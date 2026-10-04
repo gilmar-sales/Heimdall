@@ -38,7 +38,9 @@ namespace heimdall
         ModernizeAuto,
         NoImplicitBoolConversion,
         ModernizeRangeLoop,
-        ModernizeLoopConvert
+        ModernizeLoopConvert,
+        IncludeWhatYouUse,
+        ModernizeFinal
     };
 
     struct RuleOverride

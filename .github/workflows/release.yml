@@ -1,0 +1,265 @@
+name: release
+
+# Builds heimdall + heimdall-lsp for every supported platform, zips the
+# binaries, and publishes them as a GitHub Release that the VS Code extension
+# downloads from at runtime (see vscode-extension/src/serverInstall.ts).
+#
+# Asset naming (must stay in sync with serverInstall.ts:getServerAssetName):
+#   heimdall-win32-x64.zip
+#   heimdall-linux-x64.zip
+#   heimdall-darwin-arm64.zip
+#   heimdall-darwin-x64.zip
+#
+# How to cut a release:
+#   1. Bump "version" in vscode-extension/package.json (single source of truth).
+#   2. Commit, then tag:  git tag v<version> && git push origin v<version>
+#   3. This workflow builds, attaches the zips + checksums + .vsix to the
+#      release, and optionally publishes to the Marketplace when the VSCE_PAT
+#      secret is configured.
+#
+# The build matrix also runs on pull requests (without publishing) so broken
+# platform builds are caught before merging.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for manually packaged zips (e.g. 0.3.1)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win32-x64
+            os: windows-latest
+            exe: .exe
+          - target: linux-x64
+            os: ubuntu-24.04
+            exe: ""
+          - target: darwin-arm64
+            os: macos-latest
+            exe: ""
+          - target: darwin-x64
+            os: macos-latest
+            exe: ""
+            osx_arch: x86_64
+    env:
+      HEIMDALL_VERSION: ${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && github.ref_name || inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${HEIMDALL_VERSION#v}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Packaging version: $VERSION"
+
+      - name: Check tag matches extension version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          PKG_VERSION="$(node -p "require('./vscode-extension/package.json').version")"
+          if [[ "$PKG_VERSION" != "${{ steps.version.outputs.version }}" ]]; then
+            echo "::error::Tag v${{ steps.version.outputs.version }} does not match vscode-extension/package.json version ($PKG_VERSION). Bump package.json first."
+            exit 1
+          fi
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y g++-16 ninja-build
+
+      - name: Install toolchain (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install llvm ninja
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake -G Ninja -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHEIMDALL_BUILD_TESTS=OFF \
+            -DHEIMDALL_BUILD_BENCHMARKS=OFF
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CC: gcc-16
+          CXX: g++-16
+        run: |
+          cmake -G Ninja -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHEIMDALL_BUILD_TESTS=OFF \
+            -DHEIMDALL_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          ARCH_FLAGS=""
+          if [[ -n "${{ matrix.osx_arch }}" ]]; then
+            ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_arch }}"
+          fi
+          cmake -G Ninja -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHEIMDALL_BUILD_TESTS=OFF \
+            -DHEIMDALL_BUILD_BENCHMARKS=OFF \
+            $ARCH_FLAGS
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --target heimdall heimdall-lsp
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          printf 'int main() { return 0; }\n' > smoke_tmp.cpp
+          ./build/src/heimdall${{ matrix.exe }} parse smoke_tmp.cpp
+          test -f ./build/lsp/heimdall-lsp${{ matrix.exe }}
+          rm smoke_tmp.cpp
+
+      - name: Stage package
+        shell: bash
+        run: |
+          STAGE="dist/heimdall-${{ matrix.target }}"
+          mkdir -p "$STAGE"
+          cp "build/src/heimdall${{ matrix.exe }}" "$STAGE/"
+          cp "build/lsp/heimdall-lsp${{ matrix.exe }}" "$STAGE/"
+          cp LICENSE "$STAGE/"
+          cp schemas/heimdall.schema.json "$STAGE/"
+          echo "${{ steps.version.outputs.version }}" > "$STAGE/version.txt"
+
+      - name: Zip package
+        shell: bash
+        working-directory: dist/heimdall-${{ matrix.target }}
+        run: |
+          cmake -E tar "cf" "../heimdall-${{ matrix.target }}.zip" --format=zip -- \
+            "heimdall${{ matrix.exe }}" \
+            "heimdall-lsp${{ matrix.exe }}" \
+            LICENSE \
+            heimdall.schema.json \
+            version.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: heimdall-${{ matrix.target }}
+          path: dist/heimdall-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  extension:
+    name: extension (.vsix)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Compile
+        working-directory: vscode-extension
+        run: npm run compile
+
+      - name: Package
+        working-directory: vscode-extension
+        run: npx --no-install vsce package --allow-missing-repository
+
+      - name: Upload artifact
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: heimdall-vsix
+          path: vscode-extension/*.vsix
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: [build, extension]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        shell: bash
+        working-directory: dist
+        run: |
+          ls -la
+          sha256sum heimdall-*.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        shell: bash
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Heimdall ${{ github.ref_name }}" \
+            --generate-notes \
+            heimdall-*.zip checksums.txt *.vsix
+
+      - name: Setup Node (Marketplace publish)
+        if: env.VSCE_PAT != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Marketplace
+        if: env.VSCE_PAT != ''
+        working-directory: dist
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --packagePath ./*.vsix -p "$VSCE_PAT"

@@ -307,15 +307,20 @@ namespace heimdall::cli
                 // absent from compile databases: borrow the nearest entry, as the
                 // language server does.
                 std::vector<heimdall::Diagnostic> semantic;
-                if (const auto *command = database->FindOrNearest(path); command != nullptr)
+                std::shared_ptr<const heimdall::IncludeProfile> profile;
+                const auto *command = database->FindOrNearest(path);
+                if (command != nullptr)
                 {
-                    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
+                    profile = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
                     semantic = heimdall::IncludeAnalyzer::Analyze(*tree, *profile);
                 }
 
-                // Rules on the bound semantic model need no compile command.
+                // Rules on the bound semantic model need no compile command; the
+                // project-level ones (include-what-you-use, modernize-final) see the
+                // included headers only when there is a profile.
                 const auto model = heimdall::Binder::Bind(*tree);
-                auto overrides = heimdall::SemanticRules::Analyze(model);
+                const heimdall::ProjectContext context{path, profile.get(), command};
+                auto overrides = heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context);
                 semantic.insert(semantic.end(), std::make_move_iterator(overrides.begin()),
                     std::make_move_iterator(overrides.end()));
                 semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);

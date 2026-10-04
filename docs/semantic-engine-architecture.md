@@ -214,4 +214,28 @@ Decisões e limites desta fase:
 - **Gramática.** `if (init; cond)` e declarações em condição não dão ao `cond` um nó próprio, e `do { } while (cond)` não parseia `cond`: essas condições não são verificadas. Um encadeamento de milhares de `a = a = a = ...` estoura a pilha do parser (anterior a esta fase) antes de chegar ao Typer.
 - Ainda não há reuso incremental do `TypeModel` nem cache entre documentos: ele é refeito a cada versão, como o `SemanticModel`.
 
-Próxima fase: F3 (Projeto), com `HeaderSummary`, `include-what-you-use` e `modernize-final`.
+**F3 (Projeto): concluída.** Regras entregues: `cpp/include-what-you-use` e `cpp/modernize-final`.
+
+| Peça | Onde |
+|---|---|
+| `HeaderSummary` (exportações, includes diretos, classes com bases), cache global por caminho validado por tamanho e mtime | `semantic/include/Heimdall/HeaderSummary.hpp`, `semantic/src/HeaderSummary.cpp` |
+| `ProjectIndex` (mapa nome → header, classes por nome, polimorfismo e derivadas entre headers) | `semantic/include/Heimdall/ProjectIndex.hpp`, `semantic/src/ProjectIndex.cpp` |
+| `IncludeProfile` ampliado (header de cada include, fecho, diretórios de sistema, `includes_known`) e `IncludeAnalyzer::DirectIncludes` | `semantic/include/Heimdall/IncludeAnalyzer.hpp` |
+| `ProjectContext`, `SemanticRules::AnalyzeIncludeWhatYouUse/AnalyzeFinal` e `Analyze(model, types, context)` | `semantic/include/Heimdall/SemanticRules.hpp`, `semantic/src/IncludeWhatYouUse.cpp`, `semantic/src/ModernizeFinal.cpp` |
+| Testes | `test/src/ProjectRulesSpec.cpp` |
+| Benchmarks (`BM_HeaderSummary`, `BM_ModernizeFinal`, `BM_IncludeWhatYouUse`, `BM_ProjectIndex`) | `bench/src/SemanticBench.cpp` |
+
+O que a camada oferece às regras: uma regra de projeto recebe `const SemanticModel&` mais um `ProjectContext` (arquivo, `IncludeProfile` e `CompileCommand`). Sem profile (sem compile command) ela roda sem enxergar headers: nome ou base vindo de header fica `Unknown` e a regra se cala.
+
+Decisões e limites desta fase:
+
+- **`HeaderSummary` vem do próprio Binder.** O header é parseado e ligado como qualquer arquivo e o resultado é copiado para um pool de texto do resumo (strings em um buffer único, ids de 32 bits em vetores paralelos). O resumo não guarda ponteiro para a árvore, então sobrevive a ela e é compartilhado (`shared_ptr<const HeaderSummary>`) entre documentos. O único estado mutável é o cache, protegido por mutex.
+- **O que é exportado.** Classes (com corpo), enums, aliases, funções, variáveis e enumeradores de `enum` comum em escopo de namespace ou global, com o caminho de namespaces (`a::b`). Ficam de fora: namespace anônimo, membros de classe, locais, funções definidas fora da classe (`A::f`), `friend`, construtores/destrutores/operadores, nomes que começam com `_` e declarações antecipadas (`class N;`). Namespaces `inline` não são tratados: `lib::v1::X` só casa com a qualificação completa.
+- **Só headers do projeto.** O índice cobre os headers fora dos diretórios do sistema do compilador. A biblioteca padrão usa uma tabela curada de nomes → headers (os headers do libstdc++ se dividem em arquivos internos que não servem como destino de `#include`).
+- **`includes_known`.** `include-what-you-use` só roda se todo include direto foi encontrado. Includes angulares não resolvidos dentro de `#if` (cabeçalhos de plataforma) não contam. Includes condicionais têm o header resolvido, mas o fecho não é percorrido.
+- **Conservadora por construção.** O nome usado precisa ser indubitável: sem declaração local de mesmo nome, vindo de um único header, com qualificação compatível com o namespace da exportação. Vários headers com o mesmo nome (sobrecargas, redeclarações) deixam a regra em silêncio.
+- **`modernize-final` e a hierarquia.** Combina as bases do arquivo (`BaseTable`) com as dos headers (`HeaderSummary`): uma base de header decide se a classe é polimórfica, e um header que liste a classe como base impede o aviso. "Hierarquia completa" vale aqui para o universo fechado (arquivo-fonte ou namespace anônimo). Para classes de header, a regra precisaria dos arquivos que incluem o header, que o motor por arquivo não vê; ficam fora até existir uma visão de todo o projeto (por exemplo, um índice de bases gerado a partir do banco de compilação). Cadeias de bases com mais de 256 níveis viram `Unknown`.
+- **Custo.** O `HeaderSummary` de cada header é construído uma vez (com uma revalidação por `stat` a cada uso). O `ProjectIndex` é remontado a cada análise a partir dos resumos em cache (cerca de 80 µs por header do fecho, medido em `BM_ProjectIndex`); ainda não é guardado junto com o `IncludeProfile`.
+- Ainda não há reuso incremental por `TopLevelItem` (seção 6).
+
+Próxima fase: F4 (Fluxo), com CFG e def-use intraprocedural para `modernize-const` e `modernize-constexpr`.

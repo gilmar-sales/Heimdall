@@ -18,17 +18,43 @@
     "onLanguage:cpp",
     "onLanguage:cuda",
     "onLanguage:objective-c",
-    "onLanguage:objective-cpp"
+    "onLanguage:objective-cpp",
+    "onCommand:heimdall.installServer"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "heimdall.installServer",
+        "title": "Heimdall: Install Language Server",
+        "category": "Heimdall"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "heimdall.installServer",
+          "when": "editorLangId == c || editorLangId == cpp || editorLangId == cuda || editorLangId == objective-c || editorLangId == objective-cpp"
+        }
+      ]
+    },
     "configuration": {
       "title": "Heimdall",
       "properties": {
         "heimdall.serverPath": {
           "type": "string",
           "default": "heimdall-lsp",
-          "description": "Path to the heimdall-lsp executable. By default it is searched in PATH and common build directories."
+          "description": "Path to the heimdall-lsp executable. When left as the default, the extension uses the versioned install from GitHub releases, then workspace build output, then PATH."
+        },
+        "heimdall.serverVersion": {
+          "type": "string",
+          "default": "",
+          "description": "Heimdall release version to download (e.g. \"0.3.1\"). Empty means the extension's own version. Tags and release assets are named v<version> / heimdall-<platform>-<arch>.zip."
+        },
+        "heimdall.autoInstallServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically download and install the matching heimdall-lsp from GitHub releases when no local server is found."
         },
         "heimdall.trace.server": {
           "type": "string",
@@ -57,12 +83,15 @@
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository",
+    "package:dev": "node scripts/package-dev.js"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.12.7",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^4.0.0",

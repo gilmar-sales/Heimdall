@@ -3,13 +3,17 @@
 // types and expression types) and running the rules that sit on those models. Trees are parsed once outside the timed region.
 #include <benchmark/benchmark.h>
 
+#include <Heimdall/HeaderSummary.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/ProjectIndex.hpp>
 #include <Heimdall/SemanticModel.hpp>
 #include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/TypeModel.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -200,6 +204,112 @@ void BM_AnalyzeAllRules(benchmark::State& state)
     state.counters["diagnostics"] = static_cast<double>(reported);
 }
 
+// F3 (project layer). Summaries are built once per header and shared, so the
+// cost that matters per keystroke is the ProjectIndex plus the rules.
+void BM_HeaderSummary(benchmark::State& state)
+{
+    Corpus corpus;
+    if (!LoadCorpus(state, corpus)) return;
+    std::size_t exports = 0;
+    for (auto _ : state)
+    {
+        exports = 0;
+        for (const auto& source : corpus.sources)
+        {
+            const auto summary = heimdall::HeaderSummary::FromSource(*source);
+            exports += summary->ExportCount();
+            benchmark::DoNotOptimize(summary);
+        }
+    }
+    state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * corpus.bytes));
+    state.counters["exports"] = static_cast<double>(exports);
+}
+
+// A leaf at the end of a chain of `count` classes, in a source file: the rule
+// walks the whole chain for polymorphism and every class for derived classes.
+void BM_ModernizeFinal(benchmark::State& state)
+{
+    const std::string source = Hierarchy(static_cast<std::size_t>(state.range(0)));
+    const auto tree = heimdall::ParseTree::Parse(source);
+    const auto model = heimdall::Binder::Bind(tree);
+    const heimdall::ProjectContext context{"bench.cpp", nullptr, nullptr};
+    std::size_t reported = 0;
+    for (auto _ : state)
+    {
+        reported = heimdall::SemanticRules::AnalyzeFinal(model, context).size();
+        benchmark::DoNotOptimize(reported);
+    }
+    state.counters["diagnostics"] = static_cast<double>(reported);
+}
+
+// `count` headers, all included by `h0`; the file includes only `h0` and uses a
+// type from every header: each header past `h0` is reported.
+struct ProjectFixture
+{
+    explicit ProjectFixture(std::size_t count)
+    {
+        root = std::filesystem::temp_directory_path() / "heimdall-bench-iwyu";
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root / "inc");
+        command.include_directories.push_back(root / "inc");
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            std::ofstream out(root / "inc" / ("h" + std::to_string(i) + ".hpp"));
+            out << "#pragma once\n";
+            if (i == 0)
+            {
+                for (std::size_t j = 1; j < count; ++j) out << "#include <h" << j << ".hpp>\n";
+            }
+            out << "namespace lib { struct T" << i << " { int v; }; int f" << i << "(int); }\n";
+        }
+        source = "#include <h0.hpp>\n";
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            source += "lib::T" + std::to_string(i) + " v" + std::to_string(i) + " = {lib::f" + std::to_string(i) + "(1)};\n";
+        }
+    }
+    ~ProjectFixture()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+
+    std::filesystem::path root;
+    heimdall::CompileCommand command;
+    std::string source;
+};
+
+void BM_IncludeWhatYouUse(benchmark::State& state)
+{
+    ProjectFixture project(static_cast<std::size_t>(state.range(0)));
+    const auto tree = heimdall::ParseTree::Parse(project.source);
+    const auto model = heimdall::Binder::Bind(tree);
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.root / "main.cpp", tree, &project.command);
+    const heimdall::ProjectContext context{project.root / "main.cpp", profile.get(), &project.command};
+    std::size_t reported = 0;
+    for (auto _ : state)
+    {
+        reported = heimdall::SemanticRules::AnalyzeIncludeWhatYouUse(model, context).size();
+        benchmark::DoNotOptimize(reported);
+    }
+    state.counters["diagnostics"] = static_cast<double>(reported);
+}
+
+void BM_ProjectIndex(benchmark::State& state)
+{
+    ProjectFixture project(static_cast<std::size_t>(state.range(0)));
+    const auto tree = heimdall::ParseTree::Parse(project.source);
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.root / "main.cpp", tree, &project.command);
+    std::size_t summaries = 0;
+    for (auto _ : state)
+    {
+        const auto index = heimdall::ProjectIndex::Build(*profile);
+        summaries = index.Summaries().size();
+        benchmark::DoNotOptimize(summaries);
+    }
+    state.counters["summaries"] = static_cast<double>(summaries);
+}
+
 } // namespace
 
 BENCHMARK(BM_Bind);
@@ -209,3 +319,7 @@ BENCHMARK(BM_BindHierarchy)->Arg(100)->Arg(1000);
 BENCHMARK(BM_ModernizeOverride)->Arg(100)->Arg(1000);
 BENCHMARK(BM_TypeFunctions)->Arg(100)->Arg(1000);
 BENCHMARK(BM_TypeRules)->Arg(100)->Arg(1000);
+BENCHMARK(BM_HeaderSummary);
+BENCHMARK(BM_ModernizeFinal)->Arg(100)->Arg(1000);
+BENCHMARK(BM_IncludeWhatYouUse)->Arg(10)->Arg(100);
+BENCHMARK(BM_ProjectIndex)->Arg(10)->Arg(100);

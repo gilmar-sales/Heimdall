@@ -576,6 +576,10 @@ namespace heimdall
                 "semântica", true, "index loop replaceable by a range-based for"},
             {RuleId::ModernizeLoopConvert, "cpp/modernize-loop-convert", "cpp", Severity::Warning,
                 "semântica", true, "iterator loop replaceable by a range-based for"},
+            {RuleId::IncludeWhatYouUse, "cpp/include-what-you-use", "cpp", Severity::Warning,
+                "semântica", false, "name used from a header that is only included transitively"},
+            {RuleId::ModernizeFinal, "cpp/modernize-final", "cpp", Severity::Warning,
+                "semântica", true, "class or virtual function that nothing can derive from or override"},
         };
         return catalog;
     }

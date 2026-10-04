@@ -65,7 +65,9 @@ entry (`-std=`/`/std:`) and its `-D` macros, defaulting to C++20; an explicit
 ## VS Code extension
 
 The independent extension is in `vscode-extension/` and talks to `heimdall-lsp` over
-LSP JSON-RPC stdio:
+LSP JSON-RPC stdio. End users don't need to build anything: the extension
+downloads the matching prebuilt server from GitHub releases on first use
+(`heimdall.autoInstallServer`, `Heimdall: Install Language Server` command).
 
 ```bash
 cmake --build build --target heimdall-lsp
@@ -86,6 +88,24 @@ their fixes are tracked in `docs/completion-limitations.md`. Set `heimdall.serve
 workspace build directory or `PATH`. This replaces the lint/format portion of
 Microsoft's extension; full IntelliSense (member completion after `.`/`->`),
 debugging, and build integration are not implemented yet.
+
+## Release: prebuilt servers + extension
+
+`.github/workflows/release.yml` builds `heimdall` + `heimdall-lsp` in Release
+for `win32-x64` (MSVC), `linux-x64` (GCC 16), `darwin-arm64` and `darwin-x64`
+(Homebrew LLVM Clang), zips each as `heimdall-<platform>-<arch>.zip`
+(plus `LICENSE`, `heimdall.schema.json`, `version.txt`), and — on tags
+`v*.*.*` — publishes them with SHA256 checksums and the packaged `.vsix` as a
+GitHub Release. The same builds run on pull requests without publishing.
+Set the `VSCE_PAT` secret to also publish the extension to the Marketplace.
+
+To cut a release (extension `package.json` `"version"` is the single source
+of truth, and the workflow fails the tag otherwise):
+
+```bash
+# 1. bump "version" in vscode-extension/package.json and commit
+git tag v0.4.0 && git push origin v0.4.0
+```
 
 ## Layout
 

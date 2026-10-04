@@ -11,6 +11,8 @@ CTestTestfile.cmake
 _deps
 node_modules/
 
+vscode-extension/.heimdall-dev
+
 out/
 cmake-build-*/
 build/

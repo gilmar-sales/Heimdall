@@ -1,4 +1,5 @@
-# heimdall_semantic: compile database + local type oracle.
+# heimdall_semantic: compile database, local type oracle, binder/typer and
+# the project layer (HeaderSummary, ProjectIndex).
 # Depends on heimdall::core. simdjson is PRIVATE:
 # it must not leak through public headers (CompileDatabase.hpp and
 # SemanticAnalyzer.hpp are STL + Heimdall only).
@@ -12,6 +13,10 @@ add_library(heimdall_semantic STATIC
   src/Binder.cpp
   src/Typer.cpp
   src/SemanticRules.cpp
+  src/HeaderSummary.cpp
+  src/ProjectIndex.cpp
+  src/IncludeWhatYouUse.cpp
+  src/ModernizeFinal.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
 

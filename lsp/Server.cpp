@@ -985,11 +985,37 @@ namespace heimdall::lsp
             return diagnostics;
         }
 
-        // Rules on the bound model need no compile command: the model is built
-        // from the tree already parsed for this version of the document.
+        // The model is built from the tree already parsed for this version of the
+        // document. Most rules on it need no compile command; the project-level
+        // ones (include-what-you-use, modernize-final) see the included headers only
+        // when there is a profile.
+        const std::filesystem::path file_path = PathFromUri(uri);
+        std::shared_ptr<const heimdall::IncludeProfile> profile;
+        if (command != nullptr)
+        {
+            const std::string fingerprint = heimdall::IncludeAnalyzer::Fingerprint(file_path, tree, command);
+            {
+                const std::lock_guard<std::mutex> lock(m_mu);
+                if (const auto found = m_include_profiles.find(uri); found != m_include_profiles.end())
+                {
+                    profile = found->second;
+                }
+            }
+
+            // The profile reads every transitive header: keep it across keystrokes.
+            if (!profile || profile->fingerprint != fingerprint ||!heimdall::IncludeAnalyzer::IsFresh(*profile))
+            {
+                profile = heimdall::IncludeAnalyzer::BuildProfile(file_path, tree, command);
+                const std::lock_guard<std::mutex> lock(m_mu);
+                m_include_profiles[uri] = profile;
+            }
+        }
+
         {
             const auto model = heimdall::Binder::Bind(tree);
-            auto bound = engine.ApplyPolicy(heimdall::SemanticRules::Analyze(model), tree);
+            const heimdall::ProjectContext context{file_path, profile.get(), command};
+            auto bound = engine.ApplyPolicy(
+                heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context), tree);
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
                 std::make_move_iterator(bound.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),
@@ -999,28 +1025,9 @@ namespace heimdall::lsp
             });
         }
 
-        if (command == nullptr)
+        if (profile == nullptr)
         {
             return diagnostics;
-        }
-
-        const std::filesystem::path file_path = PathFromUri(uri);
-        const std::string fingerprint = heimdall::IncludeAnalyzer::Fingerprint(file_path, tree, command);
-        std::shared_ptr<const heimdall::IncludeProfile> profile;
-        {
-            const std::lock_guard<std::mutex> lock(m_mu);
-            if (const auto found = m_include_profiles.find(uri); found != m_include_profiles.end())
-            {
-                profile = found->second;
-            }
-        }
-
-        // The profile reads every transitive header: keep it across keystrokes.
-        if (!profile || profile->fingerprint != fingerprint ||!heimdall::IncludeAnalyzer::IsFresh(*profile))
-        {
-            profile = heimdall::IncludeAnalyzer::BuildProfile(file_path, tree, command);
-            const std::lock_guard<std::mutex> lock(m_mu);
-            m_include_profiles[uri] = profile;
         }
 
         auto unused = engine.ApplyPolicy(heimdall::IncludeAnalyzer::Analyze(tree, *profile), tree);

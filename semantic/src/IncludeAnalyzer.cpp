@@ -1174,20 +1174,11 @@ namespace heimdall
             return true;
         }
 
-        struct IncludeDirective
-        {
-            std::size_t directive_offset = 0;
-            std::size_t directive_length = 0;
-            std::size_t target_offset = 0;
-            std::size_t target_length = 0;
-            std::string target;
-            bool conditional = false;
-            bool keep = false;
-        };
+        using IncludeDirective = DirectInclude;
 
         // Direct `#include "x"` / `#include <x>` directives, in source order.
         // Macro includes and `#include_next` have no literal target to judge.
-        std::vector<IncludeDirective> DirectIncludes(const ParseTree &tree)
+        std::vector<IncludeDirective> ScanDirectIncludes(const ParseTree &tree)
         {
             const std::string_view source = tree.Source();
             const auto &directives = tree.Directives();
@@ -1499,6 +1490,16 @@ namespace heimdall
         return lines;
     }
 
+    std::vector<DirectInclude> IncludeAnalyzer::DirectIncludes(const ParseTree &tree)
+    {
+        return ScanDirectIncludes(tree);
+    }
+
+    bool IncludeProfile::IsSystemFile(const std::filesystem::path & file) const
+    {
+        return heimdall::IsSystemFile(file, system_dirs);
+    }
+
     std::string IncludeAnalyzer::Fingerprint(const std::filesystem::path & file, const ParseTree &tree,
         const CompileCommand *command)
     {
@@ -1512,7 +1513,7 @@ namespace heimdall
         auto profile = std::make_shared<IncludeProfile>();
         profile->fingerprint = Fingerprint(file, tree, command);
         const std::filesystem::path base_dir = file.has_parent_path() ? file.parent_path() : std::filesystem::path();
-        const auto includes = DirectIncludes(tree);
+        const auto includes = ScanDirectIncludes(tree);
         profile->entries.resize(includes.size());
 
         // Standard-library operators and specializations always belong to a type
@@ -1526,6 +1527,7 @@ namespace heimdall
             system_dirs.push_back(dir.lexically_normal());
         }
 
+        profile->system_dirs = system_dirs;
         IncludeIndex::Limits limits;
         limits.max_headers = 1024;
         limits.follow_include_next = true;
@@ -1540,9 +1542,24 @@ namespace heimdall
         std::vector<Closure> closures(includes.size());
         for (std::size_t i = 0; i < includes.size(); ++i)
         {
-            profile->entries[i].target = includes[i].target;
+            auto &entry = profile->entries[i];
+            entry.target = includes[i].target;
+            entry.conditional = includes[i].conditional;
             if (includes[i].conditional)
             {
+                // Not walked, but the file it names tells cpp/include-what-you-use
+                // which headers the file includes directly.
+                auto found = IncludeIndex::ResolveIncludeAt(base_dir, "#include " + includes[i].target + "\n", 1,
+                    command);
+                if (!found.empty())
+                {
+                    entry.header = std::move(found);
+                }
+                else if (includes[i].target.front() == '"')
+                {
+                    profile->includes_known = false;
+                }
+
                 continue;
             }
 
@@ -1551,6 +1568,17 @@ namespace heimdall
             for (const auto & path: closures[i].files)
             {
                 closures[i].keys.insert(PathKey(path));
+            }
+
+            entry.closure = closures[i].files;
+            entry.closure_complete = closures[i].complete;
+            if (!closures[i].files.empty())
+            {
+                entry.header = closures[i].files.front();
+            }
+            else
+            {
+                profile->includes_known = false;
             }
         }
 
@@ -1669,7 +1697,7 @@ namespace heimdall
         const IncludeProfile &profile)
     {
         std::vector<Diagnostic> diagnostics;
-        const auto includes = DirectIncludes(tree);
+        const auto includes = ScanDirectIncludes(tree);
         if (includes.size() != profile.entries.size())
         {
             return diagnostics;

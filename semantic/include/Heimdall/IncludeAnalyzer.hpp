@@ -14,6 +14,22 @@
 namespace heimdall
 {
 
+    // One literal `#include "x"` / `#include <x>` of a file, in source order.
+    // Macro includes and `#include_next` have no literal target to judge.
+    struct DirectInclude
+    {
+        std::size_t directive_offset = 0;
+        std::size_t directive_length = 0;
+        std::size_t target_offset = 0;
+        std::size_t target_length = 0;
+        // Header name with its delimiters, as written: `<vector>` or `"a.h"`.
+        std::string target;
+        // Inside an `#if`/`#ifdef` other than the include guard.
+        bool conditional = false;
+        // Carries `IWYU pragma: keep` or `IWYU pragma: export`.
+        bool keep = false;
+    };
+
     // Names a single header file makes available to its includers: names
     // declared at namespace/global scope, enumerators, and macros.
     struct HeaderSymbols;
@@ -39,6 +55,16 @@ namespace heimdall
             bool project_header = false;
             // The header's include closure contains the analyzed file itself.
             bool circular = false;
+            // The include sits in a conditional block.
+            bool conditional = false;
+            // The header the directive names, found on disk (also for conditional
+            // includes); empty when it could not be found.
+            std::filesystem::path header;
+            // Every file the include pulls in, `header` first. Empty for
+            // conditional includes (never walked) and for headers not found.
+            std::vector<std::filesystem::path> closure;
+            // The closure walk saw every header it was supposed to.
+            bool closure_complete = false;
         };
 
         struct FileStamp
@@ -49,10 +75,18 @@ namespace heimdall
         };
 
         std::string fingerprint;
+        // Compiler default include directories (normalized): what is "system".
+        std::vector<std::filesystem::path> system_dirs;
+        // Every direct include was found, so no name can come from a header the
+        // profile does not know. Unresolved angled includes in conditional blocks
+        // (platform headers) do not count against it.
+        bool includes_known = true;
         // The analyzed file is a header (cpp/prefer-forward-declaration applies).
         bool is_header_file = false;
         std::vector<Entry> entries;
         std::vector<FileStamp> stamps;
+
+        bool IsSystemFile(const std::filesystem::path & file) const;
     };
 
     // Two rules share this analysis:
@@ -71,6 +105,10 @@ namespace heimdall
     class IncludeAnalyzer
     {
     public:
+        // Literal includes of `tree`, in source order; entry i of an IncludeProfile
+        // built from the same include block describes element i.
+        static std::vector<DirectInclude> DirectIncludes(const ParseTree &tree);
+
         static std::shared_ptr<const IncludeProfile> BuildProfile(const std::filesystem::path & file,
             const ParseTree &tree, const CompileCommand *command);
 

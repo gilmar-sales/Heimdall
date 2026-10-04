@@ -1,13 +1,27 @@
 #pragma once
 
+#include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticModel.hpp>
 #include <Heimdall/TypeModel.hpp>
 
+#include <filesystem>
 #include <vector>
 
 namespace heimdall
 {
+
+    // What the project-level rules (F3) know beyond the one bound file: where it
+    // lives and, when a compile command was available, the headers it includes.
+    // Without a profile the rules still run but see no header: a name or base
+    // from a header stays unknown and the rule stays silent about it.
+    struct ProjectContext
+    {
+        std::filesystem::path file;
+        const IncludeProfile *profile = nullptr;
+        const CompileCommand *command = nullptr;
+    };
 
     // Rules that run on a bound SemanticModel (see
     // docs/semantic-engine-architecture.md). A rule only reports what the model
@@ -54,10 +68,32 @@ namespace heimdall
         // (quick fix only) writes the range-based for.
         static std::vector<Diagnostic> AnalyzeLoopConvert(const TypeModel &types);
 
-        // Every rule above, sorted by offset. The overload without a TypeModel runs
-        // the Typer itself.
+        // cpp/include-what-you-use: a name the file uses whose declaration comes
+        // from a header the file only reaches through another include (a project
+        // header found through the HeaderSummary of each header in the include
+        // closure, or a standard-library name with a well-known header). The
+        // quick fix adds the include. Needs context.profile; silent without it,
+        // when some include was not found, or when the name is ambiguous.
+        static std::vector<Diagnostic> AnalyzeIncludeWhatYouUse(const SemanticModel &model,
+            const ProjectContext &context);
+
+        // cpp/modernize-final: a polymorphic class that nothing derives from, and
+        // an `override` that nothing overrides, in code whose derived classes are
+        // all visible: classes in an anonymous namespace, or anything defined in a
+        // source file (no other file can see the definition). The hierarchy is
+        // completed with the HeaderSummary of the included project headers: a base
+        // defined there decides whether the class is polymorphic. Header classes
+        // outside an anonymous namespace are never reported: any other file may
+        // derive from them. The fix (quick fix only) adds `final`.
+        static std::vector<Diagnostic> AnalyzeFinal(const SemanticModel &model, const ProjectContext &context);
+
+        // Every rule above except the project-level ones, sorted by offset. The
+        // overload without a TypeModel runs the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);
         static std::vector<Diagnostic> Analyze(const SemanticModel &model, const TypeModel &types);
+        // The same plus the project-level rules, which need the file's context.
+        static std::vector<Diagnostic> Analyze(const SemanticModel &model, const TypeModel &types,
+            const ProjectContext &context);
     };
 
 } // namespace heimdall
