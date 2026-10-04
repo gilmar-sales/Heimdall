@@ -441,7 +441,7 @@ namespace heimdall
         }
     }
 
-    void Lexer::Relex(std::vector<Token> & tokens, const TextEdit &edit) const
+    void Lexer::Relex(std::vector<Token>& tokens, const TextEdit& edit) const
     {
         constexpr std::size_t kLookbehind = 32;
         const std::size_t old_end = edit.offset + edit.old_length;
@@ -533,7 +533,7 @@ namespace heimdall
         }
     }
 
-    std::string_view Lexer::Text(const Token &token) const noexcept
+    std::string_view Lexer::Text(const Token& token) const noexcept
     {
         return m_source.substr(token.offset, token.length);
     }

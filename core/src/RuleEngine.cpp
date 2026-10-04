@@ -31,8 +31,8 @@ namespace heimdall
         constexpr std::size_t kIncludeDelimCount = 2;
         constexpr std::size_t kMinSortableBlock = 2;
 
-        bool IsInDirective(std::size_t offset, const std::vector<PreprocessorDirective> & directives,
-            std::size_t & cursor)
+        bool IsInDirective(std::size_t offset, const std::vector<PreprocessorDirective>& directives,
+            std::size_t& cursor)
         {
             while (cursor < directives.size() && directives[cursor].offset + directives[cursor].length <= offset)
             {
@@ -84,8 +84,8 @@ namespace heimdall
         }
 
         std::vector<Suppression> FindSuppressions(std::string_view source,
-            const std::vector<Token> & tokens,
-            const LineTable &lines)
+            const std::vector<Token>& tokens,
+            const LineTable& lines)
         {
             constexpr std::string_view line_marker = "heimdall-disable-line";
             constexpr std::string_view next_marker = "heimdall-disable-next-line";
@@ -131,7 +131,7 @@ namespace heimdall
             return result;
         }
 
-        std::size_t NextSignificant(const std::vector<Token> & tokens, std::size_t index)
+        std::size_t NextSignificant(const std::vector<Token>& tokens, std::size_t index)
         {
             while (index < tokens.size() &&
                 (tokens[index].kind == TokenKind::Whitespace ||
@@ -144,7 +144,7 @@ namespace heimdall
             return index;
         }
 
-        std::size_t PrevSignificant(const std::vector<Token> & tokens, std::size_t index)
+        std::size_t PrevSignificant(const std::vector<Token>& tokens, std::size_t index)
         {
             while (index > 0)
             {
@@ -160,7 +160,7 @@ namespace heimdall
             return tokens.size();
         }
 
-        std::string_view PunctuationText(std::string_view source, const Token &token)
+        std::string_view PunctuationText(std::string_view source, const Token& token)
         {
             return source.substr(token.offset, token.length);
         }
@@ -175,7 +175,7 @@ namespace heimdall
         };
 
         std::optional<IncludeTarget> ReadIncludeTarget(std::string_view source,
-            const PreprocessorDirective & directive)
+            const PreprocessorDirective& directive)
         {
             std::string_view body = source.substr(directive.offset, directive.length);
             while (!body.empty() && (body.front() == ' ' || body.front() == '\t'))
@@ -196,8 +196,8 @@ namespace heimdall
             std::size_t name_length = 0;
             while (name_length < body.size() &&
                 ((body[name_length] >= 'a' && body[name_length] <= 'z') ||
-                    (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
-                    body[name_length] == '_'))
+                (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
+                body[name_length] == '_'))
             {
                 ++name_length;
             }
@@ -239,6 +239,7 @@ namespace heimdall
                     return a < b;
                 }
             }
+
             return left.size() < right.size();
         }
 
@@ -246,7 +247,7 @@ namespace heimdall
         // subscripts: zero or more [ <bound> ] groups. Anything else
         // (attributes, initializers, function declarators) is left to
         // a real parser.
-        bool IsPlainArrayDeclarator(const std::vector<Token> & tokens, std::string_view source,
+        bool IsPlainArrayDeclarator(const std::vector<Token>& tokens, std::string_view source,
             std::size_t declarator, std::size_t end)
         {
             std::size_t j = NextSignificant(tokens, declarator + 1);
@@ -281,7 +282,7 @@ namespace heimdall
 
         bool IsWordChar(char c)
         {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||
                 (c >= '0' && c <= '9') || c == '_';
         }
 
@@ -293,14 +294,14 @@ namespace heimdall
             constexpr std::string_view markers[] = {"TODO", "FIXME", "XXX"};
             for (std::size_t i = 0; i < text.size(); ++i)
             {
-                for (const auto marker : markers)
+                for (const auto marker: markers)
                 {
                     if (i + marker.size() > text.size() || text.substr(i, marker.size()) != marker)
                     {
                         continue;
                     }
 
-                    const bool left_ok = i == 0 || !IsWordChar(text[i - 1]);
+                    const bool left_ok = i == 0 ||!IsWordChar(text[i - 1]);
                     const bool right_ok = i + marker.size() == text.size() ||
                         !IsWordChar(text[i + marker.size()]);
                     if (left_ok && right_ok)
@@ -321,7 +322,7 @@ namespace heimdall
         {
             std::string clean;
             clean.reserve(text.size());
-            for (const char c : text)
+            for (const char c: text)
             {
                 if (c != '\'')
                 {
@@ -353,7 +354,7 @@ namespace heimdall
             errno = 0;
             if (is_float)
             {
-                char *end = nullptr;
+                char* end = nullptr;
                 const double value = std::strtod(clean.c_str(), &end);
                 if (end == clean.c_str() || errno == ERANGE)
                 {
@@ -370,7 +371,7 @@ namespace heimdall
                 return value == 0.0 || value == 1.0;
             }
 
-            const char *digits = clean.c_str();
+            const char* digits = clean.c_str();
             int base = kDecimalBase;
             if (hex || binary)
             {
@@ -383,14 +384,14 @@ namespace heimdall
                 base = kOctalBase;
             }
 
-            char *end = nullptr;
+            char* end = nullptr;
             const unsigned long long value = std::strtoull(digits, &end, base);
             if (end == digits || errno == ERANGE)
             {
                 return false;
             }
 
-            for (const char *p = end; *p != '\0'; ++p)
+            for (const char * p = end; *p != '\0'; ++p)
             {
                 if (*p != 'u' && *p != 'U' && *p != 'l' && *p != 'L' &&
                     *p != 'z' && *p != 'Z')
@@ -402,7 +403,7 @@ namespace heimdall
             return value <= 1;
         }
 
-        bool IsPunctuation(const std::vector<Token> & tokens, std::string_view source,
+        bool IsPunctuation(const std::vector<Token>& tokens, std::string_view source,
             std::size_t index, std::string_view text)
         {
             return index < tokens.size() && tokens[index].kind == TokenKind::Punctuation &&
@@ -416,7 +417,7 @@ namespace heimdall
         // must contain const/constexpr/constinit/enum. Note: constinit was
         // a former false positive (flagged `constinit int kX = 42;`); it
         // names its value exactly like const/constexpr, so it is exempt.
-        bool IsNamedConstantInitializer(const std::vector<Token> & tokens, std::string_view source,
+        bool IsNamedConstantInitializer(const std::vector<Token>& tokens, std::string_view source,
             std::size_t index)
         {
             std::size_t trigger = PrevSignificant(tokens, index);
@@ -546,7 +547,7 @@ namespace heimdall
 
     } // namespace
 
-    const std::vector<RuleInfo> & RuleCatalog()
+    const std::vector<RuleInfo>& RuleCatalog()
     {
         static const std::vector<RuleInfo> catalog =
             {
@@ -608,26 +609,28 @@ namespace heimdall
                 "semântica", false, "virtual call in a constructor or destructor"},
             {RuleId::DesignatedInitOrder, "cpp/designated-init-order", "cpp", Severity::Warning,
                 "semântica", true, "designated initializers out of member declaration order"},
+            {RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer", "cpp", Severity::Error,
+                "semântica", false, "non-zero integer constant used as a pointer"},
         };
         return catalog;
     }
 
-    const RuleInfo * FindRuleByCode(std::string_view code)
+    const RuleInfo* FindRuleByCode(std::string_view code)
     {
-        const auto &catalog = RuleCatalog();
+        const auto& catalog = RuleCatalog();
         const auto it = std::find_if(catalog.begin(), catalog.end(),
-            [code](const RuleInfo &info)
+            [code](const RuleInfo& info)
             {
                 return info.code == code;
         });
         return it == catalog.end() ? nullptr : & *it;
     }
 
-    const RuleInfo * FindRule(RuleId id)
+    const RuleInfo* FindRule(RuleId id)
     {
-        const auto &catalog = RuleCatalog();
+        const auto& catalog = RuleCatalog();
         const auto it = std::find_if(catalog.begin(), catalog.end(),
-            [id](const RuleInfo &info)
+            [id](const RuleInfo& info)
             {
                 return info.id == id;
         });
@@ -678,10 +681,11 @@ namespace heimdall
         {
             if (override->code == code)
             {
-                enabled = override->enabled;
+                enabled = override -> enabled;
                 break;
             }
         }
+
         return enabled;
     }
 
@@ -692,14 +696,14 @@ namespace heimdall
         return AnalyzeImpl(source, tokens, directives);
     }
 
-    std::vector<Diagnostic> RuleEngine::Analyze(const ParseTree &tree) const
+    std::vector<Diagnostic> RuleEngine::Analyze(const ParseTree& tree) const
     {
         return AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
     }
 
     std::vector<Diagnostic> RuleEngine::AnalyzeImpl(std::string_view source,
-        const std::vector<Token> & tokens,
-        const std::vector<PreprocessorDirective> & directives) const
+        const std::vector<Token>& tokens,
+        const std::vector<PreprocessorDirective>& directives) const
     {
         std::vector<Diagnostic> diagnostics;
         LineTable lines;
@@ -773,7 +777,7 @@ namespace heimdall
 
         if (m_options.todo_comment)
         {
-            for (const auto & token : tokens)
+            for (const auto & token: tokens)
             {
                 if (token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
@@ -801,7 +805,7 @@ namespace heimdall
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const auto & token = tokens[i];
+                const auto& token = tokens[i];
                 if (token.kind != TokenKind::Number ||
                     IsInDirective(token.offset, directives, directive_cursor))
                 {
@@ -828,7 +832,7 @@ namespace heimdall
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const auto &token = tokens[i];
+                const auto& token = tokens[i];
                 if (token.kind != TokenKind::Identifier ||
                     source.substr(token.offset, token.length) != "catch" ||
                     IsInDirective(token.offset, directives, directive_cursor))
@@ -848,7 +852,7 @@ namespace heimdall
                 std::size_t close_paren = tokens.size();
                 for (std::size_t j = open_paren; j < tokens.size(); ++j)
                 {
-                    const auto &candidate = tokens[j];
+                    const auto& candidate = tokens[j];
                     if (candidate.kind != TokenKind::Punctuation)
                     {
                         continue;
@@ -892,7 +896,7 @@ namespace heimdall
                 const auto interior_end = tokens[close_brace].offset;
                 TextEdit edit{interior_begin, interior_end - interior_begin, " throw; "};
                 if (std::any_of(tokens.begin() + open_brace + 1, tokens.begin() + close_brace,
-                    [](const Token &t)
+                    [](const Token& t)
                     {
                         return t.kind != TokenKind::Whitespace;
                 }))
@@ -968,7 +972,7 @@ namespace heimdall
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const auto &token = tokens[i];
+                const auto& token = tokens[i];
                 if (token.kind != TokenKind::Identifier ||
                     source.substr(token.offset, token.length) != "typedef" ||
                     IsInDirective(token.offset, directives, directive_cursor))
@@ -987,7 +991,7 @@ namespace heimdall
                 std::size_t end = tokens.size();
                 for (std::size_t j = i + 1; j < tokens.size(); ++j)
                 {
-                    const auto &candidate = tokens[j];
+                    const auto& candidate = tokens[j];
                     if (candidate.kind == TokenKind::Whitespace ||
                         candidate.kind == TokenKind::LineComment ||
                         candidate.kind == TokenKind::BlockComment)
@@ -1115,6 +1119,7 @@ namespace heimdall
                 std::size_t directive;
                 IncludeTarget target;
             };
+
             std::vector<IncludeEntry> includes;
             for (std::size_t i = 0; i < directives.size(); ++i)
             {
@@ -1130,18 +1135,18 @@ namespace heimdall
                 }
             }
 
-            auto group_index = [this](const IncludeTarget &target)
+            auto group_index =[this](const IncludeTarget& target)
             {
-                const auto &order = m_options.include_order;
+                const auto& order = m_options.include_order;
                 const auto wanted = target.angle ? IncludeGroup::Angle
-                    : IncludeGroup::Quote;
+                : IncludeGroup::Quote;
                 const auto it = std::find(order.begin(), order.end(), wanted);
                 return it == order.end() ? order.size()
-                    : static_cast<std::size_t>(it - order.begin());
+                : static_cast<std::size_t>(it - order.begin());
             };
 
-            auto sorts_before = [&](const IncludeTarget &left,
-                const IncludeTarget &right)
+            auto sorts_before =[&](const IncludeTarget& left,
+                const IncludeTarget& right)
             {
                 const auto left_group = group_index(left);
                 const auto right_group = group_index(right);
@@ -1153,8 +1158,8 @@ namespace heimdall
                 const auto left_name = left.text.substr(1, left.text.size() - kIncludeDelimCount);
                 const auto right_name = right.text.substr(1, right.text.size() - kIncludeDelimCount);
                 return m_options.include_case_insensitive
-                    ? CaseInsensitiveLess(left_name, right_name)
-                    : left_name < right_name;
+                ? CaseInsensitiveLess(left_name, right_name)
+                : left_name < right_name;
             };
 
             // A block is a run of includes on adjacent lines. Blank
@@ -1166,8 +1171,8 @@ namespace heimdall
                 std::size_t block_end = block_begin + 1;
                 while (block_end < includes.size())
                 {
-                    const auto &previous = directives[includes[block_end - 1].directive];
-                    const auto &current = directives[includes[block_end].directive];
+                    const auto& previous = directives[includes[block_end - 1].directive];
+                    const auto& current = directives[includes[block_end].directive];
                     if (current.offset != previous.offset + previous.length)
                     {
                         break;
@@ -1188,21 +1193,21 @@ namespace heimdall
                         [&](std::size_t left, std::size_t right)
                         {
                             return sorts_before(includes[block_begin + left].target,
-                                includes[block_begin + right].target);
-                        });
+                            includes[block_begin + right].target);
+                    });
 
                     // The identity permutation means the block already
                     // follows the configured order.
                     if (!std::is_sorted(order.begin(), order.end()))
                     {
-                        const auto &first = directives[includes[block_begin].directive];
-                        const auto &last = directives[includes[block_end - 1].directive];
+                        const auto& first = directives[includes[block_begin].directive];
+                        const auto& last = directives[includes[block_end - 1].directive];
                         const auto offset = first.offset;
                         const auto length = last.offset + last.length - offset;
                         std::string replacement;
                         for (const auto index: order)
                         {
-                            const auto &directive = directives[includes[block_begin + index].directive];
+                            const auto& directive = directives[includes[block_begin + index].directive];
                             replacement.append(source.substr(directive.offset, directive.length));
                         }
 
@@ -1224,12 +1229,12 @@ namespace heimdall
     }
 
     std::vector<Diagnostic> RuleEngine::ApplyPolicy(std::vector<Diagnostic> diagnostics,
-        std::string_view source, const std::vector<Token> & tokens) const
+        std::string_view source, const std::vector<Token>& tokens) const
     {
         LineTable lines;
         lines.Build(source);
 
-        std::sort(diagnostics.begin(), diagnostics.end(),[](const Diagnostic &a, const Diagnostic &b)
+        std::sort(diagnostics.begin(), diagnostics.end(),[](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
         });
@@ -1246,7 +1251,7 @@ namespace heimdall
             }
         }
 
-        std::erase_if(diagnostics,[this](const Diagnostic &diagnostic)
+        std::erase_if(diagnostics,[this](const Diagnostic& diagnostic)
             {
                 for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
                 {
@@ -1261,9 +1266,9 @@ namespace heimdall
         if (m_options.honor_suppressions && !diagnostics.empty())
         {
             const auto suppressions = FindSuppressions(source, tokens, lines);
-            std::erase_if(diagnostics,[&suppressions](const Diagnostic &diagnostic)
+            std::erase_if(diagnostics,[&suppressions](const Diagnostic& diagnostic)
                 {
-                    return std::any_of(suppressions.begin(), suppressions.end(),[&diagnostic](const Suppression &s)
+                    return std::any_of(suppressions.begin(), suppressions.end(),[&diagnostic](const Suppression& s)
                     {
                         return s.line == diagnostic.line &&
                         (s.codes.empty() || Suppresses(s.codes, diagnostic.code));
@@ -1275,7 +1280,7 @@ namespace heimdall
     }
 
     std::string RuleEngine::ApplyFixes(std::string_view source,
-        const std::vector<Diagnostic> & diagnostics, bool include_unsafe)
+        const std::vector<Diagnostic>& diagnostics, bool include_unsafe)
     {
         std::vector<const TextEdit * > edits;
         edits.reserve(diagnostics.size());
@@ -1287,7 +1292,7 @@ namespace heimdall
             }
         }
 
-        std::sort(edits.begin(), edits.end(),[](const TextEdit *a, const TextEdit *b)
+        std::sort(edits.begin(), edits.end(),[](const TextEdit* a, const TextEdit* b)
             {
                 return a->offset > b->offset;
         });
@@ -1296,7 +1301,7 @@ namespace heimdall
         std::size_t previous_start = source.size();
         for (const TextEdit * edit: edits)
         {
-            const auto owner = std::find_if(diagnostics.begin(), diagnostics.end(),[edit](const Diagnostic &d)
+            const auto owner = std::find_if(diagnostics.begin(), diagnostics.end(),[edit](const Diagnostic& d)
                 {
                     return d.has_fix && &d.fix == edit;
             });

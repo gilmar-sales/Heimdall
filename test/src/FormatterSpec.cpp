@@ -373,6 +373,18 @@ TEST(FormatterSpec, AllmanBreaksOneLineBlocks)
     EXPECT_EQ(allman.Format(formatted), formatted);
 }
 
+TEST(FormatterSpec, AllmanNewDesignatedInitMultiLineKeepsEntryIndent)
+{
+    const heimdall::Formatter allman({ .brace_style = heimdall::BraceStyle::Allman });
+    const std::string out = allman.Format(
+        "void f() {\n    auto r = new Node{\n        .next = next,\n        .value = 20,\n"
+        "        .x = 1\n    };\n}\n");
+    EXPECT_EQ(out,
+              "void f()\n{\n    auto r = new Node\n    {\n        .next = next,\n"
+              "        .value = 20,\n        .x = 1\n    };\n}\n");
+    EXPECT_EQ(allman.Format(out), out);
+}
+
 TEST(FormatterSpec, AllmanCombinesWithAddedBraces)
 {
     const heimdall::Formatter both({ .brace_style = heimdall::BraceStyle::Allman,

@@ -606,7 +606,103 @@ namespace heimdall
             }
         }
 
-        return reporter.Take();
+        auto diagnostics = reporter.Take();
+        auto designated = AnalyzeDesignatedZeroAsNull(model);
+        diagnostics.insert(diagnostics.end(), std::make_move_iterator(designated.begin()),
+            std::make_move_iterator(designated.end()));
+        std::stable_sort(diagnostics.begin(), diagnostics.end(),
+            [](const Diagnostic &a, const Diagnostic &b)
+            {
+                return a.offset < b.offset;
+            });
+        return diagnostics;
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeIntegerToPointer(const SemanticModel &model)
+    {
+        Reporter reporter(model);
+        const TokenView view(model);
+        const auto &symbols = model.Symbols();
+        const auto &nodes = model.Tree().NodesSoA();
+        const auto is_integer = [&](std::size_t position)
+        {
+            if (view.KindAt(position) != TokenKind::Number || view.IsZeroLiteral(position))
+            {
+                return false;
+            }
+
+            const auto text = view.Text(position);
+            if (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            {
+                return text.find_first_of(".pP") == std::string_view::npos;
+            }
+
+            return text.find_first_not_of("0123456789'uUlLzZ") == std::string_view::npos;
+        };
+        const auto report = [&](std::size_t position)
+        {
+            const auto offset = view.Offset(position);
+            const auto length = view.End(position) - offset;
+            reporter.ReportNoFix(RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer",
+                "integer constant " + std::string(view.Text(position)) + " cannot be converted to a pointer", offset,
+                length);
+        };
+        const auto is_pointer = [&](SymbolId symbol)
+        {
+            return symbol != kNone && (symbols.flags[symbol] & SymbolFlag::Pointer) != 0 &&
+                (symbols.kind[symbol] == SymbolKind::Variable || symbols.kind[symbol] == SymbolKind::Parameter);
+        };
+
+        // `T* p = 20;` and `void f(T* p = 20)`.
+        for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+        {
+            if (!is_pointer(symbol))
+            {
+                continue;
+            }
+
+            const auto name = view.PositionOf(symbols.decl_token[symbol]);
+            const Tok after = view.At(name + 3);
+            if (view.At(name + 1) == Tok::Eq && is_integer(name + 2) &&
+                (after == Tok::Semi || after == Tok::Comma ||
+                (symbols.kind[symbol] == SymbolKind::Parameter && after == Tok::RParen)))
+            {
+                report(name + 2);
+            }
+        }
+
+        // `p = 20`
+        for (std::uint32_t node = 1; node < nodes.size(); ++node)
+        {
+            if (nodes.Kind(node) != GrammarKind::BinaryExpression)
+            {
+                continue;
+            }
+
+            const auto [begin, end] = view.Range(node);
+            if (end == begin + 3 && view.At(begin + 1) == Tok::Eq && view.IsWord(begin) && is_integer(begin + 2) &&
+                is_pointer(model.ResolveToken(view.TokenAt(begin))))
+            {
+                report(begin + 2);
+            }
+        }
+
+        auto diagnostics = reporter.Take();
+        auto designated = AnalyzeDesignatedIntegerToPointer(model);
+        diagnostics.insert(diagnostics.end(), std::make_move_iterator(designated.begin()),
+            std::make_move_iterator(designated.end()));
+        for (auto &diagnostic: diagnostics)
+        {
+            diagnostic.severity = Severity::Error;
+            diagnostic.has_fix = false;
+        }
+
+        std::stable_sort(diagnostics.begin(), diagnostics.end(),
+            [](const Diagnostic &a, const Diagnostic &b)
+            {
+                return a.offset < b.offset;
+            });
+        return diagnostics;
     }
 
     std::vector<Diagnostic> SemanticRules::AnalyzeAuto(const SemanticModel &model)
@@ -1603,7 +1699,7 @@ namespace heimdall
                  AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
                  AnalyzeConstexpr(flow), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
                  AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
-                 AnalyzeDesignatedInitOrder(model)})
+                 AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)})
         {
             all.insert(all.end(), part.begin(), part.end());
         }

@@ -5060,6 +5060,51 @@ namespace heimdall
             std::vector<std::vector<std::string>> m_using;
             std::vector<std::vector<std::string>> m_records; // enclosing classes, innermost first
             std::vector<std::string> m_hint;                 // namespace/class path at the cursor
+
+        public:
+            // Find the declarator for a variable by name (in local scope).
+            std::size_t DeclaratorOfVariable(std::string_view name) const
+            {
+                for (std::size_t n = 0; n < m_tree.NodesSoA().size(); ++n)
+                {
+                    if (m_tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
+                        continue;
+
+                    const std::size_t token_index = m_tree.NodesSoA().FirstToken(n);
+                    if (token_index >= m_tokens.size() || m_tree.Text(m_tokens[token_index]) != name)
+                        continue;
+
+                    const LocalInfo local = AnalyzeLocal(m_tree, n);
+                    if (!local.is_local || local.owner == NoIndex)
+                        continue;
+
+                    const auto[block_start, block_end] = NodeRange(m_tree, local.boundary);
+                    if (m_offset < block_start || m_offset > block_end)
+                        continue;
+
+                    const Token &name_token = m_tokens[token_index];
+                    if (name_token.offset + name_token.length > m_offset)
+                        continue;
+
+                    return DeclaratorOf(m_tree, n);
+                }
+                return NoIndex;
+            }
+
+            // Count pointer operators (*) in a declarator.
+            int CountPointerOperators(std::size_t declarator) const
+            {
+                int count = 0;
+                const auto decl = m_tree.NodesSoA()[declarator];
+                const std::size_t end = decl.GetFirstToken() + decl.GetTokenCount();
+                for (std::size_t t = decl.GetFirstToken(); t < end && t < m_tokens.size(); ++t)
+                {
+                    const Token &token = m_tokens[t];
+                    if (token.kind == TokenKind::Punctuation && m_tree.Text(token) == "*")
+                        ++count;
+                }
+                return count;
+            }
         };
 
         // Next token after `token` that is not whitespace or a comment, or tokens.size().
@@ -5178,6 +5223,23 @@ namespace heimdall
             }
 
             const Chain chain = resolver.ParseReceiver(op);
+
+            // If using '.' on a raw pointer variable, offer no completions (invalid in C++).
+            // Only check when the receiver is a simple variable (single segment, no qualifier/postfix).
+            if (op_text == "." && chain.segments.size() == 1)
+            {
+                const ChainSegment &receiver = chain.segments.front();
+                // Receiver must be a simple variable (no qualifier, no postfix).
+                if (receiver.qualifier.empty() && receiver.post.empty())
+                {
+                    const std::size_t declarator = resolver.DeclaratorOfVariable(receiver.name);
+                    if (declarator != NoIndex && resolver.CountPointerOperators(declarator) > 0)
+                    {
+                        return; // `.` on raw pointer: invalid
+                    }
+                }
+            }
+
             const Resolved type = resolver.ResolveChain(chain);
             if (!type.ok)
             {

@@ -139,6 +139,18 @@ namespace heimdall
         // fix (never applied by --fix: it changes evaluation order) permutes the entries.
         static std::vector<Diagnostic> AnalyzeDesignatedInitOrder(const SemanticModel &model);
 
+        // cpp/no-zero-as-null inside designated initializers: `T{.ptr = 0}` where the
+        // member is declared with `*`. AnalyzeZeroAsNull includes these.
+        static std::vector<Diagnostic> AnalyzeDesignatedZeroAsNull(const SemanticModel &model);
+        // The `T{.ptr = 20}` part of AnalyzeIntegerToPointer.
+        static std::vector<Diagnostic> AnalyzeDesignatedIntegerToPointer(const SemanticModel &model);
+
+        // cpp/no-integer-to-pointer: a non-zero integer literal used as a pointer
+        // (`T* p = 20;`, `p = 20;`, `T{.ptr = 20}`), which does not compile: only a null
+        // constant converts implicitly. Error by default; no fix, since the address
+        // (`reinterpret_cast<T*>(20)`) or the intended member is for the author to say.
+        static std::vector<Diagnostic> AnalyzeIntegerToPointer(const SemanticModel &model);
+
         // Every rule above except the project-level ones, sorted by offset. The
         // overload without a TypeModel runs the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);

@@ -25,6 +25,22 @@ namespace heimdall
             NameId name = kNone;
         };
 
+        // `20`, `0x10`, `1'000UL`: an integer literal (not floating-point).
+        bool IsIntegerLiteral(std::string_view text)
+        {
+            if (text.empty() || text.front() < '0' || text.front() > '9')
+            {
+                return false;
+            }
+
+            if (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            {
+                return text.find_first_of(".pP") == std::string_view::npos;
+            }
+
+            return text.find_first_not_of("0123456789'uUlLzZ") == std::string_view::npos;
+        }
+
         class DesignatedOrder
         {
         public:
@@ -33,14 +49,28 @@ namespace heimdall
             {
             }
 
-            std::vector<Diagnostic> Run()
+            enum class Mode
+            {
+                Order,
+                Zero,
+                Integer
+            };
+
+            std::vector<Diagnostic> Run(Mode mode)
             {
                 std::vector<Diagnostic> diagnostics;
                 for (std::size_t open = 0; open < m_view.Size(); ++open)
                 {
                     if (m_view.At(open) == Tok::LBrace && m_view.At(open + 1) == Tok::Dot)
                     {
-                        Check(open, diagnostics);
+                        if (mode == Mode::Order)
+                        {
+                            Check(open, diagnostics);
+                        }
+                        else
+                        {
+                            CheckNulls(open, mode == Mode::Integer, diagnostics);
+                        }
                     }
                 }
 
@@ -204,6 +234,72 @@ namespace heimdall
                 return list;
             }
 
+            // `.ptr = 0`: the member is declared with `*` and the value is a null constant.
+            void CheckNulls(std::size_t open, bool integers, std::vector<Diagnostic> & out)
+            {
+                const auto klass = OwnerOf(open);
+                if (klass == kNone)
+                {
+                    return;
+                }
+
+                const std::size_t close = m_view.Match(open, m_view.Size());
+                if (close >= m_view.Size())
+                {
+                    return;
+                }
+
+                for (const auto & entry: Parse(open, close))
+                {
+                    if (entry.end != entry.begin + 4 || m_view.At(entry.begin + 2) != Tok::Eq)
+                    {
+                        continue;
+                    }
+
+                    const bool zero = m_view.IsZeroLiteral(entry.begin + 3);
+                    const bool integer = !zero && m_view.KindAt(entry.begin + 3) == TokenKind::Number &&
+                        IsIntegerLiteral(m_view.Text(entry.begin + 3));
+                    if (integers ? !integer : !zero)
+                    {
+                        continue;
+                    }
+
+                    bool pointer = false;
+                    for (SymbolId id = 0; id < m_symbols.Size() && !pointer; ++id)
+                    {
+                        pointer = m_symbols.scope[id] == m_symbols.member_scope[klass] &&
+                            m_symbols.name[id] == entry.name && m_symbols.kind[id] == SymbolKind::Variable &&
+                            (m_symbols.flags[id] & SymbolFlag::Pointer) != 0;
+                    }
+
+                    if (!pointer)
+                    {
+                        continue;
+                    }
+
+                    const std::size_t position = entry.begin + 3;
+                    const std::string literal(m_view.Text(position));
+                    const std::size_t offset = m_view.Offset(position);
+                    if (integers)
+                    {
+                        auto bad = m_reporter.Make(RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer",
+                            "integer constant " + literal + " cannot initialize a pointer", offset,
+                            m_view.End(position) - offset, TextEdit{offset, 0, ""}, "");
+                        bad.severity = Severity::Error;
+                        bad.has_fix = false;
+                        out.push_back(std::move(bad));
+                        continue;
+                    }
+
+                    auto diagnostic = m_reporter.Make(RuleId::NoZeroAsNull, "cpp/no-zero-as-null",
+                        "use nullptr instead of " + literal + " to initialize a pointer", offset,
+                        m_view.End(position) - offset, TextEdit{offset, m_view.End(position) - offset, "nullptr"},
+                        "Replace " + literal + " with nullptr");
+                    diagnostic.fix_is_safe = true;
+                    out.push_back(std::move(diagnostic));
+                }
+            }
+
             void Check(std::size_t open, std::vector<Diagnostic> & out)
             {
                 const auto klass = OwnerOf(open);
@@ -306,7 +402,17 @@ namespace heimdall
 
     std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedInitOrder(const SemanticModel &model)
     {
-        return DesignatedOrder(model).Run();
+        return DesignatedOrder(model).Run(DesignatedOrder::Mode::Order);
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedZeroAsNull(const SemanticModel &model)
+    {
+        return DesignatedOrder(model).Run(DesignatedOrder::Mode::Zero);
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedIntegerToPointer(const SemanticModel &model)
+    {
+        return DesignatedOrder(model).Run(DesignatedOrder::Mode::Integer);
     }
 
 } // namespace heimdall
