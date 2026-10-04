@@ -26,7 +26,10 @@ namespace heimdall
             auto text = AbsoluteNormalized(path).generic_string();
 #if defined(_WIN32)
             std::transform(text.begin(), text.end(), text.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                [](unsigned char c)
+                {
+                    return static_cast<char>(std::tolower(c));
+            });
 #endif
             return std::filesystem::path(text);
         }
@@ -342,8 +345,7 @@ namespace heimdall
             for (std::size_t i = 0; i < command.arguments.size(); ++i)
             {
                 bool consume_next = false;
-                const std::string_view next = i + 1 < command.arguments.size() ? command.arguments[i + 1] : std::string_view
-                {};
+                const std::string_view next = i + 1 < command.arguments.size() ? command.arguments[i + 1] : std::string_view {};
                 ParseOption(command, command.arguments[i], next, consume_next);
                 if (consume_next)
                 {
@@ -379,13 +381,14 @@ namespace heimdall
         }
 
         file = ComparableKey(file);
-        const CompileCommand * best = nullptr;
+        const CompileCommand *best = nullptr;
         std::size_t best_score = 0;
         for (const auto & command: m_commands)
         {
             const auto other = ComparableKey(command.file);
             std::size_t score = 0;
-            for (auto a = file.begin(), b = other.begin(); a != file.end() && b != other.end() && *a == *b; ++a, ++b)
+            for (auto a = file.begin(), b = other.begin(); a != file.end() && b != other.end() && *a == *b; ++a,
+                ++b)
             {
                 ++score;
             }

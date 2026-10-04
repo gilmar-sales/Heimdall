@@ -4,6 +4,7 @@
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/LineTable.hpp>
+#include <Heimdall/SemanticRules.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -305,18 +306,26 @@ namespace heimdall::cli
                 // other semantic rules it needs a compile command. Headers are
                 // absent from compile databases: borrow the nearest entry, as the
                 // language server does.
+                std::vector<heimdall::Diagnostic> semantic;
                 if (const auto *command = database->FindOrNearest(path); command != nullptr)
                 {
                     const auto profile = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
-                    auto unused = rule_engine.ApplyPolicy(heimdall::IncludeAnalyzer::Analyze(*tree, *profile), *tree);
-                    result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(unused.begin()),
-                        std::make_move_iterator(unused.end()));
-                    std::stable_sort(result.diagnostics.begin(), result.diagnostics.end(),
-                        [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
-                        {
-                            return a.offset < b.offset;
-                    });
+                    semantic = heimdall::IncludeAnalyzer::Analyze(*tree, *profile);
                 }
+
+                // Rules on the bound semantic model need no compile command.
+                const auto model = heimdall::Binder::Bind(*tree);
+                auto overrides = heimdall::SemanticRules::AnalyzeOverride(model);
+                semantic.insert(semantic.end(), std::make_move_iterator(overrides.begin()),
+                    std::make_move_iterator(overrides.end()));
+                semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);
+                result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(semantic.begin()),
+                    std::make_move_iterator(semantic.end()));
+                std::stable_sort(result.diagnostics.begin(), result.diagnostics.end(),
+                    [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+                    {
+                        return a.offset < b.offset;
+                });
             }
 
             if (options.fix && !result.diagnostics.empty())

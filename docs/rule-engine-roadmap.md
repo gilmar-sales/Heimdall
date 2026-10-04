@@ -21,7 +21,7 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | `cpp/modernize-range-loop` | Laços substituíveis por range-for | Semântica | Condicional | Não implementada |
 | `cpp/modernize-loop-convert` | Laços convertíveis a algoritmos ou ranges | Semântica | Condicional | Não implementada |
 | `cpp/modernize-using` | `typedef` substituível por `using` | Sintática | Possível | Implementada |
-| `cpp/modernize-override` | Sobrescrita virtual sem `override` | Semântica | Possível | Não implementada |
+| `cpp/modernize-override` | Sobrescrita virtual sem `override` | Semântica | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-final` | Classes/métodos elegíveis a `final` | Semântica | Cauteloso | Não implementada |
 | `cpp/modernize-constexpr` | Funções/expressões elegíveis a `constexpr` | Semântica | Cauteloso | Não implementada |
 | `cpp/modernize-const` | Variáveis que não são modificadas e podem ser `const` | Fluxo de dados | Condicional | Não implementada |
@@ -41,7 +41,7 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | Regra | O que detecta | Camada | Autofix | Status |
 |---|---|---|---|---|
 | `cpp/modernize-nullptr` | Literal nulo legado | Lexical/sintática | Condicional | Não implementada |
-| `cpp/modernize-override` | Método sobrescrito sem `override` | Semântica | Possível | Não implementada |
+| `cpp/modernize-override` | Método sobrescrito sem `override` | Semântica | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-using` | `typedef` legado | Sintática | Possível | Implementada |
 | `cpp/modernize-emplace` | Construção temporária em `push_back` potencialmente substituível por `emplace_back` | Semântica | Condicional | Não implementada |
 | `cpp/modernize-make-unique` | Construção manual de `unique_ptr` | Semântica | Condicional | Não implementada |
@@ -148,6 +148,7 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `cpp/no-null` | `RuleEngine` encontra `NULL` fora de comentários, literais e diretivas e sugere `nullptr` | Não substitui toda análise semântica de contexto |
 | `format/no-trailing-whitespace` | Remove espaços e tabulações no fim das linhas | Autofix preserva o conteúdo restante e trata CRLF |
 | `format/require-final-newline` | Garante newline final | Preserva CRLF quando detecta esse estilo |
+| `cpp/modernize-override` | Motor semântico (`SemanticModel` + `Binder`, ver [semantic-engine-architecture.md](semantic-engine-architecture.md)): método de classe que casa nome e assinatura com uma função virtual de uma base declarada no mesmo arquivo; requer `--semantic` | Só bases do próprio arquivo (headers ainda não entram, fase F3); bases com template (`Base<T>`) ou não resolvidas deixam a regra em silêncio; assinatura comparada pela grafia dos tipos dos parâmetros (`int` e `std::int32_t` não casam); destrutores e funções-template não são analisados; o fix só é oferecido como quick fix |
 | `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Quick fix (só no editor, não aplicado por `--fix`): insere `throw;` preservando comentários do corpo, pois a ação correta depende do contexto |
 | `cpp/no-todo` | `RuleEngine` encontra marcadores `TODO`, `FIXME` ou `XXX` (maiúsculos, palavra inteira) em comentários de linha e de bloco | Sem autofix: o comentário precisa ser resolvido ou movido para um rastreador |
 | `cpp/no-magic-numbers` | `RuleEngine` encontra literais numéricos fora de comentários, literais e diretivas, exceto `0` e `1` em qualquer base/escrita (`0x0`, `1u`, `0.0`, `1.0f`...) e exceto o valor que dá nome à constante (`constexpr`/`const` com inicializador direto, valores de `enum`) | Sem autofix: só o autor sabe o nome certo para a constante |

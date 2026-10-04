@@ -175,12 +175,13 @@ namespace heimdall
             }
 
             const auto relative = path.lexically_relative(dir);
-            return !relative.empty() && *relative.begin() != "..";
+            return!relative.empty() && *relative.begin() != "..";
         }
 
         // `#include_next`: continue the angled search after the directory that
         // supplied `current`.
-        std::filesystem::path TryResolveNext(const std::string & name, const std::filesystem::path & current,
+        std::filesystem::path TryResolveNext(const std::string & name,
+            const std::filesystem::path & current,
             const CompileCommand *command, const std::vector<std::filesystem::path> & system_dirs)
         {
             std::vector<std::filesystem::path> dirs;
@@ -581,12 +582,15 @@ namespace heimdall
             normalized_system.push_back(NormalizedAbsolute(dir));
         }
 
-        auto in_system = [&](const std::filesystem::path & file)
+        auto in_system =[&](const std::filesystem::path & file)
         {
             return std::any_of(normalized_system.begin(), normalized_system.end(),
-                [&](const std::filesystem::path &dir) { return IsUnder(file, dir); });
+                [&](const std::filesystem::path & dir)
+                {
+                    return IsUnder(file, dir);
+            });
         };
-        auto incomplete = [&]
+        auto incomplete =[&]
         {
             if (report != nullptr)
             {
@@ -621,7 +625,7 @@ namespace heimdall
             {
                 for (const auto & ref: refs)
                 {
-                    if (ref.angled != angled || (ref.next && !limits.follow_include_next))
+                    if (ref.angled != angled ||(ref.next && !limits.follow_include_next))
                     {
                         continue;
                     }
@@ -636,7 +640,7 @@ namespace heimdall
         {
             Work work = std::move(stack.front());
             stack.pop_front();
-            const bool from_system = !work.from.empty() && in_system(work.from);
+            const bool from_system =!work.from.empty() && in_system(work.from);
             if (work.depth > limits.max_depth)
             {
                 if (!from_system)
@@ -648,8 +652,8 @@ namespace heimdall
             }
 
             const auto resolved = work.next
-                ? TryResolveNext(work.name, work.from, command, system_dirs)
-                : TryResolve(work.name, work.angled, work.dir, command, system_dirs);
+            ? TryResolveNext(work.name, work.from, command, system_dirs)
+            : TryResolve(work.name, work.angled, work.dir, command, system_dirs);
             if (resolved.empty())
             {
                 if (!from_system)
@@ -701,7 +705,10 @@ namespace heimdall
             };
             std::string extension = path.extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                [](unsigned char c)
+                {
+                    return static_cast<char>(std::tolower(c));
+            });
             return accepted.contains(extension);
         }
 
@@ -789,10 +796,11 @@ namespace heimdall
         for (const auto & root: roots)
         {
             const std::filesystem::path directory = root.origin == IncludeOrigin::Absolute
-                ? typed_directory
-                : NormalizedAbsolute(root.path / typed_directory);
+            ? typed_directory
+            : NormalizedAbsolute(root.path / typed_directory);
             std::error_code ec;
-            std::filesystem::directory_iterator iterator(directory, std::filesystem::directory_options::skip_permission_denied, ec);
+            std::filesystem::directory_iterator iterator(directory,
+                std::filesystem::directory_options::skip_permission_denied, ec);
             if (ec)
             {
                 continue;
@@ -801,14 +809,14 @@ namespace heimdall
             for (const auto & entry: iterator)
             {
                 const std::string name = entry.path().filename().string();
-                if (name.empty() || name.front() == '.' || !StartsWithNoCase(name, name_prefix))
+                if (name.empty() || name.front() == '.' ||!StartsWithNoCase(name, name_prefix))
                 {
                     continue;
                 }
 
                 std::error_code type_ec;
                 const bool is_directory = entry.is_directory(type_ec);
-                if (type_ec || (!is_directory && (!entry.is_regular_file(type_ec) || !IsIncludableFile(entry.path()))))
+                if (type_ec ||(!is_directory && (!entry.is_regular_file(type_ec) ||!IsIncludableFile(entry.path()))))
                 {
                     continue;
                 }
@@ -826,12 +834,12 @@ namespace heimdall
         // Project directories before system ones (the cap must never drop a
         // project header in favour of a system one); inside an origin,
         // directories first because they lead to the rest of the tree.
-        std::sort(result.begin(), result.end(), [](const IncludeCandidate &a, const IncludeCandidate &b)
+        std::sort(result.begin(), result.end(),[](const IncludeCandidate &a, const IncludeCandidate &b)
             {
                 if (a.origin != b.origin)
                 {
                     return a.origin < b.origin;
-                }
+            }
 
                 return a.directory != b.directory ? a.directory : a.label < b.label;
         });
@@ -843,13 +851,14 @@ namespace heimdall
         return result;
     }
 
-    std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text, std::size_t offset)
+    std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text,
+        std::size_t offset)
     {
         offset = std::min(offset, text.size());
         const std::size_t line_begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
         const std::string_view line = text.substr(line_begin, offset - line_begin);
         std::size_t i = 0;
-        auto skip_blanks = [&]
+        auto skip_blanks =[&]
         {
             while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
             {
@@ -879,7 +888,7 @@ namespace heimdall
         }
 
         skip_blanks();
-        if (i >= line.size() || (line[i] != '<' && line[i] != '"'))
+        if (i >= line.size() ||(line[i] != '<' && line[i] != '"'))
         {
             return std::nullopt;
         }

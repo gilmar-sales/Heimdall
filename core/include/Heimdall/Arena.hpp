@@ -25,6 +25,14 @@ namespace heimdall
             return new (mem) T(std::forward<Args>(args)...);
         }
 
+        // Adapter for std::pmr containers: allocations are forwarded to the
+        // arena (and counted in Used()), deallocation is a no-op. Valid for as
+        // long as the arena lives and is not moved (arenas are not movable).
+        std::pmr::memory_resource * Resource() noexcept
+        {
+            return &m_adapter;
+        }
+
         // Releases all memory back to the upstream resource.
         void Reset();
 
@@ -35,8 +43,30 @@ namespace heimdall
         }
 
     private:
+        class Adapter final : public std::pmr::memory_resource
+        {
+        public:
+            explicit Adapter(Arena &arena) noexcept : m_arena(arena) {}
+
+        private:
+            void * do_allocate(std::size_t bytes, std::size_t alignment) override
+            {
+                return m_arena.Allocate(bytes, alignment);
+            }
+
+            void do_deallocate(void *, std::size_t, std::size_t) override {}
+
+            bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+            {
+                return this == &other;
+            }
+
+            Arena &m_arena;
+        };
+
         std::pmr::monotonic_buffer_resource m_resource;
         std::size_t m_used = 0;
+        Adapter m_adapter {*this};
     };
 
 } // namespace heimdall

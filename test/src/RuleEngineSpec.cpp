@@ -429,7 +429,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto & catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 12);
+    ASSERT_EQ(catalog.size(), 13);
     for (const auto & info: catalog)
     {
         EXPECT_FALSE(info.code.empty());
@@ -451,6 +451,7 @@ TEST(RuleEngineSpec, CatalogDescribesEveryRule)
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->autofix, true);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->layer, "diretivas");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-override")->autofix, true);
 }
 
 TEST(RuleEngineSpec, RemoveDirectiveLineTakesIndentationAndLineTerminator)

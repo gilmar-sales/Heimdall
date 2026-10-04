@@ -19,6 +19,8 @@ add_executable(Tests_run
   src/PreprocessorSpec.cpp
   src/RuleEngineSpec.cpp
   src/SemanticAnalyzerSpec.cpp
+  src/SemanticModelSpec.cpp
+  src/SemanticRulesSpec.cpp
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
   src/DocumentSpec.cpp

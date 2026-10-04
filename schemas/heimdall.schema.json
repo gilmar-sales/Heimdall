@@ -64,6 +64,13 @@
             "error"
           ]
         },
+        "cpp/modernize-override": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",

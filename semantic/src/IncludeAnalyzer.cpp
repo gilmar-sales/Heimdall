@@ -469,7 +469,7 @@ namespace heimdall
                     continue;
                 }
 
-                const bool in_parens = !paren_collects.empty();
+                const bool in_parens =!paren_collects.empty();
                 const bool collecting = in_parens && paren_collects.back();
                 if (!strict)
                 {
@@ -511,7 +511,7 @@ namespace heimdall
         {
             std::vector<RecordDecl> records;
             const std::vector<Token> tokens = Lexer(source).Lex();
-            auto text = [&](std::size_t i)
+            auto text =[&](std::size_t i)
             {
                 return source.substr(tokens[i].offset, tokens[i].length);
             };
@@ -526,9 +526,12 @@ namespace heimdall
             std::vector<std::string> namespace_names;
             bool in_template = false;
             bool skip_statement = false;
-            auto at_declaration_level = [&]
+            auto at_declaration_level =[&]
             {
-                return std::all_of(scopes.begin(), scopes.end(), [](const Frame &f) { return f.is_namespace; });
+                return std::all_of(scopes.begin(), scopes.end(),[](const Frame &f)
+                    {
+                        return f.is_namespace;
+                });
             };
 
             for (std::size_t i = 0; i < tokens.size(); ++i)
@@ -577,7 +580,7 @@ namespace heimdall
                     continue;
                 }
 
-                if (token.kind != TokenKind::Identifier || !at_declaration_level())
+                if (token.kind != TokenKind::Identifier ||!at_declaration_level())
                 {
                     continue;
                 }
@@ -738,7 +741,7 @@ namespace heimdall
 
                 const bool definition = stop == "{" || stop == ":";
                 const bool declaration = stop == ";" && names.size() == 1;
-                if (names.empty() || (!definition && !declaration))
+                if (names.empty() ||(!definition && !declaration))
                 {
                     continue;
                 }
@@ -756,7 +759,7 @@ namespace heimdall
                     record.ns += piece;
                 }
 
-                record.forwardable = !in_template && record.ns.find('(') == std::string::npos;
+                record.forwardable =!in_template && record.ns.find('(') == std::string::npos;
                 records.push_back(std::move(record));
                 i = j - 1;
             }
@@ -776,7 +779,10 @@ namespace heimdall
 
         bool IsPointerPunctuation(std::string_view text)
         {
-            return !text.empty() && std::all_of(text.begin(), text.end(), [](char c) { return c == '*' || c == '&'; });
+            return!text.empty() && std::all_of(text.begin(), text.end(),[](char c)
+                {
+                    return c == '*' || c == '&';
+            });
         }
 
         // Which uses of `interest` names a forward declaration could not satisfy.
@@ -784,13 +790,14 @@ namespace heimdall
         // (after optional cv-qualifiers), or is itself a `class N;` declaration.
         // Everything inside function bodies and initializers is treated as a
         // use of the complete type.
-        UseClassification ClassifyUses(const ParseTree &tree, const std::unordered_set<std::string_view> &interest)
+        UseClassification ClassifyUses(const ParseTree &tree,
+            const std::unordered_set<std::string_view> & interest)
         {
             UseClassification result;
             const std::string_view source = tree.Source();
             const auto &tokens = tree.Tokens();
             const auto &directives = tree.Directives();
-            auto text = [&](std::size_t i)
+            auto text =[&](std::size_t i)
             {
                 return source.substr(tokens[i].offset, tokens[i].length);
             };
@@ -801,10 +808,13 @@ namespace heimdall
             std::size_t cursor = 0;
             std::vector<std::pair<std::size_t, std::size_t>> bodies;
             std::size_t body_start = 0;
-            auto in_body = [&] { return body_depth > 0; };
+            auto in_body =[&]
+            {
+                return body_depth > 0;
+            };
             // `struct S {` / `enum E : int {` open a record body; `struct S *p`
             // and `struct S s;` inside a declaration do not.
-            auto opens_body = [&](std::size_t from)
+            auto opens_body =[&](std::size_t from)
             {
                 for (std::size_t j = from + 1; j < tokens.size(); ++j)
                 {
@@ -859,7 +869,7 @@ namespace heimdall
                     const std::string_view punctuation = text(i);
                     if (punctuation == "{")
                     {
-                        const bool declaration_level = !in_body() && (scopes.empty() || scopes.back() != 'E');
+                        const bool declaration_level =!in_body() && (scopes.empty() || scopes.back() != 'E');
                         const char kind = declaration_level ? pending : 'X';
                         scopes.push_back(kind);
                         if (kind == 'X' && !in_body())
@@ -932,7 +942,7 @@ namespace heimdall
                     continue;
                 }
 
-                if (in_body() || (!scopes.empty() && scopes.back() == 'E'))
+                if (in_body() ||(!scopes.empty() && scopes.back() == 'E'))
                 {
                     result.blocked.insert(word);
                     continue;
@@ -953,7 +963,7 @@ namespace heimdall
                     next = NextSignificant(tokens, next + 1);
                 }
 
-                if (next >= tokens.size() || !IsPointerPunctuation(text(next)))
+                if (next >= tokens.size() ||!IsPointerPunctuation(text(next)))
                 {
                     result.blocked.insert(word);
                     continue;
@@ -976,7 +986,7 @@ namespace heimdall
             // including in member initializer lists outside any body.
             if (!result.pointer_names.empty())
             {
-                auto unsafe_token = [&](std::size_t i)
+                auto unsafe_token =[&](std::size_t i)
                 {
                     const std::string_view piece = text(i);
                     return piece == "." || piece == "->" || piece == "[" || piece.find('*') != std::string_view::npos ||
@@ -997,7 +1007,7 @@ namespace heimdall
                     // `#include <widget.hpp>` must not read as `widget.hpp`.
                     if ((directive_cursor < directives.size() &&
                         directives[directive_cursor].offset <= tokens[i].offset) ||
-                        tokens[i].kind != TokenKind::Identifier || !result.pointer_names.contains(text(i)))
+                        tokens[i].kind != TokenKind::Identifier ||!result.pointer_names.contains(text(i)))
                     {
                         continue;
                     }
@@ -1301,13 +1311,14 @@ namespace heimdall
             return name == "c++config.h" || name == "os_defines.h" || name == "cpu_defines.h";
         }
 
-        bool IsSystemFile(const std::filesystem::path & file, const std::vector<std::filesystem::path> & system_dirs)
+        bool IsSystemFile(const std::filesystem::path & file,
+            const std::vector<std::filesystem::path> & system_dirs)
         {
             const auto normalized = file.lexically_normal();
-            return std::any_of(system_dirs.begin(), system_dirs.end(), [&](const std::filesystem::path &dir)
+            return std::any_of(system_dirs.begin(), system_dirs.end(),[&](const std::filesystem::path & dir)
                 {
                     const auto relative = normalized.lexically_relative(dir);
-                    return !relative.empty() && *relative.begin() != "..";
+                    return!relative.empty() && *relative.begin() != "..";
             });
         }
 
@@ -1327,7 +1338,7 @@ namespace heimdall
             const CompileCommand *command)
         {
             std::string key;
-            const bool quoted = !target.empty() && target.front() == '"';
+            const bool quoted =!target.empty() && target.front() == '"';
             if (quoted)
             {
                 key += base_dir.lexically_normal().generic_string();
@@ -1376,7 +1387,7 @@ namespace heimdall
         // Closure of `#include <target>` seen from base_dir; `complete` is false
         // for anything that could not be fully resolved (never cached).
         std::vector<std::filesystem::path> ResolveClosure(const std::filesystem::path & base_dir,
-            const std::string &target, const CompileCommand *command, const IncludeIndex::Limits &limits,
+            const std::string & target, const CompileCommand *command, const IncludeIndex::Limits & limits,
             bool &complete)
         {
             const std::string key = ClosureKey(base_dir, target, command);
@@ -1402,7 +1413,8 @@ namespace heimdall
             }
 
             ResolveReport report;
-            auto files = IncludeIndex::ResolveHeaders(base_dir, "#include " + target + "\n", command, limits, &report);
+            auto files = IncludeIndex::ResolveHeaders(base_dir, "#include " + target + "\n", command, limits,
+                &report);
             complete = report.complete && !files.empty();
             if (complete)
             {
@@ -1435,7 +1447,7 @@ namespace heimdall
     // Forward declarations replacing the include, one line each, or nothing
     // when some use of `matched` needs more than a declaration.
     static std::optional<std::vector<std::string>> ForwardDeclarations(const ParseTree &tree,
-        const IncludeProfile::Entry &entry, const std::vector<std::string_view> &matched)
+        const IncludeProfile::Entry & entry, const std::vector<std::string_view> & matched)
     {
         std::vector<RecordDecl> chosen;
         for (const std::string_view name: matched)
@@ -1450,7 +1462,7 @@ namespace heimdall
                         continue;
                     }
 
-                    if (!record.forwardable || (found != nullptr &&
+                    if (!record.forwardable ||(found != nullptr &&
                         (found->ns != record.ns || found->keyword != record.keyword)))
                     {
                         return std::nullopt;
@@ -1514,7 +1526,6 @@ namespace heimdall
             system_dirs.push_back(dir.lexically_normal());
         }
 
-
         IncludeIndex::Limits limits;
         limits.max_headers = 1024;
         limits.follow_include_next = true;
@@ -1535,7 +1546,8 @@ namespace heimdall
                 continue;
             }
 
-            closures[i].files = ResolveClosure(base_dir, includes[i].target, command, limits, closures[i].complete);
+            closures[i].files = ResolveClosure(base_dir, includes[i].target, command, limits,
+                closures[i].complete);
             for (const auto & path: closures[i].files)
             {
                 closures[i].keys.insert(PathKey(path));
@@ -1610,7 +1622,7 @@ namespace heimdall
                 }
 
                 auto symbols = SymbolsFor(path, IsSystemFile(path, system_dirs));
-                if (!symbols->readable || (direct && symbols->implicit_use && !IsSystemFile(header, system_dirs)))
+                if (!symbols->readable ||(direct && symbols->implicit_use && !IsSystemFile(header, system_dirs)))
                 {
                     usable = false;
                     break;
@@ -1626,7 +1638,7 @@ namespace heimdall
             }
 
             entry.eligible = true;
-            entry.project_header = !IsSystemFile(header, system_dirs);
+            entry.project_header =!IsSystemFile(header, system_dirs);
         }
 
         std::unordered_set<std::string> stamped;
@@ -1723,7 +1735,10 @@ namespace heimdall
 
         // A file with nothing but includes (an umbrella header) re-exports them.
         if (used.empty() && std::none_of(profile.entries.begin(), profile.entries.end(),
-            [](const IncludeProfile::Entry &entry) { return entry.circular; }))
+            [](const IncludeProfile::Entry & entry)
+            {
+                return entry.circular;
+        }))
         {
             return diagnostics;
         }
@@ -1738,8 +1753,8 @@ namespace heimdall
             {
                 const auto position = lines.Lookup(include.target_offset);
                 diagnostics.push_back({RuleId::CircularInclude, Severity::Error, "cpp/no-circular-include",
-                    "circular include: " + include.target + " includes this file again, directly or indirectly",
-                    include.target_offset, include.target_length, position.line, position.column, false, {}});
+                        "circular include: " + include.target + " includes this file again, directly or indirectly",
+                        include.target_offset, include.target_length, position.line, position.column, false, {}});
                 continue;
             }
 
@@ -1753,7 +1768,10 @@ namespace heimdall
             for (const std::string_view word: used)
             {
                 if (std::any_of(entry.providers.begin(), entry.providers.end(),
-                    [&](const auto &provider) { return provider->names.contains(word); }))
+                    [&](const auto &provider)
+                    {
+                        return provider->names.contains(word);
+                }))
                 {
                     matched.push_back(word);
                 }
@@ -1773,7 +1791,7 @@ namespace heimdall
                 continue;
             }
 
-            if (!profile.is_header_file || !entry.project_header)
+            if (!profile.is_header_file ||!entry.project_header)
             {
                 continue;
             }
@@ -1783,7 +1801,7 @@ namespace heimdall
                 std::string names;
                 for (const std::string_view word: matched)
                 {
-                    names += (names.empty() ? "" : ", ");
+                    names +=(names.empty() ? "" : ", ");
                     names += word;
                 }
 
@@ -1800,7 +1818,7 @@ namespace heimdall
                 Diagnostic diagnostic{RuleId::PreferForwardDeclaration, Severity::Warning,
                     "cpp/prefer-forward-declaration",
                     "include of " + include.target + " is only needed for pointers or references to " + names +
-                    "; forward declare " + (matched.size() == 1 ? "it" : "them") + " instead",
+                        "; forward declare " +(matched.size() == 1 ? "it" : "them") + " instead",
                     include.target_offset, include.target_length, position.line, position.column, true,
                     std::move(edit)};
                 diagnostic.fix_is_safe = false;

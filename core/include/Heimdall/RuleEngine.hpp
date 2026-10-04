@@ -31,7 +31,8 @@ namespace heimdall
         UnsortedIncludes,
         CircularInclude,
         TodoComment,
-        MagicNumber
+        MagicNumber,
+        ModernizeOverride
     };
 
     struct RuleOverride

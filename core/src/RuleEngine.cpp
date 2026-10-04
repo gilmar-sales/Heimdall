@@ -562,6 +562,8 @@ namespace heimdall
                 "lexical", false, "unresolved TODO, FIXME or XXX comment"},
             {RuleId::MagicNumber, "cpp/no-magic-numbers", "cpp", Severity::Warning,
                 "sintática", false, "numeric literal without a named constant"},
+            {RuleId::ModernizeOverride, "cpp/modernize-override", "cpp", Severity::Warning,
+                "semântica", true, "overriding virtual function without override"},
         };
         return catalog;
     }

@@ -9,6 +9,7 @@
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
+#include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/RuleConfig.hpp>
@@ -979,7 +980,26 @@ namespace heimdall::lsp
     {
         const heimdall::RuleEngine engine(m_rule_options);
         auto diagnostics = engine.Analyze(tree);
-        if (!m_enable_semantic.load(std::memory_order_relaxed) || command == nullptr)
+        if (!m_enable_semantic.load(std::memory_order_relaxed))
+        {
+            return diagnostics;
+        }
+
+        // Rules on the bound model need no compile command: the model is built
+        // from the tree already parsed for this version of the document.
+        {
+            const auto model = heimdall::Binder::Bind(tree);
+            auto bound = engine.ApplyPolicy(heimdall::SemanticRules::AnalyzeOverride(model), tree);
+            diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
+                std::make_move_iterator(bound.end()));
+            std::stable_sort(diagnostics.begin(), diagnostics.end(),
+                [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+                {
+                    return a.offset < b.offset;
+            });
+        }
+
+        if (command == nullptr)
         {
             return diagnostics;
         }
