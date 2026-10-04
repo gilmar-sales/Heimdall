@@ -79,7 +79,7 @@ namespace
 
     TEST(StbCorpus, TargetsMapToWholeFileTiers)
     {
-        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench";
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
         const auto small = heimdall::bench::BuildDocument(dir, 1000);
         const auto medium = heimdall::bench::BuildDocument(dir, 5000);
         const auto large = heimdall::bench::BuildDocument(dir, 20000);
@@ -94,7 +94,7 @@ namespace
 
     TEST(StbCorpus, RepeatedCopiesGetUniqueIncludeGuards)
     {
-        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench";
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
         const auto large = heimdall::bench::BuildDocument(dir, 20000);
         ASSERT_TRUE(large);
         // The lexer is emitted twice; the second copy must not collide with the first.
@@ -109,7 +109,7 @@ namespace
 
     TEST(StbCorpus, EmbeddedImplementationParsesWithoutErrorNodes)
     {
-        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench";
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
         const auto small = heimdall::bench::BuildDocument(dir, 1000);
         ASSERT_TRUE(small);
         EXPECT_LE(CountErrors(heimdall::ParseTree::Parse(*small)), 8u);

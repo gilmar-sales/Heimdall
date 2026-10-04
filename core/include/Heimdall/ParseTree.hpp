@@ -121,8 +121,10 @@ namespace heimdall
         // Cooperative cancellation: the grammar pass polls `stop` between
         // top-level items. A cancelled tree is partial; check Cancelled() and
         // discard it.
+        // `lexed`, when given, must be Lexer(source).Lex(); it skips the lexing
+        // pass (the LSP keeps tokens current via Lexer::Relex).
         static ParseTree Parse(std::string_view source, const ParserOptions &options,
-            std::stop_token stop);
+            std::stop_token stop, const std::vector<Token> *lexed = nullptr);
 
         std::string_view Source() const noexcept
         {

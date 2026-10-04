@@ -19,6 +19,43 @@ namespace heimdall::lsp
         }
     }
 
+    void LineIndex::Update(std::string_view text, std::size_t offset, std::size_t old_length,
+        std::size_t new_length)
+    {
+        if (m_line_starts.empty())
+        {
+            Build(text);
+            return;
+        }
+
+        m_text = text;
+        const std::size_t old_end = offset + old_length;
+        // Line starts s with offset < s <= old_end sat right after a removed newline.
+        const auto first = std::upper_bound(m_line_starts.begin(), m_line_starts.end(),
+            static_cast<std::uint32_t>(offset));
+        const auto last = std::upper_bound(first, m_line_starts.end(), static_cast<std::uint32_t>(old_end));
+        const auto position = m_line_starts.erase(first, last) - m_line_starts.begin();
+
+        std::vector<std::uint32_t> fresh;
+        for (std::size_t i = offset; i < offset + new_length && i < text.size(); ++i)
+        {
+            if (text[i] == '\n')
+            {
+                fresh.push_back(static_cast<std::uint32_t>(i + 1));
+            }
+        }
+
+        const std::ptrdiff_t delta =
+            static_cast<std::ptrdiff_t>(new_length) - static_cast<std::ptrdiff_t>(old_length);
+        auto tail = m_line_starts.begin() + position;
+        for (; tail != m_line_starts.end(); ++tail)
+        {
+            *tail = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(*tail) + delta);
+        }
+
+        m_line_starts.insert(m_line_starts.begin() + position, fresh.begin(), fresh.end());
+    }
+
     std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i, std::size_t stop) noexcept
     {
         const unsigned char c = static_cast<unsigned char>(text[i]);

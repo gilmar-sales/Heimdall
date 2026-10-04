@@ -32,7 +32,7 @@ target_precompile_headers(CoreBench PRIVATE
 # Review section 7 validation tools. Plain executables (not Google Benchmark): they
 # report percentiles / pass-fail limits, which the micro-benchmark harness does not.
 # Corpus: the stb single headers next to this file (src/StbCorpus.hpp).
-set(HEIMDALL_STB_DEFINITION HEIMDALL_STB_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+set(HEIMDALL_STB_DEFINITION HEIMDALL_STB_DIR="${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
 
 # End-to-end LSP latency (didChange + completion) and server memory per document.
 # Drives the real heimdall-lsp binary over stdio.

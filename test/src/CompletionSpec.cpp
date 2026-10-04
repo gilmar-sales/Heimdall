@@ -821,3 +821,70 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveMethodsAndFields)
     ASSERT_TRUE(trailing.has_value());
     EXPECT_TRUE(trailing->documentation.empty());
 }
+
+TEST(CompletionSpec, HoverOnClassQualifyingAMethodDefinition)
+{
+    const std::string_view source =
+        "namespace app {\n"
+        "class Server {\n"
+        "public:\n"
+        "    void Work(int stop);\n"
+        "};\n"
+        "void Server::Work(int stop) {}\n"
+        "}\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("Server::Work") + 2, nullptr);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "Server");
+    EXPECT_EQ(hovered->kind, heimdall::CompletionKind::Type);
+}
+
+TEST(CompletionSpec, HoverOnStructQualifyingAMethodDefinitionAtGlobalScope)
+{
+    const std::string_view source =
+        "struct Box { int Get() const; };\n"
+        "int Box::Get() const { return 1; }\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("Box::Get") + 1, nullptr);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "Box");
+}
+
+TEST(CompletionSpec, HoverOnHeaderClassQualifyingAMethodDefinition)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace heimdall::lsp {\n"
+        "class LanguageServer {\n"
+        "public:\n"
+        "    void DiagWorkerMain(int stop);\n"
+        "};\n"
+        "}\n", {});
+    const std::string_view source =
+        "namespace heimdall::lsp\n"
+        "{\n"
+        "    void LanguageServer::DiagWorkerMain(int stop)\n"
+        "    {\n"
+        "    }\n"
+        "}\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("LanguageServer::") + 3, &index);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "LanguageServer");
+}
+
+TEST(CompletionSpec, HeaderNamespaceMembersVisibleInNestedNamespaceOnly)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace heimdall::lsp {\nclass LanguageServer {};\n}\n", {});
+    auto hover = [&](std::string_view source)
+    {
+        return heimdall::CompletionEngine::Hover(source, {}, source.find("LanguageServer") + 3, &index);
+    };
+
+    EXPECT_TRUE(hover("namespace heimdall::lsp { namespace detail { LanguageServer* p; } }\n").has_value());
+    EXPECT_TRUE(hover("namespace heimdall { namespace lsp { LanguageServer* p; } }\n").has_value());
+    // Outside the namespace (or in a sibling one) the name stays qualified-only.
+    EXPECT_FALSE(hover("LanguageServer* p;\n").has_value());
+    EXPECT_FALSE(hover("namespace heimdall { LanguageServer* p; }\n").has_value());
+    EXPECT_FALSE(hover("namespace other::lsp { LanguageServer* p; }\n").has_value());
+}

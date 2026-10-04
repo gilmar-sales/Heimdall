@@ -2877,12 +2877,31 @@ namespace heimdall
             }
 
             // Header globals (top-level functions, macros, using-aliases) are visible
-            // unqualified once included. Namespaced header members stay qualified-only.
+            // unqualified once included. Namespaced header members stay qualified-only
+            // unless the cursor sits inside that namespace (or one nested in it), where
+            // they are in scope as in the compiler: `namespace app { void Server::Run() }`.
             if (external != nullptr)
             {
+                std::vector<std::string> enclosing;
+                for (std::size_t n = 0; n < scope_paths.size(); ++n)
+                {
+                    if (tree.Nodes()[n].kind != GrammarKind::NamespaceDefinition ||
+                        scope_paths[n].size() <= enclosing.size())
+                    {
+                        continue;
+                    }
+
+                    const auto[begin, end] = NodeRange(tree, n);
+                    if (offset >= begin && offset <= end)
+                    {
+                        enclosing = scope_paths[n];
+                    }
+                }
+
                 for (const auto & scope: *external)
                 {
-                    if (!scope.path.empty())
+                    if (scope.path.size() > enclosing.size() ||
+                        !std::equal(scope.path.begin(), scope.path.end(), enclosing.begin()))
                     {
                         continue;
                     }

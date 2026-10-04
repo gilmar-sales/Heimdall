@@ -1,5 +1,6 @@
 #include <Heimdall/Lexer.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -9,8 +10,6 @@ namespace heimdall
     namespace
     {
 
-        // F10: single 256-entry lookup replaces the IsSpace/IsIdentStart/
-        // IsIdentContinue comparison chains on every character.
         namespace CharBits
         {
             constexpr std::uint8_t kSpace = 1 << 0;
@@ -277,7 +276,18 @@ namespace heimdall
         std::size_t i = 0;
         while (i < m_source.size())
         {
-            const std::size_t start = i;
+            const Token token = ScanToken(i);
+            tokens.push_back(token);
+            i += token.length;
+        }
+
+        return tokens;
+    }
+
+    Token Lexer::ScanToken(std::size_t start) const
+    {
+        std::size_t i = start;
+        {
             const char c = m_source[i];
             TokenKind kind = TokenKind::Unknown;
 
@@ -403,11 +413,100 @@ namespace heimdall
                 }
             }
 
-            tokens.push_back({kind, static_cast<std::uint32_t>(start),
-                    static_cast<std::uint32_t>(i - start)});
+            return {kind, static_cast<std::uint32_t>(start), static_cast<std::uint32_t>(i - start)};
+        }
+    }
+
+    void Lexer::Relex(std::vector<Token> & tokens, const TextEdit &edit) const
+    {
+        constexpr std::size_t kLookbehind = 32;
+        const std::size_t old_end = edit.offset + edit.old_length;
+        const std::size_t new_end = edit.offset + edit.new_length;
+        const std::ptrdiff_t delta =
+            static_cast<std::ptrdiff_t>(edit.new_length) - static_cast<std::ptrdiff_t>(edit.old_length);
+
+        // First token that ends at or after the window start, minus one token of
+        // lookbehind: a token can only be influenced by text that follows it, so
+        // anything ending well before the edit keeps its old lexing.
+        const std::size_t window = edit.offset > kLookbehind ? edit.offset - kLookbehind : 0;
+        std::size_t lo = 0;
+        std::size_t hi = tokens.size();
+        while (lo < hi)
+        {
+            const std::size_t mid = (lo + hi) / 2;
+            if (static_cast<std::size_t>(tokens[mid].offset) + tokens[mid].length < window)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
         }
 
-        return tokens;
+        const std::size_t first = lo > 0 ? lo - 1 : 0;
+        std::size_t scan = first < tokens.size() ? tokens[first].offset : 0;
+        // Old tokens whose start lies at or after the replaced range, in old coordinates.
+        std::size_t resume = first;
+        std::vector<Token> middle;
+        std::size_t suffix = tokens.size();
+        while (scan < m_source.size())
+        {
+            if (scan >= new_end)
+            {
+                const std::size_t old_scan = scan - delta;
+                while (resume < tokens.size() && tokens[resume].offset < old_scan)
+                {
+                    ++resume;
+                }
+
+                if (resume < tokens.size() && tokens[resume].offset == old_scan)
+                {
+                    const Token fresh = ScanToken(scan);
+                    if (fresh.kind == tokens[resume].kind && fresh.length == tokens[resume].length)
+                    {
+                        suffix = resume;
+                        break;
+                    }
+
+                    middle.push_back(fresh);
+                    scan += fresh.length;
+                    continue;
+                }
+            }
+
+            const Token fresh = ScanToken(scan);
+            middle.push_back(fresh);
+            scan += fresh.length;
+        }
+
+        if (suffix == tokens.size())
+        {
+            tokens.erase(tokens.begin() + static_cast<std::ptrdiff_t>(first), tokens.end());
+            tokens.insert(tokens.end(), middle.begin(), middle.end());
+            return;
+        }
+
+        const std::size_t removed = suffix - first;
+        const std::size_t tail_start = first + middle.size();
+        if (middle.size() < removed)
+        {
+            std::copy(middle.begin(), middle.end(), tokens.begin() + static_cast<std::ptrdiff_t>(first));
+            tokens.erase(tokens.begin() + static_cast<std::ptrdiff_t>(tail_start),
+                tokens.begin() + static_cast<std::ptrdiff_t>(suffix));
+        }
+        else
+        {
+            std::copy(middle.begin(), middle.begin() + static_cast<std::ptrdiff_t>(removed),
+                tokens.begin() + static_cast<std::ptrdiff_t>(first));
+            tokens.insert(tokens.begin() + static_cast<std::ptrdiff_t>(suffix),
+                middle.begin() + static_cast<std::ptrdiff_t>(removed), middle.end());
+        }
+
+        for (std::size_t t = tail_start; t < tokens.size(); ++t)
+        {
+            tokens[t].offset = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(tokens[t].offset) + delta);
+        }
     }
 
     std::string_view Lexer::Text(const Token &token) const noexcept

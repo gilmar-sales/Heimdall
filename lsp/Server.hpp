@@ -50,6 +50,8 @@ namespace heimdall::lsp
             std::shared_ptr<const std::string> text = std::make_shared<const std::string>();
             std::int64_t version = 0;
             std::shared_ptr<const LineIndex> lines = std::make_shared<const LineIndex>();
+            // Lossless tokens of `text`, kept in step with it by incremental re-lexing.
+            std::shared_ptr<const std::vector<heimdall::Token>> tokens;
         };
 
         // A document as it was when a request arrived.
@@ -131,7 +133,7 @@ namespace heimdall::lsp
         void EnqueueDiagnostics(const std::string & uri, std::int64_t version);
         void FlushDiagnostics();
         static bool ApplyContentChange(std::string & current, LineIndex &index,
-            simdjson::dom::object change);
+            std::vector<heimdall::Token> &tokens, simdjson::dom::object change);
         void TouchGlobalIndex(const std::string & key);
         // Runs `handler` on the pool against a private copy of the message, so
         // the I/O thread goes straight back to reading (and to $/cancelRequest).

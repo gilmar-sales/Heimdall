@@ -4,6 +4,7 @@
 #include "JsonRpc.hpp"
 
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/Lexer.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
@@ -647,6 +648,8 @@ namespace heimdall::lsp
         auto lines = std::make_shared<LineIndex>();
         lines->Build(*snapshot.text);
         snapshot.lines = std::move(lines);
+        snapshot.tokens = std::make_shared<const std::vector<heimdall::Token>>(
+            heimdall::Lexer(*snapshot.text).Lex());
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
             m_documents[uri_string] = std::move(snapshot);
@@ -659,7 +662,7 @@ namespace heimdall::lsp
     }
 
     bool LanguageServer::ApplyContentChange(std::string & current, LineIndex &index,
-        simdjson::dom::object change)
+        std::vector<heimdall::Token> & tokens, simdjson::dom::object change)
     {
         std::string_view text;
         if (!GetString(change, "text", text))
@@ -673,6 +676,7 @@ namespace heimdall::lsp
             // Full-document sync (textDocumentSync = 1 fallback).
             current.assign(text);
             index.Build(current);
+            tokens = heimdall::Lexer(current).Lex();
             return true;
         }
 
@@ -723,7 +727,8 @@ namespace heimdall::lsp
         }
 
         current.replace(start_offset, end_offset - start_offset, text);
-        index.Build(current);
+        index.Update(current, start_offset, end_offset - start_offset, text.size());
+        heimdall::Lexer(current).Relex(tokens, {start_offset, end_offset - start_offset, text.size()});
         return true;
     }
 
@@ -756,6 +761,7 @@ namespace heimdall::lsp
         }
 
         std::shared_ptr<const std::string> base_text;
+        std::shared_ptr<const std::vector<heimdall::Token>> base_tokens;
         {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
             const auto found = m_documents.find(uri_string);
@@ -765,10 +771,21 @@ namespace heimdall::lsp
             }
 
             base_text = found->second.text;
+            base_tokens = found->second.tokens;
         }
         std::string current(*base_text);
         LineIndex batch_index;
         batch_index.Build(current);
+        std::vector<heimdall::Token> tokens;
+        if (base_tokens)
+        {
+            tokens = *base_tokens;
+        }
+        else
+        {
+            tokens = heimdall::Lexer(current).Lex();
+        }
+
         for (simdjson::dom::element change: changes)
         {
             simdjson::dom::object change_object;
@@ -777,11 +794,13 @@ namespace heimdall::lsp
                 continue;
             }
 
-            ApplyContentChange(current, batch_index, change_object);
+            ApplyContentChange(current, batch_index, tokens, change_object);
         }
 
         auto new_text = std::make_shared<const std::string>(std::move(current));
+        batch_index.Rebind(*new_text);
         auto new_lines = std::make_shared<const LineIndex>(std::move(batch_index));
+        auto new_tokens = std::make_shared<const std::vector<heimdall::Token>>(std::move(tokens));
         std::int64_t version = new_version;
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
@@ -794,6 +813,7 @@ namespace heimdall::lsp
             found->second.version = new_version;
             found->second.text = std::move(new_text);
             found->second.lines = std::move(new_lines);
+            found->second.tokens = std::move(new_tokens);
             version = found->second.version;
         }
         {
@@ -902,7 +922,7 @@ namespace heimdall::lsp
         }
 
         // The profile reads every transitive header: keep it across keystrokes.
-        if (!profile || profile->fingerprint != fingerprint || !heimdall::IncludeAnalyzer::IsFresh(*profile))
+        if (!profile || profile->fingerprint != fingerprint ||!heimdall::IncludeAnalyzer::IsFresh(*profile))
         {
             profile = heimdall::IncludeAnalyzer::BuildProfile(file_path, tree, command);
             const std::lock_guard<std::mutex> lock(m_mu);
@@ -915,7 +935,10 @@ namespace heimdall::lsp
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(unused.begin()),
                 std::make_move_iterator(unused.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),
-                [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b) { return a.offset < b.offset; });
+                [](const heimdall::Diagnostic & a, const heimdall::Diagnostic & b)
+                {
+                    return a.offset < b.offset;
+            });
         }
 
         return diagnostics;
@@ -1035,7 +1058,7 @@ namespace heimdall::lsp
     } // namespace
 
     void LanguageServer::RespondIncludeCompletion(std::string_view id, const std::string & uri,
-        const std::string & text, const LineIndex & lines, std::size_t offset,
+        const std::string & text, const LineIndex &lines, std::size_t offset,
         const heimdall::IncludeContext & context, const heimdall::CompileCommand * command)
     {
         const std::filesystem::path file_path = PathFromUri(uri);
@@ -1043,11 +1066,12 @@ namespace heimdall::lsp
             file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
         const std::string_view typed = std::string_view(text).substr(context.typed_offset,
             offset - context.typed_offset);
-        const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(base_dir, context.angled, typed, command, 1000);
+        const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(base_dir, context.angled, typed,
+            command, 1000);
 
         // Only the last path segment is replaced; earlier ones are already typed.
         const std::size_t slash = typed.find_last_of("/\\");
-        const std::size_t name_begin = context.typed_offset + (slash == std::string_view::npos ? 0 : slash + 1);
+        const std::size_t name_begin = context.typed_offset +(slash == std::string_view::npos ? 0 : slash + 1);
         const char closing = context.angled ? '>' : '"';
         const bool has_closing = offset < text.size() && text[offset] == closing;
         const Position start = lines.ToPosition(name_begin);
@@ -1062,7 +1086,7 @@ namespace heimdall::lsp
         : "{\"isIncomplete\":false,\"items\":[";
         for (std::size_t i = 0; i < candidates.size(); ++i)
         {
-            const auto & candidate = candidates[i];
+            const auto &candidate = candidates[i];
             if (i != 0)
             {
                 response += ',';
@@ -1476,10 +1500,19 @@ namespace heimdall::lsp
         try
         {
             const std::stop_token stop = CurrentStop();
+            std::shared_ptr<const std::vector<heimdall::Token>> lexed;
+            {
+                const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
+                if (const auto found = m_documents.find(uri);
+                    found != m_documents.end() && found->second.text.get() == text.get())
+                {
+                    lexed = found->second.tokens;
+                }
+            }
             std::call_once(slot->once,[&]
                 {
                     auto tree = std::make_shared<heimdall::ParseTree>(
-                    heimdall::ParseTree::Parse(*text, options, stop));
+                    heimdall::ParseTree::Parse(*text, options, stop, lexed.get()));
                     if (tree->Cancelled())
                     {
                         throw ParseCancelled{};

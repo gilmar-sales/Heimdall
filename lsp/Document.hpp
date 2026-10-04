@@ -29,6 +29,17 @@ namespace heimdall::lsp
     {
     public:
         void Build(std::string_view text);
+        // Points the index at a different buffer holding the same text (for
+        // example after the string was moved into shared storage).
+        void Rebind(std::string_view text) noexcept
+        {
+            m_text = text;
+        }
+        // Incremental update after `old_length` bytes at `offset` were replaced
+        // by `new_length` bytes; `text` is the buffer after the edit. Only the
+        // line starts inside the edit are rescanned, the rest are shifted.
+        void Update(std::string_view text, std::size_t offset, std::size_t old_length,
+            std::size_t new_length);
         Position ToPosition(std::size_t offset) const;
         std::size_t OffsetFromPosition(Position position) const;
         std::size_t LineCount() const noexcept

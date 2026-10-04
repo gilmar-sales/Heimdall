@@ -40,3 +40,54 @@ TEST(DocumentSpec, CountsUtf16CodeUnitsLikeToPosition)
     EXPECT_EQ(OffsetFromPosition(text, { 0, 4 }), 7);
     EXPECT_EQ(OffsetFromPosition(text, { 1, 0 }), text.size());
 }
+
+TEST(DocumentSpec, LineIndexUpdateMatchesFullBuildForRandomEdits)
+{
+    const char alphabet[] = "ab \n\n\xC3\xA9\xF0\x9F\x98\x80;";
+    std::uint32_t state = 777;
+    auto next = [&](std::size_t bound) {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<std::size_t>((state >> 8) % bound);
+    };
+    std::string text = "int a;\nint bb;\n\nx";
+    heimdall::lsp::LineIndex incremental;
+    incremental.Build(text);
+    for (int step = 0; step < 3000; ++step)
+    {
+        const std::size_t offset = next(text.size() + 1);
+        const std::size_t old_length = next(std::min<std::size_t>(8, text.size() - offset + 1));
+        std::string insert;
+        for (std::size_t n = next(8); n > 0; --n)
+        {
+            insert += alphabet[next(sizeof(alphabet) - 1)];
+        }
+        text.replace(offset, old_length, insert);
+        incremental.Update(text, offset, old_length, insert.size());
+        heimdall::lsp::LineIndex fresh;
+        fresh.Build(text);
+        ASSERT_EQ(incremental.LineCount(), fresh.LineCount()) << "step " << step;
+        for (std::size_t o = 0; o <= text.size(); ++o)
+        {
+            const auto position = fresh.ToPosition(o);
+            const auto got = incremental.ToPosition(o);
+            ASSERT_EQ(got.line, position.line) << "step " << step << " offset " << o;
+            ASSERT_EQ(got.character, position.character) << "step " << step << " offset " << o;
+        }
+        if (text.size() > 120)
+        {
+            text.erase(0, 60);
+            incremental.Build(text);
+        }
+    }
+}
+
+TEST(DocumentSpec, LineIndexRebindSurvivesBufferMove)
+{
+    std::string text = "a\nb";
+    heimdall::lsp::LineIndex index;
+    index.Build(text);
+    const std::string moved = std::move(text);
+    index.Rebind(moved);
+    EXPECT_EQ(index.ToPosition(2).line, 1u);
+    EXPECT_EQ(index.OffsetFromPosition({ 1, 1 }), 3u);
+}

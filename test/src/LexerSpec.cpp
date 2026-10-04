@@ -148,3 +148,80 @@ TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
         EXPECT_EQ(Reconstruct(source, lexer.Lex()), source) << entry.path().string();
     }
 }
+
+namespace
+{
+
+bool SameTokens(const std::vector<heimdall::Token>& a, const std::vector<heimdall::Token>& b)
+{
+    if (a.size() != b.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        if (a[i].kind != b[i].kind || a[i].offset != b[i].offset || a[i].length != b[i].length)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+TEST(LexerSpec, RelexMatchesFullLexForTargetedEdits)
+{
+    const std::string base = "#include <a>\nint main() {\n  /* c */ auto s = R\"x(raw\n)x\"; // t\n  return 0x1F + 1.5e+3;\n}\n";
+    struct Case { std::size_t offset; std::size_t old_length; std::string insert; };
+    const Case cases[] = {
+        { 0, 0, "" }, { 0, 0, "x" }, { base.size(), 0, "int y;" }, { 0, base.size(), "" },
+        { base.find("/*") + 2, 0, "*/ int q; /*" },   // changes comment boundaries
+        { base.find("R\"x(") + 3, 0, "(" },           // changes raw string delimiter
+        { base.find(")x\""), 1, "" },                 // breaks raw string terminator
+        { base.find("main"), 4, "m" },
+        { base.find("0x1F") + 1, 1, "" },             // hex number becomes decimal
+        { base.find("//"), 0, "/" },
+        { base.find("\n  return"), 1, " " },          // joins a line comment into code
+    };
+    for (const auto& c : cases)
+    {
+        std::string edited = base;
+        edited.replace(c.offset, c.old_length, c.insert);
+        auto tokens = heimdall::Lexer(base).Lex();
+        heimdall::Lexer(edited).Relex(tokens, { c.offset, c.old_length, c.insert.size() });
+        EXPECT_TRUE(SameTokens(tokens, heimdall::Lexer(edited).Lex()))
+            << "offset " << c.offset << " old " << c.old_length << " insert '" << c.insert << "'";
+    }
+}
+
+TEST(LexerSpec, RelexMatchesFullLexForRandomEditSequences)
+{
+    const char alphabet[] = "ab_9 \n\t\"'/*(){};.<>=R\#x+-eE";
+    std::uint32_t state = 12345;
+    auto next = [&](std::size_t bound) {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<std::size_t>((state >> 8) % bound);
+    };
+    std::string text = "int main() { auto s = R\"(a)\"; /* c */ return 1; } // end\n";
+    auto tokens = heimdall::Lexer(text).Lex();
+    for (int step = 0; step < 4000; ++step)
+    {
+        const std::size_t offset = next(text.size() + 1);
+        const std::size_t old_length = next(std::min<std::size_t>(6, text.size() - offset + 1));
+        std::string insert;
+        for (std::size_t n = next(6); n > 0; --n)
+        {
+            insert += alphabet[next(sizeof(alphabet) - 1)];
+        }
+        text.replace(offset, old_length, insert);
+        heimdall::Lexer(text).Relex(tokens, { offset, old_length, insert.size() });
+        ASSERT_TRUE(SameTokens(tokens, heimdall::Lexer(text).Lex()))
+            << "step " << step << " offset " << offset << " old " << old_length << " text:\n" << text;
+        if (text.size() > 400)
+        {
+            text.erase(0, 200);
+            tokens = heimdall::Lexer(text).Lex();
+        }
+    }
+}
