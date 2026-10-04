@@ -380,3 +380,292 @@ TEST(IncludeAnalyzerSpec, StandardHeaderNeededOnlyForAMemberCallIsStillReportedW
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].message, "included header <map> is not used directly");
 }
+
+namespace
+{
+
+    std::vector<heimdall::Diagnostic> ForwardDeclarationFindings(const std::vector<heimdall::Diagnostic> & all)
+    {
+        std::vector<heimdall::Diagnostic> result;
+        for (const auto & diagnostic: all)
+        {
+            if (diagnostic.code == "cpp/prefer-forward-declaration")
+            {
+                result.push_back(diagnostic);
+            }
+        }
+
+        return result;
+    }
+
+    std::string ApplyFix(std::string_view source, const heimdall::Diagnostic & diagnostic)
+    {
+        std::string text(source);
+        text.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
+        return text;
+    }
+
+} // namespace
+
+TEST(ForwardDeclarationSpec, SuggestsForwardDeclarationForPointersAndReferences)
+{
+    Project project;
+    project.Header("widget.hpp", "#pragma once\nclass Widget { public: int value; };\n");
+    constexpr std::string_view source =
+        "#pragma once\n"
+        "#include <widget.hpp>\n"
+        "class Panel\n"
+        "{\n"
+        "    Widget * m_widget;\n"
+        "    const Widget & m_other;\n"
+        "    void attach(Widget & widget);\n"
+        "    Widget * Find(const Widget * const needle);\n"
+        "};\n";
+    const auto findings = ForwardDeclarationFindings(project.Analyze(source, "panel.hpp"));
+    ASSERT_EQ(findings.size(), 1);
+    EXPECT_EQ(findings[0].line, 2);
+    EXPECT_EQ(findings[0].rule, heimdall::RuleId::PreferForwardDeclaration);
+    EXPECT_FALSE(findings[0].fix_is_safe);
+    EXPECT_NE(findings[0].message.find("Widget"), std::string::npos);
+    EXPECT_EQ(source.substr(findings[0].offset, findings[0].length), "<widget.hpp>");
+    EXPECT_EQ(ApplyFix(source, findings[0]).substr(0, 27), "#pragma once\nclass Widget;\n");
+}
+
+TEST(ForwardDeclarationSpec, KeepsTheNamespaceAndKeywordOfTheDeclaration)
+{
+    Project project;
+    project.Header("ui.hpp",
+        "#pragma once\n"
+        "namespace app::ui {\n"
+        "struct Button { int id; };\n"
+        "class Label {};\n"
+        "}\n");
+    constexpr std::string_view source =
+        "#include <ui.hpp>\n"
+        "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n";
+    const auto findings = ForwardDeclarationFindings(project.Analyze(source, "form.hpp"));
+    ASSERT_EQ(findings.size(), 1);
+    EXPECT_EQ(ApplyFix(source, findings[0]),
+        "namespace app::ui { struct Button; }\n"
+        "namespace app::ui { class Label; }\n"
+        "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n");
+}
+
+TEST(ForwardDeclarationSpec, PreservesCrLfLineEndings)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    constexpr std::string_view source = "#include <widget.hpp>\r\nWidget * w;\r\n";
+    const auto findings = ForwardDeclarationFindings(project.Analyze(source, "a.hpp"));
+    ASSERT_EQ(findings.size(), 1);
+    EXPECT_EQ(ApplyFix(source, findings[0]), "class Widget;\r\nWidget * w;\r\n");
+}
+
+TEST(ForwardDeclarationSpec, OnlyAppliesToHeaderFiles)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    constexpr std::string_view source = "#include <widget.hpp>\nWidget * w;\n";
+    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(source, "a.cpp")).empty());
+    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).size(), 1);
+    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "a.h")).size(), 1);
+}
+
+TEST(ForwardDeclarationSpec, AcceptsInlineBodiesThatOnlyPassThePointerAround)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    constexpr std::string_view source =
+        "#include <widget.hpp>\n"
+        "class Panel\n"
+        "{\n"
+        "public:\n"
+        "    Widget * Get() const { return m_widget; }\n"
+        "    void Set(Widget * widget) { m_widget = widget; }\n"
+        "private:\n"
+        "    Widget * m_widget = nullptr;\n"
+        "};\n";
+    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "panel.hpp")).size(), 1);
+}
+
+TEST(ForwardDeclarationSpec, StaysSilentWhenTheCompleteTypeIsNeeded)
+{
+    Project project;
+    project.Header("widget.hpp", "#pragma once\nclass Widget { public: int value; void Run(); };\n");
+    const std::string_view cases[] = {
+        "class A { Widget member; };\n",
+        "class A : public Widget {};\n",
+        "int a = Widget::kLimit;\n",
+        "Widget Make();\n",
+        "void Take(Widget value);\n",
+        "int a = sizeof(Widget);\n",
+        "Widget * Make() { return new Widget(); }\n",
+        "Widget w{};\n",
+        "#include <memory>\nstd::unique_ptr<Widget> owner;\n",
+        "class A { Widget * m_widget; int Read() { return m_widget->value; } };\n",
+        "class A { Widget & m_widget; int Read() { return (*&m_widget).value; } };\n",
+        "class A { Widget * m_widget; A(Widget * w) : m_widget(w), m_size(w->value) {} int m_size; };\n",
+        "class A { Widget * m_widget; ~A() { delete m_widget; } };\n",
+        "class A { Widget * m_widget; Widget * Pick() { return static_cast<Widget *>(m_widget); } };\n",
+        "#define MAKE(x) Widget * x\nint other;\n",
+        "enum class Kind { A = sizeof(Widget) };\n",
+    };
+    for (const auto text: cases)
+    {
+        const std::string source = "#include <widget.hpp>\n" + std::string(text);
+        EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).empty()) << text;
+    }
+}
+
+TEST(ForwardDeclarationSpec, StaysSilentWhenNamesAreNotPlainClasses)
+{
+    Project project;
+    project.Header("mixed.hpp",
+        "#pragma once\n"
+        "template <typename T> class Box {};\n"
+        "enum class Mode { A };\n"
+        "using Alias = int;\n"
+        "typedef long Long;\n"
+        "int helper(int);\n"
+        "#define LIMIT 3\n"
+        "namespace { class Hidden {}; }\n"
+        "inline namespace v1 { class Versioned {}; }\n"
+        "class Plain {};\n");
+    const std::string_view cases[] = {
+        "Box<int> * a;\n",
+        "Mode * a;\n",
+        "Alias * a;\n",
+        "Long * a;\n",
+        "int a = helper(1);\n",
+        "int a = LIMIT;\n",
+        "Hidden * a;\n",
+        "Versioned * a;\n",
+        "Plain * a; int b = helper(1);\n",
+    };
+    for (const auto text: cases)
+    {
+        const std::string source = "#include <mixed.hpp>\n" + std::string(text);
+        EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).empty()) << text;
+    }
+
+    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze("#include <mixed.hpp>\nPlain * a;\n", "a.hpp")).size(), 1);
+}
+
+TEST(ForwardDeclarationSpec, SkipsConditionalKeptAndPrimaryIncludes)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    project.Header("a.hpp", "class Widget2 {};\n");
+    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
+        "#ifdef FEATURE\n#include <widget.hpp>\n#endif\nWidget * w;\n", "b.hpp")).empty());
+    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
+        "#include <widget.hpp> // IWYU pragma: keep\nWidget * w;\n", "b.hpp")).empty());
+    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
+        "#include <a.hpp>\nWidget2 * w;\n", "a.hpp")).empty());
+}
+
+TEST(ForwardDeclarationSpec, ClassesDeclaredInNestedHeadersCanBeForwardDeclared)
+{
+    Project project;
+    project.Header("inner.hpp", "struct Inner {};\n");
+    project.Header("outer.hpp", "#include <inner.hpp>\nclass Outer {};\n");
+    const auto findings = ForwardDeclarationFindings(project.Analyze(
+        "#include <outer.hpp>\nInner * a;\nOuter & b;\n", "c.hpp"));
+    ASSERT_EQ(findings.size(), 1);
+    EXPECT_NE(findings[0].message.find("Inner, Outer"), std::string::npos);
+}
+
+TEST(ForwardDeclarationSpec, PolicyAndSuppressionApply)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    constexpr std::string_view source = "#include <widget.hpp> // heimdall-disable-line cpp/prefer-forward-declaration\nWidget * w;\n";
+    const auto tree = heimdall::ParseTree::Parse(source, {});
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("a.hpp"), tree, project.Command());
+    const auto raw = heimdall::IncludeAnalyzer::Analyze(tree, *profile);
+    ASSERT_EQ(raw.size(), 1);
+    EXPECT_TRUE(heimdall::RuleEngine().ApplyPolicy(raw, tree).empty());
+    ASSERT_NE(heimdall::FindRuleByCode("cpp/prefer-forward-declaration"), nullptr);
+    EXPECT_FALSE(heimdall::FindRuleByCode("cpp/prefer-forward-declaration")->autofix);
+}
+
+TEST(ForwardDeclarationSpec, IncludeTargetTextIsNotMistakenForAMemberAccess)
+{
+    Project project;
+    project.Header("widget.hpp", "class Widget {};\n");
+    constexpr std::string_view source =
+        "#include <widget.hpp>\n"
+        "void Attach(Widget * widget);\n";
+    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).size(), 1);
+}
+
+namespace
+{
+
+    std::vector<heimdall::Diagnostic> CircularFindings(const std::vector<heimdall::Diagnostic> & all)
+    {
+        std::vector<heimdall::Diagnostic> result;
+        for (const auto & diagnostic: all)
+        {
+            if (diagnostic.code == "cpp/no-circular-include")
+            {
+                result.push_back(diagnostic);
+            }
+        }
+
+        return result;
+    }
+
+} // namespace
+
+TEST(CircularIncludeSpec, ReportsAnIncludeThatLeadsBackToTheFileAsAnError)
+{
+    Project project;
+    project.Header("a.hpp", "#pragma once\n#include \"b.hpp\"\nstruct A {};\n");
+    project.Header("b.hpp", "#pragma once\n#include \"a.hpp\"\nstruct B {};\n");
+    constexpr std::string_view source = "#pragma once\n#include \"b.hpp\"\nstruct A {};\n";
+    const auto findings = CircularFindings(project.Analyze(source, "inc/a.hpp"));
+    ASSERT_EQ(findings.size(), 1);
+    EXPECT_EQ(findings[0].severity, heimdall::Severity::Error);
+    EXPECT_EQ(findings[0].rule, heimdall::RuleId::CircularInclude);
+    EXPECT_EQ(findings[0].line, 2);
+    EXPECT_FALSE(findings[0].has_fix);
+    EXPECT_EQ(source.substr(findings[0].offset, findings[0].length), "\"b.hpp\"");
+}
+
+TEST(CircularIncludeSpec, FindsIndirectCyclesAndSelfIncludes)
+{
+    Project project;
+    project.Header("a.hpp", "#include \"b.hpp\"\n");
+    project.Header("b.hpp", "#include \"c.hpp\"\n");
+    project.Header("c.hpp", "#include \"a.hpp\"\n");
+    EXPECT_EQ(CircularFindings(project.Analyze("#include \"b.hpp\"\n", "inc/a.hpp")).size(), 1);
+    project.Header("self.hpp", "#include \"self.hpp\"\n");
+    EXPECT_EQ(CircularFindings(project.Analyze("#include \"self.hpp\"\n", "inc/self.hpp")).size(), 1);
+}
+
+TEST(CircularIncludeSpec, NoReportWithoutACycle)
+{
+    Project project;
+    project.Header("a.hpp", "#include \"b.hpp\"\n");
+    project.Header("b.hpp", "struct B {};\n");
+    EXPECT_TRUE(CircularFindings(project.Analyze("#include \"b.hpp\"\nB value;\n", "inc/a.hpp")).empty());
+}
+
+TEST(CircularIncludeSpec, PolicyCanDowngradeOrDisableTheRule)
+{
+    Project project;
+    project.Header("a.hpp", "#include \"b.hpp\"\n");
+    project.Header("b.hpp", "#include \"a.hpp\"\n");
+    constexpr std::string_view source = "#include \"b.hpp\"\n";
+    const auto tree = heimdall::ParseTree::Parse(source, {});
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("inc/a.hpp"), tree, project.Command());
+    const auto raw = heimdall::IncludeAnalyzer::Analyze(tree, *profile);
+    ASSERT_EQ(raw.size(), 1);
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/no-circular-include", true, heimdall::Severity::Warning});
+    EXPECT_EQ(heimdall::RuleEngine(options).ApplyPolicy(raw, tree)[0].severity, heimdall::Severity::Warning);
+    options.overrides.push_back({"cpp/no-circular-include", false, heimdall::Severity::Warning});
+    EXPECT_TRUE(heimdall::RuleEngine(options).ApplyPolicy(raw, tree).empty());
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-circular-include")->default_severity, heimdall::Severity::Error);
+}

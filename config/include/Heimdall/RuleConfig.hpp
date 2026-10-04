@@ -17,6 +17,7 @@ namespace heimdall
         RuleOptions options;
         bool root = false;
         bool has_suppressions = false;
+        bool has_include_order = false;
     };
 
     std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const std::filesystem::path & path);

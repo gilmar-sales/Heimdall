@@ -10,6 +10,7 @@
 #include <functional>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,6 +28,14 @@ namespace heimdall
         }
     };
 
+    struct RecordDecl
+    {
+        std::string name;
+        std::string keyword; // class, struct or union
+        std::string ns;      // a::b, empty for the global namespace
+        bool forwardable = false;
+    };
+
     struct HeaderSymbols
     {
         std::unordered_set<std::string, NameHash, std::equal_to<>> names;
@@ -34,6 +43,8 @@ namespace heimdall
         // a namespace-scope operator or an explicit template specialization.
         bool implicit_use = false;
         bool readable = false;
+        // Only extracted for project headers (candidates for forward declaration).
+        std::vector<RecordDecl> records;
     };
 
     namespace
@@ -494,6 +505,543 @@ namespace heimdall
             return symbols;
         }
 
+        // Namespace-scope `class`/`struct`/`union` declarations of a header: what
+        // a forward declaration would have to repeat.
+        std::vector<RecordDecl> ExtractRecords(std::string_view source)
+        {
+            std::vector<RecordDecl> records;
+            const std::vector<Token> tokens = Lexer(source).Lex();
+            auto text = [&](std::size_t i)
+            {
+                return source.substr(tokens[i].offset, tokens[i].length);
+            };
+
+            struct Frame
+            {
+                bool is_namespace = false;
+                std::size_t names_added = 0;
+            };
+
+            std::vector<Frame> scopes;
+            std::vector<std::string> namespace_names;
+            bool in_template = false;
+            bool skip_statement = false;
+            auto at_declaration_level = [&]
+            {
+                return std::all_of(scopes.begin(), scopes.end(), [](const Frame &f) { return f.is_namespace; });
+            };
+
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                const Token &token = tokens[i];
+                if (IsTrivia(token.kind))
+                {
+                    continue;
+                }
+
+                if (token.kind == TokenKind::Punctuation && text(i) == "#" && StartsLine(source, token.offset))
+                {
+                    const std::size_t end = DirectiveEnd(source, token.offset);
+                    while (i + 1 < tokens.size() && tokens[i + 1].offset < end)
+                    {
+                        ++i;
+                    }
+
+                    continue;
+                }
+
+                if (token.kind == TokenKind::Punctuation)
+                {
+                    const std::string_view punctuation = text(i);
+                    if (punctuation == "{")
+                    {
+                        scopes.push_back({});
+                        in_template = false;
+                    }
+                    else if (punctuation == "}")
+                    {
+                        if (!scopes.empty())
+                        {
+                            const Frame closed = scopes.back();
+                            scopes.pop_back();
+                            namespace_names.resize(namespace_names.size() - closed.names_added);
+                            skip_statement = false;
+                        }
+                    }
+                    else if (punctuation == ";")
+                    {
+                        in_template = false;
+                        skip_statement = false;
+                    }
+
+                    continue;
+                }
+
+                if (token.kind != TokenKind::Identifier || !at_declaration_level())
+                {
+                    continue;
+                }
+
+                const std::string_view word = text(i);
+                const std::size_t previous = PreviousSignificant(tokens, i);
+                const std::string_view previous_text = previous < tokens.size() ? text(previous) : std::string_view();
+                if (word == "namespace" && previous_text != "using")
+                {
+                    std::vector<std::string> names;
+                    std::size_t j = i + 1;
+                    for (; j < tokens.size(); ++j)
+                    {
+                        if (IsTrivia(tokens[j].kind))
+                        {
+                            continue;
+                        }
+
+                        const std::string_view piece = text(j);
+                        if (piece == "{" || piece == "=" || piece == ";")
+                        {
+                            break;
+                        }
+
+                        if (tokens[j].kind == TokenKind::Identifier)
+                        {
+                            names.emplace_back(piece);
+                        }
+                    }
+
+                    if (j < tokens.size() && text(j) == "{")
+                    {
+                        if (names.empty())
+                        {
+                            names.emplace_back("(anonymous)");
+                        }
+
+                        if (previous_text == "inline")
+                        {
+                            names.emplace_back("(inline)");
+                        }
+
+                        scopes.push_back({true, names.size()});
+                        namespace_names.insert(namespace_names.end(), names.begin(), names.end());
+                    }
+
+                    i = j;
+                    continue;
+                }
+
+                if (word == "extern")
+                {
+                    const std::size_t next = NextSignificant(tokens, i + 1);
+                    const std::size_t brace = next < tokens.size() ? NextSignificant(tokens, next + 1) : tokens.size();
+                    if (next < tokens.size() && tokens[next].kind == TokenKind::StringLiteral &&
+                        brace < tokens.size() && text(brace) == "{")
+                    {
+                        scopes.push_back({true, 0});
+                        i = brace;
+                    }
+
+                    continue;
+                }
+
+                if (word == "template")
+                {
+                    in_template = true;
+                    const std::size_t open = NextSignificant(tokens, i + 1);
+                    if (open < tokens.size() && text(open).starts_with("<"))
+                    {
+                        std::size_t depth = 0;
+                        std::size_t j = open;
+                        for (; j < tokens.size(); ++j)
+                        {
+                            if (tokens[j].kind != TokenKind::Punctuation)
+                            {
+                                continue;
+                            }
+
+                            for (const char c: text(j))
+                            {
+                                if (c == '<')
+                                {
+                                    ++depth;
+                                }
+                                else if (c == '>' && depth > 0)
+                                {
+                                    --depth;
+                                }
+                            }
+
+                            if (depth == 0)
+                            {
+                                break;
+                            }
+                        }
+
+                        i = j;
+                    }
+
+                    continue;
+                }
+
+                if (word == "friend" || word == "typedef" || word == "using")
+                {
+                    skip_statement = true;
+                    continue;
+                }
+
+                if ((word != "class" && word != "struct" && word != "union") || skip_statement ||
+                    previous_text == "enum")
+                {
+                    continue;
+                }
+
+                // class [[attr]] EXPORT Name final : Base {   |   class Name;
+                std::vector<std::string_view> names;
+                std::size_t j = i + 1;
+                std::size_t bracket_depth = 0;
+                std::string_view stop;
+                for (; j < tokens.size(); ++j)
+                {
+                    if (IsTrivia(tokens[j].kind))
+                    {
+                        continue;
+                    }
+
+                    const std::string_view piece = text(j);
+                    if (tokens[j].kind == TokenKind::Punctuation)
+                    {
+                        for (const char c: piece)
+                        {
+                            if (c == '[')
+                            {
+                                ++bracket_depth;
+                            }
+                            else if (c == ']' && bracket_depth > 0)
+                            {
+                                --bracket_depth;
+                            }
+                        }
+
+                        if (bracket_depth == 0 && piece != "[" && piece != "]" && piece != "[[" && piece != "]]")
+                        {
+                            stop = piece;
+                            break;
+                        }
+
+                        continue;
+                    }
+
+                    if (tokens[j].kind == TokenKind::Identifier && bracket_depth == 0 && piece != "final" &&
+                        !Keywords().contains(piece))
+                    {
+                        names.push_back(piece);
+                    }
+                }
+
+                const bool definition = stop == "{" || stop == ":";
+                const bool declaration = stop == ";" && names.size() == 1;
+                if (names.empty() || (!definition && !declaration))
+                {
+                    continue;
+                }
+
+                RecordDecl record;
+                record.name = std::string(names.back());
+                record.keyword = std::string(word);
+                for (const auto & piece: namespace_names)
+                {
+                    if (!record.ns.empty())
+                    {
+                        record.ns += "::";
+                    }
+
+                    record.ns += piece;
+                }
+
+                record.forwardable = !in_template && record.ns.find('(') == std::string::npos;
+                records.push_back(std::move(record));
+                i = j - 1;
+            }
+
+            return records;
+        }
+
+        struct UseClassification
+        {
+            // Names with at least one use that needs the complete type.
+            std::unordered_set<std::string_view> blocked;
+            // Declarators of the form `N *name` / `N &name`.
+            std::unordered_set<std::string_view> pointer_names;
+            // Pointer/reference declared by name is dereferenced in the file.
+            bool dereferenced = false;
+        };
+
+        bool IsPointerPunctuation(std::string_view text)
+        {
+            return !text.empty() && std::all_of(text.begin(), text.end(), [](char c) { return c == '*' || c == '&'; });
+        }
+
+        // Which uses of `interest` names a forward declaration could not satisfy.
+        // A use is forward-declarable when the name is followed by `*` or `&`
+        // (after optional cv-qualifiers), or is itself a `class N;` declaration.
+        // Everything inside function bodies and initializers is treated as a
+        // use of the complete type.
+        UseClassification ClassifyUses(const ParseTree &tree, const std::unordered_set<std::string_view> &interest)
+        {
+            UseClassification result;
+            const std::string_view source = tree.Source();
+            const auto &tokens = tree.Tokens();
+            const auto &directives = tree.Directives();
+            auto text = [&](std::size_t i)
+            {
+                return source.substr(tokens[i].offset, tokens[i].length);
+            };
+
+            std::vector<char> scopes; // 'N' namespace, 'R' record, 'E' enum, 'X' body/initializer
+            char pending = 'X';
+            std::size_t body_depth = 0;
+            std::size_t cursor = 0;
+            std::vector<std::pair<std::size_t, std::size_t>> bodies;
+            std::size_t body_start = 0;
+            auto in_body = [&] { return body_depth > 0; };
+            // `struct S {` / `enum E : int {` open a record body; `struct S *p`
+            // and `struct S s;` inside a declaration do not.
+            auto opens_body = [&](std::size_t from)
+            {
+                for (std::size_t j = from + 1; j < tokens.size(); ++j)
+                {
+                    if (tokens[j].kind != TokenKind::Punctuation)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view piece = text(j);
+                    if (piece == "{" || piece == ":")
+                    {
+                        return true;
+                    }
+
+                    if (piece == ";" || piece == "(" || piece == ")" || piece == "=" || piece == "," ||
+                        IsPointerPunctuation(piece))
+                    {
+                        return false;
+                    }
+                }
+
+                return false;
+            };
+
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                const Token &token = tokens[i];
+                if (IsTrivia(token.kind))
+                {
+                    continue;
+                }
+
+                while (cursor < directives.size() &&
+                    directives[cursor].offset + directives[cursor].length <= token.offset)
+                {
+                    ++cursor;
+                }
+
+                if (cursor < directives.size() && directives[cursor].offset <= token.offset)
+                {
+                    if (token.kind == TokenKind::Identifier && directives[cursor].kind != DirectiveKind::Include &&
+                        directives[cursor].kind != DirectiveKind::Pragma && interest.contains(text(i)))
+                    {
+                        result.blocked.insert(text(i));
+                    }
+
+                    continue;
+                }
+
+                if (token.kind == TokenKind::Punctuation)
+                {
+                    const std::string_view punctuation = text(i);
+                    if (punctuation == "{")
+                    {
+                        const bool declaration_level = !in_body() && (scopes.empty() || scopes.back() != 'E');
+                        const char kind = declaration_level ? pending : 'X';
+                        scopes.push_back(kind);
+                        if (kind == 'X' && !in_body())
+                        {
+                            body_start = i;
+                        }
+
+                        if (kind == 'X')
+                        {
+                            ++body_depth;
+                        }
+
+                        pending = 'X';
+                    }
+                    else if (punctuation == "}")
+                    {
+                        if (!scopes.empty())
+                        {
+                            const char closed = scopes.back();
+                            scopes.pop_back();
+                            if (closed == 'X' && body_depth > 0 && --body_depth == 0)
+                            {
+                                bodies.emplace_back(body_start, i);
+                            }
+                        }
+
+                        pending = 'X';
+                    }
+                    else if (punctuation == ";")
+                    {
+                        pending = 'X';
+                    }
+
+                    continue;
+                }
+
+                if (token.kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                const std::string_view word = text(i);
+                if (!in_body())
+                {
+                    if (word == "namespace")
+                    {
+                        pending = 'N';
+                    }
+                    else if (word == "extern")
+                    {
+                        const std::size_t next = NextSignificant(tokens, i + 1);
+                        if (next < tokens.size() && tokens[next].kind == TokenKind::StringLiteral)
+                        {
+                            pending = 'N';
+                        }
+                    }
+                    else if (word == "enum" && opens_body(i))
+                    {
+                        pending = 'E';
+                    }
+                    else if ((word == "class" || word == "struct" || word == "union") && pending != 'E' &&
+                        pending != 'N' && opens_body(i))
+                    {
+                        pending = 'R';
+                    }
+                }
+
+                if (!interest.contains(word))
+                {
+                    continue;
+                }
+
+                if (in_body() || (!scopes.empty() && scopes.back() == 'E'))
+                {
+                    result.blocked.insert(word);
+                    continue;
+                }
+
+                const std::size_t previous = PreviousSignificant(tokens, i);
+                const std::string_view previous_text = previous < tokens.size() ? text(previous) : std::string_view();
+                std::size_t next = NextSignificant(tokens, i + 1);
+                const bool elaborated = previous_text == "class" || previous_text == "struct" ||
+                    previous_text == "union";
+                if (elaborated && next < tokens.size() && text(next) == ";")
+                {
+                    continue; // `class N;` / `friend class N;`
+                }
+
+                while (next < tokens.size() && (text(next) == "const" || text(next) == "volatile"))
+                {
+                    next = NextSignificant(tokens, next + 1);
+                }
+
+                if (next >= tokens.size() || !IsPointerPunctuation(text(next)))
+                {
+                    result.blocked.insert(word);
+                    continue;
+                }
+
+                while (next < tokens.size() && (IsPointerPunctuation(text(next)) || text(next) == "const" ||
+                    text(next) == "volatile"))
+                {
+                    next = NextSignificant(tokens, next + 1);
+                }
+
+                if (next < tokens.size() && tokens[next].kind == TokenKind::Identifier &&
+                    !Keywords().contains(text(next)))
+                {
+                    result.pointer_names.insert(text(next));
+                }
+            }
+
+            // Dereferencing a pointer/reference by name needs the complete type,
+            // including in member initializer lists outside any body.
+            if (!result.pointer_names.empty())
+            {
+                auto unsafe_token = [&](std::size_t i)
+                {
+                    const std::string_view piece = text(i);
+                    return piece == "." || piece == "->" || piece == "[" || piece.find('*') != std::string_view::npos ||
+                        piece == "delete" || piece == "dynamic_cast" || piece == "static_cast" ||
+                        piece == "reinterpret_cast" || piece == "const_cast" || piece == "typeid" ||
+                        piece == "sizeof";
+                };
+
+                std::size_t directive_cursor = 0;
+                for (std::size_t i = 0; i < tokens.size() && !result.dereferenced; ++i)
+                {
+                    while (directive_cursor < directives.size() &&
+                        directives[directive_cursor].offset + directives[directive_cursor].length <= tokens[i].offset)
+                    {
+                        ++directive_cursor;
+                    }
+
+                    // `#include <widget.hpp>` must not read as `widget.hpp`.
+                    if ((directive_cursor < directives.size() &&
+                        directives[directive_cursor].offset <= tokens[i].offset) ||
+                        tokens[i].kind != TokenKind::Identifier || !result.pointer_names.contains(text(i)))
+                    {
+                        continue;
+                    }
+
+                    const std::size_t next = NextSignificant(tokens, i + 1);
+                    if (next < tokens.size() && (text(next) == "." || text(next) == "->" || text(next) == "["))
+                    {
+                        result.dereferenced = true;
+                    }
+                }
+
+                for (const auto &[begin, end]: bodies)
+                {
+                    bool mentions = false;
+                    bool unsafe = false;
+                    for (std::size_t i = begin; i <= end && i < tokens.size(); ++i)
+                    {
+                        if (IsTrivia(tokens[i].kind))
+                        {
+                            continue;
+                        }
+
+                        if (tokens[i].kind == TokenKind::Identifier && result.pointer_names.contains(text(i)))
+                        {
+                            mentions = true;
+                        }
+
+                        if (unsafe_token(i))
+                        {
+                            unsafe = true;
+                        }
+                    }
+
+                    if (mentions && unsafe)
+                    {
+                        result.dereferenced = true;
+                        break;
+                    }
+                }
+            }
+
+            return result;
+        }
+
         std::string ReadWholeFile(const std::filesystem::path & path, std::size_t max_bytes)
         {
             std::error_code ec;
@@ -562,7 +1110,13 @@ namespace heimdall
             }
             else
             {
-                symbols = std::make_shared<const HeaderSymbols>(ExtractSymbols(content, strict));
+                HeaderSymbols extracted = ExtractSymbols(content, strict);
+                if (!strict)
+                {
+                    extracted.records = ExtractRecords(content);
+                }
+
+                symbols = std::make_shared<const HeaderSymbols>(std::move(extracted));
             }
 
             const std::lock_guard<std::mutex> lock(mutex);
@@ -764,6 +1318,61 @@ namespace heimdall
 
     } // namespace
 
+    // Forward declarations replacing the include, one line each, or nothing
+    // when some use of `matched` needs more than a declaration.
+    static std::optional<std::vector<std::string>> ForwardDeclarations(const ParseTree &tree,
+        const IncludeProfile::Entry &entry, const std::vector<std::string_view> &matched)
+    {
+        std::vector<RecordDecl> chosen;
+        for (const std::string_view name: matched)
+        {
+            const RecordDecl *found = nullptr;
+            for (const auto & provider: entry.providers)
+            {
+                for (const auto & record: provider->records)
+                {
+                    if (record.name != name)
+                    {
+                        continue;
+                    }
+
+                    if (!record.forwardable || (found != nullptr &&
+                        (found->ns != record.ns || found->keyword != record.keyword)))
+                    {
+                        return std::nullopt;
+                    }
+
+                    found = &record;
+                }
+            }
+
+            if (found == nullptr)
+            {
+                return std::nullopt;
+            }
+
+            chosen.push_back(*found);
+        }
+
+        const std::unordered_set<std::string_view> interest(matched.begin(), matched.end());
+        const UseClassification uses = ClassifyUses(tree, interest);
+        if (!uses.blocked.empty() || uses.dereferenced)
+        {
+            return std::nullopt;
+        }
+
+        std::vector<std::string> lines;
+        for (const auto & record: chosen)
+        {
+            std::string line = record.ns.empty() ? "" : "namespace " + record.ns + " { ";
+            line += record.keyword + " " + record.name + ";";
+            line += record.ns.empty() ? "" : " }";
+            lines.push_back(std::move(line));
+        }
+
+        return lines;
+    }
+
     std::string IncludeAnalyzer::Fingerprint(const std::filesystem::path & file, const ParseTree &tree,
         const CompileCommand *command)
     {
@@ -822,6 +1431,26 @@ namespace heimdall
             }
         }
 
+        // Cycle: the analyzed file is reachable from its own include.
+        std::error_code absolute_ec;
+        const std::filesystem::path self = std::filesystem::absolute(file, absolute_ec).lexically_normal();
+        for (std::size_t i = 0; i < includes.size() && !absolute_ec; ++i)
+        {
+            for (const auto & path: closures[i].files)
+            {
+                std::error_code equivalent_ec;
+                if (path.filename() == self.filename() && std::filesystem::equivalent(path, self, equivalent_ec) &&
+                    !equivalent_ec)
+                {
+                    profile->entries[i].circular = true;
+                    break;
+                }
+            }
+        }
+
+        const std::string extension = Lowercase(file.extension().string());
+        profile->is_header_file = extension == ".h" || extension == ".hh" || extension == ".hpp" ||
+            extension == ".hxx" || extension == ".h++";
         const std::string primary_stem = Lowercase(file.stem().string());
         for (std::size_t i = 0; i < includes.size(); ++i)
         {
@@ -886,6 +1515,7 @@ namespace heimdall
             }
 
             entry.eligible = true;
+            entry.project_header = !IsSystemFile(header, system_dirs);
         }
 
         std::unordered_set<std::string> stamped;
@@ -981,7 +1611,8 @@ namespace heimdall
         }
 
         // A file with nothing but includes (an umbrella header) re-exports them.
-        if (used.empty())
+        if (used.empty() && std::none_of(profile.entries.begin(), profile.entries.end(),
+            [](const IncludeProfile::Entry &entry) { return entry.circular; }))
         {
             return diagnostics;
         }
@@ -992,44 +1623,79 @@ namespace heimdall
         {
             const auto &include = includes[i];
             const auto &entry = profile.entries[i];
+            if (entry.circular && !include.conditional && entry.target == include.target)
+            {
+                const auto position = lines.Lookup(include.target_offset);
+                diagnostics.push_back({RuleId::CircularInclude, Severity::Error, "cpp/no-circular-include",
+                    "circular include: " + include.target + " includes this file again, directly or indirectly",
+                    include.target_offset, include.target_length, position.line, position.column, false, {}});
+                continue;
+            }
+
             if (!entry.eligible || include.conditional || include.keep || entry.target != include.target)
             {
                 continue;
             }
 
-            bool is_used = false;
-            for (const auto & provider: entry.providers)
+            // Names of this header the file actually uses.
+            std::vector<std::string_view> matched;
+            for (const std::string_view word: used)
             {
-                for (const std::string_view word: used)
+                if (std::any_of(entry.providers.begin(), entry.providers.end(),
+                    [&](const auto &provider) { return provider->names.contains(word); }))
                 {
-                    if (provider->names.contains(word))
-                    {
-                        is_used = true;
-                        break;
-                    }
-                }
-
-                if (is_used)
-                {
-                    break;
+                    matched.push_back(word);
                 }
             }
 
-            if (is_used)
+            std::sort(matched.begin(), matched.end());
+            const auto position = lines.Lookup(include.target_offset);
+            if (matched.empty())
+            {
+                Diagnostic diagnostic{RuleId::UnusedInclude, Severity::Warning, "cpp/no-unused-include",
+                    "included header " + include.target + " is not used directly",
+                    include.target_offset, include.target_length, position.line, position.column, true,
+                    RemoveDirectiveLine(source, include.directive_offset, include.directive_length)};
+                diagnostic.fix_is_safe = false;
+                diagnostic.fix_title = "Remove unused include " + include.target;
+                diagnostics.push_back(std::move(diagnostic));
+                continue;
+            }
+
+            if (!profile.is_header_file || !entry.project_header)
             {
                 continue;
             }
 
-            Diagnostic diagnostic{RuleId::UnusedInclude, Severity::Warning, "cpp/no-unused-include",
-                "included header " + include.target + " is not used directly",
-                include.target_offset, include.target_length, 0, 0, true,
-                RemoveDirectiveLine(source, include.directive_offset, include.directive_length)};
-            const auto position = lines.Lookup(include.target_offset);
-            diagnostic.line = position.line;
-            diagnostic.column = position.column;
-            diagnostic.fix_is_safe = false;
-            diagnostic.fix_title = "Remove unused include " + include.target;
-            diagnostics.push_back(std::move(diagnostic));
+            if (auto replacement = ForwardDeclarations(tree, entry, matched))
+            {
+                std::string names;
+                for (const std::string_view word: matched)
+                {
+                    names += (names.empty() ? "" : ", ");
+                    names += word;
+                }
+
+                const bool crlf = source.find("\r\n") != std::string_view::npos;
+                std::string text;
+                for (const auto & line: *replacement)
+                {
+                    text += line;
+                    text += crlf ? "\r\n" : "\n";
+                }
+
+                auto edit = RemoveDirectiveLine(source, include.directive_offset, include.directive_length);
+                edit.replacement = std::move(text);
+                Diagnostic diagnostic{RuleId::PreferForwardDeclaration, Severity::Warning,
+                    "cpp/prefer-forward-declaration",
+                    "include of " + include.target + " is only needed for pointers or references to " + names +
+                    "; forward declare " + (matched.size() == 1 ? "it" : "them") + " instead",
+                    include.target_offset, include.target_length, position.line, position.column, true,
+                    std::move(edit)};
+                diagnostic.fix_is_safe = false;
+                diagnostic.fix_title = "Forward declare " + names + " instead of including " + include.target;
+                diagnostics.push_back(std::move(diagnostic));
+            }
         }
 
         return diagnostics;

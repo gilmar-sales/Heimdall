@@ -35,6 +35,10 @@ namespace heimdall
             // False when the rule must stay silent for this include: header not
             // found, incomplete closure, implicit-use header, primary header...
             bool eligible = false;
+            // The header lives outside the compiler's system include directories.
+            bool project_header = false;
+            // The header's include closure contains the analyzed file itself.
+            bool circular = false;
         };
 
         struct FileStamp
@@ -45,10 +49,19 @@ namespace heimdall
         };
 
         std::string fingerprint;
+        // The analyzed file is a header (cpp/prefer-forward-declaration applies).
+        bool is_header_file = false;
         std::vector<Entry> entries;
         std::vector<FileStamp> stamps;
     };
 
+    // Two rules share this analysis:
+    //
+    // `cpp/prefer-forward-declaration`: in a header, a project include whose
+    // names are all classes used only as `N *` / `N &` (no body dereferences a
+    // pointer to them): a forward declaration would do and spare every includer
+    // the parse of the header. Quick fix only.
+    //
     // `cpp/no-unused-include`: a direct `#include` none of whose provided names
     // appears in the file. Deliberately conservative: a header counts as used as
     // soon as any identifier of the file (comments and literals aside, macro

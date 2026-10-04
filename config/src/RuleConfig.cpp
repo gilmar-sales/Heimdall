@@ -116,6 +116,85 @@ namespace heimdall
             }
         }
 
+        simdjson::dom::element order_element;
+        if (!root["include-order"].get(order_element))
+        {
+            simdjson::dom::object order;
+            if (const auto error = order_element.get_object().get(order); error)
+            {
+                return std::unexpected("'include-order' in Heimdall config must be an object: " + path.string());
+            }
+
+            simdjson::dom::element groups_element;
+            if (order["groups"].get(groups_element))
+            {
+                return std::unexpected("'include-order' requires a 'groups' array in Heimdall config: " + path.string());
+            }
+
+            simdjson::dom::array groups;
+            if (const auto error = groups_element.get_array().get(groups); error)
+            {
+                return std::unexpected("'groups' in 'include-order' must be an array: " + path.string());
+            }
+
+            std::vector<IncludeGroup> parsed_order;
+            bool saw_angle = false;
+            bool saw_quote = false;
+            for (const auto group: groups)
+            {
+                std::string_view name;
+                if (const auto error = group.get_string().get(name); error)
+                {
+                    return std::unexpected("'groups' in 'include-order' must list 'angle' and 'quote': " + path.string());
+                }
+
+                if (name == "angle")
+                {
+                    if (saw_angle)
+                    {
+                        return std::unexpected("'angle' appears more than once in 'include-order': " + path.string());
+                    }
+                    saw_angle = true;
+                    parsed_order.push_back(IncludeGroup::Angle);
+                }
+                else if (name == "quote")
+                {
+                    if (saw_quote)
+                    {
+                        return std::unexpected("'quote' appears more than once in 'include-order': " + path.string());
+                    }
+                    saw_quote = true;
+                    parsed_order.push_back(IncludeGroup::Quote);
+                }
+                else
+                {
+                    return std::unexpected("unknown include group in 'include-order': " + std::string(name));
+                }
+            }
+
+            if (!saw_angle || !saw_quote)
+            {
+                return std::unexpected("'groups' in 'include-order' must list both 'angle' and 'quote': " + path.string());
+            }
+
+            configuration.options.include_order = std::move(parsed_order);
+            configuration.has_include_order = true;
+
+            bool case_insensitive = true;
+            if (!order["case-insensitive"].get_bool().get(case_insensitive))
+            {
+                configuration.options.include_case_insensitive = case_insensitive;
+            }
+            else
+            {
+                simdjson::dom::element case_element;
+                if (!order["case-insensitive"].get(case_element) && !case_element.is_null())
+                {
+                    return std::unexpected("'case-insensitive' in 'include-order' must be a boolean: " + path.string());
+                }
+            }
+        }
+
         return configuration;
     }
 
@@ -174,6 +253,11 @@ namespace heimdall
             if (it->has_suppressions)
             {
                 merged.honor_suppressions = it->options.honor_suppressions;
+            }
+            if (it->has_include_order)
+            {
+                merged.include_order = it->options.include_order;
+                merged.include_case_insensitive = it->options.include_case_insensitive;
             }
         }
         return std::optional<RuleOptions>{std::move(merged)};

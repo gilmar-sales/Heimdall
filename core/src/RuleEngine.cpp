@@ -4,6 +4,8 @@
 #include <Heimdall/RuleEngine.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -133,6 +135,83 @@ namespace heimdall
             return source.substr(token.offset, token.length);
         }
 
+        // Literal include target with its delimiters, e.g. <vector> or
+        // "app.h". Returns nullopt for #include_next, macro includes
+        // (#include MACRO) and anything without a literal target.
+        struct IncludeTarget
+        {
+            std::string_view text;
+            bool angle;
+        };
+
+        std::optional<IncludeTarget> ReadIncludeTarget(std::string_view source,
+            const PreprocessorDirective & directive)
+        {
+            std::string_view body = source.substr(directive.offset, directive.length);
+            while (!body.empty() && (body.front() == ' ' || body.front() == '\t'))
+            {
+                body.remove_prefix(1);
+            }
+
+            if (!body.empty() && body.front() == '#')
+            {
+                body.remove_prefix(1);
+            }
+
+            while (!body.empty() && (body.front() == ' ' || body.front() == '\t'))
+            {
+                body.remove_prefix(1);
+            }
+
+            std::size_t name_length = 0;
+            while (name_length < body.size() &&
+                ((body[name_length] >= 'a' && body[name_length] <= 'z') ||
+                    (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
+                    body[name_length] == '_'))
+            {
+                ++name_length;
+            }
+
+            if (body.substr(0, name_length) != "include")
+            {
+                return std::nullopt;
+            }
+
+            body.remove_prefix(name_length);
+
+            const auto open = body.find_first_of("<\"");
+            if (open == std::string_view::npos)
+            {
+                return std::nullopt;
+            }
+
+            const auto close_char = body[open] == '<' ? '>' : '"';
+            const auto close = body.find(close_char, open + 1);
+            if (close == std::string_view::npos)
+            {
+                return std::nullopt;
+            }
+
+            return IncludeTarget{body.substr(open, close - open + 1), body[open] == '<'};
+        }
+
+        bool CaseInsensitiveLess(std::string_view left, std::string_view right)
+        {
+            const auto common = std::min(left.size(), right.size());
+            for (std::size_t i = 0; i < common; ++i)
+            {
+                const auto a = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(left[i])));
+                const auto b = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(right[i])));
+                if (a != b)
+                {
+                    return a < b;
+                }
+            }
+            return left.size() < right.size();
+        }
+
         // Tokens between the alias and the ';' must be only array
         // subscripts: zero or more [ <bound> ] groups. Anything else
         // (attributes, initializers, function declarators) is left to
@@ -192,6 +271,12 @@ namespace heimdall
                 "sintática", true, "replace typedef with a using alias"},
             {RuleId::UnusedInclude, "cpp/no-unused-include", "cpp", Severity::Warning,
                 "semântica", false, "included header whose symbols are never used"},
+            {RuleId::PreferForwardDeclaration, "cpp/prefer-forward-declaration", "cpp", Severity::Warning,
+                "semântica", false, "header included only for pointers or references to its classes"},
+            {RuleId::CircularInclude, "cpp/no-circular-include", "cpp", Severity::Error,
+                "semântica", false, "include that leads back to the including file"},
+            {RuleId::UnsortedIncludes, "cpp/sort-includes", "cpp", Severity::Warning,
+                "diretivas", true, "includes out of the configured order"},
         };
         return catalog;
     }
@@ -456,60 +541,25 @@ namespace heimdall
 
                 // #include <target> or #include "target"; macro includes
                 // (#include MACRO) have no literal target to compare.
-                std::string_view body = source.substr(directive.offset, directive.length);
-                if (!body.empty() && body.front() == '#')
-                {
-                    body.remove_prefix(1);
-                }
-
-                while (!body.empty() && (body.front() == ' ' || body.front() == '\t'))
-                {
-                    body.remove_prefix(1);
-                }
-
-                std::size_t name_length = 0;
-                while (name_length < body.size() &&
-                    ((body[name_length] >= 'a' && body[name_length] <= 'z') ||
-                    (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
-                    body[name_length] == '_'))
-                {
-                    ++name_length;
-                }
-
-                if (body.substr(0, name_length) != "include")
+                const auto target = ReadIncludeTarget(source, directive);
+                if (!target)
                 {
                     continue;
                 }
 
-                body.remove_prefix(name_length);
-
-                const auto open = body.find_first_of("<\"");
-                if (open == std::string_view::npos)
-                {
-                    continue;
-                }
-
-                const auto close_char = body[open] == '<' ? '>' : '"';
-                const auto close = body.find(close_char, open + 1);
-                if (close == std::string_view::npos)
-                {
-                    continue;
-                }
-
-                const auto target = body.substr(open, close - open + 1);
-                const auto[it, inserted] = seen.try_emplace(target, directive.offset);
+                const auto offset = static_cast<std::size_t>(
+                    target->text.data() - source.data());
+                const auto[it, inserted] = seen.try_emplace(target->text, directive.offset);
                 if (!inserted)
                 {
-                    const auto offset = directive.offset + open;
-
                     // Not safe in batch: a #define/#undef between the includes
                     // may make the second one meaningful (X-macro headers).
                     auto diagnostic = MakeDiagnostic(
                         RuleId::DuplicateInclude, "cpp/no-duplicate-include",
-                        "duplicate include of " + std::string(target), offset, target.length(),
+                        "duplicate include of " + std::string(target->text), offset, target->text.length(),
                         lines.Lookup(offset), RemoveDirectiveLine(source, directive.offset, directive.length));
                     diagnostic.fix_is_safe = false;
-                    diagnostic.fix_title = "Remove duplicate include of " + std::string(target);
+                    diagnostic.fix_title = "Remove duplicate include of " + std::string(target->text);
                     diagnostics.push_back(std::move(diagnostic));
                 }
             }
@@ -655,6 +705,120 @@ namespace heimdall
                     "replace typedef with a using alias", offset, length,
                     lines.Lookup(offset),
                     {offset, length, std::move(replacement)}));
+            }
+        }
+
+        if (m_options.sort_includes)
+        {
+            // Literal includes only: #include_next and macro includes
+            // have no target to order.
+            struct IncludeEntry
+            {
+                std::size_t directive;
+                IncludeTarget target;
+            };
+            std::vector<IncludeEntry> includes;
+            for (std::size_t i = 0; i < directives.size(); ++i)
+            {
+                if (directives[i].kind != DirectiveKind::Include)
+                {
+                    continue;
+                }
+
+                auto target = ReadIncludeTarget(source, directives[i]);
+                if (target)
+                {
+                    includes.push_back({i, *target});
+                }
+            }
+
+            auto group_index = [this](const IncludeTarget &target)
+            {
+                const auto &order = m_options.include_order;
+                const auto wanted = target.angle ? IncludeGroup::Angle
+                    : IncludeGroup::Quote;
+                const auto it = std::find(order.begin(), order.end(), wanted);
+                return it == order.end() ? order.size()
+                    : static_cast<std::size_t>(it - order.begin());
+            };
+
+            auto sorts_before = [&](const IncludeTarget &left,
+                const IncludeTarget &right)
+            {
+                const auto left_group = group_index(left);
+                const auto right_group = group_index(right);
+                if (left_group != right_group)
+                {
+                    return left_group < right_group;
+                }
+
+                const auto left_name = left.text.substr(1, left.text.size() - 2);
+                const auto right_name = right.text.substr(1, right.text.size() - 2);
+                return m_options.include_case_insensitive
+                    ? CaseInsensitiveLess(left_name, right_name)
+                    : left_name < right_name;
+            };
+
+            // A block is a run of includes on adjacent lines. Blank
+            // lines, comments and other directives start a new block,
+            // so reordering never crosses them.
+            std::size_t block_begin = 0;
+            while (block_begin < includes.size())
+            {
+                std::size_t block_end = block_begin + 1;
+                while (block_end < includes.size())
+                {
+                    const auto &previous = directives[includes[block_end - 1].directive];
+                    const auto &current = directives[includes[block_end].directive];
+                    if (current.offset != previous.offset + previous.length)
+                    {
+                        break;
+                    }
+
+                    ++block_end;
+                }
+
+                if (block_end - block_begin >= 2)
+                {
+                    std::vector<std::size_t> order(block_end - block_begin);
+                    for (std::size_t i = 0; i < order.size(); ++i)
+                    {
+                        order[i] = i;
+                    }
+
+                    std::stable_sort(order.begin(), order.end(),
+                        [&](std::size_t left, std::size_t right)
+                        {
+                            return sorts_before(includes[block_begin + left].target,
+                                includes[block_begin + right].target);
+                        });
+
+                    // The identity permutation means the block already
+                    // follows the configured order.
+                    if (!std::is_sorted(order.begin(), order.end()))
+                    {
+                        const auto &first = directives[includes[block_begin].directive];
+                        const auto &last = directives[includes[block_end - 1].directive];
+                        const auto offset = first.offset;
+                        const auto length = last.offset + last.length - offset;
+                        std::string replacement;
+                        for (const auto index: order)
+                        {
+                            const auto &directive = directives[includes[block_begin + index].directive];
+                            replacement.append(source.substr(directive.offset, directive.length));
+                        }
+
+                        // Safe in batch: the configured order is the
+                        // project's declared convention, and the fix
+                        // only reorders includes inside one block.
+                        diagnostics.push_back(MakeDiagnostic(
+                            RuleId::UnsortedIncludes, "cpp/sort-includes",
+                            "includes are not in the configured order", offset, length,
+                            lines.Lookup(offset), {offset, length, std::move(replacement)}));
+                    }
+                }
+
+                block_begin = block_end;
             }
         }
 

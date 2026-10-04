@@ -26,7 +26,10 @@ namespace heimdall
         EmptyCatch,
         DuplicateInclude,
         LegacyTypedef,
-        UnusedInclude
+        UnusedInclude,
+        PreferForwardDeclaration,
+        UnsortedIncludes,
+        CircularInclude
     };
 
     struct RuleOverride
@@ -61,6 +64,14 @@ namespace heimdall
         std::string fix_title;
     };
 
+    // Include groups recognized by cpp/sort-includes. The configured
+    // order of the groups decides where each include belongs.
+    enum class IncludeGroup : std::uint8_t
+    {
+        Angle,  // #include <header>
+        Quote   // #include "header"
+    };
+
     struct RuleOptions
     {
         bool null_macro = true;
@@ -69,8 +80,14 @@ namespace heimdall
         bool empty_catch = true;
         bool duplicate_include = true;
         bool legacy_typedef = true;
+        // Opt-in: the order is a project convention, so the rule only
+        // runs when enabled together with a configured order.
+        bool sort_includes = false;
         bool honor_suppressions = true;
         std::vector<RuleOverride> overrides;
+        std::vector<IncludeGroup> include_order = {IncludeGroup::Angle,
+            IncludeGroup::Quote};
+        bool include_case_insensitive = true;
     };
 
     // Stable metadata for every rule the engine can emit. The catalog is the

@@ -326,7 +326,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto & catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 7);
+    ASSERT_EQ(catalog.size(), 10);
     for (const auto & info: catalog)
     {
         EXPECT_FALSE(info.code.empty());
@@ -346,6 +346,8 @@ TEST(RuleEngineSpec, CatalogDescribesEveryRule)
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include")->autofix, false);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->autofix, true);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->layer, "diretivas");
 }
 
 TEST(RuleEngineSpec, RemoveDirectiveLineTakesIndentationAndLineTerminator)
@@ -374,4 +376,184 @@ TEST(RuleEngineSpec, ApplyPolicyFiltersExternalDiagnosticsAndSortsThem)
     ASSERT_EQ(kept.size(), 2);
     EXPECT_EQ(kept[0].code, "cpp/no-null");
     EXPECT_EQ(heimdall::RuleEngine(options).ApplyPolicy({late, early}, tree).size(), 1);
+}
+
+TEST(RuleEngineSpec, SortIncludesIsDisabledByDefault)
+{
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(
+        "#include <vector>\n#include <map>\n").empty());
+}
+
+TEST(RuleEngineSpec, SortsIncludesWithinAdjacentBlocks)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include <map>\n"
+        "#include <algorithm>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
+    EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::UnsortedIncludes);
+    EXPECT_EQ(diagnostics[0].line, 1);
+    EXPECT_TRUE(diagnostics[0].has_fix);
+    EXPECT_TRUE(diagnostics[0].fix_is_safe);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include <algorithm>\n"
+        "#include <map>\n"
+        "#include <vector>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesKeepsSortedBlocks)
+{
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <algorithm>\n#include <map>\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <algorithm>\n#include <map>\n#include \"app.h\"\n").empty());
+}
+
+TEST(RuleEngineSpec, SortIncludesReordersBlocksIndependently)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include <map>\n"
+        "\n"
+        "#include \"z.h\"\n"
+        "#include \"a.h\"\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].line, 1);
+    EXPECT_EQ(diagnostics[1].line, 4);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include <map>\n"
+        "#include <vector>\n"
+        "\n"
+        "#include \"a.h\"\n"
+        "#include \"z.h\"\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesDoesNotCrossCommentsAndDirectives)
+{
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n// comment\n#include <map>\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#pragma once\n#include <map>\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#ifdef USE\n#include <map>\n#endif\n#include <algorithm>\n").empty());
+}
+
+TEST(RuleEngineSpec, SortIncludesIgnoresMacroAndIncludeNext)
+{
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include HEADER\n#include <map>\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include_next <map>\n#include <algorithm>\n").empty());
+}
+
+TEST(RuleEngineSpec, SortIncludesRespectsConfiguredGroupOrder)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include \"app.h\"\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    options.include_order = {heimdall::IncludeGroup::Quote, heimdall::IncludeGroup::Angle};
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include \"app.h\"\n"
+        "#include <vector>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesSeparatesConfiguredGroups)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include \"app.h\"\n"
+        "#include <map>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include <map>\n"
+        "#include <vector>\n"
+        "#include \"app.h\"\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesIsCaseInsensitiveByDefault)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include <Array>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include <Array>\n"
+        "#include <vector>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesCaseSensitivityIsConfigurable)
+{
+    constexpr std::string_view source =
+        "#include <apple>\n"
+        "#include <Zebra>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
+
+    options.include_case_insensitive = false;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include <Zebra>\n"
+        "#include <apple>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesPreservesLineEndingsAndIndentation)
+{
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    constexpr std::string_view crlf = "#include <b>\r\n#include <a>\r\n";
+    const auto with_crlf = heimdall::RuleEngine(options).Analyze(crlf);
+    ASSERT_EQ(with_crlf.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(crlf, with_crlf),
+        "#include <a>\r\n#include <b>\r\n");
+
+    constexpr std::string_view indented = "  #include <b>\n  #include <a>\n";
+    const auto with_indent = heimdall::RuleEngine(options).Analyze(indented);
+    ASSERT_EQ(with_indent.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(indented, with_indent),
+        "  #include <a>\n  #include <b>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesHonorsSuppressionsAndOverrides)
+{
+    constexpr std::string_view source =
+        "#include <vector> // heimdall-disable-line cpp/sort-includes\n"
+        "#include <map>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
+
+    options.overrides.push_back({"cpp/sort-includes", true, heimdall::Severity::Error});
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include <map>\n");
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+
+    options.overrides[0].enabled = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include <map>\n").empty());
 }

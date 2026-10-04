@@ -105,3 +105,68 @@ TEST(RuleConfigSpec, RejectsUnknownRulesAndInvalidSettings)
     EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
     std::filesystem::remove_all(directory);
 }
+
+TEST(RuleConfigSpec, LoadsIncludeOrderSettings)
+{
+    const auto directory = MakeConfigDir("include-order");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"rules":{"cpp/sort-includes":"warning"},"include-order":{"groups":["quote","angle"],"case-insensitive":false}})");
+
+    auto loaded = heimdall::LoadRuleConfiguration(path);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_TRUE(loaded->has_include_order);
+    ASSERT_EQ(loaded->options.include_order.size(), 2);
+    EXPECT_EQ(loaded->options.include_order[0], heimdall::IncludeGroup::Quote);
+    EXPECT_EQ(loaded->options.include_order[1], heimdall::IncludeGroup::Angle);
+    EXPECT_FALSE(loaded->options.include_case_insensitive);
+
+    // The order alone does not enable the rule; 'rules' does.
+    heimdall::RuleOptions options = loaded->options;
+    options.sort_includes = true;
+    constexpr std::string_view source = "#include <vector>\n#include \"app.h\"\n";
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+        "#include \"app.h\"\n#include <vector>\n");
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, RejectsInvalidIncludeOrderSettings)
+{
+    const auto directory = MakeConfigDir("include-order-invalid");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"include-order":"angle"})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{"groups":"angle"}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{"groups":["angle"]}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{"groups":["angle","quote","angle"]}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{"groups":["angle","weird"]}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"include-order":{"groups":["angle","quote"],"case-insensitive":"yes"}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, NearestIncludeOrderWins)
+{
+    const auto directory = MakeConfigDir("include-order-merge");
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(directory, R"({"include-order":{"groups":["angle","quote"]}})");
+    WriteConfig(child, R"({"include-order":{"groups":["quote","angle"]}})");
+
+    auto loaded = heimdall::FindRuleOptions(child);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_TRUE(*loaded);
+    ASSERT_EQ((*loaded)->include_order.size(), 2);
+    EXPECT_EQ((*loaded)->include_order[0], heimdall::IncludeGroup::Quote);
+    EXPECT_EQ((*loaded)->include_order[1], heimdall::IncludeGroup::Angle);
+    EXPECT_TRUE((*loaded)->include_case_insensitive);
+    std::filesystem::remove_all(directory);
+}
