@@ -309,6 +309,24 @@ TEST(RuleEngineSpec, AllowsTrivialZeroAndOneSpellings)
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
+TEST(RuleEngineSpec, DoesNotFlagValuesThatNameAConstant)
+{
+    constexpr std::string_view source =
+        "constexpr std::size_t kTableSize = 512; // power of two, load factor < 0.4\n"
+        "const int kMax = 100;\n"
+        "constexpr double kHalf{0.5};\n"
+        "constexpr int kNeg = -42;\n"
+        "constexpr int kParen = (64);\n"
+        "enum Kind { A = 3, B };\n"
+        "int plain = 7;\n"
+        "const int mixed = 8 + 1;\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].code, "cpp/no-magic-numbers");
+    EXPECT_EQ(diagnostics[0].line, 7);
+    EXPECT_EQ(diagnostics[1].line, 8);
+}
+
 TEST(RuleEngineSpec, NewTodoAndMagicRulesHonorOverridesAndSuppressions)
 {
     heimdall::RuleOptions options;

@@ -94,3 +94,38 @@ TEST(PreprocessorSpec, PredefinedMacrosAreReadWithoutCopying)
     // The view must not have taken ownership: the caller's map is untouched.
     EXPECT_EQ(predefined.size(), 1);
 }
+
+TEST(PreprocessorSpec, BackslashContinuationExtendsTheDirectiveSpan)
+{
+    for (const std::string_view eol : {"\n", "\r\n"})
+    {
+        std::string source = "#define VALUE \\" + std::string(eol) + "    40 + \\" + std::string(eol) + "    2" +
+            std::string(eol) + "int x = VALUE;" + std::string(eol) + "#define TAIL \\";
+        const auto result = heimdall::Preprocessor().Process(source, true);
+
+        ASSERT_EQ(result.directives.size(), 2u);
+        const auto first_end = source.find("int x");
+        EXPECT_EQ(result.directives[0].offset, 0u);
+        EXPECT_EQ(result.directives[0].length, first_end);
+        // Only the real code line is active; the continuation lines are not.
+        ASSERT_EQ(result.active_ranges.size(), 1u);
+        EXPECT_EQ(result.active_ranges[0].offset, first_end);
+        EXPECT_EQ(result.active_source, "int x = 40 +      2;" + std::string(eol));
+        EXPECT_TRUE(result.diagnostics.empty());
+    }
+}
+
+TEST(PreprocessorSpec, ContinuedConditionalDirectiveIsEvaluatedAsOneLine)
+{
+    constexpr std::string_view source =
+        "#define A 1\n"
+        "#if defined(A) && \\\n"
+        "    A\n"
+        "int on;\n"
+        "#else\n"
+        "int off;\n"
+        "#endif\n";
+    const auto result = heimdall::Preprocessor().Process(source, true);
+    EXPECT_EQ(result.active_source, "int on;\n");
+    EXPECT_TRUE(result.diagnostics.empty());
+}

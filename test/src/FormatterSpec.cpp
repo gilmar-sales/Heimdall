@@ -952,3 +952,18 @@ TEST(FormatterSpec, TrailingReturnArrowKeepsItsSpacesAfterDeclaratorSuffixes)
     const std::string bare = formatter.Format("auto l = [] -> int { return 1; };\n");
     EXPECT_NE(bare.find("] -> int"), std::string::npos) << bare;
 }
+
+TEST(FormatterSpec, LeavesBackslashContinuedMacroDefinitionsVerbatim)
+{
+    // Continuation lines are part of the directive: re-indenting or wrapping them
+    // would drop the trailing backslash and cut the macro short.
+    constexpr std::string_view source =
+        "#define LIST(X) \\\n"
+        "    X(Spaceship, \"<=>\") X(ShlEq, \"<<=\") X(Shl, \"<<\") X(Le, \"<=\") X(ShrEq, \">>=\") X(Shr, \">>\") X(Ge, \">=\") \\\n"
+        "X(PlusPlus, \"++\") \\\n"
+        "      X(PlusEq, \"+=\")\n"
+        "int  a ;\n";
+    const auto formatted = heimdall::Formatter().Format(source);
+    EXPECT_EQ(formatted.substr(0, formatted.find("int")), source.substr(0, source.find("int")));
+    EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
+}

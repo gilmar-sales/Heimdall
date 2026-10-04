@@ -132,6 +132,22 @@ namespace heimdall
             return index;
         }
 
+        std::size_t PrevSignificant(const std::vector<Token> & tokens, std::size_t index)
+        {
+            while (index > 0)
+            {
+                --index;
+                if (tokens[index].kind != TokenKind::Whitespace &&
+                    tokens[index].kind != TokenKind::LineComment &&
+                    tokens[index].kind != TokenKind::BlockComment)
+                {
+                    return index;
+                }
+            }
+
+            return tokens.size();
+        }
+
         std::string_view PunctuationText(std::string_view source, const Token &token)
         {
             return source.substr(token.offset, token.length);
@@ -374,6 +390,146 @@ namespace heimdall
             return value <= 1;
         }
 
+        bool IsPunctuation(const std::vector<Token> & tokens, std::string_view source,
+            std::size_t index, std::string_view text)
+        {
+            return index < tokens.size() && tokens[index].kind == TokenKind::Punctuation &&
+                PunctuationText(source, tokens[index]) == text;
+        }
+
+        // A literal that gives a named constant its value is not magic:
+        // `constexpr std::size_t kN = 512;`, `const int kMax{100};`,
+        // `enum E { A = 3 };`. The literal must be the whole initializer
+        // (after an optional sign or parentheses), and the declaration
+        // must contain const/constexpr/enum.
+        bool IsNamedConstantInitializer(const std::vector<Token> & tokens, std::string_view source,
+            std::size_t index)
+        {
+            std::size_t trigger = PrevSignificant(tokens, index);
+            int parens = 0;
+            for (int hops = 0; hops < 4 && trigger < tokens.size() &&
+                tokens[trigger].kind == TokenKind::Punctuation; ++hops)
+            {
+                const auto text = PunctuationText(source, tokens[trigger]);
+                if (text == "-" || text == "+")
+                {
+                    trigger = PrevSignificant(tokens, trigger);
+                }
+                else if (text == "(")
+                {
+                    ++parens;
+                    trigger = PrevSignificant(tokens, trigger);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (trigger >= tokens.size() || tokens[trigger].kind != TokenKind::Punctuation)
+            {
+                return false;
+            }
+
+            const auto opener = PunctuationText(source, tokens[trigger]);
+            if (opener != "=" && opener != "{")
+            {
+                return false;
+            }
+
+            std::size_t after = NextSignificant(tokens, index + 1);
+            for (int depth = 0; depth < parens; ++depth)
+            {
+                if (!IsPunctuation(tokens, source, after, ")"))
+                {
+                    return false;
+                }
+
+                after = NextSignificant(tokens, after + 1);
+            }
+
+            if (after < tokens.size())
+            {
+                if (tokens[after].kind != TokenKind::Punctuation)
+                {
+                    return false;
+                }
+
+                const auto closer = PunctuationText(source, tokens[after]);
+                if (closer != ";" && closer != "," && closer != "}" && closer != ")")
+                {
+                    return false;
+                }
+            }
+
+            // Walk back to the start of the declaration looking for
+            // const/constexpr. A `{` on the way means an enum body or a
+            // braced scope: only an enum still names the value.
+            std::size_t cursor = trigger;
+            for (int steps = 0; steps < 25; ++steps)
+            {
+                cursor = PrevSignificant(tokens, cursor);
+                if (cursor >= tokens.size())
+                {
+                    return false;
+                }
+
+                if (tokens[cursor].kind == TokenKind::Punctuation)
+                {
+                    const auto text = PunctuationText(source, tokens[cursor]);
+                    if (text == "{")
+                    {
+                        for (int inner = 0; inner < 6; ++inner)
+                        {
+                            cursor = PrevSignificant(tokens, cursor);
+                            if (cursor >= tokens.size())
+                            {
+                                return false;
+                            }
+
+                            if (tokens[cursor].kind == TokenKind::Punctuation)
+                            {
+                                const auto boundary = PunctuationText(source, tokens[cursor]);
+                                if (boundary == "(" || boundary == ")" || boundary == ";" ||
+                                    boundary == "}" || boundary == "{")
+                                {
+                                    return false;
+                                }
+
+                                continue;
+                            }
+
+                            if (tokens[cursor].kind == TokenKind::Identifier &&
+                                source.substr(tokens[cursor].offset, tokens[cursor].length) == "enum")
+                            {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    }
+
+                    if (text == ";" || text == "}" || text == "{")
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (tokens[cursor].kind == TokenKind::Identifier)
+                {
+                    const auto word = source.substr(tokens[cursor].offset, tokens[cursor].length);
+                    if (word == "const" || word == "constexpr")
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
     } // namespace
 
     const std::vector<RuleInfo> & RuleCatalog()
@@ -596,8 +752,9 @@ namespace heimdall
         if (m_options.magic_numbers)
         {
             std::size_t directive_cursor = 0;
-            for (const auto & token : tokens)
+            for (std::size_t i = 0; i < tokens.size(); ++i)
             {
+                const auto & token = tokens[i];
                 if (token.kind != TokenKind::Number ||
                     IsInDirective(token.offset, directives, directive_cursor))
                 {
@@ -605,7 +762,7 @@ namespace heimdall
                 }
 
                 const auto text = source.substr(token.offset, token.length);
-                if (IsTrivialNumericLiteral(text))
+                if (IsTrivialNumericLiteral(text) || IsNamedConstantInitializer(tokens, source, i))
                 {
                     continue;
                 }

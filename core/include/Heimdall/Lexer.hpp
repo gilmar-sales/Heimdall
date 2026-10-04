@@ -27,7 +27,6 @@ namespace heimdall
     struct Token
     {
         TokenKind kind;
-        // Keyword/punctuator classification; lives in the padding after `kind`.
         Tok tok = Tok::None;
         std::uint32_t offset = 0;
         std::uint32_t length = 0;
@@ -58,8 +57,8 @@ namespace heimdall
             const std::size_t offset = first.offset < second.offset ? first.offset : second.offset;
             // Where the merged region ends, in the text before `first`...
             const std::size_t old_end = second_end > first_new_end
-                ? second_end - first.new_length + first.old_length
-                : first.offset + first.old_length;
+            ? second_end - first.new_length + first.old_length
+            : first.offset + first.old_length;
             // ...and in the text after `second`.
             const std::size_t new_end = (first_new_end > second_end ? first_new_end : second_end) +
                 second.new_length - second.old_length;
@@ -71,7 +70,7 @@ namespace heimdall
         // `edit`; the lexer's source is the text after it. Only a window around
         // the edit is re-scanned and the tokens after it are shifted, yielding
         // exactly what Lex() would produce.
-        void Relex(std::vector<Token> &tokens, const TextEdit &edit) const;
+        void Relex(std::vector<Token> & tokens, const TextEdit &edit) const;
         std::string_view Text(const Token &token) const noexcept;
 
     private:

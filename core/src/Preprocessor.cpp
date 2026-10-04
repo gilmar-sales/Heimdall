@@ -430,6 +430,11 @@ namespace heimdall
             return out;
         }
 
+        bool EndsWithBackslash(std::string_view body)
+        {
+            return !body.empty() && body.back() == '\\';
+        }
+
     } // namespace
 
     PreprocessorResult Preprocessor::Process(std::string_view source, bool build_active_source) const
@@ -479,6 +484,41 @@ namespace heimdall
             }
 
             auto trimmed = Trim(body);
+
+            // A directive continues over lines ending in a backslash: the whole
+            // span is one directive, and its logical text joins the pieces.
+            std::string joined;
+            if (!trimmed.empty() && trimmed.front() == '#' && EndsWithBackslash(body))
+            {
+                joined.assign(body.substr(0, body.size() - 1));
+                while (end < source.size())
+                {
+                    const std::size_t next_end = source.find('\n', end);
+                    const std::size_t stop = next_end == std::string_view::npos ? source.size() : next_end + 1;
+                    std::string_view piece = source.substr(end, stop - end);
+                    end = stop;
+                    if (!piece.empty() && piece.back() == '\n')
+                    {
+                        piece.remove_suffix(1);
+                    }
+
+                    if (!piece.empty() && piece.back() == '\r')
+                    {
+                        piece.remove_suffix(1);
+                    }
+
+                    const bool more = EndsWithBackslash(piece);
+                    joined += ' ';
+                    joined.append(piece.substr(0, more ? piece.size() - 1 : piece.size()));
+                    if (!more)
+                    {
+                        break;
+                    }
+                }
+
+                line = source.substr(line_start, end - line_start);
+                trimmed = Trim(joined);
+            }
 
             if (!trimmed.empty() && trimmed.front() == '#')
             {
