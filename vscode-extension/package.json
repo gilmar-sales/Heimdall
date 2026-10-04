@@ -1,0 +1,71 @@
+{
+  "name": "heimdall-vscode",
+  "displayName": "Heimdall - C++ Lint and Format",
+  "description": "C++ diagnostics, quick fixes, formatting, and code completion powered by Heimdall.",
+  "version": "0.3.1",
+  "publisher": "gilmar-sales",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onLanguage:cuda",
+    "onLanguage:objective-c",
+    "onLanguage:objective-cpp"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Heimdall",
+      "properties": {
+        "heimdall.serverPath": {
+          "type": "string",
+          "default": "heimdall-lsp",
+          "description": "Path to the heimdall-lsp executable. By default it is searched in PATH and common build directories."
+        },
+        "heimdall.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace JSON-RPC traffic between VS Code and heimdall-lsp."
+        },
+        "heimdall.enableSemantic": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable simple local semantic diagnostics using compile_commands.json."
+        },
+        "heimdall.compileCommands": {
+          "type": "string",
+          "default": "build/compile_commands.json",
+          "description": "Path to compile_commands.json, relative to the first workspace folder unless absolute."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.4.5"
+  }
+}
