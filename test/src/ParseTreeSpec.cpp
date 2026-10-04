@@ -139,6 +139,23 @@ TEST(ParseTreeSpec, KeepsPreprocessorDirectiveBodiesOpaque)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
 }
 
+TEST(ParseTreeSpec, BackslashContinuationsStayInsideTheDirective)
+{
+    constexpr std::string_view source =
+    "#define LIST(X) \\\n"
+    "    X(A) X(B)\n"
+    "enum class Tok : unsigned char\n"
+    "{\n"
+    "    None = 0,\n"
+    "    LIST(A)\n"
+    "};\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::PreprocessorDirective), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Enumerator), 2);
+}
+
 TEST(ParseTreeSpec, UnclosedParenDoesNotSwallowOuterScopeCloser)
 {
     constexpr std::string_view source =

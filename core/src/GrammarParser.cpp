@@ -341,6 +341,31 @@ namespace heimdall
                 ++line_end;
             }
 
+            // A directive continues over lines ending in a backslash,
+            // mirroring the preprocessor span (Preprocessor::Process):
+            // otherwise the continuation lines leak into the parse as code.
+            while (line_end < m_tree.m_source.size())
+            {
+                auto body_end = line_end;
+                if (m_tree.m_source[body_end - 1] == '\n')
+                {
+                    --body_end;
+                }
+
+                if (body_end > 0 && m_tree.m_source[body_end - 1] == '\r')
+                {
+                    --body_end;
+                }
+
+                if (body_end == 0 || m_tree.m_source[body_end - 1] != '\\')
+                {
+                    break;
+                }
+
+                const auto next = m_tree.m_source.find('\n', line_end);
+                line_end = next == std::string_view::npos ? m_tree.m_source.size() : next + 1;
+            }
+
             while (sig < end && m_tree.m_tokens[m_sig[sig]].offset < line_end)
             {
                 ++sig;
