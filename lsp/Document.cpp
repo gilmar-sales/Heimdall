@@ -222,7 +222,7 @@ namespace heimdall::lsp
         for (const char c: generic)
         {
             const unsigned char byte = static_cast<unsigned char>(c);
-            const bool plain = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+            const bool plain = (byte >= 'A' && byte <= 'Z') ||(byte >= 'a' && byte <= 'z') ||
                 (byte >= '0' && byte <= '9') || c == '-' || c == '.' || c == '_' || c == '~' || c == '/' ||
                 c == ':';
             if (plain)

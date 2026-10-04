@@ -452,3 +452,25 @@ TEST(ParseTreeSpec, ScopeQualifierAndBitfieldAreNotAccessSpecifiers)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::AccessSpecifier), 0);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::BitfieldSuffix), 1);
 }
+
+TEST(ParseTreeSpec, UnnamedConstQualifiedPointerParametersAreNotMissingCommas)
+{
+    // `const A::B *` without a parameter name used to parse `const` as the
+    // declared name and report "expected ',' before 'A'".
+    for (const std::string_view source: {
+        "void f(int, const A::B *);\n",
+        "void f(ParseTree &, const A &, std::stop_token, const B::C *);\n",
+        "void f(const A::B &, volatile ns::T *, const C * const *);\n",
+        "class P { friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &,\n"
+        "    std::stop_token, const Preprocessor::MacroMap *); };\n",
+    })
+    {
+        const auto tree = heimdall::ParseTree::Parse(source);
+        EXPECT_TRUE(tree.Diagnostics().empty()) << source << tree.Diagnostics().front().message;
+        for (const auto& node : tree.Nodes())
+        {
+            if (node.kind != heimdall::GrammarKind::DeclaredName) continue;
+            EXPECT_NE(tree.Text(tree.Tokens()[node.first_token]), "const") << source;
+        }
+    }
+}

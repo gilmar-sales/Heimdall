@@ -105,7 +105,7 @@ namespace heimdall
     namespace detail
     {
         void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop);
+            std::stop_token stop, const Preprocessor::MacroMap * macros);
     } // namespace detail
 
     // Initial recursive-descent grammar layer over the lossless lexer. It parses
@@ -152,6 +152,13 @@ namespace heimdall
         {
             return m_cancelled;
         }
+        // Identifier tokens the grammar treated as invisible because a predefined
+        // macro expands to mere decoration (`class EXPORT Name`, `_GLIBCXX_NOEXCEPT`).
+        // Name extraction that reads raw tokens must skip them too.
+        bool IsDecorationToken(std::size_t token) const noexcept
+        {
+            return token < m_decoration.size() && m_decoration[token];
+        }
         std::string_view Text(const Token &token) const noexcept
         {
             return m_source.substr(token.offset, token.length);
@@ -163,7 +170,7 @@ namespace heimdall
     private:
         friend class GrammarParser;
         friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &,
-            std::stop_token);
+            std::stop_token, const Preprocessor::MacroMap *);
 
         std::shared_ptr<const std::string> m_owned_source;
         std::string_view m_source;
@@ -173,6 +180,7 @@ namespace heimdall
         std::vector<GrammarDiagnostic> m_diagnostics;
         std::vector<PreprocessorDirective> m_directives;
         bool m_cancelled = false;
+        std::vector<bool> m_decoration;
     };
 
 } // namespace heimdall

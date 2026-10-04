@@ -897,3 +897,58 @@ TEST(FormatterSpec, SpacesInheritanceAndUnderlyingTypeColon)
                                       .space_before_inheritance_colon = false });
     check(tight, "enum class K : std::uint8_t {};\n", "enum class K: std::uint8_t {};\n");
 }
+
+TEST(FormatterSpec, MemberAccessOperatorsTakeNoSpaces)
+{
+    // `->` after a name or `]` used to be mistaken for a trailing return type
+    // whenever a name and `;` followed it, so `a -> b;` kept its spaces.
+    constexpr std::string_view source =
+        "void f() {\n"
+        "a -> b;\n"
+        "a . b;\n"
+        "a->b -> c();\n"
+        "x = p -> q . r [ 0 ] -> s;\n"
+        "y = a .* b;\n"
+        "z = a ->* b;\n"
+        "g(a , b -> c);\n"
+        "}\n";
+    const std::string expected =
+        "void f()\n{\n"
+        "    a->b;\n"
+        "    a.b;\n"
+        "    a->b->c();\n"
+        "    x = p->q.r[0]->s;\n"
+        "    y = a.*b;\n"
+        "    z = a->*b;\n"
+        "    g(a, b->c);\n"
+        "}\n";
+    const heimdall::Formatter formatter;
+    const std::string formatted = formatter.Format(source);
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, TrailingReturnArrowKeepsItsSpacesAfterDeclaratorSuffixes)
+{
+    const heimdall::Formatter formatter;
+    for (const std::string_view declaration: {
+        "auto f() -> int;",
+        "auto f() const -> int;",
+        "auto f() noexcept -> int;",
+        "auto f() const noexcept -> int;",
+        "auto f() & -> int;",
+        "auto f() const && -> int;",
+        "auto f(int a) -> Foo;",
+        "auto f() -> Foo *;",
+        "struct S { auto m() const override -> int; };",
+    })
+    {
+        EXPECT_NE(formatter.Format(std::string(declaration) + "\n").find(" -> "), std::string::npos)
+            << declaration;
+    }
+
+    const std::string lambda = formatter.Format("auto l = [](int v) mutable -> int { return v; };\n");
+    EXPECT_NE(lambda.find(") mutable -> int"), std::string::npos) << lambda;
+    const std::string bare = formatter.Format("auto l = [] -> int { return 1; };\n");
+    EXPECT_NE(bare.find("] -> int"), std::string::npos) << bare;
+}

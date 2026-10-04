@@ -121,7 +121,11 @@ outside the extension) still needs to be closed before relinking.
   is structural scaffolding, not yet a C++ declaration/expression grammar.
 - **Rule engine**: `cpp/no-null` replaces `NULL` with `nullptr` outside comments,
   literals and directives; `format/no-trailing-whitespace` removes trailing
-  spaces/tabs; `format/require-final-newline` ensures a final newline. Diagnostics
+  spaces/tabs; `format/require-final-newline` ensures a final newline;
+  `cpp/no-empty-catch` flags empty catch blocks; `cpp/no-duplicate-include`
+  flags repeated literal includes outside conditional blocks;
+  `cpp/modernize-using` rewrites plain `typedef` declarations as `using`
+  aliases. Diagnostics
   carry byte ranges and 1-based line/column, with non-overlapping text edits applied
   from right to left. Rules can be enabled independently.
 - **Local semantic rule**: `semantic/no-unused-local` reports unused simple local variables when

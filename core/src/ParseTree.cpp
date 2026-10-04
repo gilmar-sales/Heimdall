@@ -32,7 +32,7 @@ namespace heimdall
         tree.m_standard = options.standard;
         tree.m_tokens = Lexer(source).Lex();
         auto preprocessing = Preprocessor(options.Macros()).Process(source);
-        detail::ParseWithGrammar(tree, preprocessing, stop);
+        detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros());
         tree.m_directives = std::move(preprocessing.directives);
 
         for (std::size_t n = 0; n < tree.m_nodes.size(); ++n)

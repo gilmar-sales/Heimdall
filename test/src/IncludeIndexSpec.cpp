@@ -203,3 +203,26 @@ TEST(IncludeIndexSpec, ResolveIncludeAtFindsSystemHeadersNamedLikeTypes)
         EXPECT_EQ(header.filename().string(), name);
     }
 }
+
+TEST(IncludeIndexSpec, MemberAccessResolvesGuardedDecoratedHeaderTypes)
+{
+    auto command = CommandWithIncludes();
+    command.defines["MYLIB_API"] = "";
+    command.defines["MYLIB_NOEXCEPT"] = "noexcept";
+    command.defines["MYLIB_NODISCARD"] = "[[nodiscard]]";
+    constexpr std::string_view text = "#include \"mylib/shapes.hpp\"\n";
+    const auto index = heimdall::IncludeIndex::Build(IncludeDir(), text, &command);
+
+    const auto* shape = FindScope(index.Scopes(), {"mylib", "Shape"});
+    ASSERT_NE(shape, nullptr);
+    EXPECT_EQ(shape->bases, std::vector<std::string>{"Base"});
+
+    std::string source = "void f() { mylib::ShapeAlias s; s.";
+    heimdall::ParserOptions options;
+    options.shared_macros = std::make_shared<const heimdall::Preprocessor::MacroMap>(command.defines);
+    const auto items = heimdall::CompletionEngine::Complete(source, options, source.size(), &index.Scopes());
+    EXPECT_TRUE(Contains(items, "area"));
+    EXPECT_TRUE(Contains(items, "cached"));
+    EXPECT_TRUE(Contains(items, "base_value")); // inherited
+    EXPECT_TRUE(Contains(items, "base_run"));
+}

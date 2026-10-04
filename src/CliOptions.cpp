@@ -213,8 +213,7 @@ namespace heimdall::cli
 
         for (const auto &override: options.rule_overrides)
         {
-            if (override.code != "cpp/no-null" && override.code != "format/no-trailing-whitespace" &&
-                override.code != "format/require-final-newline")
+            if (!heimdall::IsKnownRuleCode(override.code))
             {
                 std::cerr << "unknown rule code: " << override.code << '\n';
                 return false;

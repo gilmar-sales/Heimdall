@@ -80,4 +80,9 @@ if (Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspCancelSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
+  add_test(
+    NAME LspMemberAccessSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspMemberAccessSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/include"
+  )
 endif ()

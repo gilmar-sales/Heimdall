@@ -77,6 +77,24 @@ TEST(RuleConfigSpec, RootConfigStopsInheritanceFromParentDirectories)
     std::filesystem::remove_all(directory);
 }
 
+TEST(RuleConfigSpec, AcceptsNewRuleCodesAndStillRejectsUnknown)
+{
+    const auto directory = MakeConfigDir("new-rules");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"rules":{"cpp/no-empty-catch":"error","cpp/no-duplicate-include":"off","cpp/modernize-using":"warning"}})");
+
+    auto loaded = heimdall::LoadRuleConfiguration(path);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_EQ(loaded->options.overrides.size(), 3);
+    EXPECT_EQ(loaded->options.overrides[0].severity, heimdall::Severity::Error);
+    EXPECT_FALSE(loaded->options.overrides[1].enabled);
+    EXPECT_EQ(loaded->options.overrides[2].severity, heimdall::Severity::Warning);
+
+    WriteConfig(directory, R"({"rules":{"cpp/no-such-rule":"warning"}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    std::filesystem::remove_all(directory);
+}
+
 TEST(RuleConfigSpec, RejectsUnknownRulesAndInvalidSettings)
 {
     const auto directory = MakeConfigDir("invalid");

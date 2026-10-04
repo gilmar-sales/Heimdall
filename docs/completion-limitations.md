@@ -54,19 +54,24 @@ this file is the engineering record so the details are not lost.
   (recursively, through chains of aliases). Requires type-expression parsing
   plus lookup — notably harder than 3a. Medium-hard.
 
-## 4. No member access (`.` / `->`) completion
+## 4. Member access (`.` / `->`): implemented, with known limits
 
-- **Files:** `core/src/Completion.cpp` (`ClassifyContext` returns
-  `MemberAccess`, `Complete` answers `[]`; pinned by
-  `SuppressesMemberAccessUntilMembersAreModeled`).
-- **Cause:** `ns::`/`Type::` resolve scopes *named in source*. `obj.member`
-  needs the *type of the expression* `obj`: variable-to-type mapping through
-  `typedef`/`using`/templates, then the member list of the corresponding
-  `RecordDefinition`, possibly in another header. That is type inference, not
-  lexical lookup.
-- **Impact:** `s.` / `ptr->` intentionally return nothing rather than guess.
-- **Fix:** a minimal expression evaluator (identifier, call, `*`/`&`,
-  chained access) plus a type-to-members table per TU, joined with the header
-  index. Suggested slicing: (1) `var.` / `var->` for same-file simple-type
-  locals (covers the common case), (2) inherited members, (3) templates.
-  Hard; the natural next milestone after 1–3.
+- **Files:** `core/src/Completion.cpp` (`MemberResolver`, `CompleteMember`),
+  `semantic/src/IncludeIndex.cpp` (`CompilerMacros`).
+- **How it works:** the receiver is parsed backwards into a chain
+  (`a.b().c[0]->`); each segment resolves to a record path through locals,
+  parameters, fields (inherited too), free functions, `auto` initializers,
+  `this`, aliases (`using`/`typedef`, including header ones such as
+  `std::string` -> `basic_string`) and `using namespace`. `->` on
+  `unique_ptr`/`shared_ptr`/`optional` reaches the first template argument and
+  `[]` on containers reaches the element type. Members come from the buffer and
+  the header index; base classes are recorded per scope (`IndexedScope::bases`).
+- **Header fidelity:** headers are parsed one by one without expanding
+  `#include`, so the index is built with the macros the compiler reports
+  (`c++ -dM -E`, include guards removed) and decoration-only macros
+  (`_GLIBCXX_NOEXCEPT`, `EXPORT`) are invisible to the grammar.
+- **Not covered (no guesses are made, the list is just empty):** types that
+  depend on template parameters (`T::value_type`, `typename C::iterator`),
+  iterators, lambdas and `operator->` overloads other than the standard
+  smart pointers, structured bindings, range-for variables, macros that expand
+  to real code, access control (private members are listed).

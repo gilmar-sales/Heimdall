@@ -21,7 +21,10 @@ namespace heimdall
     {
         NullMacro,
         TrailingWhitespace,
-        MissingFinalNewline
+        MissingFinalNewline,
+        EmptyCatch,
+        DuplicateInclude,
+        LegacyTypedef
     };
 
     struct RuleOverride
@@ -57,9 +60,31 @@ namespace heimdall
         bool null_macro = true;
         bool trailing_whitespace = true;
         bool final_newline = true;
+        bool empty_catch = true;
+        bool duplicate_include = true;
+        bool legacy_typedef = true;
         bool honor_suppressions = true;
         std::vector<RuleOverride> overrides;
     };
+
+    // Stable metadata for every rule the engine can emit. The catalog is the
+    // single source of truth for rule code validation in the config loader
+    // and the CLI, so new rules only need an entry here.
+    struct RuleInfo
+    {
+        RuleId id;
+        std::string_view code;
+        std::string_view category;
+        Severity default_severity;
+        std::string_view layer;
+        bool autofix;
+        std::string_view summary;
+    };
+
+    const std::vector<RuleInfo> & RuleCatalog();
+    const RuleInfo * FindRuleByCode(std::string_view code);
+    const RuleInfo * FindRule(RuleId id);
+    bool IsKnownRuleCode(std::string_view code);
 
     class RuleEngine
     {

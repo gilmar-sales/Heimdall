@@ -89,3 +89,184 @@ TEST(RuleEngineSpec, ApplyFixesRejectsEditsOutsideTheirDiagnosticRange)
     };
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("NULL;", {diagnostic}), "NULL;");
 }
+
+TEST(RuleEngineSpec, FindsEmptyCatchBlocksIncludingCommentOnlyBodies)
+{
+    constexpr std::string_view source =
+        "void f() {\n"
+        "    try { g(); } catch (...) {}\n"
+        "    try { g(); } catch (const std::exception& e) { /* ignored */ }\n"
+        "}\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].code, "cpp/no-empty-catch");
+    EXPECT_EQ(diagnostics[0].line, 2);
+    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_EQ(diagnostics[1].code, "cpp/no-empty-catch");
+    EXPECT_EQ(diagnostics[1].line, 3);
+}
+
+TEST(RuleEngineSpec, DoesNotFlagNonEmptyOrIncompleteCatchHandlers)
+{
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(
+        "void f() {\n"
+        "    try { g(); } catch (...) { log(); }\n"
+        "    try { g(); } catch (...) { throw; }\n"
+        "}\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze("try { g(); } catch (...)\n").empty());
+}
+
+TEST(RuleEngineSpec, IgnoresCatchInCommentsStringsAndDirectives)
+{
+    constexpr std::string_view source =
+        "// catch (...) {}\n"
+        "const char* s = \"catch () {}\";\n"
+        "#define CATCHALL catch (...) {}\n"
+        "void f() { try { g(); } catch (...) { throw; } }\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, FindsDuplicateIncludesOutsideConditionals)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include \"app.h\"\n"
+        "#include <vector>\n"
+        "#include \"app.h\"\n"
+        "#include <memory>\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].code, "cpp/no-duplicate-include");
+    EXPECT_EQ(diagnostics[0].line, 3);
+    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_EQ(diagnostics[1].code, "cpp/no-duplicate-include");
+    EXPECT_EQ(diagnostics[1].line, 4);
+}
+
+TEST(RuleEngineSpec, DoesNotFlagDistinctConditionalOrMacroIncludes)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include \"vector\"\n"
+        "#include <memory>\n"
+        "#ifdef USE_FEATURE\n"
+        "#include \"feature.h\"\n"
+        "#else\n"
+        "#include \"feature.h\"\n"
+        "#endif\n"
+        "#include HEADER_MACRO\n"
+        "#include_next \"app.h\"\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, RewritesSimpleTypedefsWithUsing)
+{
+    constexpr std::string_view source =
+        "typedef int Count;\n"
+        "typedef unsigned long size_type;\n"
+        "typedef std::vector<int> IntVector;\n"
+        "typedef int * IntPtr;\n"
+        "typedef int arr[10];\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 5);
+    EXPECT_EQ(diagnostics[0].code, "cpp/modernize-using");
+    EXPECT_EQ(diagnostics[0].line, 1);
+    EXPECT_TRUE(diagnostics[0].has_fix);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "using Count = int;\n"
+              "using size_type = unsigned long;\n"
+              "using IntVector = std::vector<int>;\n"
+              "using IntPtr = int *;\n"
+              "using arr = int[10];\n");
+}
+
+TEST(RuleEngineSpec, RewritesTypedefsWithTemplateArguments)
+{
+    constexpr std::string_view source = "typedef std::map<int, int> IntMap;\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "using IntMap = std::map<int, int>;\n");
+}
+
+TEST(RuleEngineSpec, DoesNotRewriteComplexTypedefs)
+{
+    constexpr std::string_view source =
+        "typedef void (*Callback)(int);\n"
+        "typedef int a, b;\n"
+        "typedef struct S { int x; } S;\n"
+        "typedef int Fn();\n"
+        "typedef int;\n"
+        "typedef int X [[deprecated]];\n"
+        "#define LEGACY typedef int T;\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, NewRulesCanBeDisabledIndependently)
+{
+    constexpr std::string_view source =
+        "typedef int T;\n"
+        "void f() { try { g(); } catch (...) {} }\n"
+        "#include <vector>\n"
+        "#include <vector>\n";
+    heimdall::RuleOptions options;
+    options.legacy_typedef = false;
+    options.empty_catch = false;
+    options.duplicate_include = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
+
+    heimdall::RuleOptions only_typedef = options;
+    only_typedef.legacy_typedef = true;
+    const auto diagnostics = heimdall::RuleEngine(only_typedef).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/modernize-using");
+}
+
+TEST(RuleEngineSpec, NewRulesHonorSeverityAndDisableOverrides)
+{
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/no-empty-catch", true, heimdall::Severity::Error});
+    auto diagnostics = heimdall::RuleEngine(options).Analyze(
+        "void f() { try { g(); } catch (...) {} }\n");
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+
+    options.overrides[0].enabled = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "void f() { try { g(); } catch (...) {} }\n").empty());
+}
+
+TEST(RuleEngineSpec, SuppressionsCoverNewRules)
+{
+    constexpr std::string_view source =
+        "typedef int T; // heimdall-disable-line cpp/modernize-using\n"
+        "void f() { try { g(); } catch (...) {} } // heimdall-disable-line cpp/no-empty-catch\n"
+        "#include <vector>\n"
+        "#include <vector> // heimdall-disable-line cpp/no-duplicate-include\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, CatalogDescribesEveryRule)
+{
+    const auto & catalog = heimdall::RuleCatalog();
+    ASSERT_EQ(catalog.size(), 6);
+    for (const auto & info: catalog)
+    {
+        EXPECT_FALSE(info.code.empty());
+        EXPECT_FALSE(info.category.empty());
+        EXPECT_FALSE(info.layer.empty());
+        EXPECT_FALSE(info.summary.empty());
+        ASSERT_NE(heimdall::FindRuleByCode(info.code), nullptr);
+        EXPECT_EQ(heimdall::FindRuleByCode(info.code)->id, info.id);
+        ASSERT_NE(heimdall::FindRule(info.id), nullptr);
+        EXPECT_EQ(heimdall::FindRule(info.id)->code, info.code);
+        EXPECT_TRUE(heimdall::IsKnownRuleCode(info.code));
+    }
+
+    EXPECT_FALSE(heimdall::IsKnownRuleCode("cpp/not-real"));
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-null")->autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-empty-catch")->autofix, false);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include")->autofix, false);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
+}

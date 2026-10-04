@@ -20,16 +20,16 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | `cpp/modernize-auto` | Tipos explícitos substituíveis por `auto` | Sintática/semântica | Condicional | Não implementada |
 | `cpp/modernize-range-loop` | Laços substituíveis por range-for | Semântica | Condicional | Não implementada |
 | `cpp/modernize-loop-convert` | Laços convertíveis a algoritmos ou ranges | Semântica | Condicional | Não implementada |
-| `cpp/modernize-using` | `typedef` substituível por `using` | Sintática | Possível | Não implementada |
+| `cpp/modernize-using` | `typedef` substituível por `using` | Sintática | Possível | Implementada |
 | `cpp/modernize-override` | Sobrescrita virtual sem `override` | Semântica | Possível | Não implementada |
 | `cpp/modernize-final` | Classes/métodos elegíveis a `final` | Semântica | Cauteloso | Não implementada |
 | `cpp/modernize-constexpr` | Funções/expressões elegíveis a `constexpr` | Semântica | Cauteloso | Não implementada |
 | `cpp/modernize-const` | Variáveis que não são modificadas e podem ser `const` | Fluxo de dados | Condicional | Não implementada |
 | `cpp/no-implicit-bool-conversion` | Conversões implícitas suspeitas em condições | Semântica | Não por padrão | Não implementada |
 | `cpp/no-magic-numbers` | Literais numéricos sem contexto explicativo | Sintática | Não | Não implementada |
-| `cpp/no-empty-catch` | Bloco `catch` vazio | Sintática | Não | Não implementada |
+| `cpp/no-empty-catch` | Bloco `catch` vazio | Sintática | Não | Implementada |
 | `cpp/no-todo` | Comentários `TODO`, `FIXME` ou `XXX` | Lexical | Não | Não implementada |
-| `cpp/no-duplicate-include` | Includes duplicados | Diretivas | Possível | Não implementada |
+| `cpp/no-duplicate-include` | Includes duplicados | Diretivas | Possível | Implementada |
 | `cpp/sort-includes` | Includes fora da ordem configurada | Diretivas | Seguro com configuração | Não implementada |
 | `cpp/include-what-you-use` | Includes ausentes ou desnecessários | Semântica/projeto | Fora da primeira fase | Não implementada |
 
@@ -39,7 +39,7 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 |---|---|---|---|---|
 | `cpp/modernize-nullptr` | Literal nulo legado | Lexical/sintática | Condicional | Não implementada |
 | `cpp/modernize-override` | Método sobrescrito sem `override` | Semântica | Possível | Não implementada |
-| `cpp/modernize-using` | `typedef` legado | Sintática | Possível | Não implementada |
+| `cpp/modernize-using` | `typedef` legado | Sintática | Possível | Implementada |
 | `cpp/modernize-emplace` | Construção temporária em `push_back` potencialmente substituível por `emplace_back` | Semântica | Condicional | Não implementada |
 | `cpp/modernize-make-unique` | Construção manual de `unique_ptr` | Semântica | Condicional | Não implementada |
 | `cpp/modernize-make-shared` | Construção manual de `shared_ptr` | Semântica | Condicional | Não implementada |
@@ -145,6 +145,9 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `cpp/no-null` | `RuleEngine` encontra `NULL` fora de comentários, literais e diretivas e sugere `nullptr` | Não substitui toda análise semântica de contexto |
 | `format/no-trailing-whitespace` | Remove espaços e tabulações no fim das linhas | Autofix preserva o conteúdo restante e trata CRLF |
 | `format/require-final-newline` | Garante newline final | Preserva CRLF quando detecta esse estilo |
+| `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Não sugere rethrow/log automático: a ação correta depende do contexto |
+| `cpp/no-duplicate-include` | Compara includes literais (`<...>` e `"..."`) fora de blocos condicionais | Autofix adiado: a remoção só é segura com conhecimento de guards; includes em ramos `#ifdef` distintos são ignorados |
+| `cpp/modernize-using` | Reescreve `typedef` de declarador simples como `using T = ...`, com autofix | Pula ponteiros de função, definições de classe, múltiplos declaradores e atributos; requer forma tokenizável |
 | `semantic/no-unused-local` | Analisador semântico detecta algumas variáveis locais não usadas | Cobertura limitada a declarações simples; requer `--semantic` e contexto de compilação |
 
 ## Priorização sugerida
@@ -166,6 +169,10 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 
 A Rule Engine agora também oferece:
 
+- **Catálogo de metadados**: `RuleCatalog()` registra código estável, categoria,
+  severidade padrão, camada requerida e disponibilidade de autofix de cada regra.
+  `IsKnownRuleCode()` é a fonte única de validação dos códigos no carregador de
+  configuração e na CLI, então uma regra nova só precisa de uma entrada no catálogo.
 - **Overrides por código** via `RuleOptions::overrides`, com habilitação/desabilitação e severidade (`Warning`/`Error`). O último override para o mesmo código prevalece.
 - **CLI**: `heimdall lint --rule cpp/no-null=off arquivo.cpp` desabilita uma regra; `--rule cpp/no-null=error` eleva sua severidade. Os valores aceitos são `off`, `warning` e `error`; códigos desconhecidos são rejeitados. A opção está disponível em `lint` e `check`.
 - **Supressão por comentário**: `// heimdall-disable-line cpp/no-null` suprime o código na linha do comentário; `// heimdall-disable-next-line cpp/no-null` suprime na linha seguinte. Pode-se listar códigos separados por espaço/vírgula ou omitir a lista/usar `*` para suprimir todos os diagnósticos naquela linha.

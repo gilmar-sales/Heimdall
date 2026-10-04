@@ -14,6 +14,6 @@ namespace heimdall::detail
 {
 
     void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-        std::stop_token stop);
+        std::stop_token stop, const Preprocessor::MacroMap *macros);
 
 } // namespace heimdall::detail

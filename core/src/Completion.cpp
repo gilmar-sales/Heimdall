@@ -1,6 +1,7 @@
 #include <Heimdall/Completion.hpp>
 
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/Navigation.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
 
@@ -401,9 +402,21 @@ namespace heimdall
                 return;
             }
 
-            CompletionItem &old = found -> second;
+            CompletionItem &old = found->second;
             if (KindPriority(item.kind) > KindPriority(old.kind))
             {
+                // The same symbol seen as a record scope (with its doc comment) and
+                // as a bare tag/forward declaration (without one): keep the comment.
+                if (item.documentation.empty())
+                {
+                    item.documentation = std::move(old.documentation);
+                }
+
+                if (item.type_text.empty())
+                {
+                    item.type_text = std::move(old.type_text);
+                }
+
                 old = std::move(item);
                 return;
             }
@@ -417,10 +430,20 @@ namespace heimdall
                     old.documentation = std::move(item.documentation);
                 }
 
+                if (old.type_text.empty() && !item.type_text.empty())
+                {
+                    old.type_text = std::move(item.type_text);
+                }
+
                 if (old.detail == KindDetail(old.kind) && item.detail != KindDetail(item.kind))
                 {
                     old.detail = std::move(item.detail);
                 }
+            }
+            else if (old.documentation.empty() && !item.documentation.empty())
+            {
+                // Lower-priority sighting (record scope) that carries the doc comment.
+                old.documentation = std::move(item.documentation);
             }
         }
 
@@ -649,7 +672,7 @@ namespace heimdall
             {
                 const TokenKind token_kind = tree.Tokens()[i].kind;
                 if (token_kind == TokenKind::Whitespace || token_kind == TokenKind::LineComment ||
-                    token_kind == TokenKind::BlockComment)
+                    token_kind == TokenKind::BlockComment || tree.IsDecorationToken(i))
                 {
                     continue;
                 }
@@ -1055,7 +1078,7 @@ namespace heimdall
         };
 
         void ScanTagNames(std::string_view source, const std::vector<Token> & tokens,
-            std::vector<TagName> & out)
+            std::vector<TagName> & out, const ParseTree *tree = nullptr)
         {
             struct Word
             {
@@ -1070,7 +1093,7 @@ namespace heimdall
             {
                 const Token &token = tokens[i];
                 if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
-                    token.kind == TokenKind::BlockComment)
+                    token.kind == TokenKind::BlockComment ||(tree != nullptr && tree->IsDecorationToken(i)))
                 {
                     continue;
                 }
@@ -1089,7 +1112,7 @@ namespace heimdall
                     if (index < words.size() && is_word(words[index].text))
                     {
                         out.push_back({words[index].text, words[index].offset, intro, intro_token,
-                            words[index].token});
+                                words[index].token});
                     }
                 };
                 if (words[i].text == "using" || words[i].text == "concept")
@@ -1532,9 +1555,32 @@ namespace heimdall
             return out;
         }
 
-        // Leading `///` / `/**` documentation attached to the token at anchor_token:
-        // contiguous doc comments directly above, broken by blank lines or anything
-        // else. Ordinary `//` comments never count (noise barrier).
+        // True when the comment token starts its own line (nothing but whitespace
+        // before it): a trailing `int a; // note` belongs to `a`, not to the
+        // declaration below it.
+        bool CommentStartsLine(std::string_view source, const std::vector<Token> & tokens,
+            std::size_t index)
+        {
+            if (index == 0)
+            {
+                return true;
+            }
+
+            const Token &previous = tokens[index - 1];
+            if (previous.kind != TokenKind::Whitespace)
+            {
+                return false;
+            }
+
+            const std::string_view text = TokenText(source, previous);
+            return text.find('\n') != std::string_view::npos || index == 1;
+        }
+
+        // Documentation attached to the token at anchor_token: the contiguous
+        // comments directly above it, broken by a blank line or any code. Doxygen
+        // forms (`///`, `//!`, `/**`, `/*!`) always count; ordinary `//` and `/* */`
+        // comments count when they sit on their own line(s) right above, which is
+        // how most code documents declarations.
         std::string DocCommentFor(std::string_view source, const std::vector<Token> & tokens,
             std::size_t anchor_token)
         {
@@ -1557,6 +1603,34 @@ namespace heimdall
                     continue;
                 }
 
+                if (token.kind == TokenKind::LineComment && !IsDocLineComment(text))
+                {
+                    if (!CommentStartsLine(source, tokens, j))
+                    {
+                        break;
+                    }
+
+                    std::string_view content = text.substr(2);
+                    if (!content.empty() && content.front() == ' ')
+                    {
+                        content.remove_prefix(1);
+                    }
+
+                    while (!content.empty() && (content.back() == ' ' || content.back() == '\r'))
+                    {
+                        content.remove_suffix(1);
+                    }
+
+                    if (total + content.size() > kCap)
+                    {
+                        break;
+                    }
+
+                    lines.push_back(std::string(content));
+                    total += content.size() + 1;
+                    continue;
+                }
+
                 if (token.kind == TokenKind::LineComment && IsDocLineComment(text))
                 {
                     std::string_view content = text.substr(3);
@@ -1575,7 +1649,8 @@ namespace heimdall
                     continue;
                 }
 
-                if (token.kind == TokenKind::BlockComment && IsDocBlockComment(text))
+                if (token.kind == TokenKind::BlockComment && text.size() > 4 &&
+                    (IsDocBlockComment(text) || CommentStartsLine(source, tokens, j)))
                 {
                     const std::string block = CleanBlockComment(text);
                     if (block.empty())
@@ -1659,6 +1734,222 @@ namespace heimdall
             return tree.Nodes()[current].first_token;
         }
 
+        // Return type of the function a declared name belongs to (leading type or
+        // trailing `-> T`), or empty.
+        std::string ReturnTypeText(const ParseTree &tree, std::size_t node)
+        {
+            const std::size_t declarator = DeclaratorOf(tree, node);
+            if (declarator == NoIndex)
+            {
+                return {};
+            }
+
+            const std::size_t trailing = FindInSubtree(tree, declarator, GrammarKind::TrailingReturnType);
+            if (trailing != NoIndex)
+            {
+                std::string text = CompactWs(SliceRange(tree, tree.Nodes()[trailing].first_token,
+                    tree.Nodes()[trailing].token_count), 128);
+                if (text.starts_with("->"))
+                {
+                    text.erase(0, 2);
+                }
+
+                while (!text.empty() && text.front() == ' ')
+                {
+                    text.erase(0, 1);
+                }
+
+                if (!text.empty())
+                {
+                    return text;
+                }
+            }
+
+            std::size_t function = tree.Nodes()[declarator].parent;
+            for (std::size_t depth = 0; depth < 8 && function < tree.Nodes().size(); ++depth)
+            {
+                const GrammarKind kind = tree.Nodes()[function].kind;
+                if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::FunctionDeclaration)
+                {
+                    const std::size_t type = FindChild(tree, function, GrammarKind::TypeSpecifier);
+                    if (type == NoIndex)
+                    {
+                        return {};
+                    }
+
+                    return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
+                        tree.Nodes()[type].token_count), 128);
+                }
+
+                if (kind == GrammarKind::TranslationUnit || kind == GrammarKind::NamespaceDefinition ||
+                    kind == GrammarKind::RecordDefinition || kind == GrammarKind::CompoundStatement)
+                {
+                    return {};
+                }
+
+                function = tree.Nodes()[function].parent;
+            }
+
+            return {};
+        }
+
+        // Aliased type of `using Name = T;` / `typedef T Name;`, or empty when the
+        // name is not an alias (records, `using ns::name;`).
+        std::string AliasTargetText(const ParseTree &tree, std::size_t node)
+        {
+            std::size_t current = tree.Nodes()[node].parent;
+            for (std::size_t depth = 0; depth < 8 && current < tree.Nodes().size(); ++depth)
+            {
+                const GrammarKind kind = tree.Nodes()[current].kind;
+                if (kind == GrammarKind::UsingDeclaration)
+                {
+                    const auto &grammar = tree.Nodes()[current];
+                    const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+                        tree.Tokens().size());
+                    for (std::size_t i = grammar.first_token; i < last; ++i)
+                    {
+                        if (tree.Tokens()[i].kind == TokenKind::Punctuation && tree.Text(tree.Tokens()[i]) == "=")
+                        {
+                            std::string text = CompactWs(SliceRange(tree, static_cast<std::uint32_t>(i + 1),
+                                last -(i + 1)), 160);
+                            while (!text.empty() && (text.back() == ';' || text.back() == ' '))
+                            {
+                                text.pop_back();
+                            }
+
+                            return text;
+                        }
+                    }
+
+                    return {};
+                }
+
+                if (kind == GrammarKind::Declaration)
+                {
+                    const std::size_t type = FindChild(tree, current, GrammarKind::TypeSpecifier);
+                    if (type == NoIndex)
+                    {
+                        return {};
+                    }
+
+                    return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
+                        tree.Nodes()[type].token_count), 160);
+                }
+
+                if (kind == GrammarKind::RecordDefinition || kind == GrammarKind::CompoundStatement ||
+                    kind == GrammarKind::TranslationUnit || kind == GrammarKind::NamespaceDefinition)
+                {
+                    return {};
+                }
+
+                current = tree.Nodes()[current].parent;
+            }
+
+            return {};
+        }
+
+        // Base classes of a record node as written (`ns::Base`, args dropped).
+        std::vector<std::string> RecordBases(const ParseTree &tree, std::size_t node)
+        {
+            std::vector<std::string> bases;
+            const auto &grammar = tree.Nodes()[node];
+            const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+                tree.Tokens().size());
+            std::size_t i = grammar.first_token;
+            for (; i < last; ++i)
+            {
+                const Token &token = tree.Tokens()[i];
+                if (token.kind != TokenKind::Punctuation)
+                {
+                    continue;
+                }
+
+                const std::string_view text = tree.Text(token);
+                if (text == "{" || text == ";")
+                {
+                    return bases;
+                }
+
+                if (text == ":")
+                {
+                    break;
+                }
+            }
+
+            std::string current;
+            int angle = 0;
+            for (++i; i < last; ++i)
+            {
+                const Token &token = tree.Tokens()[i];
+                if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
+                    token.kind == TokenKind::BlockComment)
+                {
+                    continue;
+                }
+
+                const std::string_view text = tree.Text(token);
+                if (token.kind == TokenKind::Punctuation)
+                {
+                    if (text == "{")
+                    {
+                        break;
+                    }
+
+                    if (text == "<")
+                    {
+                        ++angle;
+                    }
+                    else if (text == ">")
+                    {
+                        angle = std::max(0, angle - 1);
+                    }
+                    else if (text == ">>")
+                    {
+                        angle = std::max(0, angle - 2);
+                    }
+                    else if (text == "," && angle == 0)
+                    {
+                        if (!current.empty())
+                        {
+                            bases.push_back(std::move(current));
+                            current.clear();
+                        }
+                    }
+                    else if (text == "::" && angle == 0)
+                    {
+                        current += "::";
+                    }
+
+                    continue;
+                }
+
+                if (angle > 0 || token.kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                if (text == "public" || text == "private" || text == "protected" || text == "virtual" ||
+                    text == "typename")
+                {
+                    continue;
+                }
+
+                if (!current.empty() && !current.ends_with("::"))
+                {
+                    continue; // `final`, attributes
+                }
+
+                current += text;
+            }
+
+            if (!current.empty())
+            {
+                bases.push_back(std::move(current));
+            }
+
+            return bases;
+        }
+
         CompletionItem DescribeDeclared(const ParseTree &tree, std::string_view source,
             const std::vector<Token> & tokens, std::size_t node,
             std::string_view name, CompletionKind kind)
@@ -1701,6 +1992,19 @@ namespace heimdall
             }
 
             CompletionItem item{std::string(name), kind, std::move(detail), std::move(documentation)};
+            if (kind == CompletionKind::Variable)
+            {
+                item.type_text = VariableTypeDetail(tree, node);
+            }
+            else if (kind == CompletionKind::Function)
+            {
+                item.type_text = ReturnTypeText(tree, node);
+            }
+            else if (kind == CompletionKind::Type)
+            {
+                item.type_text = AliasTargetText(tree, node);
+            }
+
             const std::size_t token = tree.Nodes()[node].first_token;
             if (token < tokens.size())
             {
@@ -1865,6 +2169,36 @@ namespace heimdall
                 detail += joined;
             }
 
+            // A record/enum scope reads as `enum class n::Mode`, not `namespace n::Mode`.
+            if (tree.Nodes()[node].kind == GrammarKind::RecordDefinition && !joined.empty())
+            {
+                std::string intro;
+                const auto &record = tree.Nodes()[node];
+                const std::size_t record_end = std::min<std::size_t>(record.first_token + record.token_count,
+                    tokens.size());
+                for (std::size_t t = record.first_token; t < record_end; ++t)
+                {
+                    if (tokens[t].kind != TokenKind::Identifier || tree.IsDecorationToken(t))
+                    {
+                        continue;
+                    }
+
+                    const std::string_view word = TokenText(source, tokens[t]);
+                    if (word != "enum" && word != "class" && word != "struct" && word != "union")
+                    {
+                        break;
+                    }
+
+                    intro += word;
+                    intro += ' ';
+                }
+
+                if (!intro.empty())
+                {
+                    detail = intro + joined;
+                }
+            }
+
             const std::string label = joined.empty() ? std::string{}: full_path.back();
             CompletionItem item{label, CompletionKind::Namespace, std::move(detail),
                 DocCommentFor(source, tokens, tree.Nodes()[node].first_token)};
@@ -1874,7 +2208,7 @@ namespace heimdall
             for (std::size_t t = grammar.first_token; t < grammar.first_token + grammar.token_count &&
                 t < tokens.size(); ++t)
             {
-                if (tokens[t].kind != TokenKind::Identifier)
+                if (tokens[t].kind != TokenKind::Identifier || tree.IsDecorationToken(t))
                 {
                     continue;
                 }
@@ -2013,6 +2347,8 @@ namespace heimdall
 
     } // namespace
 
+    static ScopeIndex BuildScopeIndex(const ParseTree &tree, bool for_header);
+
     ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOptions &options)
     {
         const ParseTree tree = ParseTree::Parse(source, options);
@@ -2020,6 +2356,13 @@ namespace heimdall
     }
 
     ScopeIndex CompletionEngine::IndexScopes(const ParseTree &tree)
+    {
+        return BuildScopeIndex(tree, true);
+    }
+
+    // `for_header` drops `_`-leading variables (implementation detail of a
+    // header); the buffer's own index keeps them so `obj.` offers `_field`.
+    static ScopeIndex BuildScopeIndex(const ParseTree &tree, bool for_header)
     {
         const std::string_view source = tree.Source();
         const std::vector<Token> & tokens = tree.Tokens();
@@ -2089,7 +2432,7 @@ namespace heimdall
             }
 
             const CompletionKind kind = ClassifyDeclaredName(tree, n);
-            if (kind == CompletionKind::Variable && name.front() == '_')
+            if (for_header && kind == CompletionKind::Variable && name.front() == '_')
             {
                 continue;
             }
@@ -2098,6 +2441,117 @@ namespace heimdall
                 : ScopePath(tree, scope),
                 CompletionKind::Type);
             entry.members.push_back(DescribeDeclared(tree, source, tokens, n, name, kind));
+        }
+
+        // `using Name = Type;` carries no DeclaredName node: index the alias as a
+        // Type member that remembers its target for member-access resolution.
+        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        {
+            if (tree.Nodes()[n].kind != GrammarKind::UsingDeclaration)
+            {
+                continue;
+            }
+
+            const auto &grammar = tree.Nodes()[n];
+            const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+                tokens.size());
+            std::size_t name_token = tokens.size();
+            std::size_t equals = tokens.size();
+            for (std::size_t k = grammar.first_token; k < last; ++k)
+            {
+                if (tokens[k].kind == TokenKind::Whitespace || tokens[k].kind == TokenKind::LineComment ||
+                    tokens[k].kind == TokenKind::BlockComment)
+                {
+                    continue;
+                }
+
+                const std::string_view word = tree.Text(tokens[k]);
+                if (word == "using")
+                {
+                    continue;
+                }
+
+                if (tokens[k].kind == TokenKind::Identifier && name_token == tokens.size())
+                {
+                    name_token = k;
+                    continue;
+                }
+
+                if (name_token != tokens.size() && word == "=")
+                {
+                    equals = k;
+                }
+
+                break;
+            }
+
+            if (name_token == tokens.size() || equals == tokens.size())
+            {
+                continue;
+            }
+
+            const std::size_t scope = MemberScope(tree, n);
+            if (scope >= tree.Nodes().size())
+            {
+                continue;
+            }
+
+            const GrammarKind scope_kind = tree.Nodes()[scope].kind;
+            if (scope_kind != GrammarKind::NamespaceDefinition && scope_kind != GrammarKind::RecordDefinition &&
+                scope != ParseTree::RootNode)
+            {
+                continue;
+            }
+
+            const std::string_view name = tree.Text(tokens[name_token]);
+            if (IsKeyword(name) ||(for_header && name.front() == '_'))
+            {
+                continue;
+            }
+
+            std::string target = CompactWs(SliceRange(tree, static_cast<std::uint32_t>(equals + 1),
+                last -(equals + 1)), 160);
+            while (!target.empty() && (target.back() == ';' || target.back() == ' '))
+            {
+                target.pop_back();
+            }
+
+            CompletionItem item{std::string(name), CompletionKind::Type, KindDetail(CompletionKind::Type),
+                DocCommentFor(source, tokens, grammar.first_token)};
+            item.has_location = true;
+            item.offset = tokens[name_token].offset;
+            item.is_definition = true;
+            item.type_text = std::move(target);
+            IndexedScope &entry = entry_for(scope < scope_paths.size() ? scope_paths[scope]
+                : ScopePath(tree, scope),
+                CompletionKind::Type);
+            entry.members.push_back(std::move(item));
+        }
+
+        // Base classes, attached to the record's own entry (created on demand:
+        // a record that only inherits has no members of its own).
+        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        {
+            if (tree.Nodes()[n].kind != GrammarKind::RecordDefinition || n >= scope_paths.size() ||
+                scope_paths[n].empty() || scope_paths[n].back().empty())
+            {
+                continue;
+            }
+
+            auto bases = RecordBases(tree, n);
+            if (bases.empty())
+            {
+                continue;
+            }
+
+            IndexedScope &entry = entry_for(scope_paths[n], CompletionKind::Type);
+            for (auto & base: bases)
+            {
+                if (std::find(entry.bases.begin(), entry.bases.end(), base) == entry.bases.end())
+                {
+                    entry.bases.push_back(std::move(base));
+                }
+            }
         }
 
         // Nested scope names owned by each entry's scope.
@@ -2139,7 +2593,7 @@ namespace heimdall
 
         // Tag names bucketed by innermost enclosing named scope.
         std::vector<TagName> tags;
-        ScanTagNames(source, tokens, tags);
+        ScanTagNames(source, tokens, tags, &tree);
         for (const auto & tag: tags)
         {
             if (IsKeyword(tag.text) || tag.text.front() == '_')
@@ -2216,6 +2670,11 @@ namespace heimdall
                     if (merged.back().documentation.empty() && !member.documentation.empty())
                     {
                         merged.back().documentation = std::move(member.documentation);
+                    }
+
+                    if (merged.back().type_text.empty() && !member.type_text.empty())
+                    {
+                        merged.back().type_text = std::move(member.type_text);
                     }
 
                     if (merged.back().detail == KindDetail(merged.back().kind) &&
@@ -2718,6 +3177,1094 @@ namespace heimdall
             CollectChildScopes(tree, source, tokens, scope_paths, qualifier.path, best, prefix);
         }
 
+        // --- Member access (`obj.` / `ptr->`) -----------------------------------
+        // The receiver is parsed backwards from the operator into a chain of
+        // segments (`a.b().c[0]->`), each resolved to a record path through the
+        // variable/field/function declarations the tree and header index know.
+        // Anything the engine cannot type (dependent types, lambdas, operators)
+        // yields no items rather than a guess.
+
+        struct TypeName
+        {
+            std::vector<std::string> path;
+            std::vector<std::string> args; // top-level template arguments, as written
+            bool ok = false;
+        };
+
+        bool IsTypeWord(std::string_view word)
+        {
+            static constexpr std::string_view words[] = {"const", "volatile", "static", "constexpr",
+                "consteval", "constinit", "inline", "extern", "mutable", "register", "thread_local",
+                "typename", "struct", "class", "union", "enum", "virtual", "friend", "explicit",
+                "typedef", "signed", "unsigned"};
+            return std::find(std::begin(words), std::end(words), word) != std::end(words);
+        }
+
+        bool IsTrivia(TokenKind kind)
+        {
+            return kind == TokenKind::Whitespace || kind == TokenKind::LineComment ||
+                kind == TokenKind::BlockComment;
+        }
+
+        // Splits the template argument list that opens at `open` (a `<` token) into
+        // top-level arguments. Returns the index of the closing token (or tokens.size()).
+        std::size_t SplitTemplateArgs(std::string_view text, const std::vector<Token> & toks,
+            std::size_t open, std::vector<std::string> & args)
+        {
+            int angle = 0;
+            int nest = 0;
+            std::size_t arg_start = toks[open].offset + toks[open].length;
+            for (std::size_t k = open; k < toks.size(); ++k)
+            {
+                if (toks[k].kind != TokenKind::Punctuation)
+                {
+                    continue;
+                }
+
+                const std::string_view p = text.substr(toks[k].offset, toks[k].length);
+                if (p == "(" || p == "[" || p == "{")
+                {
+                    ++nest;
+                }
+                else if (p == ")" || p == "]" || p == "}")
+                {
+                    --nest;
+                }
+                else if (nest == 0 && p == "<")
+                {
+                    ++angle;
+                }
+                else if (nest == 0 && (p == ">" || p == ">>"))
+                {
+                    angle -= p == ">" ? 1 : 2;
+                    if (angle <= 0)
+                    {
+                        const std::size_t end = toks[k].offset;
+                        if (end > arg_start)
+                        {
+                            args.push_back(CompactWs(std::string(text.substr(arg_start, end - arg_start)), 160));
+                        }
+
+                        return k;
+                    }
+                }
+                else if (nest == 0 && angle == 1 && p == ",")
+                {
+                    args.push_back(CompactWs(std::string(text.substr(arg_start, toks[k].offset - arg_start)),
+                        160));
+                    arg_start = toks[k].offset + toks[k].length;
+                }
+            }
+
+            return toks.size();
+        }
+
+        // `const std::vector<int> &` -> {std, vector}, args {int}.
+        TypeName ParseTypeName(std::string_view text)
+        {
+            TypeName result;
+            const std::vector<Token> toks = Lexer(text).Lex();
+            auto sig =[&](std::size_t k)
+            {
+                while (k < toks.size() && IsTrivia(toks[k].kind))
+                {
+                    ++k;
+                }
+
+                return k;
+            };
+            auto txt =[&](std::size_t k)
+            {
+                return text.substr(toks[k].offset, toks[k].length);
+            };
+            std::size_t i = sig(0);
+            while (i < toks.size() && toks[i].kind == TokenKind::Identifier && IsTypeWord(txt(i)))
+            {
+                i = sig(i + 1);
+            }
+
+            if (i < toks.size() && toks[i].kind == TokenKind::Punctuation && txt(i) == "::")
+            {
+                i = sig(i + 1);
+            }
+
+            while (i < toks.size() && toks[i].kind == TokenKind::Identifier)
+            {
+                result.path.emplace_back(txt(i));
+                result.args.clear();
+                i = sig(i + 1);
+                if (i < toks.size() && toks[i].kind == TokenKind::Punctuation && txt(i) == "<")
+                {
+                    const std::size_t close = SplitTemplateArgs(text, toks, i, result.args);
+                    if (close >= toks.size())
+                    {
+                        return {};
+                    }
+
+                    i = sig(close + 1);
+                }
+
+                if (i < toks.size() && toks[i].kind == TokenKind::Punctuation && txt(i) == "::")
+                {
+                    i = sig(i + 1);
+                    continue;
+                }
+
+                break;
+            }
+
+            result.ok =!result.path.empty();
+            return result;
+        }
+
+        std::string PathKey(const std::vector<std::string> & path)
+        {
+            std::string key;
+            for (const auto & element: path)
+            {
+                key += element;
+                key += '\0';
+            }
+
+            return key;
+        }
+
+        std::vector<std::string> Join(const std::vector<std::string> & prefix,
+            const std::vector<std::string> & rest)
+        {
+            std::vector<std::string> out = prefix;
+            out.insert(out.end(), rest.begin(), rest.end());
+            return out;
+        }
+
+        // Wrappers whose `->` reaches the first template argument.
+        bool IsPointerLike(std::string_view name)
+        {
+            static constexpr std::string_view names[] = {"unique_ptr", "shared_ptr", "optional",
+                "auto_ptr", "scoped_ptr", "intrusive_ptr", "weak_ptr_lock", "reference_wrapper"};
+            return std::find(std::begin(names), std::end(names), name) != std::end(names);
+        }
+
+        // Containers whose `[]` yields the first / second template argument.
+        bool SubscriptYieldsSecond(std::string_view name)
+        {
+            return name == "map" || name == "unordered_map" || name == "flat_map";
+        }
+
+        struct ChainSegment
+        {
+            std::vector<std::string> qualifier;
+            std::string name;
+            std::vector<std::string> targs;
+            std::string post; // '(' call/construct, '[' subscript, in source order
+        };
+
+        struct Chain
+        {
+            std::vector<ChainSegment> segments;
+            std::vector<std::string> ops; // ops[i] follows segments[i]
+            bool ok = false;
+            bool new_expression = false;
+            std::size_t head_token = 0;
+        };
+
+        struct Resolved
+        {
+            std::vector<std::string> path;
+            std::vector<std::string> args;
+            bool ok = false;
+        };
+
+        class MemberResolver
+        {
+        public:
+            MemberResolver(const ParseTree &tree, const ScopeIndex *external, std::size_t offset)
+            : m_tree(tree), m_source(tree.Source()), m_tokens(tree.Tokens()), m_offset(offset)
+            {
+                m_local = BuildScopeIndex(tree, false);
+                for (const auto & scope: m_local)
+                {
+                    m_by_path[PathKey(scope.path)].push_back(&scope);
+                }
+
+                if (external != nullptr)
+                {
+                    for (const auto & scope: *external)
+                    {
+                        m_by_path[PathKey(scope.path)].push_back(&scope);
+                    }
+                }
+
+                ComputeCursorScopes();
+                for (const auto & directive: Navigation::UsingDirectives(tree))
+                {
+                    if (directive.active_begin <= offset && offset <= directive.active_end)
+                    {
+                        m_using.push_back(directive.target);
+                    }
+                }
+            }
+
+            // Parses the receiver of the access operator at token `op`.
+            Chain ParseReceiver(std::size_t op) const
+            {
+                Chain chain;
+                std::string op_text(TokenText(m_source, m_tokens[op]));
+                std::vector<ChainSegment> reversed;
+                std::vector<std::string> ops_reversed{op_text};
+                std::size_t pos = PreviousSignificant(m_tokens, op, m_source);
+                while (true)
+                {
+                    ChainSegment segment;
+                    std::string post_reversed;
+                    while (pos < m_tokens.size() && m_tokens[pos].kind == TokenKind::Punctuation)
+                    {
+                        const std::string_view p = TokenText(m_source, m_tokens[pos]);
+                        if (p != ")" && p != "]" && p != "}")
+                        {
+                            break;
+                        }
+
+                        const std::size_t open = MatchBackward(pos);
+                        if (open >= m_tokens.size())
+                        {
+                            return chain;
+                        }
+
+                        post_reversed += p == "]" ? '[' : '(';
+                        pos = PreviousSignificant(m_tokens, open, m_source);
+                        // `f<T>(...)`: keep the template arguments.
+                        if (post_reversed.back() == '(' && pos < m_tokens.size() &&
+                            m_tokens[pos].kind == TokenKind::Punctuation &&
+                            (TokenText(m_source, m_tokens[pos]) == ">" ||
+                            TokenText(m_source, m_tokens[pos]) == ">>"))
+                        {
+                            const std::size_t lt = MatchAngleBackward(pos);
+                            if (lt >= m_tokens.size())
+                            {
+                                return chain;
+                            }
+
+                            SplitTemplateArgsInSource(lt, segment.targs);
+                            pos = PreviousSignificant(m_tokens, lt, m_source);
+                        }
+                    }
+
+                    if (pos >= m_tokens.size() || m_tokens[pos].kind != TokenKind::Identifier)
+                    {
+                        return chain;
+                    }
+
+                    segment.name = std::string(TokenText(m_source, m_tokens[pos]));
+                    segment.post.assign(post_reversed.rbegin(), post_reversed.rend());
+                    chain.head_token = pos;
+                    std::size_t before = PreviousSignificant(m_tokens, pos, m_source);
+                    while (before < m_tokens.size() && IsPunct(before, "::"))
+                    {
+                        const std::size_t name = PreviousSignificant(m_tokens, before, m_source);
+                        if (name >= m_tokens.size() || m_tokens[name].kind != TokenKind::Identifier)
+                        {
+                            break; // leading `::`
+                        }
+
+                        segment.qualifier.insert(segment.qualifier.begin(),
+                            std::string(TokenText(m_source, m_tokens[name])));
+                        chain.head_token = name;
+                        before = PreviousSignificant(m_tokens, name, m_source);
+                    }
+
+                    reversed.push_back(std::move(segment));
+                    if (before < m_tokens.size() && (IsPunct(before, ".") || IsPunct(before, "->")))
+                    {
+                        ops_reversed.push_back(std::string(TokenText(m_source, m_tokens[before])));
+                        pos = PreviousSignificant(m_tokens, before, m_source);
+                        continue;
+                    }
+
+                    if (before < m_tokens.size() && m_tokens[before].kind == TokenKind::Identifier &&
+                        TokenText(m_source, m_tokens[before]) == "new")
+                    {
+                        chain.new_expression = true;
+                        chain.head_token = before;
+                    }
+
+                    break;
+                }
+
+                chain.segments.assign(reversed.rbegin(), reversed.rend());
+                chain.ops.assign(ops_reversed.rbegin(), ops_reversed.rend());
+                chain.ok = true;
+                return chain;
+            }
+
+            Resolved ResolveChain(const Chain &chain, int depth = 0) const
+            {
+                Resolved current;
+                if (!chain.ok || chain.segments.empty() || depth > 6)
+                {
+                    return current;
+                }
+
+                for (std::size_t i = 0; i < chain.segments.size(); ++i)
+                {
+                    const ChainSegment &segment = chain.segments[i];
+                    Resolved next = i == 0 ? ResolveHead(segment, chain.new_expression, depth)
+                    : ResolveMember(current, segment, depth);
+                    if (!next.ok)
+                    {
+                        return {};
+                    }
+
+                    current = std::move(next);
+                    current = Dereference(current, chain.ops[i]);
+                    if (!current.ok)
+                    {
+                        return {};
+                    }
+                }
+
+                return current;
+            }
+
+            void CollectMembers(const std::vector<std::string> & path, std::string_view prefix,
+                std::unordered_map<std::string, CompletionItem> & best) const
+            {
+                std::unordered_set<std::string> visited;
+                CollectInto(path, prefix, best, visited, 0);
+            }
+
+            // First token of `a.b.c` style chains, for `auto` deduction.
+            const std::vector<std::vector<std::string>> & EnclosingRecords() const
+            {
+                return m_records;
+            }
+
+        private:
+            bool IsPunct(std::size_t token, std::string_view text) const
+            {
+                return m_tokens[token].kind == TokenKind::Punctuation &&
+                    TokenText(m_source, m_tokens[token]) == text;
+            }
+
+            std::size_t MatchBackward(std::size_t close) const
+            {
+                int depth = 0;
+                for (std::size_t k = close + 1; k > 0; --k)
+                {
+                    const std::size_t i = k - 1;
+                    if (m_tokens[i].kind != TokenKind::Punctuation)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view p = TokenText(m_source, m_tokens[i]);
+                    if (p == ")" || p == "]" || p == "}")
+                    {
+                        ++depth;
+                    }
+                    else if (p == "(" || p == "[" || p == "{")
+                    {
+                        if (--depth == 0)
+                        {
+                            return i;
+                        }
+                    }
+                }
+
+                return m_tokens.size();
+            }
+
+            std::size_t MatchAngleBackward(std::size_t close) const
+            {
+                int depth = 0;
+                for (std::size_t k = close + 1; k > 0; --k)
+                {
+                    const std::size_t i = k - 1;
+                    if (m_tokens[i].kind != TokenKind::Punctuation)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view p = TokenText(m_source, m_tokens[i]);
+                    if (p == ">")
+                    {
+                        ++depth;
+                    }
+                    else if (p == ">>")
+                    {
+                        depth += 2;
+                    }
+                    else if (p == "<")
+                    {
+                        if (--depth <= 0)
+                        {
+                            return i;
+                        }
+                    }
+                    else if (p == ";" || p == "{" || p == "}")
+                    {
+                        break;
+                    }
+                }
+
+                return m_tokens.size();
+            }
+
+            void SplitTemplateArgsInSource(std::size_t open, std::vector<std::string> & args) const
+            {
+                SplitTemplateArgs(m_source, m_tokens, open, args);
+            }
+
+            void ComputeCursorScopes()
+            {
+                std::size_t best_namespace = NoIndex;
+                std::size_t best_span = static_cast<std::size_t>(-1);
+                std::vector<std::pair<std::size_t, std::size_t>> records; // (span, node)
+                std::size_t best_function = NoIndex;
+                std::size_t function_span = static_cast<std::size_t>(-1);
+                for (std::size_t n = 1; n < m_tree.Nodes().size(); ++n)
+                {
+                    const GrammarKind kind = m_tree.Nodes()[n].kind;
+                    if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition &&
+                        kind != GrammarKind::FunctionDefinition)
+                    {
+                        continue;
+                    }
+
+                    const auto[start, end] = NodeRange(m_tree, n);
+                    if (!(start <= m_offset && m_offset <= end) || end <= start)
+                    {
+                        continue;
+                    }
+
+                    const std::size_t span = end - start;
+                    if (kind == GrammarKind::FunctionDefinition)
+                    {
+                        if (span < function_span)
+                        {
+                            function_span = span;
+                            best_function = n;
+                        }
+                    }
+                    else if (kind == GrammarKind::NamespaceDefinition)
+                    {
+                        if (span < best_span)
+                        {
+                            best_span = span;
+                            best_namespace = n;
+                        }
+                    }
+                    else
+                    {
+                        records.emplace_back(span, n);
+                    }
+                }
+
+                std::sort(records.begin(), records.end());
+                // Out-of-line member: `void A::f() { ... }` makes A the implicit class.
+                if (best_function != NoIndex)
+                {
+                    const std::size_t declarator = FindChild(m_tree, best_function, GrammarKind::Declarator);
+                    const std::size_t nested = declarator == NoIndex
+                    ? NoIndex
+                    : FindChild(m_tree, declarator, GrammarKind::NestedNameSpecifier);
+                    if (nested != NoIndex)
+                    {
+                        std::vector<std::string> owner;
+                        const auto &grammar = m_tree.Nodes()[nested];
+                        for (std::uint32_t k = 0; k < grammar.token_count; ++k)
+                        {
+                            const Token &token = m_tree.Tokens()[grammar.first_token + k];
+                            if (token.kind == TokenKind::Identifier)
+                            {
+                                owner.emplace_back(m_tree.Text(token));
+                            }
+                        }
+
+                        if (!owner.empty())
+                        {
+                            std::vector<std::string> prefix;
+                            if (best_namespace != NoIndex)
+                            {
+                                prefix = ScopePath(m_tree, best_namespace);
+                            }
+
+                            m_records.push_back(Join(prefix, owner));
+                        }
+                    }
+                }
+
+                for (const auto &[span, node]: records)
+                {
+                    (void) span;
+                    m_records.push_back(ScopePath(m_tree, node));
+                }
+
+                if (!records.empty())
+                {
+                    m_hint = ScopePath(m_tree, records.front().second);
+                }
+                else if (!m_records.empty())
+                {
+                    m_hint = m_records.front();
+                }
+                else if (best_namespace != NoIndex)
+                {
+                    m_hint = ScopePath(m_tree, best_namespace);
+                }
+            }
+
+            const std::vector<const IndexedScope * > & ScopesAt(const std::vector<std::string> & path) const
+            {
+                static const std::vector<const IndexedScope * > none;
+                const auto found = m_by_path.find(PathKey(path));
+                return found == m_by_path.end() ? none : found->second;
+            }
+
+            // Prefixes tried when resolving a name written inside `hint`: the hint
+            // and each of its ancestors, then the using-directive namespaces.
+            std::vector<std::vector<std::string>> Prefixes(const std::vector<std::string> & hint) const
+            {
+                std::vector<std::vector<std::string>> out;
+                for (std::size_t k = hint.size() + 1; k > 0; --k)
+                {
+                    out.emplace_back(hint.begin(), hint.begin() + static_cast<std::ptrdiff_t>(k - 1));
+                }
+
+                for (const auto & target: m_using)
+                {
+                    out.push_back(target);
+                }
+
+                return out;
+            }
+
+            struct Found
+            {
+                const CompletionItem *item = nullptr;
+                std::vector<std::string> owner; // scope that declares it
+            };
+
+            Found FindDeep(const std::vector<std::string> & path, std::string_view label,
+                CompletionKind kind, std::unordered_set<std::string> & visited, int depth) const
+            {
+                if (depth > 16 ||!visited.insert(PathKey(path)).second)
+                {
+                    return {};
+                }
+
+                for (const IndexedScope * scope: ScopesAt(path))
+                {
+                    for (const auto & member: scope->members)
+                    {
+                        if (member.label == label && member.kind == kind)
+                        {
+                            return {&member, path};
+                        }
+                    }
+                }
+
+                for (const IndexedScope * scope: ScopesAt(path))
+                {
+                    for (const auto & base: scope->bases)
+                    {
+                        const Resolved resolved = ResolveType(ParseTypeName(base), Parent(path), 0);
+                        if (!resolved.ok)
+                        {
+                            continue;
+                        }
+
+                        const Found found = FindDeep(resolved.path, label, kind, visited, depth + 1);
+                        if (found.item != nullptr)
+                        {
+                            return found;
+                        }
+                    }
+                }
+
+                return {};
+            }
+
+            static std::vector<std::string> Parent(const std::vector<std::string> & path)
+            {
+                return path.empty() ? path : std::vector<std::string>(path.begin(), path.end() - 1);
+            }
+
+            void CollectInto(const std::vector<std::string> & path, std::string_view prefix,
+                std::unordered_map<std::string, CompletionItem> & best,
+                std::unordered_set<std::string> & visited, int depth) const
+            {
+                if (depth > 16 ||!visited.insert(PathKey(path)).second)
+                {
+                    return;
+                }
+
+                for (const IndexedScope * scope: ScopesAt(path))
+                {
+                    for (const auto & member: scope->members)
+                    {
+                        if (member.kind != CompletionKind::Function && member.kind != CompletionKind::Variable)
+                        {
+                            continue;
+                        }
+
+                        if (!path.empty() && member.label == path.back())
+                        {
+                            continue; // constructor
+                        }
+
+                        if (!MatchesPrefix(member.label, prefix))
+                        {
+                            continue;
+                        }
+
+                        InsertItem(best, member);
+                    }
+                }
+
+                for (const IndexedScope * scope: ScopesAt(path))
+                {
+                    for (const auto & base: scope->bases)
+                    {
+                        const Resolved resolved = ResolveType(ParseTypeName(base), Parent(path), 0);
+                        if (resolved.ok)
+                        {
+                            CollectInto(resolved.path, prefix, best, visited, depth + 1);
+                        }
+                    }
+                }
+            }
+
+            // Type name -> canonical record path, following alias chains.
+            Resolved ResolveType(const TypeName &type, const std::vector<std::string> & hint, int depth) const
+            {
+                Resolved out;
+                if (!type.ok || depth > 8)
+                {
+                    return out;
+                }
+
+                for (const auto & prefix: Prefixes(hint))
+                {
+                    const std::vector<std::string> full = Join(prefix, type.path);
+                    // A scope with members or bases is a record/namespace we can list.
+                    if (!ScopesAt(full).empty())
+                    {
+                        out.path = full;
+                        out.args = type.args;
+                        out.ok = true;
+                        return out;
+                    }
+
+                    Found alias = FindAlias(Parent(full), full.back());
+                    if (alias.item != nullptr)
+                    {
+                        const TypeName target = ParseTypeName(alias.item->type_text);
+                        Resolved via = ResolveType(target, alias.owner, depth + 1);
+                        if (via.ok)
+                        {
+                            if (via.args.empty())
+                            {
+                                via.args = type.args;
+                            }
+
+                            return via;
+                        }
+                    }
+                }
+
+                return out;
+            }
+
+            Found FindAlias(const std::vector<std::string> & scope, std::string_view name) const
+            {
+                for (const IndexedScope * entry: ScopesAt(scope))
+                {
+                    for (const auto & member: entry->members)
+                    {
+                        if (member.label == name && member.kind == CompletionKind::Type &&
+                            !member.type_text.empty())
+                        {
+                            return {&member, scope};
+                        }
+                    }
+                }
+
+                return {};
+            }
+
+            Resolved FromText(std::string_view text, const std::vector<std::string> & hint, int depth) const
+            {
+                return ResolveType(ParseTypeName(text), hint, depth);
+            }
+
+            Resolved Dereference(Resolved value, const std::string & op) const
+            {
+                if (op != "->" || value.path.empty() ||!IsPointerLike(value.path.back()) || value.args.empty())
+                {
+                    return value;
+                }
+
+                return FromText(value.args.front(), m_hint, 0);
+            }
+
+            // Declared type of the variable `name` as visible at the cursor.
+            Resolved ResolveVariable(const std::string & name, int depth) const
+            {
+                // 1. Locals and parameters: the closest preceding visible declaration.
+                std::size_t best = NoIndex;
+                std::uint32_t best_offset = 0;
+                for (std::size_t n = 0; n < m_tree.Nodes().size(); ++n)
+                {
+                    if (m_tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+                    {
+                        continue;
+                    }
+
+                    const std::size_t token_index = m_tree.Nodes()[n].first_token;
+                    if (token_index >= m_tokens.size() || m_tree.Text(m_tokens[token_index]) != name)
+                    {
+                        continue;
+                    }
+
+                    const LocalInfo local = AnalyzeLocal(m_tree, n);
+                    if (!local.is_local || local.owner == NoIndex)
+                    {
+                        continue;
+                    }
+
+                    const auto[block_start, block_end] = NodeRange(m_tree, local.boundary);
+                    if (m_offset < block_start || m_offset > block_end)
+                    {
+                        continue;
+                    }
+
+                    const Token &name_token = m_tokens[token_index];
+                    if (name_token.offset + name_token.length > m_offset)
+                    {
+                        continue;
+                    }
+
+                    if (best == NoIndex || name_token.offset >= best_offset)
+                    {
+                        best = n;
+                        best_offset = name_token.offset;
+                    }
+                }
+
+                if (best != NoIndex)
+                {
+                    return ResolveLocal(best, depth);
+                }
+
+                // 2. Fields of the enclosing classes (including inherited ones).
+                for (const auto & record: m_records)
+                {
+                    std::unordered_set<std::string> visited;
+                    const Found found = FindDeep(record, name, CompletionKind::Variable, visited, 0);
+                    if (found.item != nullptr)
+                    {
+                        return FromText(found.item->type_text, found.owner, 0);
+                    }
+                }
+
+                // 3. Namespace-level variables (own, enclosing, global, `using namespace`).
+                for (const auto & prefix: Prefixes(m_hint))
+                {
+                    std::unordered_set<std::string> visited;
+                    const Found found = FindDeep(prefix, name, CompletionKind::Variable, visited, 0);
+                    if (found.item != nullptr)
+                    {
+                        return FromText(found.item->type_text, found.owner, 0);
+                    }
+                }
+
+                return {};
+            }
+
+            Resolved ResolveLocal(std::size_t node, int depth) const
+            {
+                const std::string text = VariableTypeDetail(m_tree, node);
+                const TypeName type = ParseTypeName(text);
+                if (type.ok && (type.path.size() != 1 || type.path.front() != "auto"))
+                {
+                    return ResolveType(type, m_hint, 0);
+                }
+
+                // `auto x = <chain>;` / `auto x{<chain>}`: type the initializer.
+                std::size_t t = m_tree.Nodes()[node].first_token + 1;
+                while (t < m_tokens.size() && (IsTrivia(m_tokens[t].kind)))
+                {
+                    ++t;
+                }
+
+                if (t >= m_tokens.size() || m_tokens[t].kind != TokenKind::Punctuation ||
+                    (TokenText(m_source, m_tokens[t]) != "=" && TokenText(m_source, m_tokens[t]) != "{"))
+                {
+                    return {};
+                }
+
+                // Find the end of the initializer, then parse the chain that ends there.
+                std::size_t end = t + 1;
+                int nest = 0;
+                for (; end < m_tokens.size(); ++end)
+                {
+                    if (m_tokens[end].kind != TokenKind::Punctuation)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view p = TokenText(m_source, m_tokens[end]);
+                    if (p == "(" || p == "[" || p == "{")
+                    {
+                        ++nest;
+                    }
+                    else if (p == ")" || p == "]" || p == "}")
+                    {
+                        if (--nest < 0)
+                        {
+                            break;
+                        }
+                    }
+                    else if ((p == ";" || p == ",") && nest <= 0)
+                    {
+                        break;
+                    }
+                }
+
+                if (end >= m_tokens.size() || end <= t + 1)
+                {
+                    return {};
+                }
+
+                Chain chain = ParseChainEndingAt(end, t);
+                if (!chain.ok)
+                {
+                    return {};
+                }
+
+                return ResolveChain(chain, depth + 1);
+            }
+
+            // Parses the chain whose last token precedes `end`; it must start right
+            // after `floor` (the `=`), or after `new`.
+            Chain ParseChainEndingAt(std::size_t end, std::size_t floor) const
+            {
+                // Reuse the receiver parser: it reads backwards from a pseudo
+                // operator token, so point it at the token after the initializer.
+                Chain chain = ParseReceiverBefore(end);
+                if (!chain.ok)
+                {
+                    return chain;
+                }
+
+                const std::size_t before = PreviousSignificant(m_tokens, chain.head_token, m_source);
+                if (before != floor && !chain.new_expression)
+                {
+                    chain.ok = false;
+                }
+
+                return chain;
+            }
+
+            Chain ParseReceiverBefore(std::size_t end) const
+            {
+                Chain chain = ParseReceiver(end);
+                // ParseReceiver stores the operator text as the trailing op; an
+                // initializer has none, so it is harmless there.
+                return chain;
+            }
+
+            Resolved ResolveHead(const ChainSegment &segment, bool new_expression, int depth) const
+            {
+                if (segment.name == "this" && segment.qualifier.empty() && segment.post.empty())
+                {
+                    if (m_records.empty())
+                    {
+                        return {};
+                    }
+
+                    Resolved self;
+                    self.path = m_records.front();
+                    self.ok = true;
+                    return self;
+                }
+
+                const bool call =!segment.post.empty() && segment.post.front() == '(';
+                const std::string_view rest = call ? std::string_view(segment.post).substr(1)
+                : std::string_view(segment.post);
+                Resolved value;
+                if (segment.qualifier.empty() && !call)
+                {
+                    value = ResolveVariable(segment.name, depth);
+                }
+                else if (segment.qualifier.empty() || call)
+                {
+                    value = ResolveCallOrConstruct(segment, new_expression);
+                }
+
+                if (!value.ok && !segment.qualifier.empty() && !call)
+                {
+                    value = ResolveQualifiedVariable(segment);
+                }
+
+                return ApplyPostfix(value, rest);
+            }
+
+            Resolved ResolveQualifiedVariable(const ChainSegment &segment) const
+            {
+                for (const auto & prefix: Prefixes(m_hint))
+                {
+                    const auto scope = Join(prefix, segment.qualifier);
+                    std::unordered_set<std::string> visited;
+                    const Found found = FindDeep(scope, segment.name, CompletionKind::Variable, visited, 0);
+                    if (found.item != nullptr)
+                    {
+                        return FromText(found.item->type_text, found.owner, 0);
+                    }
+                }
+
+                return {};
+            }
+
+            Resolved ResolveCallOrConstruct(const ChainSegment &segment, bool new_expression) const
+            {
+                (void) new_expression;
+                // `std::make_unique<T>(...)` and friends.
+                if (segment.name == "make_unique" || segment.name == "make_shared")
+                {
+                    if (segment.targs.empty())
+                    {
+                        return {};
+                    }
+
+                    Resolved pointer;
+                    pointer.path = {"std", segment.name == "make_unique" ? "unique_ptr" : "shared_ptr"};
+                    pointer.args = {segment.targs.front()};
+                    pointer.ok = true;
+                    return pointer;
+                }
+
+                // Construction: `Type(...)`, `ns::Type{...}`.
+                TypeName type;
+                type.path = Join(segment.qualifier, {segment.name});
+                type.args = segment.targs;
+                type.ok = true;
+                Resolved constructed = ResolveType(type, m_hint, 0);
+                if (constructed.ok)
+                {
+                    return constructed;
+                }
+
+                // Free function or member of an enclosing class.
+                std::vector<std::vector<std::string>> scopes;
+                for (const auto & record: m_records)
+                {
+                    scopes.push_back(record);
+                }
+
+                for (const auto & prefix: Prefixes(m_hint))
+                {
+                    scopes.push_back(Join(prefix, segment.qualifier));
+                }
+
+                for (const auto & scope: scopes)
+                {
+                    std::unordered_set<std::string> visited;
+                    const Found found = FindDeep(scope, segment.name, CompletionKind::Function, visited, 0);
+                    if (found.item != nullptr && !found.item->type_text.empty())
+                    {
+                        return FromText(found.item->type_text, found.owner, 0);
+                    }
+                }
+
+                return {};
+            }
+
+            Resolved ResolveMember(const Resolved &owner, const ChainSegment &segment, int depth) const
+            {
+                (void) depth;
+                const bool call =!segment.post.empty() && segment.post.front() == '(';
+                const std::string_view rest = call ? std::string_view(segment.post).substr(1)
+                : std::string_view(segment.post);
+                std::unordered_set<std::string> visited;
+                const Found found = FindDeep(owner.path, segment.name,
+                    call ? CompletionKind::Function : CompletionKind::Variable, visited, 0);
+                if (found.item == nullptr || found.item->type_text.empty())
+                {
+                    return {};
+                }
+
+                return ApplyPostfix(FromText(found.item->type_text, found.owner, 0), rest);
+            }
+
+            // `[]` on a typed value: element of arrays/pointers (same type) and of
+            // the standard containers (first or second template argument).
+            Resolved ApplyPostfix(Resolved value, std::string_view post) const
+            {
+                for (const char marker: post)
+                {
+                    if (!value.ok || marker != '[')
+                    {
+                        return {};
+                    }
+
+                    if (value.args.empty())
+                    {
+                        continue; // raw array / pointer
+                    }
+
+                    const std::size_t which =!value.path.empty() && SubscriptYieldsSecond(value.path.back()) ? 1 : 0;
+                    if (which >= value.args.size())
+                    {
+                        return {};
+                    }
+
+                    value = FromText(value.args[which], m_hint, 0);
+                }
+
+                return value;
+            }
+
+            const ParseTree &m_tree;
+            std::string_view m_source;
+            const std::vector<Token> & m_tokens;
+            std::size_t m_offset;
+            ScopeIndex m_local;
+            std::unordered_map<std::string, std::vector<const IndexedScope * >> m_by_path;
+            std::vector<std::vector<std::string>> m_using;
+            std::vector<std::vector<std::string>> m_records; // enclosing classes, innermost first
+            std::vector<std::string> m_hint;                 // namespace/class path at the cursor
+        };
+
+        void CompleteMember(const ParseTree &tree, std::size_t offset, std::string_view prefix,
+            const ScopeIndex *external, std::unordered_map<std::string, CompletionItem> & best)
+        {
+            const std::string_view source = tree.Source();
+            const std::vector<Token> & tokens = tree.Tokens();
+            const std::size_t op = AccessOperatorBefore(source, tokens, offset, prefix);
+            if (op >= tokens.size())
+            {
+                return;
+            }
+
+            const std::string_view op_text = TokenText(source, tokens[op]);
+            if (op_text != "." && op_text != "->")
+            {
+                return; // `.*` takes a pointer-to-member, not a member name
+            }
+
+            const MemberResolver resolver(tree, external, offset);
+            const Chain chain = resolver.ParseReceiver(op);
+            const Resolved type = resolver.ResolveChain(chain);
+            if (!type.ok)
+            {
+                return;
+            }
+
+            resolver.CollectMembers(type.path, prefix, best);
+        }
+
     } // namespace
 
     std::string CompletionEngine::PrefixAt(std::string_view source, std::size_t offset)
@@ -2762,7 +4309,6 @@ namespace heimdall
         const CursorContext context = ClassifyContext(source, tokens, offset, prefix);
 
         if (context == CursorContext::Suppressed) return {};
-        if (context == CursorContext::MemberAccess) return {};
 
         std::unordered_map<std::string, CompletionItem> best;
 
@@ -2836,7 +4382,6 @@ namespace heimdall
         const CursorContext context = ClassifyContext(source, tokens, offset, prefix);
 
         if (context == CursorContext::Suppressed) return {};
-        if (context == CursorContext::MemberAccess) return {};
 
         std::unordered_map<std::string, CompletionItem> best;
 
@@ -2871,7 +4416,11 @@ namespace heimdall
         {
             const std::vector<CallableInterval> callables = BuildCallableIntervals(tree);
             const std::vector<std::vector<std::string>> scope_paths = BuildScopePaths(tree);
-            if (context == CursorContext::ScopeAccess)
+            if (context == CursorContext::MemberAccess)
+            {
+                CompleteMember(tree, offset, prefix, external, best);
+            }
+            else if (context == CursorContext::ScopeAccess)
             {
                 const std::vector<ScopeInterval> named_scopes = BuildNamedScopeIntervals(tree);
                 CompleteQualified(tree, source, tokens, scope_paths, callables, named_scopes,

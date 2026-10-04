@@ -147,7 +147,7 @@ namespace heimdall
             // spacing is preserved as typed (see SpacingGap).
             static constexpr std::string_view kBinary[] = {
                 "=", "==", "!=", "+", "-", "*", "/", "%", "^", "|", "||", "&",
-                "&&", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "?", "->*",
+                "&&", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "?",
             };
             for (const auto op: kBinary)
             {
@@ -445,12 +445,13 @@ namespace heimdall
                 return IsTrailingReturnArrow(sigs, prev) ? 1 : 0;
             }
 
-            if (left == "." || left == ".*")
+            // Member access never takes spaces: `a.b`, `a->b`, `a.*pm`, `a->*pm`.
+            if (left == "." || left == ".*" || left == "->*")
             {
                 return 0;
             }
 
-            if (right == "." || right == ".*")
+            if (right == "." || right == ".*" || right == "->*")
             {
                 return 0;
             }
@@ -537,8 +538,8 @@ namespace heimdall
             if (left == "}" || left == ")" || left == "]")
             {
                 if (right == ";" || right == "," || right == ")" || right == "]" || right == "}" ||
-                    right == "." || right == ".*" || right == ":" || right == "::" || right == "[" ||
-                    right == "(")
+                    right == "." || right == ".*" || right == "->*" || right == ":" || right == "::" ||
+                    right == "[" || right == "(")
                 {
                     return 0;
                 }
@@ -1558,6 +1559,27 @@ namespace heimdall
             if (k + 1 >= sigs.size() || sigs[k + 1].kind != TokenKind::Identifier)
             {
                 return false;
+            }
+
+            // A trailing return follows a function declarator: `)`, a qualifier
+            // (`const`, `noexcept`, `mutable`, `&`...), or the capture list of a
+            // parameterless lambda (`[] -> int {`). After a name, a literal or `]`
+            // it is member access written with spaces: `a -> b;`, `v[0] -> s;`.
+            if (k > 0)
+            {
+                const std::string_view before = sigs[k - 1].text;
+                const bool declarator_end = before == ")" || before == "const" || before == "volatile" ||
+                    before == "noexcept" || before == "mutable" || before == "override" || before == "final" ||
+                    before == "&" || before == "&&" || before == "constexpr" || before == "consteval";
+                if (before == "]")
+                {
+                    return k + 2 < sigs.size() && sigs[k + 2].text == "{";
+                }
+
+                if (!declarator_end)
+                {
+                    return false;
+                }
             }
 
             if (k + 2 >= sigs.size())

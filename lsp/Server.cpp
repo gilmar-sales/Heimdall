@@ -51,7 +51,7 @@ namespace heimdall::lsp
         m_pool.Submit([]
             {
                 heimdall::IncludeIndex::SystemIncludes("c++");
-        }, ThreadPool::Priority::Background);
+            }, ThreadPool::Priority::Background);
 
         auto stop_workers =[&]
         {
@@ -249,8 +249,11 @@ namespace heimdall::lsp
                         t_context = nullptr;
                         const std::lock_guard<std::mutex> lock(server.m_inflight_mu);
                         server.m_inflight.erase(id);
-                    }
-                } finish{*this, id};
+                }
+                } finish
+                {
+                    *this, id
+            };
 
                 simdjson::dom::parser parser;
                 simdjson::dom::element element;
@@ -258,7 +261,7 @@ namespace heimdall::lsp
                 {
                     Respond(id, "null");
                     return;
-                }
+            }
 
                 t_context = context.get();
                 handler(element, id);
@@ -286,12 +289,19 @@ namespace heimdall::lsp
         // m_compile_database is written once, by `initialize` on the I/O thread,
         // before any document exists; later readers are ordered after it by the
         // queues that hand them work.
-        return m_compile_database != std::nullopt ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
+        if (m_compile_database == std::nullopt)
+        {
+            return nullptr;
+        }
+
+        const std::filesystem::path path = PathFromUri(uri);
+        const heimdall::CompileCommand * exact = m_compile_database->Find(path);
+        return exact != nullptr ? exact : m_compile_database->FindOrNearest(path);
     }
 
     std::stop_token LanguageServer::CurrentStop()
     {
-        return t_context != nullptr ? t_context->stop : std::stop_token{};
+        return t_context != nullptr ? t_context->stop : std::stop_token {};
     }
 
     bool LanguageServer::RequestCancelled()
@@ -329,6 +339,7 @@ namespace heimdall::lsp
                     }
                 }
             }
+
             if (workspace_root.empty())
             {
                 std::string_view uri;
@@ -344,7 +355,10 @@ namespace heimdall::lsp
             }
         }
 
-        if (GetObject(params, "initializationOptions", options))
+        // A default-constructed simdjson object is not safe to index: only touch
+        // `params` / `options` when they were actually present.
+        const bool has_options = has_params && GetObject(params, "initializationOptions", options);
+        if (has_options)
         {
             if (workspace_root.empty())
             {
@@ -360,7 +374,7 @@ namespace heimdall::lsp
         const auto cwd = std::filesystem::current_path(cwd_error);
         if (workspace_root.empty())
         {
-            workspace_root = cwd_error ? std::filesystem::path{} : cwd;
+            workspace_root = cwd_error ? std::filesystem::path{}: cwd;
         }
 
         if (!workspace_root.empty())
@@ -373,7 +387,7 @@ namespace heimdall::lsp
             }
             else if (*loaded_rules)
             {
-                m_rule_options = std::move(**loaded_rules);
+                m_rule_options = std::move(* *loaded_rules);
             }
             else if (!cwd_error && std::filesystem::absolute(workspace_root).lexically_normal() !=
                 std::filesystem::absolute(cwd).lexically_normal())
@@ -386,20 +400,21 @@ namespace heimdall::lsp
                 }
                 else if (*cwd_rules)
                 {
-                    m_rule_options = std::move(**cwd_rules);
+                    m_rule_options = std::move(* *cwd_rules);
                 }
             }
         }
 
         bool enabled = false;
-        if (const auto error = options["enableSemantic"].get_bool().get(enabled); error)
+        if (has_options && options["enableSemantic"].get_bool().get(enabled))
         {
             enabled = false;
         }
+
         m_enable_semantic.store(enabled, std::memory_order_relaxed);
 
         std::string_view path;
-        if (!GetString(options, "compileCommands", path) || path.empty())
+        if (!has_options ||!GetString(options, "compileCommands", path) || path.empty())
         {
             return;
         }
@@ -429,7 +444,7 @@ namespace heimdall::lsp
                 {
                     heimdall::IncludeIndex::SystemIncludes(driver);
             }
-        }, ThreadPool::Priority::Background);
+            }, ThreadPool::Priority::Background);
     }
 
     void LanguageServer::Respond(std::string_view id, std::string_view result)
@@ -446,7 +461,7 @@ namespace heimdall::lsp
         // (was: 4 lexes + 2 preprocesses of the same buffer per keystroke).
         const heimdall::CompileCommand * command = CommandFor(uri);
         const auto tree = CachedParse(uri, text, version, command);
-        if (!tree || RequestCancelled() || !IsCurrentVersion(uri, version))
+        if (!tree || RequestCancelled() ||!IsCurrentVersion(uri, version))
         {
             return;
         }
@@ -847,6 +862,7 @@ namespace heimdall::lsp
             RespondCancelled(id);
             return;
         }
+
         const std::string formatted = heimdall::Formatter().Format(*tree);
         if (formatted == *text)
         {
@@ -890,6 +906,7 @@ namespace heimdall::lsp
             RespondCancelled(id);
             return;
         }
+
         const auto diagnostics = heimdall::RuleEngine(m_rule_options).Analyze(*tree);
         std::string response = "[";
         bool first = true;
@@ -1088,6 +1105,22 @@ namespace heimdall::lsp
         found->second.lru = m_lru.begin();
     }
 
+    LanguageServer::HeaderView LanguageServer::AwaitHeaderScopes(const std::string & uri,
+        const std::shared_ptr<const std::string> & text,
+        const heimdall::CompileCommand * command)
+    {
+        using namespace std::chrono_literals;
+        HeaderView view = HeaderScopes(uri, text, command);
+        const auto deadline = std::chrono::steady_clock::now() + 10s;
+        while (!view.complete && !RequestCancelled() && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(25ms);
+            view = HeaderScopes(uri, text, command);
+        }
+
+        return view;
+    }
+
     LanguageServer::HeaderView LanguageServer::HeaderScopes(const std::string & uri,
         const std::shared_ptr<const std::string> & text,
         const heimdall::CompileCommand * command)
@@ -1248,11 +1281,11 @@ namespace heimdall::lsp
             return options;
         }
 
-        options.standard = command -> standard;
+        options.standard = command->standard;
         const std::lock_guard<std::mutex> lock(m_mu);
         if (const auto found = m_macro_cache.find(command); found != m_macro_cache.end())
         {
-            options.shared_macros = found -> second;
+            options.shared_macros = found->second;
             return options;
         }
 
@@ -1296,8 +1329,7 @@ namespace heimdall::lsp
         // with the worker still inside the initializer.) A cancelled parse
         // throws out of the initializer, which leaves the flag unset so the next
         // caller retries with its own token instead of inheriting a partial tree.
-        struct ParseCancelled
-        {};
+        struct ParseCancelled {};
 
         try
         {
@@ -1320,7 +1352,7 @@ namespace heimdall::lsp
             return nullptr;
         }
 
-        return slot -> tree;
+        return slot->tree;
     }
 
     bool LanguageServer::IsCurrentVersion(const std::string & uri, std::int64_t version)
@@ -1377,13 +1409,14 @@ namespace heimdall::lsp
 
         const heimdall::CompileCommand * command = CommandFor(uri_string);
         const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
-        const HeaderView headers = HeaderScopes(uri_string, text, command);
+        const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
         const auto tree = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
             RespondCancelled(id);
             return;
         }
+
         if (RequestCancelled())
         {
             RespondCancelled(id);
@@ -1398,18 +1431,18 @@ namespace heimdall::lsp
             return;
         }
 
-        std::string line = hovered -> label;
+        std::string line = hovered->label;
         if (!hovered->detail.empty() && hovered->detail != hovered->label)
         {
             line = hovered->detail.find(hovered->label) == std::string::npos
             ? hovered->label + ": " + hovered->detail
-            : hovered -> detail;
+            : hovered->detail;
         }
 
         std::string value = "```cpp\n" + line + "\n```";
         if (!hovered->documentation.empty())
         {
-            value += "\n\n" + hovered -> documentation;
+            value += "\n\n" + hovered->documentation;
         }
 
         std::string response = "{\"contents\":{\"kind\":\"markdown\",\"value\":";
@@ -1837,13 +1870,14 @@ namespace heimdall::lsp
             }
         }
 
-        const HeaderView headers = HeaderScopes(uri_string, text, command);
+        const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
         const auto tree = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
             RespondCancelled(id);
             return;
         }
+
         if (RequestCancelled())
         {
             RespondCancelled(id);
@@ -1871,7 +1905,7 @@ namespace heimdall::lsp
             const std::string cache_key = disk ? uri_for + "#disk" : uri_for;
             if (const auto found = loaded.find(cache_key); found != loaded.end())
             {
-                return &found -> second;
+                return &found->second;
             }
 
             std::shared_ptr<const std::string> content;
@@ -1904,7 +1938,7 @@ namespace heimdall::lsp
             file.text = std::move(content);
             file.lines = std::make_unique<LineIndex>();
             file.lines->Build(*file.text);
-            return &loaded.emplace(cache_key, std::move(file)).first -> second;
+            return &loaded.emplace(cache_key, std::move(file)).first->second;
         };
 
         LoadedFile *self = nullptr;
@@ -1914,7 +1948,7 @@ namespace heimdall::lsp
             file.text = text;
             file.lines = std::make_unique<LineIndex>();
             file.lines->Build(*text);
-            self = &loaded.emplace(uri_string, std::move(file)).first -> second;
+            self = &loaded.emplace(uri_string, std::move(file)).first->second;
         }
 
         struct Resolved
@@ -2022,7 +2056,8 @@ namespace heimdall::lsp
                         continue;
                     }
 
-                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source -> text, parser_options, CurrentStop());
+                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source->text, parser_options,
+                        CurrentStop());
                     if (source_tree.Cancelled())
                     {
                         RespondCancelled(id);
@@ -2049,7 +2084,8 @@ namespace heimdall::lsp
                         continue;
                     }
 
-                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source -> text, parser_options, CurrentStop());
+                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source->text, parser_options,
+                        CurrentStop());
                     if (source_tree.Cancelled())
                     {
                         RespondCancelled(id);

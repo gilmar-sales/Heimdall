@@ -62,7 +62,7 @@ namespace heimdall
                 return Preprocessor(command->defines);
             }
 
-            Preprocessor::MacroMap filtered = command -> defines;
+            Preprocessor::MacroMap filtered = command->defines;
             for (const auto & name: command->undefines)
             {
                 filtered.erase(name);
@@ -270,6 +270,7 @@ namespace heimdall
             bool function_root;
             std::size_t previous_function;
         };
+
         std::vector<ScopeFrame> scopes;
         std::vector<std::size_t> function_ids(tokens.size(), 0);
         std::size_t function_id = 0;
@@ -360,8 +361,7 @@ namespace heimdall
                 continue;
             }
 
-            const auto following = name_index + 1 < tokens.size() ? tokens[name_index + 1].text : std::string_view
-            {};
+            const auto following = name_index + 1 < tokens.size() ? tokens[name_index + 1].text : std::string_view {};
             if (following != "=" && following != ";" && following != "[")
             {
                 continue;
@@ -381,7 +381,8 @@ namespace heimdall
             if (!used)
             {
                 const auto position = line_table.Lookup(tokens[name_index].offset);
-                diagnostics.push_back({"semantic/no-unused-local", "local variable '" + std::string(name) + "' is never used",
+                diagnostics.push_back({"semantic/no-unused-local",
+                        "local variable '" + std::string(name) + "' is never used",
                         tokens[name_index].offset, name.size(), position.line, position.column});
             }
         }

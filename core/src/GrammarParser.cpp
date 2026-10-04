@@ -1,6 +1,8 @@
 #include <Heimdall/ParseTree.hpp>
 #include "detail/GrammarParser.hpp"
+#include <Heimdall/Lexer.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,12 +16,93 @@
 namespace heimdall
 {
 
+    namespace
+    {
+
+        // Predefined macros that only decorate a declaration (`_GLIBCXX_NOEXCEPT`,
+        // `EXPORT`, `[[nodiscard]]` wrappers) or open/close a namespace
+        // (`_GLIBCXX_BEGIN_NAMESPACE_CXX11` -> `namespace __cxx11 {`). The grammar
+        // does not expand macros, so these identifiers would otherwise glue onto
+        // the neighbouring declaration and hide its members. They are dropped from
+        // the significant-token view; the tokens stay in the tree.
+        bool IsDecorationMacro(std::string_view value)
+        {
+            const std::vector<Token> tokens = Lexer(value).Lex();
+            static constexpr std::string_view allowed[] = {"noexcept", "constexpr", "consteval", "constinit",
+                "inline", "const", "volatile", "static", "explicit", "extern", "__inline", "__inline__",
+                "__attribute__", "__declspec", "__extension__", "__restrict", "__restrict__", "__const",
+                "__volatile__", "alignas", "nodiscard", "__nodiscard__", "deprecated", "__deprecated__"};
+            int nest = 0;
+            bool opens_namespace = false;
+            bool saw_brace = false;
+            for (const auto & token: tokens)
+            {
+                if (token.kind == TokenKind::Whitespace)
+                {
+                    continue;
+                }
+
+                const std::string_view text = value.substr(token.offset, token.length);
+                if (token.kind == TokenKind::Punctuation)
+                {
+                    if (text == "(" || text == "[")
+                    {
+                        ++nest;
+                    }
+                    else if (text == ")" || text == "]")
+                    {
+                        --nest;
+                    }
+                    else if (nest == 0 && (text == "{" || text == "}"))
+                    {
+                        saw_brace = true;
+                    }
+                    else if (nest == 0 && text != "[[" && text != "]]")
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (nest > 0)
+                {
+                    continue;
+                }
+
+                if (token.kind != TokenKind::Identifier)
+                {
+                    return false;
+                }
+
+                if (text == "namespace")
+                {
+                    opens_namespace = true;
+                    continue;
+                }
+
+                if (std::find(std::begin(allowed), std::end(allowed), text) == std::end(allowed) &&
+                    !(opens_namespace && !saw_brace))
+                {
+                    return false;
+                }
+            }
+
+            // Braces are only decoration when they belong to a namespace open/close.
+            return!saw_brace || opens_namespace || value.find_first_not_of(" 	}") == std::string_view::npos;
+        }
+
+    } // namespace
+
     class GrammarParser
     {
     public:
-        GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop)
+        GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop,
+            const Preprocessor::MacroMap * macros)
         : m_tree(tree), m_stop(std::move(stop))
         {
+            // identifier text -> "is a decoration macro", memoized per parse
+            std::unordered_map<std::string_view, bool> decoration;
             for (const auto & diagnostic: preprocessing.diagnostics)
             {
                 tree.m_diagnostics.push_back({diagnostic.offset, diagnostic.message});
@@ -49,6 +132,29 @@ namespace heimdall
                 if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
                 {
+                    if (macros != nullptr && !macros->empty() && !directive && token.kind == TokenKind::Identifier)
+                    {
+                        const std::string_view word = tree.m_source.substr(token.offset, token.length);
+                        auto cached = decoration.find(word);
+                        if (cached == decoration.end())
+                        {
+                            const auto found = macros->find(word);
+                            cached = decoration.emplace(word, found != macros->end() &&
+                                IsDecorationMacro(found->second)).first;
+                        }
+
+                        if (cached->second)
+                        {
+                            if (tree.m_decoration.empty())
+                            {
+                                tree.m_decoration.assign(tree.m_tokens.size(), false);
+                            }
+
+                            tree.m_decoration[i] = true;
+                            continue;
+                        }
+                    }
+
                     m_sig.push_back(static_cast<std::uint32_t>(i));
                 }
             }
@@ -573,7 +679,7 @@ namespace heimdall
             {
                 if (const auto hit = close_cache.find(open); hit != close_cache.end())
                 {
-                    return hit -> second;
+                    return hit->second;
                 }
 
                 const std::size_t close = FindTemplateClose(open, end);
@@ -849,6 +955,16 @@ namespace heimdall
 
                     if (look < end && (IsIdentifierToken(look) || Is(look, "(") || Is(look, "~") ||
                         Is(look, "operator") || Is(look, "::")))
+                    {
+                        i = after;
+                        saw_type = true;
+                        break;
+                    }
+
+                    // `const A::B *` (unnamed parameter): once a cv-qualifier/specifier has
+                    // been consumed, a name followed only by pointer/reference operators
+                    // is the type; leaving it as a declarator name would strand `A::`.
+                    if (spec_start < save && (look >= end || Is(look, ",") || Is(look, "=") || Is(look, ")")))
                     {
                         i = after;
                         saw_type = true;
@@ -3218,9 +3334,9 @@ namespace heimdall
     {
 
         void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop)
+            std::stop_token stop, const Preprocessor::MacroMap * macros)
         {
-            GrammarParser parser(tree, preprocessing, std::move(stop));
+            GrammarParser parser(tree, preprocessing, std::move(stop), macros);
             parser.Run();
         }
 

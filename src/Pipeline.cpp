@@ -165,7 +165,7 @@ namespace heimdall::cli
             {
                 if (!options.std_override)
                 {
-                    parser_options.standard = command -> standard;
+                    parser_options.standard = command->standard;
                 }
 
                 // Shared ownership (one copy per file): the tree borrows it without

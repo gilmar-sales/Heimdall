@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <deque>
 #include <cstdio>
 #include <fstream>
@@ -186,6 +187,234 @@ namespace heimdall
             return content;
         }
 
+        // Name `X` of a leading `#ifndef X` / `#define X` include guard, or empty.
+        std::string IncludeGuardOf(std::string_view text)
+        {
+            auto directive_name =[](std::string_view line, std::string_view keyword)->std::string
+            {
+                std::size_t i = 0;
+                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+                {
+                    ++i;
+                }
+
+                if (i >= line.size() || line[i] != '#')
+                {
+                    return {};
+                }
+
+                ++i;
+                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+                {
+                    ++i;
+                }
+
+                if (line.substr(i, keyword.size()) != keyword)
+                {
+                    return {};
+                }
+
+                i += keyword.size();
+                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+                {
+                    ++i;
+                }
+
+                std::size_t end = i;
+                while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
+                {
+                    ++end;
+                }
+
+                return std::string(line.substr(i, end - i));
+            };
+            std::string guard;
+            bool in_block_comment = false;
+            std::size_t pos = 0;
+            while (pos < text.size())
+            {
+                std::size_t end = text.find('\n', pos);
+                if (end == std::string_view::npos)
+                {
+                    end = text.size();
+                }
+
+                std::string_view line = text.substr(pos, end - pos);
+                pos = end + 1;
+                if (in_block_comment)
+                {
+                    in_block_comment = line.find("*/") == std::string_view::npos;
+                    continue;
+                }
+
+                std::size_t first = line.find_first_not_of(" \t\r");
+                if (first == std::string_view::npos || line.substr(first, 2) == "//")
+                {
+                    continue;
+                }
+
+                if (line.substr(first, 2) == "/*")
+                {
+                    in_block_comment = line.find("*/", first + 2) == std::string_view::npos;
+                    continue;
+                }
+
+                if (guard.empty())
+                {
+                    guard = directive_name(line, "ifndef");
+                    if (guard.empty())
+                    {
+                        return {};
+                    }
+
+                    continue;
+                }
+
+                return directive_name(line, "define") == guard ? guard : std::string {};
+            }
+
+            return {};
+        }
+
+        // Macros the compiler itself would have defined after preprocessing the
+        // given headers (`__cplusplus`, `_GLIBCXX_USE_CXX11_ABI`, feature-test
+        // macros...). Headers are parsed one by one with no `#include` expansion,
+        // so without this every `#if __cplusplus >= ...` guard in the standard
+        // library selects nothing and the class bodies never reach the index.
+        // Object-like macros only; empty when the compiler cannot be run.
+        Preprocessor::MacroMap CompilerMacros(const CompileCommand *command,
+            const std::vector<std::filesystem::path> & headers)
+        {
+            Preprocessor::MacroMap macros;
+            static std::atomic<unsigned> counter{0};
+            std::error_code ec;
+            const std::filesystem::path scratch = std::filesystem::temp_directory_path(ec) /
+                ("heimdall-macros-" + std::to_string(counter.fetch_add(1)) + "-" +
+                std::to_string(std::hash<std::thread::id>{}
+                (std::this_thread::get_id()) % 100000) + ".cpp");
+            if (ec)
+            {
+                return macros;
+            }
+
+            {
+                std::ofstream out(scratch, std::ios::binary);
+                if (!out)
+                {
+                    return macros;
+                }
+
+                for (const auto & header: headers)
+                {
+                    out << "#include \"" << header.generic_string() << "\"\n";
+                }
+            }
+
+            std::string flags;
+            bool has_standard = false;
+            if (command != nullptr)
+            {
+                for (std::size_t i = 1; i < command->arguments.size(); ++i)
+                {
+                    const std::string & argument = command->arguments[i];
+                    const bool takes_next = argument == "-isystem" || argument == "-iquote" ||
+                        argument == "-idirafter" || argument == "-I" || argument == "-D" || argument == "-U";
+                    if (takes_next && i + 1 < command->arguments.size())
+                    {
+                        flags += " " + argument + " \"" + command->arguments[++i] + "\"";
+                    }
+                    else if (argument.starts_with("-std=") || argument.starts_with("-stdlib=") ||
+                        argument.starts_with("-D") || argument.starts_with("-U") ||
+                        argument.starts_with("-I") || argument.starts_with("-isystem") ||
+                        argument.starts_with("-nostd") || argument.starts_with("--target") ||
+                        argument.starts_with("-m"))
+                    {
+                        has_standard = has_standard || argument.starts_with("-std=");
+                        flags += " \"" + argument + "\"";
+                    }
+                }
+            }
+
+            if (!has_standard)
+            {
+                const CppStandard standard = command != nullptr ? command->standard : CppStandard::Cpp20;
+                flags += standard == CppStandard::Cpp26 ? " -std=c++26"
+                : standard == CppStandard::Cpp23 ? " -std=c++23" : " -std=c++20";
+            }
+
+            const std::string driver = DriverOf(command);
+#if defined(_WIN32)
+            const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
+                scratch.string() + "\" 2>nul\"";
+            std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(line.c_str(), "r"), _pclose);
+#else
+            const std::string line = "\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
+                scratch.string() + "\" 2>/dev/null";
+            std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(line.c_str(), "r"), pclose);
+#endif
+            if (pipe)
+            {
+                std::string text;
+                char buffer[4096];
+                while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
+                {
+                    text += buffer;
+                }
+
+                std::size_t pos = 0;
+                while (pos < text.size())
+                {
+                    std::size_t end = text.find('\n', pos);
+                    if (end == std::string::npos)
+                    {
+                        end = text.size();
+                    }
+
+                    std::string_view row(text.data() + pos, end - pos);
+                    pos = end + 1;
+                    while (!row.empty() && row.back() == '\r')
+                    {
+                        row.remove_suffix(1);
+                    }
+
+                    constexpr std::string_view define = "#define ";
+                    if (!row.starts_with(define))
+                    {
+                        continue;
+                    }
+
+                    row.remove_prefix(define.size());
+                    const std::size_t name_end = row.find_first_of(" (");
+                    if (name_end == std::string_view::npos || row[name_end] == '(')
+                    {
+                        if (name_end == std::string_view::npos)
+                        {
+                            macros.emplace(std::string(row), std::string());
+                        }
+
+                        continue; // function-like macros stay unexpanded
+                    }
+
+                    macros.emplace(std::string(row.substr(0, name_end)), std::string(row.substr(name_end + 1)));
+                }
+            }
+
+            std::filesystem::remove(scratch, ec);
+            // The probe included every header, so every include guard is now
+            // defined; each header is parsed on its own and must still see its
+            // body. Drop the guards (`#ifndef X` / `#define X` at the top).
+            for (const auto & header: headers)
+            {
+                const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20));
+                if (!guard.empty())
+                {
+                    macros.erase(guard);
+                }
+            }
+
+            return macros;
+        }
+
         bool IsReservedName(std::string_view name)
         {
             return!name.empty() && name.front() == '_';
@@ -216,7 +445,7 @@ namespace heimdall
             const std::lock_guard<std::mutex> lock(mutex);
             if (const auto found = cache.find(key); found != cache.end())
             {
-                return found -> second;
+                return found->second;
             }
         }
 
@@ -274,7 +503,7 @@ namespace heimdall
             // Another thread may have populated while popen ran outside the lock.
             if (const auto found = cache.find(key); found != cache.end())
             {
-                return found -> second;
+                return found->second;
             }
 
             cache.emplace(key, dirs);
@@ -298,14 +527,18 @@ namespace heimdall
             bool angled = false;
             int depth = 0;
         };
+
         // Breadth-first, project (quoted) includes before system (angled) ones:
         // with the header cap a depth-first walk spent the whole budget inside
         // the last <standard header> and never reached the project's own headers.
         std::deque<Work> stack;
-        auto enqueue = [&](const std::filesystem::path & dir, int depth, std::string_view source)
+        auto enqueue =[&](const std::filesystem::path & dir, int depth, std::string_view source)
         {
             const std::vector<IncludeRef> refs = ScanIncludes(source);
-            for (const bool angled: {false, true})
+            for (const bool angled:
+                {
+                    false, true
+            })
             {
                 for (const auto & ref: refs)
                 {
@@ -504,7 +737,7 @@ namespace heimdall
         ParserOptions options;
         if (command != nullptr)
         {
-            options.standard = command -> standard;
+            options.standard = command->standard;
             options.shared_macros = std::make_shared<const Preprocessor::MacroMap>(command->defines);
             if (!command->undefines.empty())
             {
@@ -516,6 +749,33 @@ namespace heimdall
 
                 options.shared_macros = std::move(filtered);
             }
+        }
+
+        if (!headers.empty())
+        {
+            Preprocessor::MacroMap probed = CompilerMacros(command, headers);
+            if (!probed.contains("__cplusplus"))
+            {
+                // No compiler to ask: at least select the right language branch.
+                probed["__cplusplus"] = options.standard == CppStandard::Cpp26 ? "202400L"
+                : options.standard == CppStandard::Cpp23 ? "202302L" : "202002L";
+            }
+
+            // The project's own -D/-U win over what the compiler reports.
+            if (command != nullptr)
+            {
+                for (const auto &[name, value]: command->defines)
+                {
+                    probed[name] = value;
+                }
+
+                for (const auto & name: command->undefines)
+                {
+                    probed.erase(name);
+                }
+            }
+
+            options.shared_macros = std::make_shared<const Preprocessor::MacroMap>(std::move(probed));
         }
 
         // Headers are independent: read + parse them on a worker fan-out, then
@@ -583,7 +843,7 @@ namespace heimdall
         index.m_files = headers;
         for (std::size_t header = 0; header < per_header.size(); ++header)
         {
-            auto & scopes = per_header[header];
+            auto &scopes = per_header[header];
             for (auto & scope: scopes)
             {
                 for (auto & member: scope.members)
@@ -619,12 +879,13 @@ namespace heimdall
                 filtered.path = scope.path;
                 filtered.kind = scope.kind;
                 filtered.members = std::move(scope.members);
+                filtered.bases = std::move(scope.bases);
                 std::erase_if(filtered.members,
                     [](const CompletionItem &member)
                     {
                         return IsReservedName(member.label);
                 });
-                if (!filtered.members.empty())
+                if (!filtered.members.empty() ||!filtered.bases.empty())
                 {
                     const std::string key = ScopePathKey(filtered.path);
                     if (const auto found = positions.find(key); found != positions.end())
@@ -632,6 +893,13 @@ namespace heimdall
                         auto &entry = index.m_scopes[found->second];
                         entry.members.insert(entry.members.end(), filtered.members.begin(),
                             filtered.members.end());
+                        for (auto & base: filtered.bases)
+                        {
+                            if (std::find(entry.bases.begin(), entry.bases.end(), base) == entry.bases.end())
+                            {
+                                entry.bases.push_back(std::move(base));
+                            }
+                        }
                     }
                     else
                     {

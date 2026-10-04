@@ -13,8 +13,7 @@ namespace heimdall
 
         bool IsKnownRule(std::string_view code)
         {
-            return code == "cpp/no-null" || code == "format/no-trailing-whitespace" ||
-                code == "format/require-final-newline";
+            return heimdall::IsKnownRuleCode(code);
         }
 
         std::string ErrorFor(const std::filesystem::path & path, simdjson::error_code error)

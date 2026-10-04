@@ -73,7 +73,7 @@ namespace heimdall
                 {
                     if (const auto it = local->find(name); it != local->end())
                     {
-                        return &it -> second;
+                        return &it->second;
                     }
                 }
 
@@ -86,7 +86,7 @@ namespace heimdall
                 {
                     if (const auto it = predefined->find(name); it != predefined->end())
                     {
-                        return &it -> second;
+                        return &it->second;
                     }
                 }
 
@@ -102,8 +102,7 @@ namespace heimdall
         class IfExpression
         {
         public:
-            IfExpression(std::string_view input, const MacroScope &macros) : m_input(input), m_macros(macros)
-            {}
+            IfExpression(std::string_view input, const MacroScope &macros) : m_input(input), m_macros(macros) {}
 
             bool Evaluate()
             {

@@ -42,6 +42,10 @@ namespace heimdall
         bool is_definition = false;
         // Functions: number of parameters (overload matching for navigation).
         std::uint32_t param_count = 0;
+        // Type as written, for member access (`obj.`): the declared type of a
+        // variable/field, the return type of a function, or the aliased type of
+        // a `using`/`typedef` (`basic_string<char>` for `std::string`).
+        std::string type_text;
     };
 
     // One named scope and its direct members. `path` is the qualified path from
@@ -54,6 +58,9 @@ namespace heimdall
         std::vector<std::string> path;
         CompletionKind kind = CompletionKind::Type;
         std::vector<CompletionItem> members;
+        // Base classes of a record scope as written (`ns::Base`, template
+        // arguments dropped); member access walks them for inherited members.
+        std::vector<std::string> bases;
     };
 
     using ScopeIndex = std::vector<IndexedScope>;

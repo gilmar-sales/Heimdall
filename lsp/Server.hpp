@@ -102,6 +102,11 @@ namespace heimdall::lsp
         void CompleteDocument(simdjson::dom::element request, std::string_view id);
         void HoverDocument(simdjson::dom::element request, std::string_view id);
         void GotoDocument(simdjson::dom::element request, std::string_view id, bool implementation);
+        // HeaderScopes, but waits (bounded, cancellable) for a background index
+        // build that is still running: hover and go-to answer once, so they must
+        // not report "nothing found" just because the first request beat the index.
+        HeaderView AwaitHeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
+            const heimdall::CompileCommand * command);
         HeaderView HeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
             const heimdall::CompileCommand * command);
         std::shared_ptr<const heimdall::ParseTree> CachedParse(const std::string & uri,

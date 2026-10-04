@@ -111,7 +111,7 @@ TEST(CompletionSpec, SuppressesCompletionInsideCommentsAndStrings)
     }
 }
 
-TEST(CompletionSpec, SuppressesMemberAccessUntilMembersAreModeled)
+TEST(CompletionSpec, SuppressesMemberAccessOnReceiversItCannotType)
 {
     {
         constexpr std::string_view source = " Khalifa; Khalifa.";
@@ -568,4 +568,256 @@ TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
     EXPECT_TRUE(std::is_sorted(items.begin(), items.end(), [](const auto& left, const auto& right) {
         return left.label < right.label;
     }));
+}
+
+namespace
+{
+
+    // `|` marks the cursor. Returns the labels offered there.
+    std::vector<std::string> MemberLabels(std::string source, const heimdall::ScopeIndex *external = nullptr)
+    {
+        const std::size_t cursor = source.find('|');
+        source.erase(cursor, 1);
+        std::vector<std::string> labels;
+        for (const auto & item: heimdall::CompletionEngine::Complete(source, {}, cursor, external))
+        {
+            labels.push_back(item.label);
+        }
+
+        return labels;
+    }
+
+    bool Has(const std::vector<std::string> & labels, std::string_view label)
+    {
+        return std::find(labels.begin(), labels.end(), label) != labels.end();
+    }
+
+    constexpr std::string_view kStdLike =
+    "namespace std {\n"
+    "template<class T> class vector { public: void push_back(const T&); void clear(); T& front(); unsigned size() const; };\n"
+    "class basic_string { public: basic_string(); void resize(int); void clear(); };\n"
+    "typedef basic_string string;\n"
+    "template<class T> class unique_ptr { public: T* get(); void reset(); };\n"
+    "}\n";
+
+} // namespace
+
+TEST(CompletionSpec, MemberAccessListsMembersOfLocalAndParameterTypes)
+{
+    const auto dot = MemberLabels("struct P { int x; void run(); private: int y; void hid(); P(); ~P(); };\n"
+        "void f() { P p; p.| }\n");
+    EXPECT_TRUE(Has(dot, "x"));
+    EXPECT_TRUE(Has(dot, "run"));
+    EXPECT_TRUE(Has(dot, "y"));
+    EXPECT_TRUE(Has(dot, "hid"));
+    EXPECT_FALSE(Has(dot, "P")); // constructors are not members you can name
+
+    const auto arrow = MemberLabels("struct P { int x; void run(); };\nvoid f(P* p) { p->r| }\n");
+    EXPECT_EQ(arrow, std::vector<std::string>{"run"});
+    const auto reference = MemberLabels("struct P { int x; };\nvoid f(const P& r) { r.| }\n");
+    EXPECT_TRUE(Has(reference, "x"));
+    EXPECT_TRUE(MemberLabels("struct P { int x; };\nvoid f(const P& r, int z) { z.| }\n").empty());
+}
+
+TEST(CompletionSpec, MemberAccessIncludesInheritedMembers)
+{
+    const auto labels = MemberLabels("struct B { int bx; void bm(); };\nstruct M : public B { int mx; };\n"
+        "struct D : M { int dx; };\nvoid f() { D d; d.| }\n");
+    EXPECT_TRUE(Has(labels, "dx"));
+    EXPECT_TRUE(Has(labels, "mx"));
+    EXPECT_TRUE(Has(labels, "bx"));
+    EXPECT_TRUE(Has(labels, "bm"));
+}
+
+TEST(CompletionSpec, MemberAccessFollowsChainsCallsAndSubscripts)
+{
+    const std::string types = "struct I { int deep; };\nstruct O { I in; I get(); I* ptr(); };\n";
+    EXPECT_TRUE(Has(MemberLabels(types + "void f() { O o; o.in.| }\n"), "deep"));
+    EXPECT_TRUE(Has(MemberLabels(types + "void f() { O o; o.get().| }\n"), "deep"));
+    EXPECT_TRUE(Has(MemberLabels(types + "void f() { O o; o.ptr()->| }\n"), "deep"));
+    EXPECT_TRUE(Has(MemberLabels(types + "void f(O* o) { o->in.| }\n"), "deep"));
+}
+
+TEST(CompletionSpec, MemberAccessResolvesAliasesNamespacesAndAuto)
+{
+    EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\nusing Q = P;\nvoid f() { Q q; q.| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\ntypedef P R;\nvoid f() { R r; r.| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("namespace n { struct P { int x; }; }\nvoid f() { n::P a; a.| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("namespace n { struct P { int x; }; }\nusing namespace n;\n"
+        "void f() { P a; a.| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("namespace n { struct P { int x; }; }\nnamespace n { void f() { P a; a.| } }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\nvoid f() { auto a = P(); a.| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\nvoid f() { auto a = new P(); a->| }\n"), "x"));
+    EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\nP g;\nvoid f() { g.| }\n"), "x"));
+}
+
+TEST(CompletionSpec, MemberAccessOnThisAndImplicitFields)
+{
+    const auto labels = MemberLabels("struct I { int deep; };\n"
+        "struct P { int x; I in; void m(); };\n"
+        "void P::m() { this->| }\n");
+    EXPECT_TRUE(Has(labels, "x"));
+    EXPECT_TRUE(Has(labels, "m"));
+    EXPECT_TRUE(Has(MemberLabels("struct I { int deep; };\nstruct P { I in; void m() { in.| } };\n"), "deep"));
+    EXPECT_TRUE(Has(MemberLabels("struct I { int deep; };\nstruct P { I in; void m(); };\nvoid P::m() { in.| }\n"),
+        "deep"));
+}
+
+TEST(CompletionSpec, MemberAccessUsesTheHeaderIndexForStandardLikeTypes)
+{
+    const heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(kStdLike, {});
+
+    // `std::string` is a typedef of another record: resolved through the alias.
+    const auto text = MemberLabels("void f() { std::string body; body.| }\n", &index);
+    EXPECT_TRUE(Has(text, "resize"));
+    EXPECT_TRUE(Has(text, "clear"));
+    EXPECT_EQ(MemberLabels("void f() { std::string s; s.cl| }\n", &index), std::vector<std::string>{"clear"});
+    EXPECT_TRUE(Has(MemberLabels("using namespace std;\nvoid f() { string s; s.| }\n", &index), "resize"));
+    EXPECT_TRUE(Has(MemberLabels("void f() { auto s = std::string(); s.| }\n", &index), "resize"));
+
+    const auto vector = MemberLabels("void f() { std::vector<int> v; v.| }\n", &index);
+    EXPECT_TRUE(Has(vector, "push_back"));
+    EXPECT_TRUE(Has(vector, "size"));
+
+    // Member of a header type that is itself a header type.
+    EXPECT_TRUE(Has(MemberLabels("struct P { std::string name; };\nvoid f(P p) { p.name.| }\n", &index), "resize"));
+}
+
+TEST(CompletionSpec, MemberAccessThroughSmartPointersAndContainers)
+{
+    const heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(kStdLike, {});
+    const std::string p = "struct P { int x; };\n";
+    const auto arrow = MemberLabels(p + "void f() { std::unique_ptr<P> u; u->| }\n", &index);
+    EXPECT_TRUE(Has(arrow, "x"));
+    EXPECT_FALSE(Has(arrow, "reset"));
+    const auto dot = MemberLabels(p + "void f() { std::unique_ptr<P> u; u.| }\n", &index);
+    EXPECT_TRUE(Has(dot, "reset"));
+    EXPECT_FALSE(Has(dot, "x"));
+    EXPECT_TRUE(Has(MemberLabels(p + "void f() { std::vector<P> v; v[0].| }\n", &index), "x"));
+}
+
+TEST(CompletionSpec, IndexRecordsAliasTargetsAndBases)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "struct B { int b; };\nstruct D : public B, private ns::Other<int> { };\nusing Alias = std::vector<int>;\n", {});
+    bool saw_bases = false;
+    bool saw_alias = false;
+    for (const auto & scope: index)
+    {
+        if (scope.path == std::vector<std::string>{"D"})
+        {
+            saw_bases = scope.bases == std::vector<std::string>{"B", "ns::Other"};
+        }
+
+        for (const auto & member: scope.members)
+        {
+            saw_alias = saw_alias || (member.label == "Alias" && member.type_text == "std::vector<int>");
+        }
+    }
+
+    EXPECT_TRUE(saw_bases);
+    EXPECT_TRUE(saw_alias);
+}
+
+TEST(CompletionSpec, HoverKeepsDocCommentWhenAForwardDeclarationIsIndexedToo)
+{
+    // A bare forward declaration (no comment) used to win over the documented
+    // definition and wipe the doc from the hover.
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace n { class element; }\n"
+        "namespace n {\n"
+        "/**\n * A JSON element.\n */\n"
+        "class element { public: int v; };\n"
+        "}\n", {});
+    const std::string source = "n::element value;";
+    const auto hover = heimdall::CompletionEngine::Hover(source, {}, 5, &index);
+    ASSERT_TRUE(hover.has_value());
+    EXPECT_EQ(hover->label, "element");
+    EXPECT_NE(hover->documentation.find("A JSON element."), std::string::npos);
+}
+
+TEST(CompletionSpec, HoverShowsPlainCommentsAboveEnumsAndEnumerators)
+{
+    const std::string header =
+        "namespace n {\n"
+        "    // How single-statement blocks are treated.\n"
+        "    // Second line.\n"
+        "    enum class Style : unsigned char\n"
+        "    {\n"
+        "        // Leave them as written.\n"
+        "        Keep,\n"
+        "        // Collapse onto one line.\n"
+        "        SingleLine,\n"
+        "    };\n"
+        "}\n";
+    const std::string use = "void f() { n::Style s = n::Style::Keep; }\n";
+    for (const std::string source: {header + use})
+    {
+        auto hover = [&](std::string_view needle, const heimdall::ScopeIndex *index)
+        {
+            return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, index);
+        };
+        const auto enumeration = hover("Style :", nullptr);
+        ASSERT_TRUE(enumeration.has_value());
+        EXPECT_EQ(enumeration->documentation, "How single-statement blocks are treated.\nSecond line.");
+        const auto keep = hover("Keep,", nullptr);
+        ASSERT_TRUE(keep.has_value());
+        EXPECT_EQ(keep->documentation, "Leave them as written.");
+        const auto second = hover("SingleLine,", nullptr);
+        ASSERT_TRUE(second.has_value());
+        EXPECT_EQ(second->documentation, "Collapse onto one line.");
+        // Used elsewhere: the type reads as an enum, not a namespace.
+        const auto used = hover("Style s", nullptr);
+        ASSERT_TRUE(used.has_value());
+        EXPECT_EQ(used->detail, "enum class n::Style");
+        EXPECT_NE(used->documentation.find("How single-statement"), std::string::npos);
+    }
+
+    // Same through the header index.
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
+    const std::string source = use;
+    const auto indexed = heimdall::CompletionEngine::Hover(source, {}, source.find("Style s") + 1, &index);
+    ASSERT_TRUE(indexed.has_value());
+    EXPECT_NE(indexed->documentation.find("How single-statement"), std::string::npos);
+    const auto keep = heimdall::CompletionEngine::Hover(source, {}, source.find("Keep") + 1, &index);
+    ASSERT_TRUE(keep.has_value());
+    EXPECT_EQ(keep->documentation, "Leave them as written.");
+}
+
+TEST(CompletionSpec, HoverShowsPlainCommentsAboveMethodsAndFields)
+{
+    const std::string source =
+        "class Tree\n"
+        "{\n"
+        "public:\n"
+        "    // Cooperative cancellation: polls `stop`\n"
+        "    // between items.\n"
+        "    static Tree Parse(int source,\n"
+        "        int stop);\n"
+        "    int count; // trailing note, not documentation\n"
+        "    // Number of nodes.\n"
+        "    int nodes;\n"
+        "};\n"
+        "void f() { Tree t; t.nodes; Tree::Parse(1, 2); t.count; }\n";
+    auto hover = [&](std::string_view needle, std::size_t skip = 1)
+    {
+        return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + skip, nullptr);
+    };
+    const auto method = hover("Parse(int");
+    ASSERT_TRUE(method.has_value());
+    EXPECT_EQ(method->documentation, "Cooperative cancellation: polls `stop`\nbetween items.");
+    const auto field = hover("nodes;");
+    ASSERT_TRUE(field.has_value());
+    EXPECT_EQ(field->documentation, "Number of nodes.");
+    // After `.` and `::` (member access / qualified lookup).
+    const auto member = hover("t.nodes", 3);
+    ASSERT_TRUE(member.has_value());
+    EXPECT_EQ(member->documentation, "Number of nodes.");
+    const auto qualified = hover("Tree::Parse(1", 7);
+    ASSERT_TRUE(qualified.has_value());
+    EXPECT_EQ(qualified->documentation, "Cooperative cancellation: polls `stop`\nbetween items.");
+    // A comment trailing the previous declaration documents that one only.
+    const auto trailing = hover("count;");
+    ASSERT_TRUE(trailing.has_value());
+    EXPECT_TRUE(trailing->documentation.empty());
 }
