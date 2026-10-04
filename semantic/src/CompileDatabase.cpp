@@ -12,7 +12,7 @@ namespace heimdall
     namespace
     {
 
-        std::filesystem::path AbsoluteNormalized(const std::filesystem::path & path)
+        std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path)
         {
             std::error_code ec;
             auto absolute = std::filesystem::absolute(path, ec);
@@ -21,7 +21,7 @@ namespace heimdall
 
         // Comparison form of a path: the Windows file system ignores case, and
         // editors disagree with compile databases on drive-letter case (`c:` vs `C:`).
-        std::filesystem::path ComparableKey(const std::filesystem::path & path)
+        std::filesystem::path ComparableKey(const std::filesystem::path &path)
         {
             auto text = AbsoluteNormalized(path).generic_string();
 #if defined(_WIN32)
@@ -252,7 +252,7 @@ namespace heimdall
             return args;
         }
 
-        bool GetString(simdjson::dom::object object, const char *key, std::string & output)
+        bool GetString(simdjson::dom::object object, const char *key, std::string &output)
         {
             std::string_view value;
             if (object[key].get_string().get(value))
@@ -267,7 +267,7 @@ namespace heimdall
     } // namespace
 
     std::expected<CompileDatabase,
-        std::string> CompileDatabase::Load(const std::filesystem::path & path)
+        std::string> CompileDatabase::Load(const std::filesystem::path &path)
     {
         simdjson::dom::parser parser;
         simdjson::dom::element document;

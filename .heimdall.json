@@ -1,5 +1,5 @@
 {
-  "$schema": "./schemas/heimdall.schema.json",
+  "$schema": "schemas/heimdall.schema.json",
   "root": true,
   "rules": {
     "cpp/no-null": "warning",
@@ -8,6 +8,10 @@
     "cpp/no-empty-catch": "warning",
     "cpp/no-duplicate-include": "warning",
     "cpp/modernize-using": "warning"
+  },
+  "format": {
+    "pointer-alignment": "left",
+    "reference-alignment": "left"
   },
   "suppressions": true,
   "include-order": {

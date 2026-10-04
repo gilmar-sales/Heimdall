@@ -679,3 +679,28 @@ TEST(RuleEngineSpec, SortIncludesEnabledByOverride)
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
         "#include <vector>\n#include <map>\n").empty());
 }
+
+TEST(RuleEngineSpec, ApplyFixesSkipsUnsafeFixesUnlessRequested)
+{
+    heimdall::Diagnostic diagnostic{
+        heimdall::RuleId::NullMacro, heimdall::Severity::Warning, "cpp/no-null", "replace null macro",
+        0, 4, 1, 1, true, {0, 4, "nullptr"}
+    };
+    diagnostic.fix_is_safe = false;
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("NULL;", {diagnostic}), "NULL;");
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("NULL;", {diagnostic}, true), "nullptr;");
+}
+
+TEST(RuleEngineSpec, ApplyFixesLetsRequestedUnsafeFixesEditOutsideTheirDiagnostic)
+{
+    heimdall::Diagnostic diagnostic{
+        heimdall::RuleId::ModernizeConstexpr, heimdall::Severity::Warning, "cpp/modernize-constexpr", "constexpr",
+        4, 1, 1, 5, true, {0, 0, "constexpr "}
+    };
+    diagnostic.fix_is_safe = false;
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}), "int n = 3;");
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true), "constexpr int n = 3;");
+
+    diagnostic.fix = {100, 0, "x"};
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true), "int n = 3;");
+}

@@ -34,6 +34,24 @@ namespace heimdall
                 }
             }
 
+            // The grammar folds storage keywords into the type: `const` and `constexpr`
+            // read better after them (`static const int`).
+            const auto &tokens = model.Tree().Tokens();
+            while (first != kNone && first < tokens.size())
+            {
+                const Tok tok = tokens[first].tok;
+                const bool storage = tok == Tok::KwStatic || tok == Tok::KwInline || tok == Tok::KwExtern ||
+                    tok == Tok::KwThreadLocal || tok == Tok::KwRegister;
+                const bool trivia = tokens[first].kind == TokenKind::Whitespace || tokens[first].kind == TokenKind::LineComment ||
+                    tokens[first].kind == TokenKind::BlockComment;
+                if (!storage && !trivia)
+                {
+                    break;
+                }
+
+                ++first;
+            }
+
             return first;
         }
 

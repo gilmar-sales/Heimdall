@@ -143,7 +143,10 @@ namespace heimdall
             return ApplyPolicy(std::move(diagnostics), tree.Source(), tree.Tokens());
         }
 
-        static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic> & diagnostics);
+        // Applies the non-overlapping fixes. Fixes marked unsafe (editor quick fixes)
+        // are only applied when include_unsafe is set.
+        static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic> & diagnostics,
+            bool include_unsafe = false);
 
     private:
         // Opt-in rules run when enabled in RuleOptions or through an

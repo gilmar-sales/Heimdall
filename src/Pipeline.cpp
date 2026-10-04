@@ -293,7 +293,8 @@ namespace heimdall::cli
 
         if (options.command == Command::Format)
         {
-            result.output = tree ? heimdall::Formatter().Format(*tree) : heimdall::Formatter().Format(source);
+            result.output = tree ? heimdall::Formatter(options.format_options).Format(*tree) :
+                                   heimdall::Formatter(options.format_options).Format(source);
             result.changed = result.output != source;
         }
         else
@@ -335,7 +336,7 @@ namespace heimdall::cli
 
             if (options.fix && !result.diagnostics.empty())
             {
-                result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics);
+                result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics, options.fix_unsafe);
                 result.changed = result.output != source;
             }
         }

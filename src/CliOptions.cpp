@@ -35,11 +35,47 @@ namespace heimdall::cli
         return false;
     }
 
+    bool ParsePointerAlignment(std::string_view value, heimdall::PointerAlignment & alignment)
+    {
+        if (value == "left")
+        {
+            alignment = heimdall::PointerAlignment::Left;
+            return true;
+        }
+
+        if (value == "right")
+        {
+            alignment = heimdall::PointerAlignment::Right;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool ParseReferenceAlignment(std::string_view value, heimdall::ReferenceAlignment & alignment)
+    {
+        if (value == "left")
+        {
+            alignment = heimdall::ReferenceAlignment::Left;
+            return true;
+        }
+
+        if (value == "right")
+        {
+            alignment = heimdall::ReferenceAlignment::Right;
+            return true;
+        }
+
+        return false;
+    }
+
     bool ParseOptions(int argc, char **argv, Options &options)
     {
         constexpr int kMinArgcForCommand = 2;
         constexpr int kFirstOptionIndex = 2;
         constexpr std::string_view kStdPrefix = "--std=";
+        constexpr std::string_view kPointerAlignmentPrefix = "--pointer-alignment=";
+        constexpr std::string_view kReferenceAlignmentPrefix = "--reference-alignment=";
         if (argc < kMinArgcForCommand)
         {
             return false;
@@ -117,6 +153,11 @@ namespace heimdall::cli
             {
                 options.fix = true;
             }
+            else if (arg == "--fix-unsafe")
+            {
+                options.fix = true;
+                options.fix_unsafe = true;
+            }
             else if (arg == "--semantic")
             {
                 options.semantic = true;
@@ -176,6 +217,34 @@ namespace heimdall::cli
                 }
 
                 options.std_override = true;
+            }
+            else if ((arg == "--pointer-alignment" && i + 1 < argc) ||
+                (arg.starts_with("--pointer-alignment=") && arg.size() > kPointerAlignmentPrefix.size()))
+            {
+                const std::string_view value = arg.starts_with(kPointerAlignmentPrefix)
+                    ? std::string_view(arg).substr(kPointerAlignmentPrefix.size())
+                    : std::string_view(argv[++i]);
+                if (!ParsePointerAlignment(value, options.pointer_alignment))
+                {
+                    std::cerr << "invalid --pointer-alignment value: " << value << " (expected left or right)\n";
+                    return false;
+                }
+
+                options.pointer_alignment_override = true;
+            }
+            else if ((arg == "--reference-alignment" && i + 1 < argc) ||
+                (arg.starts_with("--reference-alignment=") && arg.size() > kReferenceAlignmentPrefix.size()))
+            {
+                const std::string_view value = arg.starts_with(kReferenceAlignmentPrefix)
+                    ? std::string_view(arg).substr(kReferenceAlignmentPrefix.size())
+                    : std::string_view(argv[++i]);
+                if (!ParseReferenceAlignment(value, options.reference_alignment))
+                {
+                    std::cerr << "invalid --reference-alignment value: " << value << " (expected left or right)\n";
+                    return false;
+                }
+
+                options.reference_alignment_override = true;
             }
             else if (arg == "--jobs" && i + 1 < argc)
             {
@@ -249,9 +318,17 @@ namespace heimdall::cli
             return false;
         }
 
-        if (options.rule_config_explicit && options.command != Command::Lint && options.command != Command::Check)
+        if ((options.pointer_alignment_override || options.reference_alignment_override) &&
+            options.command != Command::Format)
         {
-            std::cerr << "--config is only supported by lint/check\n";
+            std::cerr << "--pointer-alignment and --reference-alignment are only supported by format\n";
+            return false;
+        }
+
+        if (options.rule_config_explicit && options.command != Command::Lint && options.command != Command::Check &&
+            options.command != Command::Format)
+        {
+            std::cerr << "--config is only supported by lint/check/format\n";
             return false;
         }
 

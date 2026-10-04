@@ -33,6 +33,7 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ./build/src/heimdall lint --jobs 8 src include
 ./build/src/heimdall lint --json src/main.cpp
 ./build/src/heimdall lint --fix src/main.cpp
+./build/src/heimdall lint --fix-unsafe --semantic --compile-commands build/compile_commands.json src
 ./build/src/heimdall check src include
 ./build/src/heimdall format src/main.cpp
 ./build/src/heimdall format --write src include

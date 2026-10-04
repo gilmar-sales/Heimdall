@@ -3,6 +3,7 @@
 // types and expression types) and running the rules that sit on those models. Trees are parsed once outside the timed region.
 #include <benchmark/benchmark.h>
 
+#include <Heimdall/FlowModel.hpp>
 #include <Heimdall/HeaderSummary.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/MappedBuffer.hpp>
@@ -254,6 +255,87 @@ namespace
         state.counters["diagnostics"] = static_cast<double>(reported);
     }
 
+    // F4 (flow): the CFG and def-use events of every function body, then the two
+    // rules that read them.
+    void BM_Flow(benchmark::State & state)
+    {
+        Corpus corpus;
+        if (!LoadCorpus(state, corpus))
+        {
+            return;
+        }
+
+        std::vector<heimdall::SemanticModel> models;
+        for (const auto & tree: corpus.trees)
+        {
+            models.push_back(heimdall::Binder::Bind(tree));
+        }
+
+        std::vector<heimdall::TypeModel> typed;
+        for (const auto & model: models)
+        {
+            typed.push_back(heimdall::Typer::Type(model));
+        }
+
+        std::size_t events = 0;
+        for (auto _: state)
+        {
+            events = 0;
+            for (const auto & types: typed)
+            {
+                const auto flow = heimdall::Flow::Build(types);
+                events += flow.Events().Size();
+                benchmark::DoNotOptimize(flow.ArenaBytes());
+            }
+        }
+
+        state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * corpus.bytes));
+        state.counters["events"] = static_cast<double>(events);
+    }
+
+    void BM_ModernizeConst(benchmark::State & state)
+    {
+        Corpus corpus;
+        if (!LoadCorpus(state, corpus))
+        {
+            return;
+        }
+
+        std::vector<heimdall::SemanticModel> models;
+        for (const auto & tree: corpus.trees)
+        {
+            models.push_back(heimdall::Binder::Bind(tree));
+        }
+
+        std::vector<heimdall::TypeModel> typed;
+        for (const auto & model: models)
+        {
+            typed.push_back(heimdall::Typer::Type(model));
+        }
+
+        std::vector<heimdall::FlowModel> flows;
+        for (const auto & types: typed)
+        {
+            flows.push_back(heimdall::Flow::Build(types));
+        }
+
+        std::size_t reported = 0;
+        for (auto _: state)
+        {
+            reported = 0;
+            for (const auto & flow: flows)
+            {
+                reported += heimdall::SemanticRules::AnalyzeConst(flow).size();
+                reported += heimdall::SemanticRules::AnalyzeConstexpr(flow).size();
+            }
+
+            benchmark::DoNotOptimize(reported);
+        }
+
+        state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * corpus.bytes));
+        state.counters["diagnostics"] = static_cast<double>(reported);
+    }
+
     // F3 (project layer). Summaries are built once per header and shared, so the
     // cost that matters per keystroke is the ProjectIndex plus the rules.
     void BM_HeaderSummary(benchmark::State & state)
@@ -391,6 +473,8 @@ BENCHMARK(BM_ModernizeOverride)->Arg(100)->Arg(1000);
 BENCHMARK(BM_TypeFunctions)->Arg(100)->Arg(1000);
 BENCHMARK(BM_TypeRules)->Arg(100)->Arg(1000);
 BENCHMARK(BM_HeaderSummary);
+BENCHMARK(BM_Flow);
+BENCHMARK(BM_ModernizeConst);
 BENCHMARK(BM_ModernizeFinal)->Arg(100)->Arg(1000);
 BENCHMARK(BM_IncludeWhatYouUse)->Arg(10)->Arg(100);
 BENCHMARK(BM_ProjectIndex)->Arg(10)->Arg(100);

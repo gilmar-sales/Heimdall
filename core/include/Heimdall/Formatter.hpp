@@ -18,6 +18,14 @@ namespace heimdall
         Right,
     };
 
+    enum class ReferenceAlignment
+    {
+        // `int& x` (`&`/`&&` bind to the type).
+        Left,
+        // `int &x` (`&`/`&&` bind to the declarator name).
+        Right,
+    };
+
     enum class BraceStyle
     {
         // `if (x) {` — opening brace stays on the code line.
@@ -54,6 +62,7 @@ namespace heimdall
         // Maximum line width before comma-driven breaks; 0 disables breaking.
         std::size_t column_limit = kDefaultColumnLimit;
         PointerAlignment pointer_alignment = PointerAlignment::Right;
+        ReferenceAlignment reference_alignment = ReferenceAlignment::Right;
         BraceStyle brace_style = BraceStyle::Allman;
         // Single-statement control blocks: Keep (default), SingleLine, Indent or
         // IndentWithBraces. Only `if`/`else`/`for`/`while`/`do` bodies are touched;

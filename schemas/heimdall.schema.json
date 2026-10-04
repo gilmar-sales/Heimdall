@@ -219,6 +219,29 @@
         "groups"
       ],
       "additionalProperties": false
+    },
+    "format": {
+      "type": "object",
+      "description": "Formatter alignment. CLI flags (--pointer-alignment, --reference-alignment) override these values.",
+      "properties": {
+        "pointer-alignment": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Attachment of declarator `*`: 'left' formats `int* x`, 'right' formats `int *x`."
+        },
+        "reference-alignment": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Attachment of declarator `&`/`&&`: 'left' formats `int& x`, 'right' formats `int &x`."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

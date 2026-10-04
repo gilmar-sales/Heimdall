@@ -195,10 +195,70 @@ namespace heimdall
             }
         }
 
+        simdjson::dom::element format_element;
+        if (!root["format"].get(format_element))
+        {
+            simdjson::dom::object format;
+            if (const auto error = format_element.get_object().get(format); error)
+            {
+                return std::unexpected("'format' in Heimdall config must be an object: " + path.string());
+            }
+
+            for (const auto field: format)
+            {
+                const std::string_view key = field.key;
+                std::string_view setting;
+                if (const auto error = field.value.get_string().get(setting); error)
+                {
+                    return std::unexpected("'" + std::string(key) +
+                        "' in 'format' must be 'left' or 'right': " + path.string());
+                }
+
+                if (key == "pointer-alignment")
+                {
+                    if (setting == "left")
+                    {
+                        configuration.format_options.pointer_alignment = PointerAlignment::Left;
+                    }
+                    else if (setting == "right")
+                    {
+                        configuration.format_options.pointer_alignment = PointerAlignment::Right;
+                    }
+                    else
+                    {
+                        return std::unexpected("invalid 'pointer-alignment' in Heimdall config '" +
+                            path.string() + "': expected 'left' or 'right'");
+                    }
+                    configuration.has_pointer_alignment = true;
+                }
+                else if (key == "reference-alignment")
+                {
+                    if (setting == "left")
+                    {
+                        configuration.format_options.reference_alignment = ReferenceAlignment::Left;
+                    }
+                    else if (setting == "right")
+                    {
+                        configuration.format_options.reference_alignment = ReferenceAlignment::Right;
+                    }
+                    else
+                    {
+                        return std::unexpected("invalid 'reference-alignment' in Heimdall config '" +
+                            path.string() + "': expected 'left' or 'right'");
+                    }
+                    configuration.has_reference_alignment = true;
+                }
+                else
+                {
+                    return std::unexpected("unknown key in 'format' in Heimdall config: " + std::string(key));
+                }
+            }
+        }
+
         return configuration;
     }
 
-    std::expected<std::optional<RuleOptions>, std::string> FindRuleOptions(
+    std::expected<std::vector<RuleConfiguration>, std::string> FindConfigurations(
         const std::filesystem::path & directory)
     {
         std::vector<RuleConfiguration> configurations;
@@ -240,6 +300,19 @@ namespace heimdall
             current = parent;
         }
 
+        return configurations;
+    }
+
+    std::expected<std::optional<RuleOptions>, std::string> FindRuleOptions(
+        const std::filesystem::path & directory)
+    {
+        auto found = FindConfigurations(directory);
+        if (!found)
+        {
+            return std::unexpected(found.error());
+        }
+        auto & configurations = *found;
+
         if (configurations.empty())
         {
             return std::optional<RuleOptions>{};
@@ -261,6 +334,36 @@ namespace heimdall
             }
         }
         return std::optional<RuleOptions>{std::move(merged)};
+    }
+
+    std::expected<std::optional<FormatOptions>, std::string> FindFormatOptions(
+        const std::filesystem::path & directory)
+    {
+        auto found = FindConfigurations(directory);
+        if (!found)
+        {
+            return std::unexpected(found.error());
+        }
+        auto & configurations = *found;
+
+        if (configurations.empty())
+        {
+            return std::optional<FormatOptions>{};
+        }
+
+        FormatOptions merged;
+        for (auto it = configurations.rbegin(); it != configurations.rend(); ++it)
+        {
+            if (it->has_pointer_alignment)
+            {
+                merged.pointer_alignment = it->format_options.pointer_alignment;
+            }
+            if (it->has_reference_alignment)
+            {
+                merged.reference_alignment = it->format_options.reference_alignment;
+            }
+        }
+        return std::optional<FormatOptions>{std::move(merged)};
     }
 
 } // namespace heimdall

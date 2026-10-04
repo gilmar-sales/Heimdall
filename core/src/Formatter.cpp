@@ -277,7 +277,8 @@ namespace heimdall
 
             const std::string_view before = sigs[k - kTwoTokenOffset].text;
             return before == "(" || before == "," || before == ";" || before == "{" || before == "}" ||
-                before == "<" || before == ">" || before == ":" || IsQualifierKeyword(before);
+                before == "<" || before == ">" || before == ":" || before == "::" ||
+                IsQualifierKeyword(before);
         }
 
         // True when sigs[k] (`*`, `&`) is a unary dereference/address-of: `*p`,
@@ -439,12 +440,31 @@ namespace heimdall
             return false;
         }
 
+        // Gap for one side of a declarator `*` (pointer knob) or `&`/`&&`
+        // (reference knob). `before_name` selects the gap between the operator
+        // and the declared name (Right: none) vs between the type and the
+        // operator (Right: one space); Left mirrors both.
+        int DeclaratorGap(std::string_view token, bool before_name,
+            PointerAlignment pointer_alignment, ReferenceAlignment reference_alignment)
+        {
+            const bool right = token == "*"
+                ? pointer_alignment == PointerAlignment::Right
+                : reference_alignment == ReferenceAlignment::Right;
+            if (before_name)
+            {
+                return right ? 0 : 1;
+            }
+
+            return right ? 1 : 0;
+        }
+
         // Gap decision between two adjacent significant tokens of one chunk.
         // Returns -1 to preserve the original gap (exactly one space iff the source
         // had whitespace there), 0 for no space, 1 for exactly one space.
         int SpacingGap(const std::vector<Sig> & sigs, std::size_t prev, std::size_t cur,
             std::string_view source, const std::vector<Token> & tokens,
-            PointerAlignment pointer_alignment, bool space_before_inheritance_colon)
+            PointerAlignment pointer_alignment, ReferenceAlignment reference_alignment,
+            bool space_before_inheritance_colon)
         {
             const std::string_view left = sigs[prev].text;
             const std::string_view right = sigs[cur].text;
@@ -578,7 +598,7 @@ namespace heimdall
 
             if (left == "*" && (right == "const" || right == "volatile"))
             {
-                return pointer_alignment == PointerAlignment::Right ? 0 : 1;
+                return DeclaratorGap(left, true, pointer_alignment, reference_alignment);
             }
 
             if (right == "*" || right == "&" || right == "&&")
@@ -590,7 +610,7 @@ namespace heimdall
 
                 if (IsDeclaratorStar(sigs, cur))
                 {
-                    return pointer_alignment == PointerAlignment::Right ? 1 : 0;
+                    return DeclaratorGap(right, false, pointer_alignment, reference_alignment);
                 }
 
                 return 1; // binary
@@ -605,7 +625,7 @@ namespace heimdall
 
                 if (IsDeclaratorStar(sigs, prev))
                 {
-                    return pointer_alignment == PointerAlignment::Right ? 0 : 1;
+                    return DeclaratorGap(left, true, pointer_alignment, reference_alignment);
                 }
 
                 return 1; // binary
@@ -2951,7 +2971,7 @@ namespace heimdall
                 }
 
                 const int gap = SpacingGap(sigs, i - 1, i, source, tokens, m_options.pointer_alignment,
-                    m_options.space_before_inheritance_colon);
+                    m_options.reference_alignment, m_options.space_before_inheritance_colon);
                 if (gap < 0)
                 {
                     if (original_gap_had_space(i - 1, i))
@@ -3020,7 +3040,7 @@ namespace heimdall
                             if (i > cbegin)
                             {
                                 const int gap = SpacingGap(sigs, i - 1, i, source, tokens,
-                                    m_options.pointer_alignment,
+                                    m_options.pointer_alignment, m_options.reference_alignment,
                                     m_options.space_before_inheritance_colon);
                                 if (gap < 0)
                                 {

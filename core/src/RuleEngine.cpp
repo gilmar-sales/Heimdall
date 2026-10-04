@@ -1265,13 +1265,13 @@ namespace heimdall
     }
 
     std::string RuleEngine::ApplyFixes(std::string_view source,
-        const std::vector<Diagnostic> & diagnostics)
+        const std::vector<Diagnostic> & diagnostics, bool include_unsafe)
     {
         std::vector<const TextEdit * > edits;
         edits.reserve(diagnostics.size());
         for (const auto & diagnostic: diagnostics)
         {
-            if (diagnostic.has_fix && diagnostic.fix_is_safe)
+            if (diagnostic.has_fix && (diagnostic.fix_is_safe || include_unsafe))
             {
                 edits.push_back(&diagnostic.fix);
             }
@@ -1290,9 +1290,13 @@ namespace heimdall
                 {
                     return d.has_fix && &d.fix == edit;
             });
-            if (owner == diagnostics.end() || edit->offset < owner->offset ||
-                edit->offset - owner->offset > owner->length ||
-                edit->length > owner->length -(edit->offset - owner->offset) ||
+            // Safe fixes must stay within their diagnostic. Unsafe ones, applied
+            // only on request, may edit elsewhere (a specifier before the type, a
+            // keyword after the parameters) but are still bounds-checked.
+            const bool in_range = owner != diagnostics.end() && edit->offset >= owner->offset &&
+                edit->offset - owner->offset <= owner->length &&
+                edit->length <= owner->length -(edit->offset - owner->offset);
+            if (owner == diagnostics.end() ||(!in_range && owner->fix_is_safe) ||
                 edit->offset > source.size() || edit->length > source.size() - edit->offset ||
                 edit->offset + edit->length > previous_start)
             {

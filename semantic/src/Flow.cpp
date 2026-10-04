@@ -713,6 +713,20 @@ namespace heimdall
                                                                     : EventKind::Escape;
             }
 
+            // `static_cast<T>(x)` copies a value; `static_cast<T&>(x)` aliases it.
+            if (view.At(range.first) == Tok::KwStaticCast)
+            {
+                for (auto p = range.first; p < range.second; ++p)
+                {
+                    if (view.At(p) == Tok::Amp || view.At(p) == Tok::AmpAmp)
+                    {
+                        return EventKind::Escape;
+                    }
+                }
+
+                return shape.scalar ? EventKind::Read : EventKind::Escape;
+            }
+
             if (nodes[callee].kind == GrammarKind::MemberExpression)
             {
                 std::string text;
@@ -900,7 +914,11 @@ namespace heimdall
                 const auto symbol = model.ResolveToken(token);
                 if (symbol != kNone && m.m_owner[symbol] == m_function)
                 {
-                    local.push_back({Classify(ref, symbol), symbol, token, m_current});
+                    // `decltype(x)`: adding `const` to x would change the type.
+                    const auto position = view.PositionOf(token);
+                    const bool in_decltype = position >= 2 && view.At(position - 1) == Tok::LParen &&
+                        view.At(position - 2) == Tok::KwDecltype;
+                    local.push_back({in_decltype ? EventKind::Escape : Classify(ref, symbol), symbol, token, m_current});
                 }
             }
 
@@ -973,7 +991,13 @@ namespace heimdall
                     const auto symbol = name == kNone ? kNone : SymbolAt(name);
                     if (symbol != kNone && m.m_owner[symbol] == m_function)
                     {
-                        const auto after = view.PositionOf(name) + 1;
+                        auto after = view.PositionOf(name) + 1;
+                        while (view.At(after) == Tok::LBracket) // array bounds: `int a[3] = {...}`
+                        {
+                            const auto close = view.Match(after, view.Size());
+                            after = close < view.Size() ? close + 1 : view.Size();
+                        }
+
                         const Tok next = view.At(after);
                         const bool initialized = next == Tok::Eq || next == Tok::LBrace;
                         Emit(initialized ? EventKind::Init : EventKind::Uninit, symbol, name);

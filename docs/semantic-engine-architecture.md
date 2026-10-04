@@ -238,4 +238,30 @@ Decisões e limites desta fase:
 - **Custo.** O `HeaderSummary` de cada header é construído uma vez (com uma revalidação por `stat` a cada uso). O `ProjectIndex` é remontado a cada análise a partir dos resumos em cache (cerca de 80 µs por header do fecho, medido em `BM_ProjectIndex`); ainda não é guardado junto com o `IncludeProfile`.
 - Ainda não há reuso incremental por `TopLevelItem` (seção 6).
 
-Próxima fase: F4 (Fluxo), com CFG e def-use intraprocedural para `modernize-const` e `modernize-constexpr`.
+**F4 (Fluxo): concluída.** Regras entregues: `cpp/modernize-const` e `cpp/modernize-constexpr`.
+
+| Peça | Onde |
+|---|---|
+| `FlowModel` (`FunctionTable`, `BlockTable`, `EventTable`, arestas e eventos por símbolo), `Flow::Build(const TypeModel&)` | `semantic/include/Heimdall/FlowModel.hpp`, `semantic/src/Flow.cpp` |
+| `ConstantAnalysis` (avaliador de expressões constantes, elegibilidade de funções, especificadores) | `semantic/src/detail/ConstantAnalysis.hpp`, `semantic/src/ConstantAnalysis.cpp` |
+| `SemanticRules::AnalyzeConst/AnalyzeConstexpr(const FlowModel&)` | `semantic/src/ModernizeConst.cpp` |
+| `TokenView` compartilhado (antes privado de `SemanticRules.cpp`) | `semantic/src/detail/TokenView.hpp` |
+| Testes | `test/src/SemanticFlowSpec.cpp` |
+| Benchmarks (`BM_Flow`, `BM_ModernizeConst`) | `bench/src/SemanticBench.cpp` |
+
+O que o modelo oferece às regras: uma entrada por corpo de função e por lambda; blocos básicos com sucessores (`Successors`); eventos por variável local ou parâmetro (`EventsOf(symbol)`: `Init`, `Uninit`, `Read`, `Write`, `Modify`, `Escape`); `OwnerOf`, `IsReachable`, `ExitReachable`, `HasReachableReturn` e `IsNeverModified`. O `FlowModel` é uma consulta separada: `Analyze(model, types)` o calcula uma vez para as duas regras; as regras anteriores não pagam por ele.
+
+Decisões e limites desta fase:
+
+- **CFG por instrução.** `if`, `for`, `while`, range-for, `do`, `switch` (com fallthrough e sem `default`), `try`/`catch` (handlers ligados ao ponto de entrada), `break`, `continue`, `return` e `throw`. Código depois de `return` ganha um bloco sem predecessores: continua analisado (uma escrita ali ainda impede `const`), mas é inalcançável. `for (;;)` só sai por `break`. A forma é pensada para as futuras regras `memory/*` e `concurrency/*` (blocos, arestas e eventos por símbolo), que não foram implementadas.
+- **Função incompleta.** `goto`, `asm`, corrotinas, nós `Error` e aninhamento acima de 128 níveis marcam a função como incompleta (`complete == 0`); toda regra se cala sobre ela.
+- **Ordem dos eventos.** Dentro de uma instrução os eventos vêm em ordem de token, não de avaliação (`x = x + 1` dá `Read` e depois `Write` só por posição).
+- **Classificação conservadora.** O contexto de cada uso sobe pela árvore: operadores, subscript, acesso a membro, chamadas, inicializadores e `return`. Tudo que o motor não reconhece vira `Escape`. Em chamadas, a função do próprio arquivo é consultada pelos tokens dos parâmetros (valor ou `const T&` mantém o argumento; `T&`, `T&&`, `...` e templates escapam); chamadas a `std::` ou a funções não resolvidas escapam, exceto uma lista curta que recebe por valor (`printf`, `std::min`, `std::to_string`...) e só para tipos escalares.
+- **Nomes que a gramática não modelou.** `S s(q);` é lido como declarador de função e `{x, y}` engole os nomes. Uma varredura de tokens por função trata todo identificador não resolvido que não seja membro (`.`, `->`, `::`) como `Escape` de todo local de mesmo nome já declarado.
+- **Parâmetros de lambda** não viram nós na gramática: não têm símbolo e não são analisados. Os locais do corpo da lambda são analisados como os de uma função.
+- **Avaliador constante.** Opera sobre tokens (a gramática lê casts e alguns inicializadores de forma estranha): precedência de C, literais inteiros e de ponto flutuante, `true`/`false`, enumeradores, variáveis `constexpr` ou `const` integral com inicializador constante e chamadas a funções `constexpr` ou elegíveis. Inteiros de 32 bits têm valor e sinal rastreados (estouro com sinal, divisão por zero e deslocamento fora da largura são "não constante"); tipos de largura dependente da plataforma, enumeradores e `char` têm tipo mas não valor.
+- **Elegibilidade de função.** Ver a linha de `cpp/modernize-constexpr` em [rule-engine-roadmap.md](rule-engine-roadmap.md). O padrão mínimo é C++20, então laços, locais sem inicializador e múltiplas instruções são aceitos.
+- **Conflito resolvido de propósito.** Um local com inicializador constante e tipo aritmético é reportado só por `modernize-constexpr`, nunca também por `modernize-const`.
+- Ainda não há reuso incremental do `FlowModel` (seção 6): ele é refeito a cada versão, como o `TypeModel`. O `ProjectContext` não entra: a análise é intraprocedural e por arquivo.
+
+Próxima fase: reuso incremental por `TopLevelItem` (seção 6) e as regras `memory/*` e `concurrency/*` sobre o `FlowModel`.

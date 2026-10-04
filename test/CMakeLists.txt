@@ -24,6 +24,7 @@ add_executable(Tests_run
   src/SemanticModernizeSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
   src/SemanticTyperSpec.cpp
+  src/SemanticFlowSpec.cpp
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
   src/DocumentSpec.cpp
@@ -33,6 +34,7 @@ add_executable(Tests_run
   src/ParserTruncationSpec.cpp
   src/IncrementalParseSpec.cpp
   src/FileDiscoverySpec.cpp
+  src/CliOptionsSpec.cpp
   ../../lsp/Document.cpp
   ../../src/CliOptions.cpp
   ../../src/FileDiscovery.cpp

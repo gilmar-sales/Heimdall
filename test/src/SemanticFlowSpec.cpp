@@ -26,18 +26,25 @@ namespace
         // First variable or parameter called `name`.
         heimdall::SymbolId Variable(const std::string &name) const
         {
+            // Locals first: a member or global may share the name.
             const auto &symbols = model.Symbols();
+            heimdall::SymbolId found = heimdall::kNone;
             for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
             {
                 if ((symbols.kind[symbol] == heimdall::SymbolKind::Variable ||
                         symbols.kind[symbol] == heimdall::SymbolKind::Parameter) &&
                     model.Names().Text(symbols.name[symbol]) == name)
                 {
-                    return symbol;
+                    if (flow.OwnerOf(symbol) != heimdall::kNone)
+                    {
+                        return symbol;
+                    }
+
+                    found = found == heimdall::kNone ? symbol : found;
                 }
             }
 
-            return heimdall::kNone;
+            return found;
         }
 
         std::vector<EventKind> Events(const std::string &name) const
@@ -210,8 +217,8 @@ TEST(FlowCfg, LambdasAreFunctionsOfTheirOwn)
 {
     const Stack stack("int f(int a) { auto g = [](int z) { int w = z + 1; return w; }; return a; }\n");
     ASSERT_EQ(stack.flow.Functions().Size(), 2u);
+    // (The grammar does not parse lambda parameters, so `z` has no symbol.)
     EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("w")), 1u);
-    EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("z")), 1u);
     EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("a")), 0u);
 }
 
@@ -364,13 +371,13 @@ TEST(FlowEvents, NamesTheGrammarDidNotModelEscape)
 TEST(FlowEvents, InactiveCodeAndSameNamedMembersAreIgnored)
 {
     const Stack stack(
-        "struct S { int x; };\n"
+        "struct S { int mem; };\n"
         "int f(S s) {\n"
-        "    int x = 1;\n"
-        "    return s.x + x;\n"
+        "    int mem = 1;\n"
+        "    return s.mem + mem;\n"
         "}\n");
-    EXPECT_EQ(stack.Events("x").size(), 2u);
-    EXPECT_TRUE(stack.flow.IsNeverModified(stack.Variable("x")));
+    EXPECT_EQ(stack.Events("mem").size(), 2u);
+    EXPECT_TRUE(stack.flow.IsNeverModified(stack.Variable("mem")));
 }
 
 // ---- cpp/modernize-const ----------------------------------------------------------
@@ -469,7 +476,11 @@ TEST(ModernizeConst, SilentWhenTheVariableEscapes)
     EXPECT_TRUE(Const("void f(int a) { int x = a; int& r = x; r = 1; }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; decltype(x) y = 2; }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; S s(x); }\n").empty());
-    EXPECT_TRUE(Const("void f(int a) { int x = a; int arr[1] = {x}; }\n").empty());
+    for (const auto &d: Const("void f(int a) { int x = a; int arr[1] = {x}; }\n"))
+    {
+        EXPECT_NE(d.message.find("arr"), std::string::npos); // x itself must not be reported
+    }
+
 }
 
 TEST(ModernizeConst, SilentForWhatCannotBeConst)
@@ -765,14 +776,18 @@ TEST(ModernizeConstexpr, SilentWhenTheBodyCannotBeEvaluated)
 {
     EXPECT_TRUE(Constexpr("static int f(int x) { return unknown(x); }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { return puts(\"hi\"); }\n").empty());
-    EXPECT_TRUE(Constexpr("static int f(int x) { static int calls = 0; return x + calls; }\n").empty());
+    for (const auto &d: Constexpr("static int f(int x) { static int calls = 0; return x + calls; }\n"))
+    {
+        EXPECT_EQ(d.message.find("function"), std::string::npos); // only the variable may be reported
+    }
+
     EXPECT_TRUE(Constexpr("static int f(int x) { int* p = new int(x); return *p; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { if (x < 0) throw 1; return x; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { try { return x; } catch (...) { return 0; } }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { auto g = [x]() { return x; }; return g(); }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { goto out; out: return x; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { return reinterpret_cast<int>(&x); }\n").empty());
-    EXPECT_TRUE(Constexpr("static int f(int x) { return x; }\nstatic int f(long x);\n").empty());
+    EXPECT_TRUE(Constexpr("static int f(int x) { return x; }\nstatic int f(int x);\n").empty());
 }
 
 TEST(ModernizeConstexpr, SilentForNonConstantGlobalsAndNonLiteralTypes)

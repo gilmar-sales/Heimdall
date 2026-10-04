@@ -504,11 +504,58 @@ TEST(FormatterSpec, CreatedSingleLineBlocksFollowTheBraceStyle)
 TEST(FormatterSpec, SupportsLeftPointerAlignment)
 {
     constexpr std::string_view source = "int*x;\nint &r=x;\n";
-    const heimdall::Formatter left({ .pointer_alignment = heimdall::PointerAlignment::Left });
+    const heimdall::Formatter left({ .pointer_alignment = heimdall::PointerAlignment::Left,
+        .reference_alignment = heimdall::ReferenceAlignment::Left });
     const std::string expected = "int* x;\nint& r = x;\n";
     const std::string formatted = left.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(left.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, AlignsReferencesAfterQualifiedTypes)
+{
+    constexpr std::string_view source =
+        "std::filesystem::path AbsoluteNormalized(const std::filesystem::path & path);\n"
+        "foo::Bar *alias;\n";
+
+    const auto check = [](heimdall::FormatOptions options, std::string_view expected)
+    {
+        const heimdall::Formatter formatter(options);
+        const std::string formatted = formatter.Format(source);
+        EXPECT_EQ(formatted, expected);
+        EXPECT_EQ(formatter.Format(formatted), formatted);
+    };
+
+    check({}, "std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path);\n"
+        "foo::Bar *alias;\n");
+    check({ .pointer_alignment = heimdall::PointerAlignment::Left,
+            .reference_alignment = heimdall::ReferenceAlignment::Left },
+        "std::filesystem::path AbsoluteNormalized(const std::filesystem::path& path);\n"
+        "foo::Bar* alias;\n");
+}
+
+TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
+{
+    constexpr std::string_view source = "int*x;\nint &r=x;\nvoid f(int&&v);\nint*const p=nullptr;\n";
+
+    const auto check = [](heimdall::FormatOptions options, std::string_view expected)
+    {
+        const heimdall::Formatter formatter(options);
+        const std::string formatted = formatter.Format(source);
+        EXPECT_EQ(formatted, expected);
+        EXPECT_EQ(formatter.Format(formatted), formatted);
+    };
+
+    // Defaults: both bind to the declarator name.
+    check({}, "int *x;\nint &r = x;\nvoid f(int &&v);\nint *const p = nullptr;\n");
+    // Split: pointers to the type, references to the name.
+    check({ .pointer_alignment = heimdall::PointerAlignment::Left },
+        "int* x;\nint &r = x;\nvoid f(int &&v);\nint * const p = nullptr;\n");
+    check({ .reference_alignment = heimdall::ReferenceAlignment::Left },
+        "int *x;\nint& r = x;\nvoid f(int&& v);\nint *const p = nullptr;\n");
+    check({ .pointer_alignment = heimdall::PointerAlignment::Left,
+            .reference_alignment = heimdall::ReferenceAlignment::Left },
+        "int* x;\nint& r = x;\nvoid f(int&& v);\nint * const p = nullptr;\n");
 }
 
 TEST(FormatterSpec, BreaksLongLinesAtCommas)

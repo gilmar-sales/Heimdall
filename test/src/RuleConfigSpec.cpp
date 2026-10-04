@@ -170,3 +170,55 @@ TEST(RuleConfigSpec, NearestIncludeOrderWins)
     EXPECT_TRUE((*loaded)->include_case_insensitive);
     std::filesystem::remove_all(directory);
 }
+
+TEST(RuleConfigSpec, LoadsFormatAlignments)
+{
+    const auto directory = MakeConfigDir("format");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"format":{"pointer-alignment":"left","reference-alignment":"left"}})");
+
+    auto loaded = heimdall::LoadRuleConfiguration(path);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    EXPECT_TRUE(loaded->has_pointer_alignment);
+    EXPECT_TRUE(loaded->has_reference_alignment);
+    EXPECT_EQ(loaded->format_options.pointer_alignment, heimdall::PointerAlignment::Left);
+    EXPECT_EQ(loaded->format_options.reference_alignment, heimdall::ReferenceAlignment::Left);
+
+    auto found = heimdall::FindFormatOptions(directory);
+    ASSERT_TRUE(found) << (found ? "" : found.error());
+    ASSERT_TRUE(*found);
+    EXPECT_EQ((*found)->pointer_alignment, heimdall::PointerAlignment::Left);
+    EXPECT_EQ((*found)->reference_alignment, heimdall::ReferenceAlignment::Left);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, RejectsInvalidFormatSettings)
+{
+    const auto directory = MakeConfigDir("format-invalid");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"format":{"pointer-alignment":"middle"}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"format":{"reference-alignment":true}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"format":{"indent-width":4}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    WriteConfig(directory, R"({"format":"left"})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, NearestFormatAlignmentWinsPerKey)
+{
+    const auto directory = MakeConfigDir("format-merge");
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(directory, R"({"format":{"pointer-alignment":"left","reference-alignment":"left"}})");
+    WriteConfig(child, R"({"format":{"pointer-alignment":"right"}})");
+
+    auto found = heimdall::FindFormatOptions(child);
+    ASSERT_TRUE(found) << (found ? "" : found.error());
+    ASSERT_TRUE(*found);
+    EXPECT_EQ((*found)->pointer_alignment, heimdall::PointerAlignment::Right);
+    EXPECT_EQ((*found)->reference_alignment, heimdall::ReferenceAlignment::Left);
+    std::filesystem::remove_all(directory);
+}
