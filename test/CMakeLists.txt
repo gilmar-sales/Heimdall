@@ -10,6 +10,7 @@ include(GoogleTest)
 add_executable(Tests_run
   src/CompileDatabaseSpec.cpp
   src/RuleConfigSpec.cpp
+  src/CliInitSpec.cpp
   src/CorePolicySpec.cpp
   src/SyntaxTreeSpec.cpp
   src/FormatterSpec.cpp
@@ -24,10 +25,13 @@ add_executable(Tests_run
   src/IncludeIndexSpec.cpp
   src/IncludeAnalyzerSpec.cpp
   src/ParserTruncationSpec.cpp
+  src/IncrementalParseSpec.cpp
   ../../lsp/Document.cpp
+  ../../src/CliOptions.cpp
+  ../../src/Init.cpp
 )
 
-target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src)
+target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
 target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic heimdall::config)
 
@@ -90,6 +94,11 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspCancelSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspCancelSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIncrementalSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncrementalSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

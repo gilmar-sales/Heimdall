@@ -42,6 +42,24 @@ namespace heimdall
             std::size_t new_length = 0;
         };
 
+        // Merges two consecutive edits (`second` is expressed in the text that
+        // `first` produced) into one edit, relative to the text before `first`,
+        // that covers both.
+        static TextEdit Compose(const TextEdit &first, const TextEdit &second) noexcept
+        {
+            const std::size_t first_new_end = first.offset + first.new_length;
+            const std::size_t second_end = second.offset + second.old_length;
+            const std::size_t offset = first.offset < second.offset ? first.offset : second.offset;
+            // Where the merged region ends, in the text before `first`...
+            const std::size_t old_end = second_end > first_new_end
+                ? second_end - first.new_length + first.old_length
+                : first.offset + first.old_length;
+            // ...and in the text after `second`.
+            const std::size_t new_end = (first_new_end > second_end ? first_new_end : second_end) +
+                second.new_length - second.old_length;
+            return {offset, old_end - offset, new_end - offset};
+        }
+
         std::vector<Token> Lex() const;
         // Incremental re-lex. `tokens` must be the tokens of the text before
         // `edit`; the lexer's source is the text after it. Only a window around

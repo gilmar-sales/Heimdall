@@ -132,8 +132,20 @@ namespace heimdall::lsp
         void DiagWorkerMain(std::stop_token stop);
         void EnqueueDiagnostics(const std::string & uri, std::int64_t version);
         void FlushDiagnostics();
+        // The smallest single edit covering every change applied so far.
+        struct EditHull
+        {
+            bool valid = false;
+            heimdall::Lexer::TextEdit edit;
+            void Add(const heimdall::Lexer::TextEdit &next) noexcept
+            {
+                edit = valid ? heimdall::Lexer::Compose(edit, next) : next;
+                valid = true;
+            }
+        };
+
         static bool ApplyContentChange(std::string & current, LineIndex &index,
-            std::vector<heimdall::Token> &tokens, simdjson::dom::object change);
+            std::vector<heimdall::Token> &tokens, EditHull &hull, simdjson::dom::object change);
         void TouchGlobalIndex(const std::string & key);
         // Runs `handler` on the pool against a private copy of the message, so
         // the I/O thread goes straight back to reading (and to $/cancelRequest).
@@ -195,6 +207,8 @@ namespace heimdall::lsp
         {
             std::once_flag once;
             std::shared_ptr<const heimdall::ParseTree> tree;
+            // Set (release) once `tree` is filled, so other threads can peek without call_once.
+            std::atomic<bool> ready{false};
         };
 
         struct ParseCacheEntry
@@ -203,6 +217,13 @@ namespace heimdall::lsp
             std::shared_ptr<const std::string> text;
             heimdall::ParserOptions options;
             std::shared_ptr<ParseSlot> slot;
+            // Tree of an earlier version of this document and the edit that turns
+            // its text into the one at `base_version`: the next parse copies the
+            // top-level items outside that edit instead of re-parsing them.
+            std::shared_ptr<const heimdall::ParseTree> base;
+            heimdall::ParserOptions base_options;
+            heimdall::Lexer::TextEdit base_edit;
+            std::int64_t base_version = -1;
         };
 
         std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;

@@ -98,8 +98,8 @@ namespace heimdall
     {
     public:
         GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop,
-            const Preprocessor::MacroMap * macros)
-        : m_tree(tree), m_stop(std::move(stop))
+            const Preprocessor::MacroMap * macros, const ParseReuse * reuse)
+        : m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse)
         {
             // identifier text -> "is a decoration macro", memoized per parse
             std::unordered_map<std::string_view, bool> decoration;
@@ -236,6 +236,12 @@ namespace heimdall
         std::pmr::vector<std::string_view> m_sig_text{&m_scratch};
         std::pmr::vector<std::uint32_t> m_match{&m_scratch};
         std::uint32_t m_last_expression_node = Invalid;
+        const ParseReuse *m_reuse = nullptr;
+        // Top-level item currently being parsed (see FinishItem / TryReuseItem).
+        bool m_item_open = false;
+        std::size_t m_item_first_sig = 0;
+        std::size_t m_item_node_begin = 0;
+        std::size_t m_item_diag_begin = 0;
 
         std::string_view Text(std::size_t sig) const
         {
@@ -3012,8 +3018,190 @@ namespace heimdall
             }
         }
 
+        // True when every bracket in sig range [begin, end) is matched inside it,
+        // so the range's parse cannot depend on delimiters outside of it.
+        bool BracketsClosedWithin(std::size_t begin, std::size_t end) const
+        {
+            for (auto i = begin; i < end; ++i)
+            {
+                const auto text = m_sig_text[i];
+                if (text.size() == 1 && (text[0] == '(' || text[0] == '[' || text[0] == '{' ||
+                    text[0] == ')' || text[0] == ']' || text[0] == '}') &&
+                    (m_match[i] == Invalid || m_match[i] < begin || m_match[i] >= end))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        void BeginItem(std::size_t pos)
+        {
+            m_item_open = true;
+            m_item_first_sig = pos;
+            m_item_node_begin = m_tree.m_nodes.size();
+            m_item_diag_begin = m_tree.m_diagnostics.size();
+        }
+
+        // Closes the item opened at BeginItem: it ends before sig index `pos`.
+        // `complete` is false when the scope bailed out instead of consuming it.
+        void FinishItem(std::size_t pos, bool complete)
+        {
+            if (!m_item_open)
+            {
+                return;
+            }
+
+            m_item_open = false;
+            TopLevelItem item{};
+            item.node_begin = static_cast<std::uint32_t>(m_item_node_begin);
+            item.node_end = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            item.diag_begin = static_cast<std::uint32_t>(m_item_diag_begin);
+            item.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
+            item.sig_count = static_cast<std::uint32_t>(pos - m_item_first_sig);
+            item.first_token = m_sig[m_item_first_sig];
+            item.token_end = pos > m_item_first_sig ? m_sig[pos - 1] + 1 : item.first_token;
+            bool reusable = complete && pos > m_item_first_sig && item.node_end > item.node_begin &&
+                !IsDirective(m_item_first_sig) && BracketsClosedWithin(m_item_first_sig, pos);
+            // Error recovery may scan arbitrarily far ahead, so only items that parsed
+            // cleanly and ended on `;` or `}` are known to depend on nothing beyond them.
+            reusable = reusable && item.diag_end == item.diag_begin && pos > m_item_first_sig &&
+                (Is(pos - 1, ";") || Is(pos - 1, "}"));
+            for (auto n = item.node_begin; reusable && n < item.node_end; ++n)
+            {
+                const auto &node = m_tree.m_nodes[n];
+                reusable = node.kind != GrammarKind::Error && node.kind != GrammarKind::ErrorExpression &&
+                    node.first_token >= item.first_token && node.first_token < item.token_end &&
+                    node.first_token + node.token_count <= item.token_end &&
+                    (node.parent == ParseTree::RootNode || (node.parent >= item.node_begin && node.parent < item.node_end));
+            }
+
+            item.reusable = reusable;
+            m_tree.m_items.push_back(item);
+        }
+
+        // Copies the matching item of the previous tree when the edit provably
+        // cannot have changed how it parses; advances `pos` past it.
+        bool TryReuseItem(std::size_t &pos, std::size_t end)
+        {
+            if (m_reuse == nullptr || m_reuse->previous == nullptr)
+            {
+                return false;
+            }
+
+            const ParseTree &prev = *m_reuse->previous;
+            const auto &items = prev.m_items;
+            const std::size_t edit = m_reuse->offset;
+            const std::size_t old_end = edit + m_reuse->old_length;
+            const std::size_t new_end = edit + m_reuse->new_length;
+            const std::ptrdiff_t shift = static_cast<std::ptrdiff_t>(m_reuse->new_length) -
+                static_cast<std::ptrdiff_t>(m_reuse->old_length);
+            const std::uint32_t token = m_sig[pos];
+            const std::size_t offset = m_tree.m_tokens[token].offset;
+            bool after = false;
+            std::size_t old_offset = offset;
+            if (offset >= new_end)
+            {
+                after = true;
+                old_offset = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(offset) - shift);
+            }
+            else if (offset >= edit)
+            {
+                return false;
+            }
+
+            const auto found = std::lower_bound(items.begin(), items.end(), old_offset,
+                [&prev](const TopLevelItem &item, std::size_t value)
+                {
+                    return prev.m_tokens[item.first_token].offset < value;
+                });
+            if (found == items.end() || prev.m_tokens[found->first_token].offset != old_offset ||
+                !found->reusable)
+            {
+                return false;
+            }
+
+            const TopLevelItem &item = *found;
+            if (after)
+            {
+                if (old_offset < old_end)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // The item must end before the edit, and so must the token after it:
+                // the parser may peek one token past an item to decide where it ends.
+                const auto &last = prev.m_tokens[item.token_end - 1];
+                const auto next = found + 1;
+                if (static_cast<std::size_t>(last.offset) + last.length >= edit || next == items.end() ||
+                    prev.m_tokens[next->first_token].offset >= edit)
+                {
+                    return false;
+                }
+            }
+
+            const std::size_t token_count = item.token_end - item.first_token;
+            const std::size_t after_sig = pos + item.sig_count;
+            if (after_sig > end || token + token_count > m_tree.m_tokens.size() ||
+                m_sig[after_sig - 1] != token + (item.token_end - 1 - item.first_token) ||
+                (after_sig < m_sig.size() && m_sig[after_sig] < token + token_count) ||
+                !BracketsClosedWithin(pos, after_sig))
+            {
+                return false;
+            }
+
+            const std::ptrdiff_t byte_shift = after ? shift : 0;
+            const std::ptrdiff_t token_shift = static_cast<std::ptrdiff_t>(token) -
+                static_cast<std::ptrdiff_t>(item.first_token);
+            const auto &last_new = m_tree.m_tokens[token + token_count - 1];
+            const auto &last_old = prev.m_tokens[item.token_end - 1];
+            if (static_cast<std::ptrdiff_t>(last_new.offset) !=
+                static_cast<std::ptrdiff_t>(last_old.offset) + byte_shift ||
+                last_new.length != last_old.length)
+            {
+                return false;
+            }
+
+            const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            for (auto n = item.node_begin; n < item.node_end; ++n)
+            {
+                GrammarNode node = prev.m_nodes[n];
+                node.first_token = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(node.first_token) + token_shift);
+                if (node.parent != ParseTree::RootNode)
+                {
+                    node.parent = node.parent - item.node_begin + node_base;
+                }
+
+                m_tree.m_nodes.push_back(node);
+            }
+
+            const std::uint32_t diag_base = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
+            for (auto d = item.diag_begin; d < item.diag_end; ++d)
+            {
+                GrammarDiagnostic diagnostic = prev.m_diagnostics[d];
+                diagnostic.offset = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(diagnostic.offset) + byte_shift);
+                m_tree.m_diagnostics.push_back(std::move(diagnostic));
+            }
+
+            TopLevelItem copy = item;
+            copy.first_token = token;
+            copy.token_end = static_cast<std::uint32_t>(token + token_count);
+            copy.node_begin = node_base;
+            copy.node_end = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            copy.diag_begin = diag_base;
+            copy.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
+            m_tree.m_items.push_back(copy);
+            ++m_tree.m_reused_items;
+            pos = after_sig;
+            return true;
+        }
+
         void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
         {
+            const bool top_level = parent == ParseTree::RootNode;
             auto pos = begin;
             while (pos < end)
             {
@@ -3021,6 +3209,17 @@ namespace heimdall
                 {
                     m_tree.m_cancelled = true;
                     return;
+                }
+
+                if (top_level)
+                {
+                    FinishItem(pos, true);
+                    if (TryReuseItem(pos, end))
+                    {
+                        continue;
+                    }
+
+                    BeginItem(pos);
                 }
 
                 const auto start = pos;
@@ -3327,6 +3526,11 @@ namespace heimdall
                 Add(GrammarKind::Error, start, end, parent);
                 break;
             }
+
+            if (top_level)
+            {
+                FinishItem(pos, pos >= end);
+            }
         }
     };
 
@@ -3334,9 +3538,9 @@ namespace heimdall
     {
 
         void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop, const Preprocessor::MacroMap * macros)
+            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse * reuse)
         {
-            GrammarParser parser(tree, preprocessing, std::move(stop), macros);
+            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse);
             parser.Run();
         }
 

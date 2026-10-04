@@ -39,7 +39,16 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ./build/src/heimdall parse src/main.cpp
 ./build/src/heimdall parse --json --std c++23 src/main.cpp
 ./build/src/heimdall lint --semantic --compile-commands build/compile_commands.json src
+./build/src/heimdall init
+./build/src/heimdall init ./my-project --force
 ```
+
+`init [directory] [--force]` creates `<directory>/.heimdall.json` (default:
+current directory) with `root`, `rules`, `suppressions` and `include-order`
+defaults. It refuses to overwrite an existing file unless `--force` (`-f`) is
+given and creates missing directories. The JSON Schema for editors lives in
+`schemas/heimdall.schema.json`; add `"$schema": "<path-to>/heimdall.schema.json"`
+to `.heimdall.json` for completion and validation.
 
 Files are analyzed concurrently with a standard-library `std::jthread` worker
 set and an atomic work index; results are emitted in sorted path order. The
@@ -89,8 +98,9 @@ core/                   # heimdall_core: zero-dependency engine (STL only, no ex
 semantic/               # heimdall_semantic: compile DB + local oracle (simdjson PRIVATE)
   include/Heimdall/     # CompileDatabase.hpp, SemanticAnalyzer.hpp (STL + core only)
   src/
-src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Pipeline/Reporting
+src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Init/Pipeline/Reporting
 lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modules (simdjson PRIVATE)
+schemas/                # heimdall.schema.json: JSON Schema for .heimdall.json (used by init docs)
 vscode-extension/       # VS Code extension manifest and LSP client
 test/                   # GoogleTest suite, incl. core dependency-policy guard (explicit sources)
 bench/                  # Google Benchmark suite (explicit sources) + corpus

@@ -643,12 +643,13 @@ namespace heimdall::lsp
 
         const std::string uri_string(uri);
         DocumentSnapshot snapshot;
-        snapshot.text = std::make_shared<const std::string>(text);
+        // Created non-const: ChangeDocument edits an unshared snapshot in place.
+        snapshot.text = std::make_shared<std::string>(text);
         snapshot.version = version;
         auto lines = std::make_shared<LineIndex>();
         lines->Build(*snapshot.text);
         snapshot.lines = std::move(lines);
-        snapshot.tokens = std::make_shared<const std::vector<heimdall::Token>>(
+        snapshot.tokens = std::make_shared<std::vector<heimdall::Token>>(
             heimdall::Lexer(*snapshot.text).Lex());
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
@@ -662,7 +663,7 @@ namespace heimdall::lsp
     }
 
     bool LanguageServer::ApplyContentChange(std::string & current, LineIndex &index,
-        std::vector<heimdall::Token> & tokens, simdjson::dom::object change)
+        std::vector<heimdall::Token> & tokens, EditHull &hull, simdjson::dom::object change)
     {
         std::string_view text;
         if (!GetString(change, "text", text))
@@ -674,6 +675,7 @@ namespace heimdall::lsp
         if (!GetObject(change, "range", range))
         {
             // Full-document sync (textDocumentSync = 1 fallback).
+            hull.Add({0, current.size(), text.size()});
             current.assign(text);
             index.Build(current);
             tokens = heimdall::Lexer(current).Lex();
@@ -726,9 +728,11 @@ namespace heimdall::lsp
             end_offset = start_offset;
         }
 
-        current.replace(start_offset, end_offset - start_offset, text);
-        index.Update(current, start_offset, end_offset - start_offset, text.size());
-        heimdall::Lexer(current).Relex(tokens, {start_offset, end_offset - start_offset, text.size()});
+        const heimdall::Lexer::TextEdit edit{start_offset, end_offset - start_offset, text.size()};
+        current.replace(edit.offset, edit.old_length, text);
+        index.Update(current, edit.offset, edit.old_length, edit.new_length);
+        heimdall::Lexer(current).Relex(tokens, edit);
+        hull.Add(edit);
         return true;
     }
 
@@ -760,8 +764,10 @@ namespace heimdall::lsp
             new_version = 0;
         }
 
-        std::shared_ptr<const std::string> base_text;
-        std::shared_ptr<const std::vector<heimdall::Token>> base_tokens;
+        // Which text the parse cache entry has to describe for its tree to be a
+        // usable base, and which document version that is.
+        const std::string *current_text = nullptr;
+        std::int64_t current_version = 0;
         {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
             const auto found = m_documents.find(uri_string);
@@ -770,39 +776,50 @@ namespace heimdall::lsp
                 return;
             }
 
-            base_text = found->second.text;
-            base_tokens = found->second.tokens;
-        }
-        std::string current(*base_text);
-        LineIndex batch_index;
-        batch_index.Build(current);
-        std::vector<heimdall::Token> tokens;
-        if (base_tokens)
-        {
-            tokens = *base_tokens;
-        }
-        else
-        {
-            tokens = heimdall::Lexer(current).Lex();
+            current_text = found->second.text.get();
+            current_version = found->second.version;
         }
 
-        for (simdjson::dom::element change: changes)
+        // Take the previous parse out of the cache as the base for the next one.
+        // Dropping the cache entry (and, when nothing else uses the tree, the
+        // tree's hold on the text) is also what lets the text below be edited in
+        // place instead of copied.
+        std::shared_ptr<const heimdall::ParseTree> base;
+        heimdall::ParserOptions base_options;
+        EditHull pending;
         {
-            simdjson::dom::object change_object;
-            if (change.get_object().get(change_object))
+            const std::lock_guard<std::mutex> lock(m_mu);
+            if (const auto found = m_parse_cache.find(uri_string); found != m_parse_cache.end())
             {
-                continue;
-            }
+                auto &entry = found->second;
+                if (entry.slot && entry.slot->ready.load(std::memory_order_acquire) &&
+                    entry.text.get() == current_text && entry.version == current_version)
+                {
+                    base = entry.slot->tree;
+                    base_options = entry.options;
+                }
+                else if (entry.base && entry.base_version == current_version)
+                {
+                    base = entry.base;
+                    base_options = entry.base_options;
+                    pending.valid = true;
+                    pending.edit = entry.base_edit;
+                }
 
-            ApplyContentChange(current, batch_index, tokens, change_object);
+                m_parse_cache.erase(found);
+            }
+        }
+        if (base && base.use_count() == 1)
+        {
+            // Nobody else sees this tree: it will only be read for its nodes and tokens.
+            std::const_pointer_cast<heimdall::ParseTree>(base)->ReleaseSource();
         }
 
-        auto new_text = std::make_shared<const std::string>(std::move(current));
-        batch_index.Rebind(*new_text);
-        auto new_lines = std::make_shared<const LineIndex>(std::move(batch_index));
-        auto new_tokens = std::make_shared<const std::vector<heimdall::Token>>(std::move(tokens));
+        EditHull hull;
         std::int64_t version = new_version;
         {
+            // Edits run under the exclusive lock so a snapshot that nothing else
+            // references can be changed in place: O(edit) instead of O(document).
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
             const auto found = m_documents.find(uri_string);
             if (found == m_documents.end())
@@ -810,15 +827,72 @@ namespace heimdall::lsp
                 return;
             }
 
-            found->second.version = new_version;
-            found->second.text = std::move(new_text);
-            found->second.lines = std::move(new_lines);
-            found->second.tokens = std::move(new_tokens);
-            version = found->second.version;
+            auto &snapshot = found->second;
+            std::shared_ptr<std::string> text = snapshot.text.use_count() == 1
+                ? std::const_pointer_cast<std::string>(snapshot.text)
+                : std::make_shared<std::string>(*snapshot.text);
+            std::shared_ptr<LineIndex> lines = snapshot.lines.use_count() == 1
+                ? std::const_pointer_cast<LineIndex>(snapshot.lines)
+                : std::make_shared<LineIndex>(*snapshot.lines);
+            std::shared_ptr<std::vector<heimdall::Token>> tokens;
+            if (!snapshot.tokens)
+            {
+                tokens = std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*text).Lex());
+            }
+            else if (snapshot.tokens.use_count() == 1)
+            {
+                tokens = std::const_pointer_cast<std::vector<heimdall::Token>>(snapshot.tokens);
+            }
+            else
+            {
+                tokens = std::make_shared<std::vector<heimdall::Token>>(*snapshot.tokens);
+            }
+
+            lines->Rebind(*text);
+            for (simdjson::dom::element change: changes)
+            {
+                simdjson::dom::object change_object;
+                if (change.get_object().get(change_object))
+                {
+                    continue;
+                }
+
+                ApplyContentChange(*text, *lines, *tokens, hull, change_object);
+            }
+
+            lines->Rebind(*text);
+            snapshot.version = new_version;
+            snapshot.text = std::move(text);
+            snapshot.lines = std::move(lines);
+            snapshot.tokens = std::move(tokens);
+            version = snapshot.version;
         }
         {
             const std::lock_guard<std::mutex> lock(m_mu);
-            m_parse_cache.erase(uri_string);
+            if (base)
+            {
+                ParseCacheEntry &entry = m_parse_cache[uri_string];
+                entry.base = std::move(base);
+                entry.base_options = std::move(base_options);
+                if (pending.valid && hull.valid)
+                {
+                    entry.base_edit = heimdall::Lexer::Compose(pending.edit, hull.edit);
+                }
+                else if (pending.valid)
+                {
+                    entry.base_edit = pending.edit;
+                }
+                else if (hull.valid)
+                {
+                    entry.base_edit = hull.edit;
+                }
+                else
+                {
+                    entry.base_edit = {};
+                }
+
+                entry.base_version = new_version;
+            }
         }
         EnqueueDiagnostics(uri_string, version);
     }
@@ -1472,6 +1546,8 @@ namespace heimdall::lsp
     {
         heimdall::ParserOptions options = ParserOptionsFor(command);
         std::shared_ptr<ParseSlot> slot;
+        std::shared_ptr<const heimdall::ParseTree> base;
+        heimdall::Lexer::TextEdit base_edit;
         {
             const std::lock_guard<std::mutex> lock(m_mu);
             if (const auto found = m_parse_cache.find(uri);
@@ -1484,6 +1560,19 @@ namespace heimdall::lsp
             {
                 slot = std::make_shared<ParseSlot>();
                 auto &entry = m_parse_cache[uri];
+                if (entry.base && entry.base_version == version &&
+                    entry.base_options.standard == options.standard &&
+                    entry.base_options.shared_macros == options.shared_macros &&
+                    entry.base_options.predefined_macros == options.predefined_macros)
+                {
+                    base = entry.base;
+                    base_edit = entry.base_edit;
+                }
+                else
+                {
+                    entry.base.reset();
+                }
+
                 entry.version = version;
                 entry.text = text;
                 entry.options = options;
@@ -1511,8 +1600,15 @@ namespace heimdall::lsp
             }
             std::call_once(slot->once,[&]
                 {
+                    heimdall::ParseReuse reuse;
+                    if (base)
+                    {
+                        reuse = {base.get(), base_edit.offset, base_edit.old_length, base_edit.new_length};
+                    }
+
                     auto tree = std::make_shared<heimdall::ParseTree>(
-                    heimdall::ParseTree::Parse(*text, options, stop, lexed.get()));
+                    heimdall::ParseTree::Parse(*text, options, stop, lexed.get(),
+                        base ? &reuse : nullptr));
                     if (tree->Cancelled())
                     {
                         throw ParseCancelled{};
@@ -1520,11 +1616,23 @@ namespace heimdall::lsp
 
                     tree->HoldSource(text);
                     slot->tree = std::move(tree);
+                    slot->ready.store(true, std::memory_order_release);
             });
         }
         catch (const ParseCancelled &)
         {
             return nullptr;
+        }
+
+        if (base)
+        {
+            // The base has served its purpose; free the old tree.
+            const std::lock_guard<std::mutex> lock(m_mu);
+            if (const auto found = m_parse_cache.find(uri);
+                found != m_parse_cache.end() && found->second.slot == slot)
+            {
+                found->second.base.reset();
+            }
         }
 
         return slot->tree;

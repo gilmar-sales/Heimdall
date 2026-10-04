@@ -59,9 +59,42 @@ namespace heimdall::cli
         {
             options.command = Command::Parse;
         }
+        else if (command == "init")
+        {
+            options.command = Command::Init;
+        }
         else
         {
             return false;
+        }
+
+        if (options.command == Command::Init)
+        {
+            for (int i = 2; i < argc; ++i)
+            {
+                const std::string_view arg = argv[i];
+                if (arg == "--force" || arg == "-f")
+                {
+                    options.force = true;
+                }
+                else if (!arg.empty() && arg.front() == '-')
+                {
+                    std::cerr << "unknown option for init: " << arg << '\n';
+                    return false;
+                }
+                else
+                {
+                    options.inputs.emplace_back(arg);
+                }
+            }
+
+            if (options.inputs.size() > 1)
+            {
+                std::cerr << "init accepts at most one directory\n";
+                return false;
+            }
+
+            return true;
         }
 
         options.jobs = std::max<std::size_t>(1u, std::thread::hardware_concurrency());
@@ -151,6 +184,11 @@ namespace heimdall::cli
                 }
 
                 options.jobs = jobs;
+            }
+            else if (arg == "--force" || arg == "-f")
+            {
+                std::cerr << "--force is only supported by init\n";
+                return false;
             }
             else if (!arg.empty() && arg.front() == '-')
             {

@@ -1,5 +1,6 @@
 #include "CliOptions.hpp"
 #include "FileDiscovery.hpp"
+#include "Init.hpp"
 #include "Pipeline.hpp"
 #include "Reporting.hpp"
 
@@ -16,7 +17,22 @@ int main(int argc, char **argv)
     if (!heimdall::cli::ParseOptions(argc, argv, options))
     {
         std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories...>\n";
+        std::cerr << "       heimdall init [directory] [--force]\n";
         return 2;
+    }
+
+    if (options.command == heimdall::cli::Command::Init)
+    {
+        std::string error;
+        std::filesystem::path created;
+        if (!heimdall::cli::RunInit(options, error, created))
+        {
+            std::cerr << error << '\n';
+            return 2;
+        }
+
+        std::cout << "created " << created.string() << '\n';
+        return 0;
     }
 
     if (options.command == heimdall::cli::Command::Lint || options.command == heimdall::cli::Command::Check)

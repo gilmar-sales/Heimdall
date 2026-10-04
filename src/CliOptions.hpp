@@ -15,7 +15,8 @@ namespace heimdall::cli
         Lint,
         Check,
         Format,
-        Parse
+        Parse,
+        Init
     };
 
     struct Options
@@ -26,6 +27,7 @@ namespace heimdall::cli
         bool write = false;
         bool fix = false;
         bool semantic = false;
+        bool force = false;
         bool std_override = false;
         heimdall::CppStandard standard = heimdall::CppStandard::Cpp20;
         std::filesystem::path compile_commands;

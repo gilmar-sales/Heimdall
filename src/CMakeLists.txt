@@ -3,6 +3,7 @@ add_executable(heimdall
   cli.cpp
   CliOptions.cpp
   FileDiscovery.cpp
+  Init.cpp
   Pipeline.cpp
   Reporting.cpp
 )

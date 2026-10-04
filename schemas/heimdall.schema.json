@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heimdall configuration",
+  "description": "Configuration file for Heimdall (.heimdall.json). Validated by heimdall init and loaded by heimdall lint/check and heimdall-lsp.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URI used by editors for completion and validation."
+    },
+    "root": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, stop searching parent directories for additional configs."
+    },
+    "suppressions": {
+      "type": "boolean",
+      "default": true,
+      "description": "When false, // heimdall-suppress comments are ignored."
+    },
+    "rules": {
+      "type": "object",
+      "description": "Per-rule severity. Valid values are 'off', 'warning' and 'error'.",
+      "properties": {
+        "cpp/no-null": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "format/no-trailing-whitespace": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "format/require-final-newline": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-empty-catch": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-duplicate-include": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-using": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-unused-include": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/prefer-forward-declaration": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-circular-include": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/sort-includes": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        }
+      },
+      "additionalProperties": {
+        "enum": [
+          "off",
+          "warning",
+          "error"
+        ],
+        "description": "Allows future rules while still validating the setting value."
+      }
+    },
+    "include-order": {
+      "type": "object",
+      "description": "Group order used by cpp/sort-includes. The rule only runs when enabled in 'rules'.",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "description": "Ordered include groups. Must list both 'angle' and 'quote'.",
+          "items": {
+            "enum": [
+              "angle",
+              "quote"
+            ]
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "case-insensitive": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
