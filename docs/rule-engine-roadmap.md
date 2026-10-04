@@ -15,9 +15,9 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | `format/no-trailing-whitespace` | Espaços e tabulações no fim da linha | Lexical | Seguro | Implementada |
 | `format/require-final-newline` | Arquivo sem newline final | Lexical | Seguro | Implementada |
 | `cpp/no-null` | Uso de `NULL` em vez de `nullptr` | Lexical | Geralmente seguro | Implementada |
-| `cpp/no-zero-as-null` | `0` ou `0L` usado como ponteiro nulo | Sintática/semântica | Só com tipo conhecido | Não implementada |
-| `cpp/modernize-nullptr` | Conversões e comparações antigas com ponteiro nulo | Semântica | Condicional | Não implementada |
-| `cpp/modernize-auto` | Tipos explícitos substituíveis por `auto` | Sintática/semântica | Condicional | Não implementada |
+| `cpp/no-zero-as-null` | `0` ou `0L` usado como ponteiro nulo | Sintática/semântica | Seguro (só com tipo conhecido) | Implementada (parcial) |
+| `cpp/modernize-nullptr` | Conversões antigas de constante nula para ponteiro (`(T*)0`, `static_cast<T*>(0)`) | Semântica | Quick fix (não em lote) | Implementada (parcial) |
+| `cpp/modernize-auto` | Tipos explícitos substituíveis por `auto` | Sintática/semântica | Seguro (tipo repetido no inicializador) | Implementada (parcial) |
 | `cpp/modernize-range-loop` | Laços substituíveis por range-for | Semântica | Condicional | Não implementada |
 | `cpp/modernize-loop-convert` | Laços convertíveis a algoritmos ou ranges | Semântica | Condicional | Não implementada |
 | `cpp/modernize-using` | `typedef` substituível por `using` | Sintática | Possível | Implementada |
@@ -40,7 +40,7 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 
 | Regra | O que detecta | Camada | Autofix | Status |
 |---|---|---|---|---|
-| `cpp/modernize-nullptr` | Literal nulo legado | Lexical/sintática | Condicional | Não implementada |
+| `cpp/modernize-nullptr` | Literal nulo legado | Lexical/sintática | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-override` | Método sobrescrito sem `override` | Semântica | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-using` | `typedef` legado | Sintática | Possível | Implementada |
 | `cpp/modernize-emplace` | Construção temporária em `push_back` potencialmente substituível por `emplace_back` | Semântica | Condicional | Não implementada |
@@ -149,6 +149,9 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `format/no-trailing-whitespace` | Remove espaços e tabulações no fim das linhas | Autofix preserva o conteúdo restante e trata CRLF |
 | `format/require-final-newline` | Garante newline final | Preserva CRLF quando detecta esse estilo |
 | `cpp/modernize-override` | Motor semântico (`SemanticModel` + `Binder`, ver [semantic-engine-architecture.md](semantic-engine-architecture.md)): método de classe que casa nome e assinatura com uma função virtual de uma base declarada no mesmo arquivo; requer `--semantic` | Só bases do próprio arquivo (headers ainda não entram, fase F3); bases com template (`Base<T>`) ou não resolvidas deixam a regra em silêncio; assinatura comparada pela grafia dos tipos dos parâmetros (`int` e `std::int32_t` não casam); destrutores e funções-template não são analisados; o fix só é oferecido como quick fix |
+| `cpp/modernize-nullptr` | Motor semântico: cast C ou `static_cast`/`reinterpret_cast` de `0`, `0L` ou `NULL` para tipo ponteiro; requer `--semantic` | Não reporta o idioma `offsetof` (`((T*)0)->m`), código inativo (`#if 0`) nem macros; o fix é só quick fix porque `nullptr` pode mudar overload e dedução de `auto` |
+| `cpp/no-zero-as-null` | Motor semântico: `0`/`0L` em inicialização, atribuição e comparação com variável ou parâmetro declarado com `*`, e `return 0;` em função cujo tipo de retorno escrito é ponteiro; requer `--semantic` | Ponteiros via `typedef`, `auto`, referência ou array não contam (tipo desconhecido); argumentos de chamada ficam de fora (exigem overload resolution); acesso por objeto (`s.p = 0`) fica de fora até a F2 |
+| `cpp/modernize-auto` | Motor semântico: `T* p = new T...`, `T x = static_cast<T>(...)` (e `dynamic_`/`reinterpret_`/`const_cast`) e `std::unique_ptr<T> p = std::make_unique<T>(...)` (idem `shared_ptr`); requer `--semantic` | Só quando o tipo é idêntico, token a token; ignora `const`/`volatile`/referências/arrays, vários declaradores, placement new, membros de classe e cast de constante nula; declarações de iterador exigem o tipo do contêiner e não são reportadas; no escopo de namespace, `T x = f(...)` é lido como declaração de função pela gramática e não é analisado |
 | `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Quick fix (só no editor, não aplicado por `--fix`): insere `throw;` preservando comentários do corpo, pois a ação correta depende do contexto |
 | `cpp/no-todo` | `RuleEngine` encontra marcadores `TODO`, `FIXME` ou `XXX` (maiúsculos, palavra inteira) em comentários de linha e de bloco | Sem autofix: o comentário precisa ser resolvido ou movido para um rastreador |
 | `cpp/no-magic-numbers` | `RuleEngine` encontra literais numéricos fora de comentários, literais e diretivas, exceto `0` e `1` em qualquer base/escrita (`0x0`, `1u`, `0.0`, `1.0f`...) e exceto o valor que dá nome à constante (`constexpr`/`const` com inicializador direto, valores de `enum`) | Sem autofix: só o autor sabe o nome certo para a constante |

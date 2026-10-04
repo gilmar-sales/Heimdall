@@ -564,6 +564,12 @@ namespace heimdall
                 "sintática", false, "numeric literal without a named constant"},
             {RuleId::ModernizeOverride, "cpp/modernize-override", "cpp", Severity::Warning,
                 "semântica", true, "overriding virtual function without override"},
+            {RuleId::ModernizeNullptr, "cpp/modernize-nullptr", "cpp", Severity::Warning,
+                "semântica", true, "explicit cast of a null constant to a pointer type"},
+            {RuleId::NoZeroAsNull, "cpp/no-zero-as-null", "cpp", Severity::Warning,
+                "semântica", true, "0 used as a null pointer"},
+            {RuleId::ModernizeAuto, "cpp/modernize-auto", "cpp", Severity::Warning,
+                "semântica", true, "explicit type that repeats the initializer"},
         };
         return catalog;
     }

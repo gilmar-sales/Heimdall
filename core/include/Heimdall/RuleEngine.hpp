@@ -32,7 +32,10 @@ namespace heimdall
         CircularInclude,
         TodoComment,
         MagicNumber,
-        ModernizeOverride
+        ModernizeOverride,
+        ModernizeNullptr,
+        NoZeroAsNull,
+        ModernizeAuto
     };
 
     struct RuleOverride

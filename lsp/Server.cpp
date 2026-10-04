@@ -989,7 +989,7 @@ namespace heimdall::lsp
         // from the tree already parsed for this version of the document.
         {
             const auto model = heimdall::Binder::Bind(tree);
-            auto bound = engine.ApplyPolicy(heimdall::SemanticRules::AnalyzeOverride(model), tree);
+            auto bound = engine.ApplyPolicy(heimdall::SemanticRules::Analyze(model), tree);
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
                 std::make_move_iterator(bound.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),

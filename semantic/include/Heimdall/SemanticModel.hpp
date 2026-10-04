@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -78,6 +79,11 @@ namespace heimdall
         inline constexpr std::uint32_t Operator = 1u << 12;
         inline constexpr std::uint32_t Template = 1u << 13;   // declared under `template<...>`
         inline constexpr std::uint32_t RefQualified = 1u << 14;
+        // Declared with `*` operators only (`T* p`, `T** p`): known to be a pointer.
+        // Typedef'd and deduced pointer types are not flagged.
+        inline constexpr std::uint32_t Pointer = 1u << 15;
+        // Functions: the written return type is a pointer (`T* f()`, `auto f() -> T*`).
+        inline constexpr std::uint32_t ReturnsPointer = 1u << 16;
     } // namespace SymbolFlag
 
     // Structure of arrays: a rule that filters on one property touches only
@@ -201,6 +207,34 @@ namespace heimdall
         SymbolId LookupMember(SymbolId owner, NameId name) const;
         // Resolution recorded for the identifier at `token`, or kNone.
         SymbolId ResolveToken(std::uint32_t token) const;
+        // Scope that contains `node`'s declarations (its own scope for namespaces,
+        // classes, functions and blocks).
+        ScopeId ScopeOfNode(std::uint32_t node) const
+        {
+            return node < m_node_scope.size() ? m_node_scope[node] : TranslationUnitScope;
+        }
+        // Child nodes of `node`, in node-table order.
+        std::span<const std::uint32_t> ChildrenOf(std::uint32_t node) const
+        {
+            if (node + 1 >= m_child_begin.size())
+            {
+                return {};
+            }
+
+            return {m_child_list.data() + m_child_begin[node], m_child_begin[node + 1] - m_child_begin[node]};
+        }
+        // Token is code the grammar attached to a node: false for trivia between
+        // top-level items, preprocessor directives and inactive `#if` branches.
+        bool IsCode(std::uint32_t token) const
+        {
+            return token < m_code.size() && m_code[token] != 0;
+        }
+        // Indices into Tree().Tokens() of the significant tokens, ascending:
+        // code only, without trivia, directives or decoration macros.
+        const std::pmr::vector<std::uint32_t> &Significant() const noexcept
+        {
+            return m_sig;
+        }
 
     private:
         friend class Binder;
@@ -215,6 +249,12 @@ namespace heimdall
         RefTable m_refs;
         // (scope << 32 | name) -> first symbol of the chain.
         std::pmr::unordered_map<std::uint64_t, SymbolId> m_declared;
+        std::pmr::vector<std::uint32_t> m_sig;
+        std::pmr::vector<ScopeId> m_node_scope;
+        std::pmr::vector<std::uint8_t> m_code;
+        // Children of every node in compressed-row form.
+        std::pmr::vector<std::uint32_t> m_child_begin;
+        std::pmr::vector<std::uint32_t> m_child_list;
     };
 
     // Builds the model in one pass over the tree's node table.

@@ -136,6 +136,7 @@ namespace heimdall::cli
                     std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
                     return false;
                 }
+
                 heimdall::RuleOverride override;
                 override.code = value.substr(0, equal);
                 const auto setting = value.substr(equal + 1);
@@ -156,6 +157,7 @@ namespace heimdall::cli
                     std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
                     return false;
                 }
+
                 options.rule_overrides.push_back(std::move(override));
             }
             else if ((arg == "--std" && i + 1 < argc) ||
@@ -249,7 +251,7 @@ namespace heimdall::cli
             return false;
         }
 
-        for (const auto &override: options.rule_overrides)
+        for (const auto & override: options.rule_overrides)
         {
             if (!heimdall::IsKnownRuleCode(override.code))
             {

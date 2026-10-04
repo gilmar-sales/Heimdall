@@ -71,6 +71,27 @@
             "error"
           ]
         },
+        "cpp/modernize-nullptr": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-zero-as-null": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-auto": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",

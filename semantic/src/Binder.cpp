@@ -77,7 +77,10 @@ namespace heimdall
     class BinderImpl
     {
     public:
-        explicit BinderImpl(SemanticModel &model, const ParseTree &tree) : m_model(model), m_tree(tree) {}
+        explicit BinderImpl(SemanticModel &model, const ParseTree &tree) : m_model(model), m_tree(tree), m_sig(model.m_sig), m_child_begin(model.m_child_begin),
+          m_child_list(model.m_child_list)
+    {
+    }
 
         void Run();
 
@@ -106,7 +109,11 @@ namespace heimdall
         }
 
         // Significant (non-trivia, non-directive) tokens, ascending.
+        void BuildCoverage();
         void BuildSignificant();
+        void FillNodeScopes();
+        std::uint32_t PointerFlags(std::uint32_t declarator) const;
+        std::uint32_t ReturnsPointerFlag(std::uint32_t function) const;
         // First significant position at or after raw token `token`.
         std::size_t SigAtOrAfter(std::uint32_t token) const;
         std::uint32_t PrevSig(std::uint32_t token) const;
@@ -166,9 +173,9 @@ namespace heimdall
 
         SemanticModel &m_model;
         const ParseTree &m_tree;
-        std::vector<std::uint32_t> m_sig;
-        std::vector<std::uint32_t> m_child_begin;
-        std::vector<std::uint32_t> m_child_list;
+        std::pmr::vector<std::uint32_t> &m_sig;
+        std::pmr::vector<std::uint32_t> &m_child_begin;
+        std::pmr::vector<std::uint32_t> &m_child_list;
         std::vector<ScopeId> m_own_scope;
         // class symbols whose bases are still to be recorded: (symbol, node)
         std::vector<std::pair<SymbolId, std::uint32_t>> m_pending_bases;
@@ -202,13 +209,157 @@ namespace heimdall
                 continue;
             }
 
-            if (m_tree.IsDecorationToken(i))
+            if (!m_model.m_code[i] || m_tree.IsDecorationToken(i))
             {
                 continue;
             }
 
             m_sig.push_back(static_cast<std::uint32_t>(i));
         }
+    }
+
+    // Marks the tokens that belong to some node (other than the root and
+    // preprocessor directives): what is left is trivia between items, directives
+    // and code the preprocessor switched off.
+    void BinderImpl::BuildCoverage()
+    {
+        const auto &tokens = Tokens();
+        const auto &nodes = m_tree.Nodes();
+        std::vector<std::int32_t> delta(tokens.size() + 1, 0);
+        for (std::size_t i = 1; i < nodes.size(); ++i)
+        {
+            if (nodes[i].kind == GrammarKind::PreprocessorDirective || nodes[i].token_count == 0)
+            {
+                continue;
+            }
+
+            const std::size_t first = std::min<std::size_t>(nodes[i].first_token, tokens.size());
+            const std::size_t last = std::min<std::size_t>(first + nodes[i].token_count, tokens.size());
+            ++delta[first];
+            --delta[last];
+        }
+
+        m_model.m_code.assign(tokens.size(), 0);
+        std::int32_t depth = 0;
+        for (std::size_t i = 0; i < tokens.size(); ++i)
+        {
+            depth += delta[i];
+            m_model.m_code[i] = depth > 0 ? 1 : 0;
+        }
+    }
+
+    void BinderImpl::FillNodeScopes()
+    {
+        const auto &nodes = m_tree.Nodes();
+        m_model.m_node_scope.assign(nodes.size(), SemanticModel::TranslationUnitScope);
+        for (std::uint32_t node = 1; node < nodes.size(); ++node)
+        {
+            const auto parent = nodes[node].parent;
+            if (m_own_scope[node] != kNone)
+            {
+                m_model.m_node_scope[node] = m_own_scope[node];
+            }
+            else if (parent < node)
+            {
+                m_model.m_node_scope[node] = m_model.m_node_scope[parent];
+            }
+            else
+            {
+                m_model.m_node_scope[node] = ScopeFor(node);
+            }
+        }
+    }
+
+    // `Pointer` when the declarator is built from `*` operators alone.
+    std::uint32_t BinderImpl::PointerFlags(std::uint32_t declarator) const
+    {
+        if (declarator == kNone || FindChild(declarator, GrammarKind::FunctionSuffix) != kNone ||
+            FindChild(declarator, GrammarKind::ArraySuffix) != kNone)
+        {
+            return 0;
+        }
+
+        std::size_t operators = 0;
+        const auto[begin, end] = Children(declarator);
+        for (auto i = begin; i < end; ++i)
+        {
+            const auto child = m_child_list[i];
+            if (KindOf(child) != GrammarKind::PointerOperator)
+            {
+                continue;
+            }
+
+            if (!Is(m_tree.Nodes()[child].first_token, Tok::Star))
+            {
+                return 0;
+            }
+
+            ++operators;
+        }
+
+        return operators > 0 ? SymbolFlag::Pointer : 0;
+    }
+
+    // `ReturnsPointer` when the written return type is a pointer.
+    std::uint32_t BinderImpl::ReturnsPointerFlag(std::uint32_t function) const
+    {
+        const auto declarator = FindChild(function, GrammarKind::Declarator);
+        if (declarator == kNone)
+        {
+            return 0;
+        }
+
+        auto suffix = FindChild(declarator, GrammarKind::FunctionSuffix);
+        auto trailing = FindChild(declarator, GrammarKind::TrailingReturnType);
+        if (trailing == kNone && suffix != kNone)
+        {
+            trailing = FindChild(suffix, GrammarKind::TrailingReturnType);
+        }
+
+        if (trailing != kNone)
+        {
+            // The grammar ends the node before a trailing `*`: read the tokens from the
+            // `->` up to the body (or `;`) instead.
+            const auto begin = NodeSig(trailing).first;
+            std::size_t end = begin;
+            while (end < m_sig.size() && !Is(m_sig[end], Tok::LBrace) && !Is(m_sig[end], Tok::Semi) &&
+                !Is(m_sig[end], Tok::Eq) && !Is(m_sig[end], Tok::KwRequires))
+            {
+                if (Is(m_sig[end], Tok::Amp) || Is(m_sig[end], Tok::AmpAmp) || Is(m_sig[end], Tok::LParen))
+                {
+                    return 0;
+                }
+
+                ++end;
+            }
+
+            return end > begin + 1 && Is(m_sig[end - 1], Tok::Star) ? SymbolFlag::ReturnsPointer : 0;
+        }
+
+        if (suffix == kNone)
+        {
+            return 0;
+        }
+
+        std::size_t operators = 0;
+        const auto[begin, end] = Children(declarator);
+        for (auto i = begin; i < end; ++i)
+        {
+            const auto child = m_child_list[i];
+            if (KindOf(child) != GrammarKind::PointerOperator)
+            {
+                continue;
+            }
+
+            if (!Is(m_tree.Nodes()[child].first_token, Tok::Star))
+            {
+                return 0;
+            }
+
+            ++operators;
+        }
+
+        return operators > 0 ? SymbolFlag::ReturnsPointer : 0;
     }
 
     std::size_t BinderImpl::SigAtOrAfter(std::uint32_t token) const
@@ -1037,6 +1188,7 @@ namespace heimdall
             signature = 0;
         }
 
+        flags |= ReturnsPointerFlag(node);
         const auto id = Declare(HeadName(head), SymbolKind::Function, scope, flags, head.name_token, node,
             kNone,
             !qualified);
@@ -1061,14 +1213,15 @@ namespace heimdall
                 return;
             }
 
-            const auto name = DeclaredNameToken(FindChild(node, GrammarKind::Declarator));
+            const auto declarator = FindChild(node, GrammarKind::Declarator);
+            const auto name = DeclaredNameToken(declarator);
             if (name == kNone)
             {
                 return;
             }
 
-            Declare(m_model.m_names.Intern(Text(name)), SymbolKind::Parameter, ScopeFor(current), 0, name, node,
-                kNone, true);
+            Declare(m_model.m_names.Intern(Text(name)), SymbolKind::Parameter, ScopeFor(current),
+                PointerFlags(declarator), name, node, kNone, true);
             return;
         }
     }
@@ -1101,6 +1254,23 @@ namespace heimdall
                 declarator = child;
             }
 
+            // The grammar reads the later declarators of `int* a = 0, b = 0;` as an
+            // InitDeclarator whose "type" is the name itself.
+            if (declarator == kNone && KindOf(child) == GrammarKind::InitDeclarator)
+            {
+                const auto spelled = FindChild(child, GrammarKind::TypeSpecifier);
+                if (spelled != kNone && m_tree.Nodes()[spelled].token_count == 1 &&
+                    IsIdent(m_tree.Nodes()[spelled].first_token))
+                {
+                    const auto token = m_tree.Nodes()[spelled].first_token;
+                    Declare(m_model.m_names.Intern(Text(token)),
+                        typedef_declaration ? SymbolKind::TypeAlias : SymbolKind::Variable, scope, flags, token,
+                        node, kNone, true);
+                }
+
+                continue;
+            }
+
             if (declarator == kNone || FindChild(declarator, GrammarKind::FunctionSuffix) != kNone)
             {
                 continue;
@@ -1113,8 +1283,8 @@ namespace heimdall
             }
 
             Declare(m_model.m_names.Intern(Text(name)),
-                typedef_declaration ? SymbolKind::TypeAlias : SymbolKind::Variable, scope, flags, name, node,
-                kNone, true);
+                typedef_declaration ? SymbolKind::TypeAlias : SymbolKind::Variable, scope,
+                flags | PointerFlags(declarator), name, node, kNone, true);
         }
     }
 
@@ -1388,6 +1558,7 @@ namespace heimdall
     void BinderImpl::Run()
     {
         const auto &nodes = m_tree.Nodes();
+        BuildCoverage();
         BuildSignificant();
         BuildChildren();
         m_own_scope.assign(nodes.size(), kNone);
@@ -1411,6 +1582,7 @@ namespace heimdall
             DeclareNode(node);
         }
 
+        FillNodeScopes();
         ResolveBases();
         ResolveRefs();
     }

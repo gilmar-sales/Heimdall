@@ -104,8 +104,26 @@ void BM_ModernizeOverride(benchmark::State& state)
     state.counters["diagnostics"] = static_cast<double>(reported);
 }
 
+void BM_AnalyzeAllRules(benchmark::State& state)
+{
+    Corpus corpus;
+    if (!LoadCorpus(state, corpus)) return;
+    std::vector<heimdall::SemanticModel> models;
+    for (const auto& tree : corpus.trees) models.push_back(heimdall::Binder::Bind(tree));
+    std::size_t reported = 0;
+    for (auto _ : state)
+    {
+        reported = 0;
+        for (const auto& model : models) reported += heimdall::SemanticRules::Analyze(model).size();
+        benchmark::DoNotOptimize(reported);
+    }
+    state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * corpus.bytes));
+    state.counters["diagnostics"] = static_cast<double>(reported);
+}
+
 } // namespace
 
 BENCHMARK(BM_Bind);
+BENCHMARK(BM_AnalyzeAllRules);
 BENCHMARK(BM_BindHierarchy)->Arg(100)->Arg(1000);
 BENCHMARK(BM_ModernizeOverride)->Arg(100)->Arg(1000);

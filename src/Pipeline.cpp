@@ -315,7 +315,7 @@ namespace heimdall::cli
 
                 // Rules on the bound semantic model need no compile command.
                 const auto model = heimdall::Binder::Bind(*tree);
-                auto overrides = heimdall::SemanticRules::AnalyzeOverride(model);
+                auto overrides = heimdall::SemanticRules::Analyze(model);
                 semantic.insert(semantic.end(), std::make_move_iterator(overrides.begin()),
                     std::make_move_iterator(overrides.end()));
                 semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);

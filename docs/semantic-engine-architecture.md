@@ -162,24 +162,31 @@ Adotado: **motor próprio com política `Unknown`**.
 
 ## 13. Estado da implementação
 
-**F1 (Binder): implementada, com a regra `cpp/modernize-override`.**
+**F1 (Binder): concluída.** Regras entregues: `cpp/modernize-override`, `cpp/modernize-nullptr`, `cpp/no-zero-as-null` e `cpp/modernize-auto`.
 
 | Peça | Onde |
 |---|---|
 | `InternPool`, `SymbolTable`, `ScopeTable`, `BaseTable`, `RefTable`, `SemanticModel` | `semantic/include/Heimdall/SemanticModel.hpp`, `semantic/src/SemanticModel.cpp` |
 | `Binder::Bind(const ParseTree&)` | `semantic/src/Binder.cpp` |
-| `SemanticRules::AnalyzeOverride` | `semantic/src/SemanticRules.cpp` |
+| `SemanticRules::AnalyzeOverride/AnalyzeNullptr/AnalyzeZeroAsNull/AnalyzeAuto/Analyze` | `semantic/src/SemanticRules.cpp` |
 | Adaptador de arena para `std::pmr` (`Arena::Resource()`) | `core/include/Heimdall/Arena.hpp` |
 | Benchmarks (`BM_Bind`, `BM_BindHierarchy`, `BM_ModernizeOverride`) | `bench/src/SemanticBench.cpp` (alvo `SemanticBench`) |
+
+O que o modelo oferece às regras: `Significant()` (tokens de código, sem trivia, diretivas nem macros de decoração), `IsCode(token)`, `ChildrenOf(node)`, `ScopeOfNode(node)`, `ResolveToken(token)`, `Lookup`/`LookupMember` e as flags `Pointer` e `ReturnsPointer`.
 
 Decisões e limites desta fase:
 
 - O modelo é construído por uma passada sobre `ParseTree::Nodes()`, que **não** está em pré-ordem: o pai de um nó pode ter índice maior. O Binder cria escopos sob demanda subindo a cadeia de pais, nunca assume ordem.
+- **Código inativo.** A árvore não guarda quais ramos de `#if` estão ativos. O Binder considera "código" só os tokens cobertos por algum nó que não seja diretiva; o que sobra (trivia entre itens, diretivas, ramos desligados) nunca entra em `Significant()`. Ramo inativo dentro de uma mesma declaração continua sendo visto.
 - Nomes de funções, construtores, destrutores e operadores vêm de uma leitura dos tokens do cabeçalho da declaração, porque a gramática não os nomeia de forma confiável (por exemplo, `virtual ~Base();`).
-- `RefTable` só registra `IdentifierExpression`. Acesso por objeto (`obj.m`, `p->m`) fica não resolvido até o Typer (F2); nomes de template e de namespace anônimo também ficam não resolvidos. Em escopos de função e bloco só enxerga declarações anteriores ao uso.
+- Os declaradores seguintes de `int* a = 0, b = 0;` chegam da gramática como `InitDeclarator` sem `Declarator`; o Binder os nomeia mesmo assim, mas só o primeiro tem a flag `Pointer`.
+- O nó `TrailingReturnType` termina antes de um `*` final: `ReturnsPointer` lê os tokens de `->` até o corpo.
+- No escopo de namespace, `T x = f(...);` é lido pela gramática como `FunctionDeclaration` (qualquer `(` antes do `;`), então esses inicializadores globais não são analisados e `x` vira um "símbolo função".
+- `RefTable` só registra `IdentifierExpression`. Acesso por objeto (`obj.m`, `p->m`) fica não resolvido até o Typer (F2); nomes de template e de namespace anônimo também. Em escopos de função e bloco só enxerga declarações anteriores ao uso.
 - Bases com argumentos de template (`Base<T>`) ficam não resolvidas de propósito.
 - Assinatura de função = hash dos tokens dos tipos dos parâmetros (sem nomes nem valores padrão) mais qualificadores `const`, `volatile`, `&` e `&&`. Comparação textual: pode perder overrides (falso negativo), mas a regra continua em silêncio nesses casos.
 - Hierarquias são percorridas com marcação de visitados (ciclos e diamantes terminam, sem limite de profundidade).
+- Um conflito entre regras foi resolvido de propósito: `modernize-auto` não reporta cast de constante nula, porque depois do fix de `modernize-nullptr` não sobraria nada para o `auto` deduzir.
 - Ainda não há reuso incremental por `TopLevelItem` (seção 6) nem `HeaderSummary` (seção 8): o modelo é refeito a cada versão do documento, como o `ParseTree`.
 
-Próximos passos da F1: `modernize-nullptr`, `no-zero-as-null` e `modernize-auto`.
+Próxima fase: F2 (Typer), com `modernize-range-loop`, `modernize-loop-convert` e `no-implicit-bool-conversion`.

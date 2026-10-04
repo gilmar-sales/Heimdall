@@ -61,7 +61,9 @@ namespace heimdall
     SemanticModel::SemanticModel(const ParseTree &tree, std::size_t arena_hint)
     : m_arena(std::make_unique<Arena>(arena_hint)), m_tree(&tree), m_names(m_arena->Resource()),
         m_symbols(m_arena->Resource()), m_scopes(m_arena->Resource()), m_bases(m_arena->Resource()),
-        m_refs(m_arena->Resource()), m_declared(m_arena->Resource()) {}
+        m_refs(m_arena->Resource()), m_declared(m_arena->Resource()), m_sig(m_arena->Resource()),
+      m_node_scope(m_arena->Resource()), m_code(m_arena->Resource()), m_child_begin(m_arena->Resource()),
+      m_child_list(m_arena->Resource()) {}
 
     SymbolId SemanticModel::LookupLocal(ScopeId scope, NameId name) const
     {
