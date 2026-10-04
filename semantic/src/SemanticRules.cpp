@@ -497,7 +497,7 @@ namespace heimdall
         Reporter reporter(model);
         const TokenView view(model);
         const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         const auto report = [&](std::size_t position, std::string_view context)
         {
             const auto offset = view.Offset(position);
@@ -547,7 +547,7 @@ namespace heimdall
         std::sort(returning_pointer.begin(), returning_pointer.end());
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
-            if (nodes[node].kind == GrammarKind::BinaryExpression)
+            if (nodes.Kind(node) == GrammarKind::BinaryExpression)
             {
                 // `p = 0`, `p == 0`, `p != 0`, `0 == p`
                 const auto [begin, end] = view.Range(node);
@@ -570,7 +570,7 @@ namespace heimdall
                     report(begin, "compared with a pointer");
                 }
             }
-            else if (nodes[node].kind == GrammarKind::ReturnStatement)
+            else if (nodes.Kind(node) == GrammarKind::ReturnStatement)
             {
                 // `return 0;` in a function that returns a pointer
                 const auto [begin, end] = view.Range(node);
@@ -580,10 +580,10 @@ namespace heimdall
                     continue;
                 }
 
-                std::uint32_t owner = nodes[node].parent;
+                std::uint32_t owner = nodes.Parent(node);
                 for (std::size_t steps = 0; steps < nodes.size() && owner < nodes.size() && owner != 0; ++steps)
                 {
-                    const auto kind = nodes[owner].kind;
+                    const auto kind = nodes.Kind(owner);
                     if (kind == GrammarKind::LambdaExpression)
                     {
                         owner = kNone;
@@ -595,7 +595,7 @@ namespace heimdall
                         break;
                     }
 
-                    owner = nodes[owner].parent;
+                    owner = nodes.Parent(owner);
                 }
 
                 if (owner < nodes.size() && owner != 0 &&
@@ -613,12 +613,12 @@ namespace heimdall
     {
         Reporter reporter(model);
         const TokenView view(model);
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         const auto &scopes = model.Scopes();
 
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
-            if (nodes[node].kind != GrammarKind::Declaration && nodes[node].kind != GrammarKind::DeclarationStatement)
+            if (nodes.Kind(node) != GrammarKind::Declaration && nodes.Kind(node) != GrammarKind::DeclarationStatement)
             {
                 continue;
             }
@@ -634,12 +634,12 @@ namespace heimdall
             std::size_t declarators = 0;
             for (const auto child: model.ChildrenOf(node))
             {
-                if (nodes[child].kind == GrammarKind::InitDeclarator || nodes[child].kind == GrammarKind::Declarator)
+                if (nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator)
                 {
                     ++declarators;
                     for (const auto inner: model.ChildrenOf(child))
                     {
-                        if (nodes[inner].kind == GrammarKind::Declarator)
+                        if (nodes.Kind(inner) == GrammarKind::Declarator)
                         {
                             declarator = inner;
                         }
@@ -655,12 +655,12 @@ namespace heimdall
             std::uint32_t name_token = kNone;
             for (const auto inner: model.ChildrenOf(declarator))
             {
-                if (nodes[inner].kind == GrammarKind::DeclaredName)
+                if (nodes.Kind(inner) == GrammarKind::DeclaredName)
                 {
-                    name_token = nodes[inner].first_token;
+                    name_token = nodes.FirstToken(inner);
                 }
-                else if (nodes[inner].kind == GrammarKind::FunctionSuffix ||
-                    nodes[inner].kind == GrammarKind::ArraySuffix)
+                else if (nodes.Kind(inner) == GrammarKind::FunctionSuffix ||
+                    nodes.Kind(inner) == GrammarKind::ArraySuffix)
                 {
                     name_token = kNone;
                     break;
@@ -1105,12 +1105,12 @@ namespace heimdall
     {
         const auto &model = types.Model();
         const auto &table = types.Types();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         Reporter reporter(model);
         const TokenView view(model);
         const auto check = [&](std::uint32_t operand, std::string_view context)
         {
-            if (operand >= nodes.size() || nodes[operand].kind == GrammarKind::LiteralExpression)
+            if (operand >= nodes.size() || nodes.Kind(operand) == GrammarKind::LiteralExpression)
             {
                 return;
             }
@@ -1156,7 +1156,7 @@ namespace heimdall
                 continue;
             }
 
-            switch (nodes[node].kind)
+            switch (nodes.Kind(node))
             {
             case GrammarKind::UnaryExpression:
             {
@@ -1167,8 +1167,8 @@ namespace heimdall
                 }
 
                 // `!!x` is the idiom for an explicit conversion.
-                const auto parent = nodes[node].parent;
-                if (parent < nodes.size() && nodes[parent].kind == GrammarKind::UnaryExpression &&
+                const auto parent = nodes.Parent(node);
+                if (parent < nodes.size() && nodes.Kind(parent) == GrammarKind::UnaryExpression &&
                     view.Range(parent).first + 1 == begin && view.At(view.Range(parent).first) == Tok::Bang)
                 {
                     break;
@@ -1233,7 +1233,7 @@ namespace heimdall
     {
         const auto &model = types.Model();
         const auto &table = types.Types();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         const auto &symbols = model.Symbols();
         const TokenView view(model);
         std::vector<Diagnostic> diagnostics;
@@ -1267,7 +1267,7 @@ namespace heimdall
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
             ForLoop loop;
-            if (nodes[node].kind != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+            if (nodes.Kind(node) != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
                 !model.IsCode(view.TokenAt(loop.kw)))
             {
                 continue;
@@ -1429,7 +1429,7 @@ namespace heimdall
     {
         const auto &model = types.Model();
         const auto &table = types.Types();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         const auto &symbols = model.Symbols();
         const TokenView view(model);
         std::vector<Diagnostic> diagnostics;
@@ -1439,7 +1439,7 @@ namespace heimdall
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
             ForLoop loop;
-            if (nodes[node].kind != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+            if (nodes.Kind(node) != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
                 !model.IsCode(view.TokenAt(loop.kw)))
             {
                 continue;

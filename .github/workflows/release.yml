@@ -157,8 +157,8 @@ jobs:
         $outputDir = "release-windows-${version}"
         New-Item -ItemType Directory -Path $outputDir | Out-Null
         # Copy the built executables
-        Copy-Item -Path "build\heimdall.exe" -Destination $outputDir -Force
-        Copy-Item -Path "build\heimdall-lsp.exe" -Destination $outputDir -Force
+        Copy-Item -Path "build\src\heimdall.exe" -Destination $outputDir -Force
+        Copy-Item -Path "build\lsp\heimdall-lsp.exe" -Destination $outputDir -Force
         # Create zip archive
         Compress-Archive -Path "$outputDir\*" -DestinationPath "heimdall-windows-${version}.zip" -Force
         Write-Host "Created heimdall-windows-${version}.zip"
@@ -171,8 +171,8 @@ jobs:
         output_dir="release-linux-${version}"
         mkdir -p "$output_dir"
         # Copy the built executables
-        cp "build/heimdall" "$output_dir/"
-        cp "build/heimdall-lsp" "$output_dir/"
+        cp "build/src/heimdall" "$output_dir/"
+        cp "build/lsp/heimdall-lsp" "$output_dir/"
         # Create tar.gz archive
         tar -czf "heimdall-linux-${version}.tar.gz" -C "$output_dir" .
         echo "Created heimdall-linux-${version}.tar.gz"

@@ -428,7 +428,7 @@ namespace heimdall
     public:
         TyperImpl(TypeModel &out, const SemanticModel &model)
         : m_out(out), m_model(model), m_tree(model.Tree()), m_types(out.m_types), m_sig(model.Significant()),
-            m_symbols(model.Symbols()), m_nodes(model.Tree().Nodes())
+            m_symbols(model.Symbols()), m_nodes(model.Tree().NodesSoA())
         {
         }
 
@@ -472,9 +472,9 @@ namespace heimdall
         }
         std::pair<std::size_t, std::size_t> NodeSig(std::uint32_t node) const
         {
-            const auto &n = m_nodes[node];
-            const auto begin = Pos(n.first_token);
-            return {begin, std::max(begin, Pos(n.first_token + n.token_count))};
+            const auto n = m_nodes[node];
+            const auto begin = Pos(n.GetFirstToken());
+            return {begin, std::max(begin, Pos(n.GetFirstToken() + n.GetTokenCount()))};
         }
         std::size_t MatchParen(std::size_t open, std::size_t limit) const;
         std::size_t MatchAngle(std::size_t open, std::size_t limit) const;
@@ -482,7 +482,7 @@ namespace heimdall
         {
             for (const auto child: m_model.ChildrenOf(node))
             {
-                if (m_nodes[child].kind == kind)
+                if (m_nodes.Kind(child) == kind)
                 {
                     return child;
                 }
@@ -492,7 +492,7 @@ namespace heimdall
         }
         bool SameStart(std::uint32_t a, std::uint32_t b) const
         {
-            return Pos(m_nodes[a].first_token) == Pos(m_nodes[b].first_token);
+            return Pos(m_nodes.FirstToken(a)) == Pos(m_nodes.FirstToken(b));
         }
 
         // ---- declared types --------------------------------------------------
@@ -534,7 +534,7 @@ namespace heimdall
         TypeTable &m_types;
         const std::pmr::vector<std::uint32_t> &m_sig;
         const SymbolTable &m_symbols;
-        const std::vector<GrammarNode> &m_nodes;
+        const GrammarNodeSoA &m_nodes;
         std::size_t m_depth = 0;
     };
 
@@ -1142,8 +1142,8 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        const auto prefix_begin = Pos(m_nodes[declarator].first_token);
-        const auto prefix_end = Pos(m_nodes[name].first_token);
+        const auto prefix_begin = Pos(m_nodes.FirstToken(declarator));
+        const auto prefix_end = Pos(m_nodes.FirstToken(name));
         TypeId type = base.type;
         if (base.is_auto)
         {
@@ -1188,7 +1188,7 @@ namespace heimdall
         std::vector<std::uint32_t> suffixes;
         for (const auto child: m_model.ChildrenOf(declarator))
         {
-            if (m_nodes[child].kind == GrammarKind::ArraySuffix)
+            if (m_nodes.Kind(child) == GrammarKind::ArraySuffix)
             {
                 suffixes.push_back(child);
             }
@@ -1235,7 +1235,7 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        const auto kind = m_nodes[node].kind;
+        const auto kind = m_nodes.Kind(node);
         if (kind != GrammarKind::Declaration && kind != GrammarKind::DeclarationStatement &&
             kind != GrammarKind::ParameterDeclaration)
         {
@@ -1253,11 +1253,11 @@ namespace heimdall
         for (const auto child: m_model.ChildrenOf(node))
         {
             std::uint32_t candidate = kNone;
-            if (m_nodes[child].kind == GrammarKind::InitDeclarator)
+            if (m_nodes.Kind(child) == GrammarKind::InitDeclarator)
             {
                 candidate = FindChild(child, GrammarKind::Declarator);
             }
-            else if (m_nodes[child].kind == GrammarKind::Declarator)
+            else if (m_nodes.Kind(child) == GrammarKind::Declarator)
             {
                 candidate = child;
             }
@@ -1268,10 +1268,10 @@ namespace heimdall
             }
 
             const auto name = FindChild(candidate, GrammarKind::DeclaredName);
-            if (name != kNone && m_nodes[name].first_token == m_symbols.decl_token[symbol])
+            if (name != kNone && m_nodes.FirstToken(name) == m_symbols.decl_token[symbol])
             {
                 declarator = candidate;
-                init = m_nodes[child].kind == GrammarKind::InitDeclarator ? child : kNone;
+                init = m_nodes.Kind(child) == GrammarKind::InitDeclarator ? child : kNone;
                 break;
             }
         }
@@ -1309,7 +1309,7 @@ namespace heimdall
                 const auto init_end = NodeSig(init).second;
                 for (const auto child: m_model.ChildrenOf(init))
                 {
-                    if (m_nodes[child].kind == GrammarKind::Declarator || m_nodes[child].kind == GrammarKind::TypeSpecifier)
+                    if (m_nodes.Kind(child) == GrammarKind::Declarator || m_nodes.Kind(child) == GrammarKind::TypeSpecifier)
                     {
                         continue;
                     }
@@ -1336,7 +1336,7 @@ namespace heimdall
 
         const auto node = m_symbols.decl_node[symbol];
         if (node >= m_nodes.size() ||
-            (m_nodes[node].kind != GrammarKind::FunctionDeclaration && m_nodes[node].kind != GrammarKind::FunctionDefinition))
+            (m_nodes.Kind(node) != GrammarKind::FunctionDeclaration && m_nodes.Kind(node) != GrammarKind::FunctionDefinition))
         {
             return TypeTable::Unknown;
         }
@@ -1397,8 +1397,8 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        const auto prefix_begin = Pos(m_nodes[declarator].first_token);
-        const auto prefix_end = Pos(m_nodes[name].first_token);
+        const auto prefix_begin = Pos(m_nodes.FirstToken(declarator));
+        const auto prefix_end = Pos(m_nodes.FirstToken(name));
         TypeId type = base.type;
         if (base.next < spec_end)
         {
@@ -1417,10 +1417,10 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        if (m_nodes[node].kind == GrammarKind::UsingDeclaration)
+        if (m_nodes.Kind(node) == GrammarKind::UsingDeclaration)
         {
-            const auto parent = m_nodes[node].parent;
-            if (parent < m_nodes.size() && m_nodes[parent].kind == GrammarKind::TemplateDeclaration)
+            const auto parent = m_nodes.Parent(node);
+            if (parent < m_nodes.size() && m_nodes.Kind(parent) == GrammarKind::TemplateDeclaration)
             {
                 return TypeTable::Unknown;
             }
@@ -1610,7 +1610,7 @@ namespace heimdall
 
     TypeId TyperImpl::ComputeNodeType(std::uint32_t node)
     {
-        switch (m_nodes[node].kind)
+        switch (m_nodes.Kind(node))
         {
         case GrammarKind::LiteralExpression:
             return LiteralType(node);
@@ -1736,7 +1736,7 @@ namespace heimdall
         const bool prefix = (first == Tok::Plus || first == Tok::Minus || first == Tok::Bang || first == Tok::Tilde ||
                                 first == Tok::Star || first == Tok::Amp || first == Tok::PlusPlus ||
                                 first == Tok::MinusMinus) &&
-            Pos(m_nodes[kids[0]].first_token) == begin + 1;
+            Pos(m_nodes.FirstToken(kids[0])) == begin + 1;
         TypeId operand = TypeTable::Unknown;
         Tok op = Tok::None;
         if (prefix)
@@ -2027,7 +2027,7 @@ namespace heimdall
         }
 
         const auto callee = kids[0];
-        switch (m_nodes[callee].kind)
+        switch (m_nodes.Kind(callee))
         {
         case GrammarKind::IdentifierExpression:
         {
@@ -2106,7 +2106,7 @@ namespace heimdall
 
         for (std::uint32_t node = 0; node < m_nodes.size(); ++node)
         {
-            switch (m_nodes[node].kind)
+            switch (m_nodes.Kind(node))
             {
             case GrammarKind::LiteralExpression:
             case GrammarKind::IdentifierExpression:
@@ -2128,7 +2128,7 @@ namespace heimdall
 
     TypeModel Typer::Type(const SemanticModel &model)
     {
-        const auto nodes = model.Tree().Nodes().size();
+        const auto nodes = model.Tree().NodesSoA().size();
         TypeModel result(model, std::max<std::size_t>(32 * 1024, nodes * 24));
         TyperImpl(result, model).Run();
         return result;

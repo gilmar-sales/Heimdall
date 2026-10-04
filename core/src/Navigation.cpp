@@ -190,26 +190,26 @@ namespace heimdall
 
             std::size_t NodeBegin(std::size_t node) const
             {
-                const auto &grammar = m_tree.Nodes()[node];
+                const auto grammar = m_tree.NodesSoA()[node];
                 if (node == ParseTree::RootNode)
                 {
                     return 0;
                 }
 
-                return grammar.first_token < m_tree.Tokens().size() ? m_tree.Tokens()[grammar.first_token].offset
+                return grammar.GetFirstToken() < m_tree.Tokens().size() ? m_tree.Tokens()[grammar.GetFirstToken()].offset
                                                                      : m_tree.Source().size();
             }
 
             std::size_t NodeEnd(std::size_t node) const
             {
-                const auto &grammar = m_tree.Nodes()[node];
-                if (node == ParseTree::RootNode || grammar.token_count == 0)
+                const auto grammar = m_tree.NodesSoA()[node];
+                if (node == ParseTree::RootNode || grammar.GetTokenCount() == 0)
                 {
                     return node == ParseTree::RootNode ? m_tree.Source().size() : NodeBegin(node);
                 }
 
                 const std::size_t last =
-                    std::min<std::size_t>(grammar.first_token + grammar.token_count, m_tree.Tokens().size()) - 1;
+                    std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(), m_tree.Tokens().size()) - 1;
                 return m_tree.Tokens()[last].offset + m_tree.Tokens()[last].length;
             }
 
@@ -568,13 +568,13 @@ namespace heimdall
 
             void BuildPaths()
             {
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 m_node_path.assign(nodes.size(), Path{});
                 m_node_elements.assign(nodes.size(), Path{});
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
-                    const GrammarKind kind = nodes[n].kind;
-                    Path path = nodes[n].parent < n ? m_node_path[nodes[n].parent] : Path{};
+                    const GrammarKind kind = nodes.Kind(n);
+                    Path path = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path{};
                     if (kind == GrammarKind::NamespaceDefinition || kind == GrammarKind::RecordDefinition)
                     {
                         const ScopeName name = ParseScopeName(n);
@@ -607,10 +607,10 @@ namespace heimdall
             ScopeName ParseScopeName(std::size_t node) const
             {
                 ScopeName out;
-                const auto &grammar = m_tree.Nodes()[node];
+                const auto grammar = m_tree.NodesSoA()[node];
                 const auto &tokens = m_tree.Tokens();
-                const std::size_t end = std::min<std::size_t>(grammar.first_token + grammar.token_count, tokens.size());
-                std::size_t t = grammar.first_token;
+                const std::size_t end = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(), tokens.size());
+                std::size_t t = grammar.GetFirstToken();
                 std::size_t body = kNone;
                 for (std::size_t k = t; k < end; ++k)
                 {
@@ -623,7 +623,7 @@ namespace heimdall
 
                 out.has_body = body != kNone;
                 const std::size_t limit = body != kNone ? body : end;
-                const bool is_namespace = m_tree.Nodes()[node].kind == GrammarKind::NamespaceDefinition;
+                const bool is_namespace = m_tree.NodesSoA().Kind(node) == GrammarKind::NamespaceDefinition;
                 std::size_t k = t;
                 for (; k < limit; ++k)
                 {
@@ -818,10 +818,10 @@ namespace heimdall
             void CollectScopes()
             {
                 m_known_scopes.insert(std::string());
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
-                    const GrammarKind kind = nodes[n].kind;
+                    const GrammarKind kind = nodes.Kind(n);
                     if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
                     {
                         continue;
@@ -867,13 +867,13 @@ namespace heimdall
 
             Placement Place(std::size_t name_node) const
             {
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 Placement placement;
                 std::size_t previous = name_node;
-                std::size_t current = nodes[name_node].parent;
+                std::size_t current = nodes.Parent(name_node);
                 for (std::size_t depth = 0; depth < kMaxPlacementWalkDepth && current < nodes.size(); ++depth)
                 {
-                    const GrammarKind kind = nodes[current].kind;
+                    const GrammarKind kind = nodes.Kind(current);
                     switch (kind)
                     {
                         case GrammarKind::ParameterDeclaration:
@@ -926,7 +926,7 @@ namespace heimdall
                     }
 
                     previous = current;
-                    current = nodes[current].parent;
+                    current = nodes.Parent(current);
                 }
 
                 (void)previous;
@@ -937,16 +937,16 @@ namespace heimdall
 
             void CollectDecls()
             {
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 const auto &tokens = m_tree.Tokens();
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
-                    const GrammarNode &grammar = nodes[n];
-                    if (grammar.kind == GrammarKind::DeclaredName)
+                    const auto grammar = nodes[n];
+                    if (grammar.GetKind() == GrammarKind::DeclaredName)
                     {
                         CollectDeclaredName(n);
                     }
-                    else if (grammar.kind == GrammarKind::NamespaceDefinition)
+                    else if (grammar.GetKind() == GrammarKind::NamespaceDefinition)
                     {
                         const ScopeName &name = m_scope_name.at(n);
                         if (name.written.empty() || name.name_token == kNone)
@@ -956,7 +956,7 @@ namespace heimdall
 
                         Decl decl;
                         decl.name = name.written.back();
-                        decl.scope = nodes[n].parent < n ? m_node_path[nodes[n].parent] : Path{};
+                        decl.scope = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path{};
                         decl.scope.insert(decl.scope.end(), name.written.begin(), name.written.end() - 1);
                         decl.offset = tokens[name.name_token].offset;
                         decl.length = tokens[name.name_token].length;
@@ -964,7 +964,7 @@ namespace heimdall
                         decl.is_definition = true;
                         AddDecl(std::move(decl));
                     }
-                    else if (grammar.kind == GrammarKind::RecordDefinition)
+                    else if (grammar.GetKind() == GrammarKind::RecordDefinition)
                     {
                         const ScopeName &name = m_scope_name.at(n);
                         if (name.written.empty() || name.name_token == kNone || !name.has_body)
@@ -974,7 +974,7 @@ namespace heimdall
 
                         Decl decl;
                         decl.name = name.written.back();
-                        decl.scope = nodes[n].parent < n ? m_node_path[nodes[n].parent] : Path{};
+                        decl.scope = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path{};
                         decl.scope.insert(decl.scope.end(), name.written.begin(), name.written.end() - 1);
                         decl.offset = tokens[name.name_token].offset;
                         decl.length = tokens[name.name_token].length;
@@ -982,7 +982,7 @@ namespace heimdall
                         decl.is_definition = true;
                         AddDecl(std::move(decl));
                     }
-                    else if (grammar.kind == GrammarKind::UsingDeclaration)
+                    else if (grammar.GetKind() == GrammarKind::UsingDeclaration)
                     {
                         CollectUsing(n);
                     }
@@ -996,9 +996,9 @@ namespace heimdall
 
             void CollectDeclaredName(std::size_t n)
             {
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 const auto &tokens = m_tree.Tokens();
-                const std::size_t token = nodes[n].first_token;
+                const std::size_t token = nodes.FirstToken(n);
                 if (token >= tokens.size() || tokens[token].kind != TokenKind::Identifier)
                 {
                     return;
@@ -1017,18 +1017,18 @@ namespace heimdall
                 decl.is_definition = true;
 
                 // Function-ness and qualifiers come from the owning Declarator.
-                const std::size_t declarator = nodes[n].parent;
+                const std::size_t declarator = nodes.Parent(n);
                 Path qualifiers;
-                if (declarator < nodes.size() && nodes[declarator].kind == GrammarKind::Declarator)
+                if (declarator < nodes.size() && nodes.Kind(declarator) == GrammarKind::Declarator)
                 {
                     bool suffix = false;
                     std::size_t suffix_node = kNone;
                     for (const std::size_t child: m_tree.Children(declarator))
                     {
-                        const GrammarKind kind = nodes[child].kind;
+                        const GrammarKind kind = nodes.Kind(child);
                         if (kind == GrammarKind::NestedNameSpecifier)
                         {
-                            const std::size_t first = nodes[child].first_token;
+                            const std::size_t first = nodes.FirstToken(child);
                             if (first < tokens.size() && tokens[first].kind == TokenKind::Identifier)
                             {
                                 qualifiers.emplace_back(Text(first));
@@ -1044,18 +1044,18 @@ namespace heimdall
                     if (suffix && !placement.param)
                     {
                         decl.kind = CompletionKind::Function;
-                        const std::size_t owner = nodes[declarator].parent;
+                        const std::size_t owner = nodes.Parent(declarator);
                         decl.is_definition =
-                            owner < nodes.size() && nodes[owner].kind == GrammarKind::FunctionDefinition;
+                            owner < nodes.size() && nodes.Kind(owner) == GrammarKind::FunctionDefinition;
                         std::uint32_t count = 0;
                         std::size_t only_void = kNone;
                         for (const std::size_t param: m_tree.Children(suffix_node))
                         {
-                            if (nodes[param].kind == GrammarKind::ParameterDeclaration)
+                            if (nodes.Kind(param) == GrammarKind::ParameterDeclaration)
                             {
                                 ++count;
-                                only_void = (nodes[param].token_count == 1 &&
-                                                Text(nodes[param].first_token) == "void")
+                                only_void = (nodes.TokenCount(param) == 1 &&
+                                                Text(nodes.FirstToken(param)) == "void")
                                     ? param
                                     : kNone;
                             }
@@ -1105,8 +1105,8 @@ namespace heimdall
                 // Out-of-line member bodies see the class scope.
                 if (decl.kind == CompletionKind::Function && !qualifiers.empty() && decl.is_definition)
                 {
-                    const std::size_t owner = nodes[nodes[n].parent].parent;
-                    if (owner < nodes.size() && nodes[owner].kind == GrammarKind::FunctionDefinition)
+                    const std::size_t owner = nodes.Parent(nodes.Parent(n));
+                    if (owner < nodes.size() && nodes.Kind(owner) == GrammarKind::FunctionDefinition)
                     {
                         m_ranges.push_back({NodeBegin(owner), NodeEnd(owner), decl.scope});
                     }
@@ -1117,10 +1117,10 @@ namespace heimdall
 
             void CollectUsing(std::size_t n)
             {
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 const auto &tokens = m_tree.Tokens();
-                const std::size_t end = std::min<std::size_t>(nodes[n].first_token + nodes[n].token_count, tokens.size());
-                std::size_t first = nodes[n].first_token;
+                const std::size_t end = std::min<std::size_t>(nodes.FirstToken(n) + nodes.TokenCount(n), tokens.size());
+                std::size_t first = nodes.FirstToken(n);
                 while (first < end && IsTrivia(tokens[first].kind))
                 {
                     ++first;
@@ -1137,7 +1137,7 @@ namespace heimdall
                     return;
                 }
 
-                const std::size_t parent = nodes[n].parent;
+                const std::size_t parent = nodes.Parent(n);
                 const Path scope = m_node_path[n];
                 const std::size_t active_begin = tokens[first].offset;
                 const std::size_t active_end = parent < nodes.size() ? NodeEnd(parent) : m_tree.Source().size();
@@ -1697,9 +1697,9 @@ namespace heimdall
 
         // Offsets covered by using-declarations/directives and preprocessor lines.
         std::vector<std::pair<std::size_t, std::size_t>> skip;
-        for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
+        for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
         {
-            if (tree.Nodes()[n].kind == GrammarKind::UsingDeclaration)
+            if (tree.NodesSoA().Kind(n) == GrammarKind::UsingDeclaration)
             {
                 skip.emplace_back(model.NodeBegin(n), model.NodeEnd(n));
             }

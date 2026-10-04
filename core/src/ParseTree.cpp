@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
@@ -125,18 +126,20 @@ namespace heimdall
             }
         }
 
-        // Directive token indices
+        // Directive token indices. Tokens are ordered by offset, so each
+        // directive's range is found by binary search instead of a full scan.
         for (const auto &dir : m_directives)
         {
-            // Find tokens within directive range
-            for (std::size_t i = 0; i < m_tokens.size(); ++i)
+            const auto first = std::lower_bound(m_tokens.begin(), m_tokens.end(), dir.offset,
+                [](const Token &token, std::size_t offset) { return token.offset < offset; });
+            for (auto it = first; it != m_tokens.end(); ++it)
             {
-                const std::uint32_t tok_offset = m_tokens[i].offset;
-                const std::uint32_t tok_end = tok_offset + m_tokens[i].length;
-                if (tok_offset >= dir.offset && tok_end <= dir.offset + dir.length)
+                const std::size_t tok_end = static_cast<std::size_t>(it->offset) + it->length;
+                if (tok_end > dir.offset + dir.length)
                 {
-                    m_directive_tokens.push_back(static_cast<std::uint32_t>(i));
+                    break;
                 }
+                m_directive_tokens.push_back(static_cast<std::uint32_t>(it - m_tokens.begin()));
             }
         }
     }

@@ -625,10 +625,10 @@ namespace heimdall
 
         CompletionKind ClassifyDeclaredName(const ParseTree &tree, std::size_t node_index)
         {
-            std::size_t current = tree.Nodes()[node_index].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node_index);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::ParameterDeclaration || kind == GrammarKind::CompoundStatement ||
                     kind == GrammarKind::DeclarationStatement || kind == GrammarKind::ExpressionStatement ||
                     kind == GrammarKind::ReturnStatement || kind == GrammarKind::IfStatement ||
@@ -647,8 +647,8 @@ namespace heimdall
                 if (kind == GrammarKind::RecordDefinition || kind == GrammarKind::ConceptDefinition ||
                     kind == GrammarKind::TemplateDeclaration)
                 {
-                    if (tree.Nodes()[node_index].parent == current ||
-                        tree.Nodes()[tree.Nodes()[node_index].parent].parent == current)
+                    if (tree.NodesSoA().Parent(node_index) == current ||
+                        tree.NodesSoA().Parent(tree.NodesSoA().Parent(node_index)) == current)
                     {
                         return CompletionKind::Type;
                     }
@@ -668,12 +668,12 @@ namespace heimdall
 
                 if (kind == GrammarKind::Declaration)
                 {
-                    const GrammarNode &declaration = tree.Nodes()[current];
-                    const std::size_t last = std::min<std::size_t>(declaration.first_token + declaration.token_count,
+                    const auto declaration = tree.NodesSoA()[current];
+                    const std::size_t last = std::min<std::size_t>(declaration.GetFirstToken() + declaration.GetTokenCount(),
                         tree.Tokens().size());
                     std::size_t seen = 0;
                     constexpr std::size_t kMaxSpecifierTokens = 4;
-                    for (std::size_t t = declaration.first_token; t < last && seen < kMaxSpecifierTokens; ++t)
+                    for (std::size_t t = declaration.GetFirstToken(); t < last && seen < kMaxSpecifierTokens; ++t)
                     {
                         const TokenKind token_kind = tree.Tokens()[t].kind;
                         if (token_kind == TokenKind::Whitespace || token_kind == TokenKind::LineComment ||
@@ -691,7 +691,7 @@ namespace heimdall
                     }
                 }
 
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return CompletionKind::Variable;
@@ -837,13 +837,13 @@ namespace heimdall
 
         std::pair<std::size_t, std::size_t> NodeRange(const ParseTree &tree, std::size_t node)
         {
-            if (node >= tree.Nodes().size()) return {0, 0};
-            const GrammarNode &grammar = tree.Nodes()[node];
-            if (grammar.token_count == 0 || grammar.first_token >= tree.Tokens().size()) return {0, 0};
-            const std::size_t last = grammar.first_token + grammar.token_count <= tree.Tokens().size()
-            ? grammar.first_token + grammar.token_count - 1
+            if (node >= tree.NodesSoA().size()) return {0, 0};
+            const auto grammar = tree.NodesSoA()[node];
+            if (grammar.GetTokenCount() == 0 || grammar.GetFirstToken() >= tree.Tokens().size()) return {0, 0};
+            const std::size_t last = grammar.GetFirstToken() + grammar.GetTokenCount() <= tree.Tokens().size()
+            ? grammar.GetFirstToken() + grammar.GetTokenCount() - 1
             : tree.Tokens().size() - 1;
-            const Token &first = tree.Tokens()[grammar.first_token];
+            const Token &first = tree.Tokens()[grammar.GetFirstToken()];
             const Token &last_token = tree.Tokens()[last];
             return {first.offset, last_token.offset + last_token.length};
         }
@@ -908,15 +908,15 @@ namespace heimdall
         LocalInfo AnalyzeLocal(const ParseTree &tree, std::size_t node)
         {
             LocalInfo info;
-            if (node >= tree.Nodes().size())
+            if (node >= tree.NodesSoA().size())
             {
                 return info;
             }
 
-            std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::LambdaExpression)
                 {
                     if (!info.is_local)
@@ -951,7 +951,7 @@ namespace heimdall
                     return info;
                 }
 
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return info;
@@ -994,17 +994,17 @@ namespace heimdall
         // namespace; its locals belong to body blocks instead).
         std::size_t MemberScope(const ParseTree &tree, std::size_t node)
         {
-            if (node >= tree.Nodes().size())
+            if (node >= tree.NodesSoA().size())
             {
                 return NoIndex;
             }
 
-            std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                if (IsTransparentForMembership(tree.Nodes()[current].kind))
+                if (IsTransparentForMembership(tree.NodesSoA().Kind(current)))
                 {
-                    current = tree.Nodes()[current].parent;
+                    current = tree.NodesSoA().Parent(current);
                     continue;
                 }
 
@@ -1019,21 +1019,21 @@ namespace heimdall
         // contribute one empty element so they can never match a typed qualifier.
         std::vector<std::string> ScopeNameElements(const ParseTree &tree, std::size_t node)
         {
-            const auto &nodes = tree.Nodes();
+            const auto &nodes = tree.NodesSoA();
             if (node >= nodes.size()) return {
                 {}};
-            const GrammarKind kind = nodes[node].kind;
+            const GrammarKind kind = nodes.Kind(node);
             if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
             {
                 return {
                     {}};
             }
 
-            const GrammarNode &grammar = nodes[node];
+            const auto grammar = nodes[node];
             std::vector<std::size_t> significant;
-            const std::size_t end = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+            const std::size_t end = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
                 tree.Tokens().size());
-            for (std::size_t i = grammar.first_token; i < end; ++i)
+            for (std::size_t i = grammar.GetFirstToken(); i < end; ++i)
             {
                 const TokenKind token_kind = tree.Tokens()[i].kind;
                 if (token_kind == TokenKind::Whitespace || token_kind == TokenKind::LineComment ||
@@ -1117,17 +1117,17 @@ namespace heimdall
         // direct members of the enclosing scope).
         bool IsInlineNamespace(const ParseTree &tree, std::size_t node)
         {
-            const auto &nodes = tree.Nodes();
-            if (node >= nodes.size() || nodes[node].kind != GrammarKind::NamespaceDefinition)
+            const auto &nodes = tree.NodesSoA();
+            if (node >= nodes.size() || nodes.Kind(node) != GrammarKind::NamespaceDefinition)
             {
                 return false;
             }
 
-            const GrammarNode &grammar = nodes[node];
-            const std::size_t end = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+            const auto grammar = nodes[node];
+            const std::size_t end = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
                 tree.Tokens().size());
             bool seen_inline = false;
-            for (std::size_t i = grammar.first_token; i < end; ++i)
+            for (std::size_t i = grammar.GetFirstToken(); i < end; ++i)
             {
                 const Token &token = tree.Tokens()[i];
                 if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
@@ -1164,9 +1164,9 @@ namespace heimdall
         {
             std::vector<std::string> path;
             std::size_t current = node;
-            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::TranslationUnit)
                 {
                     break;
@@ -1181,7 +1181,7 @@ namespace heimdall
                     }
                 }
 
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return path;
@@ -1278,10 +1278,10 @@ namespace heimdall
         // loops previously recomputed ScopePath per node on each pass.
         std::vector<std::vector<std::string>> BuildScopePaths(const ParseTree &tree)
         {
-            std::vector<std::vector<std::string>> paths(tree.Nodes().size());
-            for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+            std::vector<std::vector<std::string>> paths(tree.NodesSoA().size());
+            for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
             {
-                const GrammarKind kind = tree.Nodes()[n].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(n);
                 if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
                 {
                     continue;
@@ -1307,10 +1307,10 @@ namespace heimdall
         {
             std::vector<CallableInterval> intervals;
             constexpr std::size_t kReserveDivisor = 8;
-            intervals.reserve(tree.Nodes().size() / kReserveDivisor);
-            for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+            intervals.reserve(tree.NodesSoA().size() / kReserveDivisor);
+            for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
             {
-                const GrammarKind kind = tree.Nodes()[n].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(n);
                 if (kind != GrammarKind::FunctionDefinition && kind != GrammarKind::LambdaExpression)
                 {
                     continue;
@@ -1387,9 +1387,9 @@ namespace heimdall
         std::vector<ScopeInterval> BuildNamedScopeIntervals(const ParseTree &tree)
         {
             std::vector<ScopeInterval> intervals;
-            for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
+            for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
             {
-                const GrammarKind kind = tree.Nodes()[n].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(n);
                 if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
                 {
                     continue;
@@ -1581,17 +1581,17 @@ namespace heimdall
         // pre-order subtree range instead of a per-request children table.
         std::size_t FindChild(const ParseTree &tree, std::size_t parent, GrammarKind kind)
         {
-            if (parent >= tree.Nodes().size())
+            if (parent >= tree.NodesSoA().size())
             {
                 return NoIndex;
             }
 
-            const std::size_t end = tree.Nodes()[parent].subtree_end < tree.Nodes().size()
-            ? tree.Nodes()[parent].subtree_end
-            : tree.Nodes().size();
+            const std::size_t end = tree.NodesSoA().SubtreeEnd(parent) < tree.NodesSoA().size()
+            ? tree.NodesSoA().SubtreeEnd(parent)
+            : tree.NodesSoA().size();
             for (std::size_t i = parent + 1; i < end; ++i)
             {
-                if (tree.Nodes()[i].parent == parent && tree.Nodes()[i].kind == kind)
+                if (tree.NodesSoA().Parent(i) == parent && tree.NodesSoA().Kind(i) == kind)
                 {
                     return i;
                 }
@@ -1605,17 +1605,17 @@ namespace heimdall
         // and allocates nothing.
         std::size_t FindInSubtree(const ParseTree &tree, std::size_t node, GrammarKind kind)
         {
-            if (node >= tree.Nodes().size())
+            if (node >= tree.NodesSoA().size())
             {
                 return NoIndex;
             }
 
-            const std::size_t end = tree.Nodes()[node].subtree_end < tree.Nodes().size()
-            ? tree.Nodes()[node].subtree_end
-            : tree.Nodes().size();
+            const std::size_t end = tree.NodesSoA().SubtreeEnd(node) < tree.NodesSoA().size()
+            ? tree.NodesSoA().SubtreeEnd(node)
+            : tree.NodesSoA().size();
             for (std::size_t i = node + 1; i < end; ++i)
             {
-                if (tree.Nodes()[i].kind == kind)
+                if (tree.NodesSoA().Kind(i) == kind)
                 {
                     return i;
                 }
@@ -1678,15 +1678,15 @@ namespace heimdall
         // Nearest Declarator ancestor of a DeclaredName, or NoIndex.
         std::size_t DeclaratorOf(const ParseTree &tree, std::size_t node)
         {
-            if (node >= tree.Nodes().size())
+            if (node >= tree.NodesSoA().size())
             {
                 return NoIndex;
             }
 
-            std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::Declarator)
                 {
                     return current;
@@ -1699,7 +1699,7 @@ namespace heimdall
                     return NoIndex;
                 }
 
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return NoIndex;
@@ -1718,8 +1718,8 @@ namespace heimdall
             const std::size_t suffix = FindInSubtree(tree, declarator, GrammarKind::FunctionSuffix);
             if (suffix != NoIndex)
             {
-                const auto &suffix_node = tree.Nodes()[suffix];
-                params = CompactWs(SliceRange(tree, suffix_node.first_token, suffix_node.token_count),
+                const auto suffix_node = tree.NodesSoA()[suffix];
+                params = CompactWs(SliceRange(tree, suffix_node.GetFirstToken(), suffix_node.GetTokenCount()),
                     kMaxParamsTextLen);
             }
 
@@ -1728,16 +1728,16 @@ namespace heimdall
                 FindInSubtree(tree, declarator, GrammarKind::TrailingReturnType);
             if (trailing_node != NoIndex)
             {
-                const auto &trailing_ref = tree.Nodes()[trailing_node];
-                trailing = CompactWs(SliceRange(tree, trailing_ref.first_token, trailing_ref.token_count),
+                const auto trailing_ref = tree.NodesSoA()[trailing_node];
+                trailing = CompactWs(SliceRange(tree, trailing_ref.GetFirstToken(), trailing_ref.GetTokenCount()),
                     kMaxTrailingTextLen);
             }
 
             std::string returns;
-            std::size_t function = tree.Nodes()[declarator].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.Nodes().size(); ++depth)
+            std::size_t function = tree.NodesSoA().Parent(declarator);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[function].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(function);
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::FunctionDeclaration)
                 {
                     break;
@@ -1750,7 +1750,7 @@ namespace heimdall
                     break;
                 }
 
-                function = tree.Nodes()[function].parent;
+                function = tree.NodesSoA().Parent(function);
             }
 
             if (function != NoIndex)
@@ -1758,8 +1758,8 @@ namespace heimdall
                 const std::size_t type = FindChild(tree, function, GrammarKind::TypeSpecifier);
                 if (type != NoIndex)
                 {
-                    const auto &type_node = tree.Nodes()[type];
-                    returns = CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count),
+                    const auto type_node = tree.NodesSoA()[type];
+                    returns = CompactWs(SliceRange(tree, type_node.GetFirstToken(), type_node.GetTokenCount()),
                         kMaxReturnTextLen);
                 }
             }
@@ -1790,16 +1790,16 @@ namespace heimdall
         // Declared type of a variable (`int`, `Widget`, ...), or empty.
         std::string VariableTypeDetail(const ParseTree &tree, std::size_t node)
         {
-            std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::Declarator || kind == GrammarKind::PointerOperator ||
                     kind == GrammarKind::ArraySuffix || kind == GrammarKind::TypeSpecifier ||
                     kind == GrammarKind::InitDeclarator)
                 {
                     // Declarator plumbing (shared specifiers live further up).
-                    current = tree.Nodes()[current].parent;
+                    current = tree.NodesSoA().Parent(current);
                     continue;
                 }
 
@@ -1808,8 +1808,8 @@ namespace heimdall
                 {
                     const std::size_t type = FindChild(tree, current, GrammarKind::TypeSpecifier);
                     if (type == NoIndex) return {};
-                    const auto &type_node = tree.Nodes()[type];
-                    return CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count),
+                    const auto type_node = tree.NodesSoA()[type];
+                    return CompactWs(SliceRange(tree, type_node.GetFirstToken(), type_node.GetTokenCount()),
                         kMaxShortDetailLen);
                 }
 
@@ -1823,18 +1823,18 @@ namespace heimdall
         // Enumerator ancestor.
         std::string EnumeratorDetail(const ParseTree &tree, std::size_t node, std::string_view name)
         {
-            if (node >= tree.Nodes().size()) return {};
-            std::size_t current = tree.Nodes()[node].parent;
+            if (node >= tree.NodesSoA().size()) return {};
+            std::size_t current = tree.NodesSoA().Parent(node);
             constexpr std::size_t kMaxEnumeratorDepth = 6;
-            for (std::size_t depth = 0; depth < kMaxEnumeratorDepth && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxEnumeratorDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::Enumerator)
                 {
-                    const std::size_t record = tree.Nodes()[current].parent;
+                    const std::size_t record = tree.NodesSoA().Parent(current);
                     std::string out;
-                    if (record < tree.Nodes().size() &&
-                        tree.Nodes()[record].kind == GrammarKind::RecordDefinition)
+                    if (record < tree.NodesSoA().size() &&
+                        tree.NodesSoA().Kind(record) == GrammarKind::RecordDefinition)
                     {
                         for (const auto & element: ScopePath(tree, record))
                         {
@@ -1862,7 +1862,7 @@ namespace heimdall
                 }
 
                 if (!IsTransparentForMembership(kind)) return {};
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return {};
@@ -2079,7 +2079,7 @@ namespace heimdall
         // documentation sitting above the whole declaration attaches.
         std::size_t DocAnchorToken(const ParseTree &tree, std::size_t node)
         {
-            if (node >= tree.Nodes().size())
+            if (node >= tree.NodesSoA().size())
             {
                 return 0;
             }
@@ -2088,13 +2088,13 @@ namespace heimdall
             constexpr std::size_t kMaxDocAnchorDepth = 16;
             for (std::size_t depth = 0; depth < kMaxDocAnchorDepth; ++depth)
             {
-                const std::size_t parent = tree.Nodes()[current].parent;
-                if (parent >= tree.Nodes().size() || parent == current)
+                const std::size_t parent = tree.NodesSoA().Parent(current);
+                if (parent >= tree.NodesSoA().size() || parent == current)
                 {
                     break;
                 }
 
-                switch (tree.Nodes()[parent].kind)
+                switch (tree.NodesSoA().Kind(parent))
                 {
                 case GrammarKind::Declarator:
                 case GrammarKind::InitDeclarator:
@@ -2116,7 +2116,7 @@ namespace heimdall
                 break;
             }
 
-            return tree.Nodes()[current].first_token;
+            return tree.NodesSoA().FirstToken(current);
         }
 
         // Return type of the function a declared name belongs to (leading type or
@@ -2133,8 +2133,8 @@ namespace heimdall
             constexpr std::size_t kArrowLen = 2;
             if (trailing != NoIndex)
             {
-                std::string text = CompactWs(SliceRange(tree, tree.Nodes()[trailing].first_token,
-                    tree.Nodes()[trailing].token_count), kMaxShortDetailLen);
+                std::string text = CompactWs(SliceRange(tree, tree.NodesSoA().FirstToken(trailing),
+                    tree.NodesSoA().TokenCount(trailing)), kMaxShortDetailLen);
                 if (text.starts_with("->"))
                 {
                     text.erase(0, kArrowLen);
@@ -2151,10 +2151,10 @@ namespace heimdall
                 }
             }
 
-            std::size_t function = tree.Nodes()[declarator].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.Nodes().size(); ++depth)
+            std::size_t function = tree.NodesSoA().Parent(declarator);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[function].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(function);
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::FunctionDeclaration)
                 {
                     const std::size_t type = FindChild(tree, function, GrammarKind::TypeSpecifier);
@@ -2163,8 +2163,8 @@ namespace heimdall
                         return {};
                     }
 
-                    return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
-                        tree.Nodes()[type].token_count), kMaxShortDetailLen);
+                    return CompactWs(SliceRange(tree, tree.NodesSoA().FirstToken(type),
+                        tree.NodesSoA().TokenCount(type)), kMaxShortDetailLen);
                 }
 
                 if (kind == GrammarKind::TranslationUnit || kind == GrammarKind::NamespaceDefinition ||
@@ -2173,7 +2173,7 @@ namespace heimdall
                     return {};
                 }
 
-                function = tree.Nodes()[function].parent;
+                function = tree.NodesSoA().Parent(function);
             }
 
             return {};
@@ -2183,16 +2183,16 @@ namespace heimdall
         // name is not an alias (records, `using ns::name;`).
         std::string AliasTargetText(const ParseTree &tree, std::size_t node)
         {
-            std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.NodesSoA().size(); ++depth)
             {
-                const GrammarKind kind = tree.Nodes()[current].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
                 if (kind == GrammarKind::UsingDeclaration)
                 {
-                    const auto &grammar = tree.Nodes()[current];
-                    const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+                    const auto grammar = tree.NodesSoA()[current];
+                    const std::size_t last = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
                         tree.Tokens().size());
-                    for (std::size_t i = grammar.first_token; i < last; ++i)
+                    for (std::size_t i = grammar.GetFirstToken(); i < last; ++i)
                     {
                         if (tree.Tokens()[i].kind == TokenKind::Punctuation && tree.Text(tree.Tokens()[i]) == "=")
                         {
@@ -2218,8 +2218,8 @@ namespace heimdall
                         return {};
                     }
 
-                    return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
-                        tree.Nodes()[type].token_count), kMaxTypeTextLen);
+                    return CompactWs(SliceRange(tree, tree.NodesSoA().FirstToken(type),
+                        tree.NodesSoA().TokenCount(type)), kMaxTypeTextLen);
                 }
 
                 if (kind == GrammarKind::RecordDefinition || kind == GrammarKind::CompoundStatement ||
@@ -2228,7 +2228,7 @@ namespace heimdall
                     return {};
                 }
 
-                current = tree.Nodes()[current].parent;
+                current = tree.NodesSoA().Parent(current);
             }
 
             return {};
@@ -2238,10 +2238,10 @@ namespace heimdall
         std::vector<std::string> RecordBases(const ParseTree &tree, std::size_t node)
         {
             std::vector<std::string> bases;
-            const auto &grammar = tree.Nodes()[node];
-            const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+            const auto grammar = tree.NodesSoA()[node];
+            const std::size_t last = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
                 tree.Tokens().size());
-            std::size_t i = grammar.first_token;
+            std::size_t i = grammar.GetFirstToken();
             for (; i < last; ++i)
             {
                 const Token &token = tree.Tokens()[i];
@@ -2392,7 +2392,7 @@ namespace heimdall
                 item.type_text = AliasTargetText(tree, node);
             }
 
-            const std::size_t token = tree.Nodes()[node].first_token;
+            const std::size_t token = tree.NodesSoA().FirstToken(node);
             if (token < tokens.size())
             {
                 item.has_location = true;
@@ -2405,15 +2405,15 @@ namespace heimdall
                 const std::size_t declarator = DeclaratorOf(tree, node);
                 if (declarator != NoIndex)
                 {
-                    const std::size_t owner = tree.Nodes()[declarator].parent;
-                    item.is_definition = owner < tree.Nodes().size() &&
-                        tree.Nodes()[owner].kind == GrammarKind::FunctionDefinition;
+                    const std::size_t owner = tree.NodesSoA().Parent(declarator);
+                    item.is_definition = owner < tree.NodesSoA().size() &&
+                        tree.NodesSoA().Kind(owner) == GrammarKind::FunctionDefinition;
                     const std::size_t suffix = FindInSubtree(tree, declarator, GrammarKind::FunctionSuffix);
                     if (suffix != NoIndex)
                     {
                         for (const std::size_t child: tree.Children(suffix))
                         {
-                            if (tree.Nodes()[child].kind == GrammarKind::ParameterDeclaration)
+                            if (tree.NodesSoA().Kind(child) == GrammarKind::ParameterDeclaration)
                             {
                                 ++item.param_count;
                             }
@@ -2557,13 +2557,13 @@ namespace heimdall
             }
 
             // A record/enum scope reads as `enum class n::Mode`, not `namespace n::Mode`.
-            if (tree.Nodes()[node].kind == GrammarKind::RecordDefinition && !joined.empty())
+            if (tree.NodesSoA().Kind(node) == GrammarKind::RecordDefinition && !joined.empty())
             {
                 std::string intro;
-                const auto &record = tree.Nodes()[node];
-                const std::size_t record_end = std::min<std::size_t>(record.first_token + record.token_count,
+                const auto record = tree.NodesSoA()[node];
+                const std::size_t record_end = std::min<std::size_t>(record.GetFirstToken() + record.GetTokenCount(),
                     tokens.size());
-                for (std::size_t t = record.first_token; t < record_end; ++t)
+                for (std::size_t t = record.GetFirstToken(); t < record_end; ++t)
                 {
                     if (tokens[t].kind != TokenKind::Identifier || tree.IsDecorationToken(t))
                     {
@@ -2588,11 +2588,11 @@ namespace heimdall
 
             const std::string label = joined.empty() ? std::string{}: full_path.back();
             CompletionItem item{label, CompletionKind::Namespace, std::move(detail),
-                DocCommentFor(source, tokens, tree.Nodes()[node].first_token)};
+                DocCommentFor(source, tokens, tree.NodesSoA().FirstToken(node))};
             // The name token follows `namespace` (and `inline`): first identifier
             // that is not a keyword inside the node.
-            const auto &grammar = tree.Nodes()[node];
-            for (std::size_t t = grammar.first_token; t < grammar.first_token + grammar.token_count &&
+            const auto grammar = tree.NodesSoA()[node];
+            for (std::size_t t = grammar.GetFirstToken(); t < grammar.GetFirstToken() + grammar.GetTokenCount() &&
                 t < tokens.size(); ++t)
             {
                 if (tokens[t].kind != TokenKind::Identifier || tree.IsDecorationToken(t))
@@ -2810,27 +2810,27 @@ namespace heimdall
 
         // Declared names bucketed by owning scope; function locals land on body
         // blocks (no entry) and are skipped: they are not qualifier-addressable.
-        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
         {
-            if (tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+            if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
             {
                 continue;
             }
 
             const std::size_t scope = MemberScope(tree, n);
-            if (scope >= tree.Nodes().size())
+            if (scope >= tree.NodesSoA().size())
             {
                 continue;
             }
 
-            const GrammarKind scope_kind = tree.Nodes()[scope].kind;
+            const GrammarKind scope_kind = tree.NodesSoA().Kind(scope);
             if (scope_kind != GrammarKind::NamespaceDefinition && scope_kind != GrammarKind::RecordDefinition &&
                 scope != ParseTree::RootNode)
             {
                 continue;
             }
 
-            const std::size_t token_index = tree.Nodes()[n].first_token;
+            const std::size_t token_index = tree.NodesSoA().FirstToken(n);
             if (token_index >= tree.Tokens().size())
             {
                 continue;
@@ -2856,19 +2856,19 @@ namespace heimdall
 
         // `using Name = Type;` carries no DeclaredName node: index the alias as a
         // Type member that remembers its target for member-access resolution.
-        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
         {
-            if (tree.Nodes()[n].kind != GrammarKind::UsingDeclaration)
+            if (tree.NodesSoA().Kind(n) != GrammarKind::UsingDeclaration)
             {
                 continue;
             }
 
-            const auto &grammar = tree.Nodes()[n];
-            const std::size_t last = std::min<std::size_t>(grammar.first_token + grammar.token_count,
+            const auto grammar = tree.NodesSoA()[n];
+            const std::size_t last = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
                 tokens.size());
             std::size_t name_token = tokens.size();
             std::size_t equals = tokens.size();
-            for (std::size_t k = grammar.first_token; k < last; ++k)
+            for (std::size_t k = grammar.GetFirstToken(); k < last; ++k)
             {
                 if (tokens[k].kind == TokenKind::Whitespace || tokens[k].kind == TokenKind::LineComment ||
                     tokens[k].kind == TokenKind::BlockComment)
@@ -2902,12 +2902,12 @@ namespace heimdall
             }
 
             const std::size_t scope = MemberScope(tree, n);
-            if (scope >= tree.Nodes().size())
+            if (scope >= tree.NodesSoA().size())
             {
                 continue;
             }
 
-            const GrammarKind scope_kind = tree.Nodes()[scope].kind;
+            const GrammarKind scope_kind = tree.NodesSoA().Kind(scope);
             if (scope_kind != GrammarKind::NamespaceDefinition && scope_kind != GrammarKind::RecordDefinition &&
                 scope != ParseTree::RootNode)
             {
@@ -2928,7 +2928,7 @@ namespace heimdall
             }
 
             CompletionItem item{std::string(name), CompletionKind::Type, KindDetail(CompletionKind::Type),
-                DocCommentFor(source, tokens, grammar.first_token)};
+                DocCommentFor(source, tokens, grammar.GetFirstToken())};
             item.has_location = true;
             item.offset = tokens[name_token].offset;
             item.is_definition = true;
@@ -2941,9 +2941,9 @@ namespace heimdall
 
         // Base classes, attached to the record's own entry (created on demand:
         // a record that only inherits has no members of its own).
-        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
         {
-            if (tree.Nodes()[n].kind != GrammarKind::RecordDefinition || n >= scope_paths.size() ||
+            if (tree.NodesSoA().Kind(n) != GrammarKind::RecordDefinition || n >= scope_paths.size() ||
                 scope_paths[n].empty() || scope_paths[n].back().empty())
             {
                 continue;
@@ -2966,21 +2966,21 @@ namespace heimdall
         }
 
         // Nested scope names owned by each entry's scope.
-        for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+        for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
         {
-            const GrammarKind kind = tree.Nodes()[n].kind;
+            const GrammarKind kind = tree.NodesSoA().Kind(n);
             if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
             {
                 continue;
             }
 
             const std::size_t owner = MemberScope(tree, n);
-            if (owner >= tree.Nodes().size())
+            if (owner >= tree.NodesSoA().size())
             {
                 continue;
             }
 
-            const GrammarKind owner_kind = tree.Nodes()[owner].kind;
+            const GrammarKind owner_kind = tree.NodesSoA().Kind(owner);
             if (owner_kind != GrammarKind::NamespaceDefinition && owner_kind != GrammarKind::RecordDefinition &&
                 owner != ParseTree::RootNode)
             {
@@ -3014,9 +3014,9 @@ namespace heimdall
 
             std::size_t bucket = ParseTree::RootNode;
             std::size_t span = static_cast<std::size_t>(-1);
-            for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
+            for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
             {
-                const GrammarKind kind = tree.Nodes()[n].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(n);
                 if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
                 {
                     continue;
@@ -3180,14 +3180,14 @@ namespace heimdall
             // carry signatures plus documentation. Tag names (`struct Widget`) are
             // not always DeclaredName nodes, so collect them lexically as well.
             CollectTagNames(source, tokens, interner, best, prefix);
-            for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+            for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
             {
-                if (tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+                if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
                 {
                     continue;
                 }
 
-                const std::size_t token_index = tree.Nodes()[n].first_token;
+                const std::size_t token_index = tree.NodesSoA().FirstToken(n);
                 if (token_index >= tree.Tokens().size())
                 {
                     continue;
@@ -3245,7 +3245,7 @@ namespace heimdall
             // Namespace kind outranks the lexical fallback's plain Variable.
             for (std::size_t n = 0; n < scope_paths.size(); ++n)
             {
-                if (tree.Nodes()[n].kind != GrammarKind::NamespaceDefinition)
+                if (tree.NodesSoA().Kind(n) != GrammarKind::NamespaceDefinition)
                 {
                     continue;
                 }
@@ -3296,7 +3296,7 @@ namespace heimdall
                 std::vector<std::string> enclosing;
                 for (std::size_t n = 0; n < scope_paths.size(); ++n)
                 {
-                    if (tree.Nodes()[n].kind != GrammarKind::NamespaceDefinition ||
+                    if (tree.NodesSoA().Kind(n) != GrammarKind::NamespaceDefinition ||
                         scope_paths[n].size() <= enclosing.size())
                     {
                         continue;
@@ -3359,9 +3359,9 @@ namespace heimdall
             {
                 // Leading `::` names the global scope: no keywords, builtins, macros
                 // or function locals, and no record members.
-                for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+                for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
                 {
-                    if (tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+                    if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
                     {
                         continue;
                     }
@@ -3371,7 +3371,7 @@ namespace heimdall
                         continue;
                     }
 
-                    const std::size_t token_index = tree.Nodes()[n].first_token;
+                    const std::size_t token_index = tree.NodesSoA().FirstToken(n);
                     if (token_index >= tree.Tokens().size())
                     {
                         continue;
@@ -3534,9 +3534,9 @@ namespace heimdall
 
                 return false;
             };
-            for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+            for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
             {
-                if (tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+                if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
                 {
                     continue;
                 }
@@ -3546,7 +3546,7 @@ namespace heimdall
                     continue;
                 }
 
-                const std::size_t token_index = tree.Nodes()[n].first_token;
+                const std::size_t token_index = tree.NodesSoA().FirstToken(n);
                 if (token_index >= tree.Tokens().size())
                 {
                     continue;
@@ -3568,9 +3568,9 @@ namespace heimdall
             }
 
             // Nested scopes (`struct Inner` / `namespace inner`) owned by a target.
-            for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+            for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
             {
-                const GrammarKind kind = tree.Nodes()[n].kind;
+                const GrammarKind kind = tree.NodesSoA().Kind(n);
                 if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
                 {
                     continue;
@@ -4054,9 +4054,9 @@ namespace heimdall
                 std::vector<std::pair<std::size_t, std::size_t>> records; // (span, node)
                 std::size_t best_function = NoIndex;
                 std::size_t function_span = static_cast<std::size_t>(-1);
-                for (std::size_t n = 1; n < m_tree.Nodes().size(); ++n)
+                for (std::size_t n = 1; n < m_tree.NodesSoA().size(); ++n)
                 {
-                    const GrammarKind kind = m_tree.Nodes()[n].kind;
+                    const GrammarKind kind = m_tree.NodesSoA().Kind(n);
                     if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition &&
                         kind != GrammarKind::FunctionDefinition)
                     {
@@ -4103,10 +4103,10 @@ namespace heimdall
                     if (nested != NoIndex)
                     {
                         std::vector<std::string> owner;
-                        const auto &grammar = m_tree.Nodes()[nested];
-                        for (std::uint32_t k = 0; k < grammar.token_count; ++k)
+                        const auto grammar = m_tree.NodesSoA()[nested];
+                        for (std::uint32_t k = 0; k < grammar.GetTokenCount(); ++k)
                         {
-                            const Token &token = m_tree.Tokens()[grammar.first_token + k];
+                            const Token &token = m_tree.Tokens()[grammar.GetFirstToken() + k];
                             if (token.kind == TokenKind::Identifier)
                             {
                                 owner.emplace_back(m_tree.Text(token));
@@ -4349,14 +4349,14 @@ namespace heimdall
                 // 1. Locals and parameters: the closest preceding visible declaration.
                 std::size_t best = NoIndex;
                 std::uint32_t best_offset = 0;
-                for (std::size_t n = 0; n < m_tree.Nodes().size(); ++n)
+                for (std::size_t n = 0; n < m_tree.NodesSoA().size(); ++n)
                 {
-                    if (m_tree.Nodes()[n].kind != GrammarKind::DeclaredName)
+                    if (m_tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
                     {
                         continue;
                     }
 
-                    const std::size_t token_index = m_tree.Nodes()[n].first_token;
+                    const std::size_t token_index = m_tree.NodesSoA().FirstToken(n);
                     if (token_index >= m_tokens.size() || m_tree.Text(m_tokens[token_index]) != name)
                     {
                         continue;
@@ -4427,7 +4427,7 @@ namespace heimdall
                 }
 
                 // `auto x = <chain>;` / `auto x{<chain>}`: type the initializer.
-                std::size_t t = m_tree.Nodes()[node].first_token + 1;
+                std::size_t t = m_tree.NodesSoA().FirstToken(node) + 1;
                 while (t < m_tokens.size() && (IsTrivia(m_tokens[t].kind)))
                 {
                     ++t;

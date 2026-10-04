@@ -525,3 +525,65 @@ TEST(ParseTreeSpec, UnnamedConstQualifiedPointerParametersAreNotMissingCommas)
         }
     }
 }
+
+TEST(ParseTreeSpec, SoaColumnsMatchTheAosCompatibilityView)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "#include <vector>\nnamespace n { struct S { int v; }; int f(int a) { return a; } }\n");
+    const auto& soa = tree.NodesSoA();
+    const auto& aos = tree.Nodes();
+    ASSERT_EQ(soa.size(), aos.size());
+    ASSERT_FALSE(soa.empty());
+    ASSERT_EQ(soa.kind.size(), soa.parent.size());
+    ASSERT_EQ(soa.first_token.size(), soa.subtree_end.size());
+    for (std::size_t i = 0; i < soa.size(); ++i)
+    {
+        EXPECT_EQ(soa.Kind(i), aos[i].kind);
+        EXPECT_EQ(soa.FirstToken(i), aos[i].first_token);
+        EXPECT_EQ(soa.TokenCount(i), aos[i].token_count);
+        EXPECT_EQ(soa.Parent(i), aos[i].parent);
+        EXPECT_EQ(soa.SubtreeEnd(i), aos[i].subtree_end);
+        const auto view = soa[i];
+        EXPECT_EQ(view.GetKind(), aos[i].kind);
+        EXPECT_EQ(view.GetFirstToken(), aos[i].first_token);
+        EXPECT_EQ(view.GetTokenCount(), aos[i].token_count);
+        EXPECT_EQ(view.GetParent(), aos[i].parent);
+        EXPECT_EQ(view.GetSubtreeEnd(), aos[i].subtree_end);
+    }
+}
+
+TEST(ParseTreeSpec, AuxiliaryTokenIndicesMatchTokenKinds)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "#define A 1\n#include <vector>\nint x = A; // note\n#if 0\n#endif\n");
+    const auto& tokens = tree.Tokens();
+    ASSERT_EQ(tree.TokenKindMask().size(), tokens.size());
+
+    std::vector<std::uint32_t> identifiers;
+    for (std::size_t i = 0; i < tokens.size(); ++i)
+    {
+        const auto kind = tokens[i].kind;
+        const bool trivia = kind == heimdall::TokenKind::Whitespace || kind == heimdall::TokenKind::LineComment ||
+            kind == heimdall::TokenKind::BlockComment;
+        EXPECT_EQ(tree.TokenKindMask()[i], trivia ? 1 : 0) << "token " << i;
+        if (kind == heimdall::TokenKind::Identifier) identifiers.push_back(static_cast<std::uint32_t>(i));
+    }
+    EXPECT_EQ(tree.IdentifierTokens(), identifiers);
+
+    // Every directive token lies inside some directive; every token inside a
+    // directive is listed, in ascending order.
+    std::vector<std::uint32_t> expected;
+    for (const auto& directive : tree.Directives())
+    {
+        for (std::size_t i = 0; i < tokens.size(); ++i)
+        {
+            if (tokens[i].offset >= directive.offset &&
+                tokens[i].offset + tokens[i].length <= directive.offset + directive.length)
+            {
+                expected.push_back(static_cast<std::uint32_t>(i));
+            }
+        }
+    }
+    EXPECT_FALSE(expected.empty());
+    EXPECT_EQ(tree.DirectiveTokens(), expected);
+}

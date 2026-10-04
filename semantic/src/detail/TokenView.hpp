@@ -73,9 +73,9 @@ namespace heimdall::detail
         // [begin, end) positions of a node's significant tokens.
         std::pair<std::size_t, std::size_t> Range(std::uint32_t node) const
         {
-            const auto &n = m_model.Tree().Nodes()[node];
-            const auto begin = PositionOf(n.first_token);
-            return {begin, std::max(begin, PositionOf(n.first_token + n.token_count))};
+            const auto n = m_model.Tree().NodesSoA()[node];
+            const auto begin = PositionOf(n.GetFirstToken());
+            return {begin, std::max(begin, PositionOf(n.GetFirstToken() + n.GetTokenCount()))};
         }
         // `0`, `0L`, `0u`, `0UL`...: a null pointer constant.
         bool IsZeroLiteral(std::size_t position) const

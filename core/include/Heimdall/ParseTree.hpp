@@ -118,6 +118,16 @@ namespace heimdall
             subtree_end.push_back(se);
         }
 
+        bool empty() const noexcept { return kind.empty(); }
+
+        // Single-column accessors: touch only the column asked for, so a parent
+        // walk or kind filter never loads the other four.
+        GrammarKind Kind(std::size_t i) const noexcept { return static_cast<GrammarKind>(kind[i]); }
+        std::uint32_t FirstToken(std::size_t i) const noexcept { return first_token[i]; }
+        std::uint32_t TokenCount(std::size_t i) const noexcept { return token_count[i]; }
+        std::uint32_t Parent(std::size_t i) const noexcept { return parent[i]; }
+        std::uint32_t SubtreeEnd(std::size_t i) const noexcept { return subtree_end[i]; }
+
         // Accessors for compatibility with existing code
         struct View
         {

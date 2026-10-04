@@ -45,8 +45,8 @@ void BM_Parse(benchmark::State& state)
         for (const auto& source : sources)
         {
             auto tree = heimdall::ParseTree::Parse(source);
-            node_count += tree.Nodes().size();
-            benchmark::DoNotOptimize(tree.Nodes().data());
+            node_count += tree.NodesSoA().size();
+            benchmark::DoNotOptimize(tree.NodesSoA().kind.data());
         }
         benchmark::DoNotOptimize(node_count);
     }
@@ -66,7 +66,7 @@ void BM_ParseUnclosedParen(benchmark::State& state)
     for (auto _ : state)
     {
         auto tree = heimdall::ParseTree::Parse(source);
-        benchmark::DoNotOptimize(tree.Nodes().data());
+        benchmark::DoNotOptimize(tree.NodesSoA().kind.data());
         benchmark::ClobberMemory();
     }
     state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * source.size()));

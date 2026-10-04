@@ -584,7 +584,7 @@ namespace heimdall
             {
                 const auto &scopes = m_model.Scopes();
                 const auto &symbols = m_model.Symbols();
-                const auto &nodes = m_tree.Nodes();
+                const auto &nodes = m_tree.NodesSoA();
                 ScopeId best = kNone;
                 std::size_t best_depth = 0;
                 for (ScopeId scope = 0; scope < scopes.Size(); ++scope)
@@ -594,8 +594,8 @@ namespace heimdall
                         continue;
                     }
 
-                    const auto &node = nodes[scopes.node[scope]];
-                    if (token < node.first_token || token >= node.first_token + node.token_count)
+                    const auto node = nodes[scopes.node[scope]];
+                    if (token < node.GetFirstToken() || token >= node.GetFirstToken() + node.GetTokenCount())
                     {
                         continue;
                     }

@@ -725,7 +725,7 @@ namespace heimdall
             {
                 for (const auto child: m_analysis.Model().ChildrenOf(node))
                 {
-                    if (m_analysis.Model().Tree().Nodes()[child].kind == GrammarKind::CompoundStatement)
+                    if (m_analysis.Model().Tree().NodesSoA().Kind(child) == GrammarKind::CompoundStatement)
                     {
                         return m_analysis.View().Range(child);
                     }
@@ -785,10 +785,10 @@ namespace heimdall
             {
                 if (!m_lambdas_built)
                 {
-                    const auto &nodes = m_analysis.Model().Tree().Nodes();
+                    const auto &nodes = m_analysis.Model().Tree().NodesSoA();
                     for (std::uint32_t node = 0; node < nodes.size(); ++node)
                     {
-                        if (nodes[node].kind == GrammarKind::LambdaExpression)
+                        if (nodes.Kind(node) == GrammarKind::LambdaExpression)
                         {
                             m_lambdas.push_back(m_analysis.View().Range(node));
                         }

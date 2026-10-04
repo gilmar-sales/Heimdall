@@ -62,7 +62,10 @@ namespace
     std::size_t TreeBytes(const heimdall::ParseTree & tree)
     {
         std::size_t bytes = tree.Tokens().capacity() * sizeof(heimdall::Token);
-        bytes += tree.Nodes().capacity() * sizeof(heimdall::GrammarNode);
+        const auto & soa = tree.NodesSoA();
+        bytes += soa.kind.capacity() * sizeof(std::uint8_t);
+        bytes += (soa.first_token.capacity() + soa.token_count.capacity() + soa.parent.capacity() +
+            soa.subtree_end.capacity()) * sizeof(std::uint32_t);
         bytes += tree.Directives().capacity() * sizeof(heimdall::PreprocessorDirective);
         bytes += tree.Diagnostics().capacity() * sizeof(heimdall::GrammarDiagnostic);
         for (const auto & diagnostic: tree.Diagnostics()) bytes += diagnostic.message.capacity();
@@ -109,7 +112,7 @@ int main(int argc, char ** argv)
         const double growth = WorkingSetMb() - before;
         const std::size_t bytes = TreeBytes(tree);
         std::printf("%8zu %9.1f %9zu %9zu %10.2f %10.0f %10.1f %11.1f\n", lines,
-            static_cast<double>(document->size()) / 1024.0, tree.Tokens().size(), tree.Nodes().size(),
+            static_cast<double>(document->size()) / 1024.0, tree.Tokens().size(), tree.NodesSoA().size(),
             static_cast<double>(bytes) / (1024.0 * 1024.0), static_cast<double>(bytes) / static_cast<double>(lines),
             static_cast<double>(bytes) / static_cast<double>(tree.Tokens().size()), growth);
     }

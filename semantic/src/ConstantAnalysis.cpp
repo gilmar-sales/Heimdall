@@ -729,7 +729,7 @@ namespace heimdall::detail
     Specifiers ConstantAnalysis::SpecifiersOf(std::uint32_t decl_node, std::uint32_t name_token) const
     {
         Specifiers result;
-        if (decl_node >= m_model.Tree().Nodes().size())
+        if (decl_node >= m_model.Tree().NodesSoA().size())
         {
             return result;
         }
@@ -1070,25 +1070,25 @@ namespace heimdall::detail
             }
 
             // Parameters: every written one has a name and a literal type.
-            const auto &nodes = m_model.Tree().Nodes();
+            const auto &nodes = m_model.Tree().NodesSoA();
             std::size_t written = 0;
             for (const auto declarator: m_model.ChildrenOf(m_symbols.decl_node[function]))
             {
-                if (nodes[declarator].kind != GrammarKind::Declarator)
+                if (nodes.Kind(declarator) != GrammarKind::Declarator)
                 {
                     continue;
                 }
 
                 for (const auto suffix: m_model.ChildrenOf(declarator))
                 {
-                    if (nodes[suffix].kind != GrammarKind::FunctionSuffix)
+                    if (nodes.Kind(suffix) != GrammarKind::FunctionSuffix)
                     {
                         continue;
                     }
 
                     for (const auto parameter: m_model.ChildrenOf(suffix))
                     {
-                        written += nodes[parameter].kind == GrammarKind::ParameterDeclaration ? 1 : 0;
+                        written += nodes.Kind(parameter) == GrammarKind::ParameterDeclaration ? 1 : 0;
                     }
                 }
             }
@@ -1119,7 +1119,7 @@ namespace heimdall::detail
     bool ConstantAnalysis::BodyIsConstexprSafe(SymbolId function, FunctionId id)
     {
         const auto &functions = m_flow.Functions();
-        const auto &nodes = m_model.Tree().Nodes();
+        const auto &nodes = m_model.Tree().NodesSoA();
         if (functions.complete[id] == 0 || !m_flow.ExitReachable(id))
         {
             return false;
@@ -1144,7 +1144,7 @@ namespace heimdall::detail
         {
             const auto node = pending.back();
             pending.pop_back();
-            switch (nodes[node].kind)
+            switch (nodes.Kind(node))
             {
             case GrammarKind::CompoundStatement:
             case GrammarKind::DeclarationStatement:
@@ -1346,7 +1346,7 @@ namespace heimdall::detail
     bool ConstantAnalysis::DeclaresSingleName(SymbolId variable) const
     {
         const auto node = m_symbols.decl_node[variable];
-        const auto &nodes = m_model.Tree().Nodes();
+        const auto &nodes = m_model.Tree().NodesSoA();
         if (node >= nodes.size())
         {
             return false;
@@ -1355,7 +1355,7 @@ namespace heimdall::detail
         std::size_t names = 0;
         for (const auto child: m_model.ChildrenOf(node))
         {
-            names += nodes[child].kind == GrammarKind::InitDeclarator || nodes[child].kind == GrammarKind::Declarator ? 1 : 0;
+            names += nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator ? 1 : 0;
         }
 
         return names == 1;
@@ -1364,16 +1364,16 @@ namespace heimdall::detail
     ConstantAnalysis::Candidate ConstantAnalysis::ConstexprVariable(SymbolId variable)
     {
         if (variable >= m_symbols.Size() || m_symbols.kind[variable] != SymbolKind::Variable ||
-            m_symbols.decl_node[variable] >= m_model.Tree().Nodes().size() || !DeclaresSingleName(variable))
+            m_symbols.decl_node[variable] >= m_model.Tree().NodesSoA().size() || !DeclaresSingleName(variable))
         {
             return Candidate::None;
         }
 
-        const auto &nodes = m_model.Tree().Nodes();
+        const auto &nodes = m_model.Tree().NodesSoA();
         const auto decl = m_symbols.decl_node[variable];
-        const auto parent = nodes[decl].parent;
-        if (parent < nodes.size() && (nodes[parent].kind == GrammarKind::LoopStatement ||
-                nodes[parent].kind == GrammarKind::IfStatement || nodes[parent].kind == GrammarKind::SwitchStatement))
+        const auto parent = nodes.Parent(decl);
+        if (parent < nodes.size() && (nodes.Kind(parent) == GrammarKind::LoopStatement ||
+                nodes.Kind(parent) == GrammarKind::IfStatement || nodes.Kind(parent) == GrammarKind::SwitchStatement))
         {
             return Candidate::None; // declared in a statement header
         }

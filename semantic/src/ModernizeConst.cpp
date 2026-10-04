@@ -23,14 +23,14 @@ namespace heimdall
         // qualifier (`std::`) and type specifier, so `const` goes before both.
         std::uint32_t TypeStart(const SemanticModel &model, std::uint32_t decl_node)
         {
-            const auto &nodes = model.Tree().Nodes();
+            const auto &nodes = model.Tree().NodesSoA();
             std::uint32_t first = kNone;
             for (const auto child: model.ChildrenOf(decl_node))
             {
-                if ((nodes[child].kind == GrammarKind::TypeSpecifier || nodes[child].kind == GrammarKind::NestedNameSpecifier) &&
-                    (first == kNone || nodes[child].first_token < first))
+                if ((nodes.Kind(child) == GrammarKind::TypeSpecifier || nodes.Kind(child) == GrammarKind::NestedNameSpecifier) &&
+                    (first == kNone || nodes.FirstToken(child) < first))
                 {
-                    first = nodes[child].first_token;
+                    first = nodes.FirstToken(child);
                 }
             }
 
@@ -91,7 +91,7 @@ namespace heimdall
         const auto &types = flow.Types();
         const auto &table = types.Types();
         const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         ConstantAnalysis constants(flow);
         Reporter reporter(model.Tree());
         std::vector<Diagnostic> diagnostics;
@@ -106,9 +106,9 @@ namespace heimdall
             }
 
             const auto decl = symbols.decl_node[symbol];
-            const auto parent = nodes[decl].parent;
-            if (parent < nodes.size() && (nodes[parent].kind == GrammarKind::LoopStatement ||
-                nodes[parent].kind == GrammarKind::IfStatement || nodes[parent].kind == GrammarKind::SwitchStatement))
+            const auto parent = nodes.Parent(decl);
+            if (parent < nodes.size() && (nodes.Kind(parent) == GrammarKind::LoopStatement ||
+                nodes.Kind(parent) == GrammarKind::IfStatement || nodes.Kind(parent) == GrammarKind::SwitchStatement))
             {
                 continue; // declared in a statement header
             }
@@ -166,7 +166,7 @@ namespace heimdall
     {
         const auto &model = flow.Model();
         const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().Nodes();
+        const auto &nodes = model.Tree().NodesSoA();
         ConstantAnalysis constants(flow);
         Reporter reporter(model.Tree());
         std::vector<Diagnostic> diagnostics;

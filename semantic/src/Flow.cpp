@@ -123,7 +123,7 @@ namespace heimdall
     public:
         explicit FlowBuilder(FlowModel &out)
         : m(out), types(out.Types()), table(out.Types().Types()), model(out.Model()),
-          nodes(out.Model().Tree().Nodes()), symbols(out.Model().Symbols()), view(out.Model())
+          nodes(out.Model().Tree().NodesSoA()), symbols(out.Model().Symbols()), view(out.Model())
         {
         }
 
@@ -157,8 +157,8 @@ namespace heimdall
         // ---- indexing ---------------------------------------------------
         bool IsFunctionLike(std::uint32_t node) const
         {
-            return nodes[node].kind == GrammarKind::FunctionDefinition ||
-                nodes[node].kind == GrammarKind::LambdaExpression;
+            return nodes.Kind(node) == GrammarKind::FunctionDefinition ||
+                nodes.Kind(node) == GrammarKind::LambdaExpression;
         }
 
         std::uint32_t BodyOf(std::uint32_t node) const
@@ -166,8 +166,8 @@ namespace heimdall
             std::uint32_t body = kNone;
             for (const auto child: model.ChildrenOf(node))
             {
-                if (nodes[child].kind == GrammarKind::CompoundStatement &&
-                    (body == kNone || nodes[child].first_token > nodes[body].first_token))
+                if (nodes.Kind(child) == GrammarKind::CompoundStatement &&
+                    (body == kNone || nodes.FirstToken(child) > nodes.FirstToken(body)))
                 {
                     body = child;
                 }
@@ -235,12 +235,12 @@ namespace heimdall
                 }
 
                 path.push_back(current);
-                if (nodes[current].parent == current)
+                if (nodes.Parent(current) == current)
                 {
                     break;
                 }
 
-                current = nodes[current].parent;
+                current = nodes.Parent(current);
             }
 
             for (const auto visited: path)
@@ -313,7 +313,7 @@ namespace heimdall
             std::stable_sort(result.begin(), result.end(),
                 [&](std::uint32_t a, std::uint32_t b)
                 {
-                    return nodes[a].first_token < nodes[b].first_token;
+                    return nodes.FirstToken(a) < nodes.FirstToken(b);
                 });
             return result;
         }
@@ -322,7 +322,7 @@ namespace heimdall
         {
             for (const auto child: model.ChildrenOf(node))
             {
-                if (nodes[child].kind == kind)
+                if (nodes.Kind(child) == kind)
                 {
                     return child;
                 }
@@ -411,7 +411,7 @@ namespace heimdall
             std::uint32_t current = node;
             for (std::size_t steps = 0; steps < 64; ++steps)
             {
-                const auto parent = nodes[current].parent;
+                const auto parent = nodes.Parent(current);
                 if (parent >= nodes.size() || parent == current)
                 {
                     return EventKind::Escape;
@@ -419,7 +419,7 @@ namespace heimdall
 
                 const auto kids = Sorted(parent);
                 const auto [begin, end] = view.Range(parent);
-                switch (nodes[parent].kind)
+                switch (nodes.Kind(parent))
                 {
                 case GrammarKind::ParenthesizedExpression:
                     current = parent;
@@ -543,8 +543,8 @@ namespace heimdall
                     }
 
                     // `x.f(...)`: whether f is a const member decides.
-                    const auto grand = nodes[parent].parent;
-                    if (grand < nodes.size() && nodes[grand].kind == GrammarKind::CallExpression)
+                    const auto grand = nodes.Parent(parent);
+                    if (grand < nodes.size() && nodes.Kind(grand) == GrammarKind::CallExpression)
                     {
                         const auto call_kids = Sorted(grand);
                         if (!call_kids.empty() && call_kids[0] == parent)
@@ -664,7 +664,7 @@ namespace heimdall
         {
             const auto declarator = FindChild(init_declarator, GrammarKind::Declarator);
             const auto name = declarator == kNone ? kNone : FindChild(declarator, GrammarKind::DeclaredName);
-            const auto symbol = name == kNone ? kNone : SymbolAt(nodes[name].first_token);
+            const auto symbol = name == kNone ? kNone : SymbolAt(nodes.FirstToken(name));
             if (symbol == kNone)
             {
                 return EventKind::Escape;
@@ -695,7 +695,7 @@ namespace heimdall
         EventKind ArgumentContext(std::uint32_t callee, std::size_t index, const Shape &shape)
         {
             const auto range = view.Range(callee);
-            if (nodes[callee].kind == GrammarKind::IdentifierExpression)
+            if (nodes.Kind(callee) == GrammarKind::IdentifierExpression)
             {
                 const auto text = view.Text(range.first);
                 if (text == "sizeof" || text == "alignof" || text == "noexcept" || text == "decltype")
@@ -703,7 +703,7 @@ namespace heimdall
                     return EventKind::Read;
                 }
 
-                const auto target = model.ResolveToken(nodes[callee].first_token);
+                const auto target = model.ResolveToken(nodes.FirstToken(callee));
                 if (target == kNone)
                 {
                     return shape.scalar && TakesByValue(text) ? EventKind::Read : EventKind::Escape;
@@ -727,7 +727,7 @@ namespace heimdall
                 return shape.scalar ? EventKind::Read : EventKind::Escape;
             }
 
-            if (nodes[callee].kind == GrammarKind::MemberExpression)
+            if (nodes.Kind(callee) == GrammarKind::MemberExpression)
             {
                 std::string text;
                 for (auto i = range.first; i < range.second; ++i)
@@ -857,12 +857,12 @@ namespace heimdall
                     return true;
                 }
 
-                if (nodes[node].parent == node)
+                if (nodes.Parent(node) == node)
                 {
                     return false;
                 }
 
-                node = nodes[node].parent;
+                node = nodes.Parent(node);
             }
 
             return false;
@@ -877,7 +877,7 @@ namespace heimdall
             {
                 const auto current = pending.back();
                 pending.pop_back();
-                switch (nodes[current].kind)
+                switch (nodes.Kind(current))
                 {
                 case GrammarKind::IdentifierExpression:
                     refs.push_back(current);
@@ -910,7 +910,7 @@ namespace heimdall
             std::vector<RawEvent> local;
             for (const auto ref: refs)
             {
-                const auto token = nodes[ref].first_token;
+                const auto token = nodes.FirstToken(ref);
                 const auto symbol = model.ResolveToken(token);
                 if (symbol != kNone && m.m_owner[symbol] == m_function)
                 {
@@ -929,7 +929,7 @@ namespace heimdall
                 CollectAll(inner, inner_refs);
                 for (const auto ref: inner_refs)
                 {
-                    const auto token = nodes[ref].first_token;
+                    const auto token = nodes.FirstToken(ref);
                     const auto symbol = model.ResolveToken(token);
                     if (symbol != kNone && m.m_owner[symbol] == m_function)
                     {
@@ -954,7 +954,7 @@ namespace heimdall
             {
                 const auto current = pending.back();
                 pending.pop_back();
-                if (nodes[current].kind == GrammarKind::IdentifierExpression)
+                if (nodes.Kind(current) == GrammarKind::IdentifierExpression)
                 {
                     refs.push_back(current);
                     continue;
@@ -972,20 +972,20 @@ namespace heimdall
         {
             for (const auto child: Sorted(node))
             {
-                if (nodes[child].kind == GrammarKind::InitDeclarator || nodes[child].kind == GrammarKind::Declarator)
+                if (nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator)
                 {
                     std::uint32_t name = kNone;
-                    const auto declarator = nodes[child].kind == GrammarKind::Declarator
+                    const auto declarator = nodes.Kind(child) == GrammarKind::Declarator
                         ? child : FindChild(child, GrammarKind::Declarator);
                     if (declarator != kNone)
                     {
                         const auto declared = FindChild(declarator, GrammarKind::DeclaredName);
-                        name = declared == kNone ? kNone : nodes[declared].first_token;
+                        name = declared == kNone ? kNone : nodes.FirstToken(declared);
                     }
                     else if (const auto spelled = FindChild(child, GrammarKind::TypeSpecifier);
-                        spelled != kNone && nodes[spelled].token_count == 1)
+                        spelled != kNone && nodes.TokenCount(spelled) == 1)
                     {
-                        name = nodes[spelled].first_token; // later declarators of `int a = 0, b = 0;`
+                        name = nodes.FirstToken(spelled); // later declarators of `int a = 0, b = 0;`
                     }
 
                     const auto symbol = name == kNone ? kNone : SymbolAt(name);
@@ -1022,7 +1022,7 @@ namespace heimdall
             }
 
             m_current = current;
-            switch (nodes[node].kind)
+            switch (nodes.Kind(node))
             {
             case GrammarKind::CompoundStatement:
                 for (const auto child: Sorted(node))
@@ -1127,7 +1127,7 @@ namespace heimdall
             m_current = current;
             for (const auto part: parts)
             {
-                if (nodes[part].kind == GrammarKind::DeclarationStatement || nodes[part].kind == GrammarKind::Declaration)
+                if (nodes.Kind(part) == GrammarKind::DeclarationStatement || nodes.Kind(part) == GrammarKind::Declaration)
                 {
                     Declaration(part);
                 }
@@ -1281,7 +1281,7 @@ namespace heimdall
             bool have_body = false;
             for (const auto child: Sorted(node))
             {
-                if (!have_body && IsStatement(nodes[child].kind))
+                if (!have_body && IsStatement(nodes.Kind(child)))
                 {
                     have_body = true;
                     end = Statement(child, end, depth + 1);
@@ -1328,7 +1328,7 @@ namespace heimdall
             BlockId previous = kNone;
             for (const auto body : bodies)
             {
-                if (nodes[body].kind != GrammarKind::CompoundStatement)
+                if (nodes.Kind(body) != GrammarKind::CompoundStatement)
                 {
                     Incomplete();
                     Walk(body);
@@ -1337,7 +1337,7 @@ namespace heimdall
 
                 for (const auto child: Sorted(body))
                 {
-                    if (nodes[child].kind == GrammarKind::CaseLabel)
+                    if (nodes.Kind(child) == GrammarKind::CaseLabel)
                     {
                         const auto label = NewBlock();
                         Edge(current, label);
@@ -1369,7 +1369,7 @@ namespace heimdall
             const auto join = NewBlock();
             for (const auto child: Sorted(node))
             {
-                if (nodes[child].kind != GrammarKind::CompoundStatement)
+                if (nodes.Kind(child) != GrammarKind::CompoundStatement)
                 {
                     m_current = current;
                     Walk(child);
@@ -1588,7 +1588,7 @@ namespace heimdall
         const TypeModel &types;
         const TypeTable &table;
         const SemanticModel &model;
-        const std::vector<GrammarNode> &nodes;
+        const GrammarNodeSoA &nodes;
         const SymbolTable &symbols;
         detail::TokenView view;
 

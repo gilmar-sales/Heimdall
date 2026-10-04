@@ -132,7 +132,7 @@ namespace heimdall
         std::uint32_t FindChild(std::uint32_t node, GrammarKind kind) const;
         GrammarKind KindOf(std::uint32_t node) const
         {
-            return m_tree.Nodes()[node].kind;
+            return m_tree.NodesSoA().Kind(node);
         }
         std::uint32_t DeclaredNameToken(std::uint32_t declarator) const;
 
@@ -224,17 +224,17 @@ namespace heimdall
     void BinderImpl::BuildCoverage()
     {
         const auto &tokens = Tokens();
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         std::vector<std::int32_t> delta(tokens.size() + 1, 0);
         for (std::size_t i = 1; i < nodes.size(); ++i)
         {
-            if (nodes[i].kind == GrammarKind::PreprocessorDirective || nodes[i].token_count == 0)
+            if (nodes.Kind(i) == GrammarKind::PreprocessorDirective || nodes.TokenCount(i) == 0)
             {
                 continue;
             }
 
-            const std::size_t first = std::min<std::size_t>(nodes[i].first_token, tokens.size());
-            const std::size_t last = std::min<std::size_t>(first + nodes[i].token_count, tokens.size());
+            const std::size_t first = std::min<std::size_t>(nodes.FirstToken(i), tokens.size());
+            const std::size_t last = std::min<std::size_t>(first + nodes.TokenCount(i), tokens.size());
             ++delta[first];
             --delta[last];
         }
@@ -250,11 +250,11 @@ namespace heimdall
 
     void BinderImpl::FillNodeScopes()
     {
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         m_model.m_node_scope.assign(nodes.size(), SemanticModel::TranslationUnitScope);
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
-            const auto parent = nodes[node].parent;
+            const auto parent = nodes.Parent(node);
             if (m_own_scope[node] != kNone)
             {
                 m_model.m_node_scope[node] = m_own_scope[node];
@@ -289,7 +289,7 @@ namespace heimdall
                 continue;
             }
 
-            if (!Is(m_tree.Nodes()[child].first_token, Tok::Star))
+            if (!Is(m_tree.NodesSoA().FirstToken(child), Tok::Star))
             {
                 return 0;
             }
@@ -351,7 +351,7 @@ namespace heimdall
                 continue;
             }
 
-            if (!Is(m_tree.Nodes()[child].first_token, Tok::Star))
+            if (!Is(m_tree.NodesSoA().FirstToken(child), Tok::Star))
             {
                 return 0;
             }
@@ -382,9 +382,9 @@ namespace heimdall
 
     std::pair<std::size_t, std::size_t> BinderImpl::NodeSig(std::uint32_t node) const
     {
-        const auto &n = m_tree.Nodes()[node];
-        const auto begin = SigAtOrAfter(n.first_token);
-        const auto end = SigAtOrAfter(n.first_token + n.token_count);
+        const auto n = m_tree.NodesSoA()[node];
+        const auto begin = SigAtOrAfter(n.GetFirstToken());
+        const auto end = SigAtOrAfter(n.GetFirstToken() + n.GetTokenCount());
         return {begin, std::max(begin, end)};
     }
 
@@ -411,12 +411,12 @@ namespace heimdall
 
     void BinderImpl::BuildChildren()
     {
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         const std::size_t count = nodes.size();
         m_child_begin.assign(count + 1, 0);
         for (std::size_t i = 1; i < count; ++i)
         {
-            const auto parent = nodes[i].parent;
+            const auto parent = nodes.Parent(i);
             if (parent < count && parent != i)
             {
                 ++m_child_begin[parent + 1];
@@ -432,7 +432,7 @@ namespace heimdall
         std::vector<std::uint32_t> cursor(m_child_begin.begin(), m_child_begin.end() - 1);
         for (std::size_t i = 1; i < count; ++i)
         {
-            const auto parent = nodes[i].parent;
+            const auto parent = nodes.Parent(i);
             if (parent < count && parent != i)
             {
                 m_child_list[cursor[parent] ++] = static_cast<std::uint32_t>(i);
@@ -467,7 +467,7 @@ namespace heimdall
             return kNone;
         }
 
-        const auto token = m_tree.Nodes()[name].first_token;
+        const auto token = m_tree.NodesSoA().FirstToken(name);
         return IsIdent(token) ? token : kNone;
     }
 
@@ -484,7 +484,7 @@ namespace heimdall
 
     ScopeId BinderImpl::ScopeFor(std::uint32_t node)
     {
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         std::vector<std::uint32_t> pending;
         ScopeId base = SemanticModel::TranslationUnitScope;
         std::uint32_t index = node;
@@ -496,7 +496,7 @@ namespace heimdall
                 break;
             }
 
-            if (IsDefiningKind(nodes[index].kind))
+            if (IsDefiningKind(nodes.Kind(index)))
             {
                 pending.push_back(index);
             }
@@ -506,7 +506,7 @@ namespace heimdall
                 break;
             }
 
-            index = nodes[index].parent < nodes.size() ? nodes[index].parent : 0;
+            index = nodes.Parent(index) < nodes.size() ? nodes.Parent(index) : 0;
         }
 
         for (auto it = pending.rbegin(); it != pending.rend(); ++it)
@@ -520,8 +520,8 @@ namespace heimdall
 
     ScopeId BinderImpl::ParentScopeFor(std::uint32_t node)
     {
-        const auto parent = m_tree.Nodes()[node].parent;
-        return node == 0 || parent >= m_tree.Nodes().size() ? SemanticModel::TranslationUnitScope : ScopeFor(parent);
+        const auto parent = m_tree.NodesSoA().Parent(node);
+        return node == 0 || parent >= m_tree.NodesSoA().size() ? SemanticModel::TranslationUnitScope : ScopeFor(parent);
     }
 
     ScopeId BinderImpl::CreateScope(std::uint32_t node, ScopeId parent)
@@ -663,8 +663,8 @@ namespace heimdall
             }
         }
 
-        const bool template_parent = KindOf(m_tree.Nodes()[node].parent < m_tree.Nodes().size() ?
-            m_tree.Nodes()[node].parent : 0) == GrammarKind::TemplateDeclaration;
+        const bool template_parent = KindOf(m_tree.NodesSoA().Parent(node) < m_tree.NodesSoA().size() ?
+            m_tree.NodesSoA().Parent(node) : 0) == GrammarKind::TemplateDeclaration;
         SymbolId symbol = kNone;
         if (name_token != kNone && !specialization)
         {
@@ -756,7 +756,7 @@ namespace heimdall
             const auto body = FindChild(node, GrammarKind::CompoundStatement);
             if (body != kNone)
             {
-                end = std::min(end, SigAtOrAfter(m_tree.Nodes()[body].first_token));
+                end = std::min(end, SigAtOrAfter(m_tree.NodesSoA().FirstToken(body)));
             }
         }
 
@@ -914,7 +914,7 @@ namespace heimdall
         const auto declarator = FindChild(node, GrammarKind::Declarator);
         std::uint32_t suffix = declarator == kNone ? kNone : FindChild(declarator,
             GrammarKind::FunctionSuffix);
-        if (suffix == kNone || m_tree.Nodes()[suffix].first_token != head.open)
+        if (suffix == kNone || m_tree.NodesSoA().FirstToken(suffix) != head.open)
         {
             return 0;
         }
@@ -977,7 +977,7 @@ namespace heimdall
             if (body != kNone)
             {
                 has_body = true;
-                end = std::min(end, SigAtOrAfter(m_tree.Nodes()[body].first_token));
+                end = std::min(end, SigAtOrAfter(m_tree.NodesSoA().FirstToken(body)));
             }
         }
 
@@ -1161,8 +1161,8 @@ namespace heimdall
         const auto scope = ParentScopeFor(node);
         std::uint64_t signature = 0;
         std::uint32_t flags = FlagsFromHead(node, head, signature);
-        const auto parent = m_tree.Nodes()[node].parent;
-        if (parent < m_tree.Nodes().size() && KindOf(parent) == GrammarKind::TemplateDeclaration)
+        const auto parent = m_tree.NodesSoA().Parent(node);
+        if (parent < m_tree.NodesSoA().size() && KindOf(parent) == GrammarKind::TemplateDeclaration)
         {
             flags |= SymbolFlag::Template;
         }
@@ -1198,13 +1198,13 @@ namespace heimdall
     void BinderImpl::DeclareParameter(std::uint32_t node)
     {
         // Only parameters of a definition are visible (in the function's scope).
-        std::uint32_t current = m_tree.Nodes()[node].parent;
-        for (std::size_t steps = 0; steps < 8 && current < m_tree.Nodes().size(); ++steps)
+        std::uint32_t current = m_tree.NodesSoA().Parent(node);
+        for (std::size_t steps = 0; steps < 8 && current < m_tree.NodesSoA().size(); ++steps)
         {
             const auto kind = KindOf(current);
             if (kind == GrammarKind::FunctionSuffix || kind == GrammarKind::Declarator)
             {
-                current = m_tree.Nodes()[current].parent;
+                current = m_tree.NodesSoA().Parent(current);
                 continue;
             }
 
@@ -1259,10 +1259,10 @@ namespace heimdall
             if (declarator == kNone && KindOf(child) == GrammarKind::InitDeclarator)
             {
                 const auto spelled = FindChild(child, GrammarKind::TypeSpecifier);
-                if (spelled != kNone && m_tree.Nodes()[spelled].token_count == 1 &&
-                    IsIdent(m_tree.Nodes()[spelled].first_token))
+                if (spelled != kNone && m_tree.NodesSoA().TokenCount(spelled) == 1 &&
+                    IsIdent(m_tree.NodesSoA().FirstToken(spelled)))
                 {
-                    const auto token = m_tree.Nodes()[spelled].first_token;
+                    const auto token = m_tree.NodesSoA().FirstToken(spelled);
                     Declare(m_model.m_names.Intern(Text(token)),
                         typedef_declaration ? SymbolKind::TypeAlias : SymbolKind::Variable, scope, flags, token,
                         node, kNone, true);
@@ -1484,11 +1484,11 @@ namespace heimdall
 
     void BinderImpl::ResolveRefs()
     {
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         std::vector<std::pair<std::uint32_t, SymbolId>> found;
         for (std::uint32_t node = 0; node < nodes.size(); ++node)
         {
-            if (nodes[node].kind != GrammarKind::IdentifierExpression)
+            if (nodes.Kind(node) != GrammarKind::IdentifierExpression)
             {
                 continue;
             }
@@ -1557,7 +1557,7 @@ namespace heimdall
 
     void BinderImpl::Run()
     {
-        const auto &nodes = m_tree.Nodes();
+        const auto &nodes = m_tree.NodesSoA();
         BuildCoverage();
         BuildSignificant();
         BuildChildren();
@@ -1571,7 +1571,7 @@ namespace heimdall
         // find their scopes in any node order.
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
-            if (IsDefiningKind(nodes[node].kind))
+            if (IsDefiningKind(nodes.Kind(node)))
             {
                 ScopeFor(node);
             }
@@ -1589,7 +1589,7 @@ namespace heimdall
 
     SemanticModel Binder::Bind(const ParseTree &tree)
     {
-        const auto nodes = tree.Nodes().size();
+        const auto nodes = tree.NodesSoA().size();
         SemanticModel model(tree, std::max<std::size_t>(64 * 1024, nodes * 96));
         auto &symbols = model.m_symbols;
         const auto expected = nodes / 6 + 8;
