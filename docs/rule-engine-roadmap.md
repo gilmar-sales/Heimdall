@@ -145,8 +145,8 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `cpp/no-null` | `RuleEngine` encontra `NULL` fora de comentários, literais e diretivas e sugere `nullptr` | Não substitui toda análise semântica de contexto |
 | `format/no-trailing-whitespace` | Remove espaços e tabulações no fim das linhas | Autofix preserva o conteúdo restante e trata CRLF |
 | `format/require-final-newline` | Garante newline final | Preserva CRLF quando detecta esse estilo |
-| `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Não sugere rethrow/log automático: a ação correta depende do contexto |
-| `cpp/no-duplicate-include` | Compara includes literais (`<...>` e `"..."`) fora de blocos condicionais | Autofix adiado: a remoção só é segura com conhecimento de guards; includes em ramos `#ifdef` distintos são ignorados |
+| `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Quick fix (só no editor, não aplicado por `--fix`): insere `throw;` preservando comentários do corpo, pois a ação correta depende do contexto |
+| `cpp/no-duplicate-include` | Compara includes literais (`<...>` e `"..."`) fora de blocos condicionais | Quick fix (só no editor, não aplicado por `--fix`) remove a linha do include duplicado: não é seguro em lote por causa de `#define`/`#undef` entre includes (X-macros); includes em ramos `#ifdef` distintos são ignorados |
 | `cpp/modernize-using` | Reescreve `typedef` de declarador simples como `using T = ...`, com autofix | Pula ponteiros de função, definições de classe, múltiplos declaradores e atributos; requer forma tokenizável |
 | `semantic/no-unused-local` | Analisador semântico detecta algumas variáveis locais não usadas | Cobertura limitada a declarações simples; requer `--semantic` e contexto de compilação |
 

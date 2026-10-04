@@ -2,6 +2,9 @@
 
 #include <Heimdall/RuleEngine.hpp>
 
+#include <algorithm>
+#include <string>
+
 TEST(RuleEngineSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
 {
     constexpr std::string_view source =
@@ -101,7 +104,8 @@ TEST(RuleEngineSpec, FindsEmptyCatchBlocksIncludingCommentOnlyBodies)
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-empty-catch");
     EXPECT_EQ(diagnostics[0].line, 2);
-    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_TRUE(diagnostics[0].has_fix);
+    EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(diagnostics[1].code, "cpp/no-empty-catch");
     EXPECT_EQ(diagnostics[1].line, 3);
 }
@@ -138,7 +142,8 @@ TEST(RuleEngineSpec, FindsDuplicateIncludesOutsideConditionals)
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-duplicate-include");
     EXPECT_EQ(diagnostics[0].line, 3);
-    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_TRUE(diagnostics[0].has_fix);
+    EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(diagnostics[1].code, "cpp/no-duplicate-include");
     EXPECT_EQ(diagnostics[1].line, 4);
 }
@@ -244,6 +249,78 @@ TEST(RuleEngineSpec, SuppressionsCoverNewRules)
         "#include <vector>\n"
         "#include <vector> // heimdall-disable-line cpp/no-duplicate-include\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+namespace
+{
+    // Applies every fix, safe or not, the way an editor would when the user
+    // accepts each quick fix one by one.
+    std::string ApplyQuickFixes(std::string_view source)
+    {
+        std::string text(source);
+        for (int guard = 0; guard < 16; ++guard)
+        {
+            auto diagnostics = heimdall::RuleEngine().Analyze(text);
+            auto it = std::find_if(diagnostics.begin(), diagnostics.end(),
+                [](const heimdall::Diagnostic &d) { return d.has_fix; });
+            if (it == diagnostics.end())
+            {
+                break;
+            }
+
+            text.replace(it->fix.offset, it->fix.length, it->fix.replacement);
+        }
+
+        return text;
+    }
+}
+
+TEST(RuleEngineSpec, EmptyCatchQuickFixRethrowsButIsNotAppliedInBatch)
+{
+    constexpr std::string_view source = "void f() { try { g(); } catch (...) {} }\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_FALSE(diagnostics[0].fix_title.empty());
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+    EXPECT_EQ(ApplyQuickFixes(source), "void f() { try { g(); } catch (...) { throw; } }\n");
+}
+
+TEST(RuleEngineSpec, EmptyCatchQuickFixKeepsComments)
+{
+    EXPECT_EQ(ApplyQuickFixes("try { g(); } catch (...) { /* ignored */ }\n"),
+        "try { g(); } catch (...) { /* ignored */ throw; }\n");
+    EXPECT_EQ(ApplyQuickFixes("try { g(); } catch (...) {\n}\n"),
+        "try { g(); } catch (...) { throw; }\n");
+}
+
+TEST(RuleEngineSpec, DuplicateIncludeQuickFixRemovesTheWholeLine)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include <memory>\n"
+        "#  include <vector>\n"
+        "int x;\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+    EXPECT_EQ(ApplyQuickFixes(source), "#include <vector>\n#include <memory>\nint x;\n");
+    EXPECT_EQ(ApplyQuickFixes("#include <a>\r\n#include <a>\r\nint x;\r\n"), "#include <a>\r\nint x;\r\n");
+    EXPECT_EQ(ApplyQuickFixes("#include <a>\n#include <a>"), "#include <a>\n");
+}
+
+TEST(RuleEngineSpec, DuplicateIncludeQuickFixDropsTrailingComment)
+{
+    EXPECT_EQ(ApplyQuickFixes("#include <a>\n#include <a> // again\n"), "#include <a>\n");
+}
+
+TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
+{
+    const auto diagnostics = heimdall::RuleEngine().Analyze("typedef int T;\nvoid* p = NULL;\n");
+    ASSERT_EQ(diagnostics.size(), 2);
+    for (const auto & diagnostic: diagnostics)
+    {
+        EXPECT_TRUE(diagnostic.fix_is_safe);
+    }
 }
 
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)

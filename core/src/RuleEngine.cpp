@@ -371,10 +371,26 @@ namespace heimdall
 
                 const auto offset = tokens[open_brace].offset;
                 const auto length = tokens[close_brace].offset + tokens[close_brace].length - offset;
-                diagnostics.push_back(MakeDiagnostic(
+
+                const auto interior_begin = tokens[open_brace].offset + tokens[open_brace].length;
+                const auto interior_end = tokens[close_brace].offset;
+                TextEdit edit{interior_begin, interior_end - interior_begin, " throw; "};
+                if (std::any_of(tokens.begin() + open_brace + 1, tokens.begin() + close_brace,
+                    [](const Token &t)
+                    {
+                        return t.kind != TokenKind::Whitespace;
+                }))
+                {
+                    edit = {interior_end, 0, "throw; "};
+                }
+
+                auto diagnostic = MakeDiagnostic(
                     RuleId::EmptyCatch, "cpp/no-empty-catch",
                     "empty catch block ignores the exception", offset, length,
-                    lines.Lookup(offset), {}, false));
+                    lines.Lookup(offset), std::move(edit));
+                diagnostic.fix_is_safe = false;
+                diagnostic.fix_title = "Rethrow the exception in the empty catch block";
+                diagnostics.push_back(std::move(diagnostic));
             }
         }
 
@@ -452,10 +468,43 @@ namespace heimdall
                 if (!inserted)
                 {
                     const auto offset = directive.offset + open;
-                    diagnostics.push_back(MakeDiagnostic(
+
+                    // Drop the whole directive line. Not safe in batch: a
+                    // #define/#undef between the includes may make the
+                    // second one meaningful (X-macro headers).
+                    std::size_t begin = directive.offset;
+                    while (begin > 0 && (source[begin - 1] == ' ' || source[begin - 1] == '	'))
+                    {
+                        --begin;
+                    }
+
+                    std::size_t end = directive.offset + directive.length;
+                    std::size_t probe = end;
+                    while (probe < source.size() && (source[probe] == ' ' || source[probe] == '	'))
+                    {
+                        ++probe;
+                    }
+
+                    if (probe == source.size())
+                    {
+                        end = probe;
+                    }
+                    else if (source[probe] == '\n')
+                    {
+                        end = probe + 1;
+                    }
+                    else if (source[probe] == '\r' && probe + 1 < source.size() && source[probe + 1] == '\n')
+                    {
+                        end = probe + 2;
+                    }
+
+                    auto diagnostic = MakeDiagnostic(
                         RuleId::DuplicateInclude, "cpp/no-duplicate-include",
                         "duplicate include of " + std::string(target), offset, target.length(),
-                        lines.Lookup(offset), {}, false));
+                        lines.Lookup(offset), {begin, end - begin, ""});
+                    diagnostic.fix_is_safe = false;
+                    diagnostic.fix_title = "Remove duplicate include of " + std::string(target);
+                    diagnostics.push_back(std::move(diagnostic));
                 }
             }
         }
@@ -655,7 +704,7 @@ namespace heimdall
         edits.reserve(diagnostics.size());
         for (const auto & diagnostic: diagnostics)
         {
-            if (diagnostic.has_fix)
+            if (diagnostic.has_fix && diagnostic.fix_is_safe)
             {
                 edits.push_back(&diagnostic.fix);
             }

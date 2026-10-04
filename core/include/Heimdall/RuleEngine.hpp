@@ -53,6 +53,10 @@ namespace heimdall
         std::uint32_t column;
         bool has_fix;
         TextEdit fix;
+        // Safe fixes preserve behavior and are applied in batch (--fix).
+        // Unsafe ones are only offered as editor quick fixes.
+        bool fix_is_safe = true;
+        std::string fix_title;
     };
 
     struct RuleOptions

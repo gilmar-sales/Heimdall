@@ -924,8 +924,15 @@ namespace heimdall::lsp
 
             first = false;
             response += "{\"title\":";
-            QuoteJson("Fix " + diagnostic.code + ": " + diagnostic.message, response);
-            response += ",\"kind\":\"quickfix\",\"edit\":{\"changes\":{";
+            QuoteJson(diagnostic.fix_title.empty() ? "Fix " + diagnostic.code + ": " + diagnostic.message :
+                diagnostic.fix_title, response);
+            response += ",\"kind\":\"quickfix\"";
+            if (diagnostic.fix_is_safe)
+            {
+                response += ",\"isPreferred\":true";
+            }
+
+            response += ",\"edit\":{\"changes\":{";
             QuoteJson(uri_string, response);
             response += ":[{\"range\":{\"start\":";
             AppendPosition(lines->ToPosition(diagnostic.fix.offset), response);
