@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <Heimdall/TypeNames.hpp>
+
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,6 +86,10 @@ namespace heimdall
         static std::vector<CompletionItem> Complete(const ParseTree &tree, const ParserOptions &options,
             std::size_t offset, const ScopeIndex *external = nullptr);
 
+        // Names of the types the index declares at namespace level (class members are
+        // left out): what the grammar parser needs to tell declarations from products
+        // and casts from groups. Last component only, so `std::string` yields `string`.
+        static std::shared_ptr<const TypeNameOracle> TypeNamesOf(const ScopeIndex &index);
         static ScopeIndex IndexScopes(std::string_view source, const ParserOptions &options);
         static ScopeIndex IndexScopes(const ParseTree &tree);
         static std::optional<CompletionItem> Hover(std::string_view source, const ParserOptions &options,

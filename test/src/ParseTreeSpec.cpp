@@ -2,7 +2,11 @@
 
 #include <Heimdall/ParseTree.hpp>
 
+#include <algorithm>
+#include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -619,4 +623,167 @@ TEST(ParseTreeSpec, ParsesLanguageLinkageWithNestedDeclarations)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 2);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 4); // S, value, func, param
+}
+
+// ---- names: types, values, casts -----------------------------------------------------
+
+namespace
+{
+
+    class FakeTypeNames final : public heimdall::TypeNameOracle
+    {
+    public:
+        FakeTypeNames(std::initializer_list<std::string_view> names, std::uint64_t fingerprint = 1)
+        : m_names(names), m_fingerprint(fingerprint)
+        {
+        }
+        bool IsType(std::string_view name) const noexcept override
+        {
+            return std::find(m_names.begin(), m_names.end(), name) != m_names.end();
+        }
+        std::uint64_t Fingerprint() const noexcept override
+        {
+            return m_fingerprint;
+        }
+
+    private:
+        std::vector<std::string_view> m_names;
+        std::uint64_t m_fingerprint;
+    };
+
+    heimdall::ParseTree ParseWith(std::string_view source, std::shared_ptr<const heimdall::TypeNameOracle> names = {})
+    {
+        heimdall::ParserOptions options;
+        options.type_names = std::move(names);
+        return heimdall::ParseTree::Parse(source, options);
+    }
+
+} // namespace
+
+TEST(ParseTreeSpec, ProductOfVariablesIsNotADeclaration)
+{
+    const auto tree = ParseWith("void f(int a, int b) { a * b; }\n");
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 0);
+
+    const auto locals = ParseWith("void f() { int a = 1; int b = 2; a * b; a & b; }\n");
+    EXPECT_EQ(Count(locals, heimdall::GrammarKind::DeclarationStatement), 2);
+    EXPECT_EQ(Count(locals, heimdall::GrammarKind::ExpressionStatement), 2);
+}
+
+TEST(ParseTreeSpec, UnknownOrTypeNamesKeepTheDeclarationReading)
+{
+    // Nothing is known about `Foo`: the shape-based reading is unchanged.
+    EXPECT_EQ(Count(ParseWith("void f() { Foo * p; }\n"), heimdall::GrammarKind::DeclarationStatement), 1);
+    EXPECT_EQ(Count(ParseWith("struct Foo {};\nvoid f() { Foo * p; Foo & r = *p; }\n"),
+                  heimdall::GrammarKind::DeclarationStatement), 2);
+}
+
+TEST(ParseTreeSpec, ABlockScopedValueShadowsAType)
+{
+    const std::string_view source =
+        "struct T {};\n"
+        "void f(int x) {\n"
+        "    T * a;\n"          // declaration: T is the struct
+        "    { int T = 2; T * x; }\n" // product: the local T hides the struct
+        "    T * b;\n"          // declaration again after the block
+        "}\n";
+    const auto tree = ParseWith(source);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 3); // `T * a`, `int T`, `T * b`
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 1);
+}
+
+TEST(ParseTreeSpec, ForLoopVariablesAreVisibleInTheBodyOnly)
+{
+    const auto tree = ParseWith("void f() { for (int i = 0; i < 3; ++i) { i * i; } }\n");
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 1 + 0);
+}
+
+TEST(ParseTreeSpec, ParsesCastsOnlyWhenTheTypeIsKnown)
+{
+    const std::string_view source =
+        "struct Foo { int v; };\n"
+        "void f(void *p, double d) {\n"
+        "    auto a = (Foo*)p;\n"
+        "    auto b = (int)d;\n"
+        "    auto c = (unsigned long)d + 1;\n"
+        "    auto e = (Unknown*)p;\n"
+        "    auto g = (d);\n"
+        "}\n";
+    const auto tree = ParseWith(source);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CastExpression), 3);
+    // The unknown one keeps the old reading: a parenthesized expression.
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::ParenthesizedExpression), 2);
+}
+
+TEST(ParseTreeSpec, CastsAreNotMistakenForParenthesizedProducts)
+{
+    // `(x) * y` with a variable `x` is a product, even if `x` shares a name with a type elsewhere.
+    const auto tree = ParseWith("struct x {};\nvoid f() { int x = 1; int y = 2; int z = (x) * y; }\n");
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CastExpression), 0);
+}
+
+TEST(ParseTreeSpec, HeaderTypeNamesComeFromTheOracle)
+{
+    const std::string_view source = "void f(void *p) { auto w = (Widget*)p; Widget * q; }\n";
+    EXPECT_EQ(Count(ParseWith(source), heimdall::GrammarKind::CastExpression), 0);
+
+    const auto known = ParseWith(source, std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view>{"Widget"}));
+    EXPECT_EQ(Count(known, heimdall::GrammarKind::CastExpression), 1);
+    // The cast holds its type and its operand.
+    for (std::size_t n = 0; n < known.Nodes().size(); ++n)
+    {
+        if (known.Nodes()[n].kind == heimdall::GrammarKind::CastExpression)
+        {
+            const auto children = known.Children(n);
+            ASSERT_EQ(children.size(), 2u);
+            EXPECT_EQ(known.Nodes()[children[0]].kind, heimdall::GrammarKind::TypeSpecifier);
+            EXPECT_EQ(known.Nodes()[children[1]].kind, heimdall::GrammarKind::IdentifierExpression);
+        }
+    }
+}
+
+TEST(ParseTreeSpec, AVariableOfTheFileHidesAHeaderType)
+{
+    const auto names = std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view>{"count"});
+    const auto tree = ParseWith("void f(int count, int n) { auto a = (count) - n; count * n; }\n", names);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CastExpression), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 1); // only `auto a`
+}
+
+TEST(ParseTreeSpec, ReusedItemsAreReparsedWhenTheKnownNamesChange)
+{
+    const std::string first = "struct A {};\nvoid f(void *p) { auto x = (A*)p; }\n";
+    auto owned = std::make_shared<std::string>(first);
+    heimdall::ParseTree previous = heimdall::ParseTree::Parse(*owned, {});
+    previous.HoldSource(owned);
+    ASSERT_EQ(Count(previous, heimdall::GrammarKind::CastExpression), 1);
+
+    // `A` stops being a type: the unchanged second item must not be copied as is.
+    std::string edited = first;
+    edited.replace(edited.find("A {}"), 1, "B");
+    const heimdall::ParseReuse reuse{&previous, edited.find("B {}"), 1, 1};
+    const auto incremental = heimdall::ParseTree::Parse(edited, {}, {}, nullptr, &reuse);
+    EXPECT_EQ(Count(incremental, heimdall::GrammarKind::CastExpression), 0);
+    EXPECT_EQ(Count(incremental, heimdall::GrammarKind::CastExpression),
+        Count(heimdall::ParseTree::Parse(edited, {}), heimdall::GrammarKind::CastExpression));
+
+    // An edit that leaves the names alone still reuses the items.
+    std::string touched = first;
+    touched.replace(touched.find("auto x"), 4, "auto");
+    touched.insert(touched.find("void f"), "int unrelated;\n");
+    const heimdall::ParseReuse reuse_unrelated{&previous, touched.find("int unrelated"), 0, 15};
+    const auto kept = heimdall::ParseTree::Parse(touched, {}, {}, nullptr, &reuse_unrelated);
+    EXPECT_EQ(Count(kept, heimdall::GrammarKind::CastExpression), 1);
+}
+
+TEST(ParseTreeSpec, ConstructorDefinitionsDoNotHideTheirClassName)
+{
+    // `Widget::Widget` names a function, but `Widget w(1);` still declares a Widget.
+    const auto tree = ParseWith(
+        "struct Widget { Widget(int); };\n"
+        "Widget::Widget(int) {}\n"
+        "void use() { Widget w(1); Widget * p = nullptr; }\n");
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 0);
 }

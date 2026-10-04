@@ -974,6 +974,7 @@ namespace heimdall::lsp
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
             m_parse_cache.erase(std::string(uri));
+            m_type_names.erase(std::string(uri));
         }
         {
             // Nothing to publish for a closed document: abandon a running pass.
@@ -1452,7 +1453,18 @@ namespace heimdall::lsp
             return {nullptr, false};
         }
 
-        return HeaderScopes(uri, text, command);
+        HeaderView view = HeaderScopes(uri, text, command);
+        if (view.index && view.index->TypeNames())
+        {
+            const std::lock_guard<std::mutex> lock(m_parse_mu);
+            auto& known = m_type_names[uri];
+            if (!known || known->Fingerprint() != view.index->TypeNames()->Fingerprint())
+            {
+                known = view.index->TypeNames();
+            }
+        }
+
+        return view;
     }
 
     LanguageServer::HeaderView LanguageServer::HeaderScopes(const std::string& uri,
@@ -1644,9 +1656,15 @@ namespace heimdall::lsp
         heimdall::Lexer::TextEdit base_edit;
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
+            if (const auto names = m_type_names.find(uri); names != m_type_names.end())
+            {
+                options.type_names = names->second;
+            }
+
             if (const auto found = m_parse_cache.find(uri);
                 found != m_parse_cache.end() && found->second.version == version &&
-                found->second.text.get() == text.get() && found->second.slot)
+                found->second.text.get() == text.get() && found->second.slot &&
+                found->second.options.type_names == options.type_names)
             {
                 slot = found->second.slot;
             }

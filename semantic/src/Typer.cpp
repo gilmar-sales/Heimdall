@@ -1526,6 +1526,8 @@ namespace heimdall
         }
         case GrammarKind::ParenthesizedExpression:
             return kids.size() == 1 ? ValueCategory(kids[0]) : Category::Unknown;
+        case GrammarKind::CastExpression:
+            return Category::PRValue; // `(T&)x` would be an lvalue, but a cast to a reference is not modeled
         case GrammarKind::UnaryExpression:
         {
             if (kids.empty())
@@ -1945,6 +1947,19 @@ namespace heimdall
         {
             const auto kids = m_model.ChildrenOf(node);
             return kids.size() == 1 ? NodeType(kids[0]) : TypeTable::Unknown;
+        }
+        case GrammarKind::CastExpression:
+        {
+            // `(T) operand` is a T: the parser only builds the node when T is certainly a type.
+            const auto kids = m_model.ChildrenOf(node);
+            if (kids.empty() || m_nodes.Kind(kids[0]) != GrammarKind::TypeSpecifier)
+            {
+                return TypeTable::Unknown;
+            }
+
+            NodeType(kids.back());
+            const auto [begin, end] = NodeSig(kids[0]);
+            return ParseTypeTokens(begin, end, m_model.ScopeOfNode(node), m_sig[begin]);
         }
         case GrammarKind::UnaryExpression:
             return UnaryType(node);
@@ -2437,6 +2452,7 @@ namespace heimdall
             case GrammarKind::LiteralExpression:
             case GrammarKind::IdentifierExpression:
             case GrammarKind::ParenthesizedExpression:
+            case GrammarKind::CastExpression:
             case GrammarKind::UnaryExpression:
             case GrammarKind::BinaryExpression:
             case GrammarKind::ConditionalExpression:

@@ -603,14 +603,16 @@ TEST(Typer, ClassOperatorsAreNotGuessed)
     EXPECT_EQ(typed.Of("m"), "<unknown>");
 }
 
-TEST(Typer, CStyleCastsDoNotLeakTheOperandType)
+TEST(Typer, BuiltinCastsTypeTheirWholeExpression)
 {
+    // Before the parser knew `(int)` was a cast these read as the operand's type, so
+    // the Typer answered Unknown to stay safe; now the cast is its own node.
     const Typed typed(Body(
         "double d = 0; int i = 0;\n"
         "auto a = (int)d; auto b = (double)i / 2; auto c = (long)i + 1;"));
-    EXPECT_EQ(typed.Of("a"), "<unknown>");
-    EXPECT_EQ(typed.Of("b"), "<unknown>");
-    EXPECT_EQ(typed.Of("c"), "<unknown>");
+    EXPECT_EQ(typed.Of("a"), "int");
+    EXPECT_EQ(typed.Of("b"), "double");
+    EXPECT_EQ(typed.Of("c"), "long");
 }
 
 TEST(Typer, NodeTypeCoversEveryExpression)
@@ -1327,4 +1329,25 @@ TEST(TyperRules, TypeModelIsIndependentOfTheRuleThatAsksForIt)
     }
 
     EXPECT_GT(first.types.ArenaBytes(), 0u);
+}
+
+TEST(Typer, CStyleCastsTakeTheCastType)
+{
+    const Typed typed(
+        "struct Foo { int v; };\n"
+        "void f(void* p, double d) {\n"
+        "    auto a = (Foo*)p; auto b = (int)d; auto c = (unsigned long)d; auto e = (const Foo*)p;\n"
+        "    auto g = (Unknown*)p;\n"
+        "}\n");
+    EXPECT_EQ(typed.Of("a"), "Foo*");
+    EXPECT_EQ(typed.Of("b"), "int");
+    EXPECT_EQ(typed.Of("c"), "unsigned long");
+    EXPECT_EQ(typed.Of("e"), "const Foo*");
+    EXPECT_EQ(typed.Of("g"), "<unknown>"); // not known to be a type: still a parenthesized group
+}
+
+TEST(Typer, ProductsOfVariablesAreTypedAsExpressions)
+{
+    const Typed typed("void f(int a, long b) { auto x = a * b; a * b; }\n");
+    EXPECT_EQ(typed.Of("x"), "long");
 }

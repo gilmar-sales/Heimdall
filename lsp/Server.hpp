@@ -246,6 +246,10 @@ namespace heimdall::lsp
         };
 
         std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;
+        // Type names of the headers each open document includes, as last indexed (guarded
+        // by m_parse_mu). The parser reads them without ever waiting for an index build; a
+        // new set invalidates the cached parse, so the next request re-reads the file with it.
+        std::unordered_map<std::string, std::shared_ptr<const heimdall::TypeNameOracle>> m_type_names;
 
         std::unordered_map<const heimdall::CompileCommand *,
             std::shared_ptr<const heimdall::Preprocessor::MacroMap>>

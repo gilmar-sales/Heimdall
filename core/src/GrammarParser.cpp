@@ -113,9 +113,10 @@ namespace heimdall
     {
     public:
         GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop,
-            const Preprocessor::MacroMap * macros, const ParseReuse * reuse)
-        : m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse)
+            const Preprocessor::MacroMap * macros, const ParseReuse * reuse, const TypeNameOracle * type_names)
+        : m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names)
         {
+            m_names_hash = type_names != nullptr ? type_names->Fingerprint() : 0;
             // identifier text -> "is a decoration macro", memoized per parse
             std::unordered_map<std::string_view, bool> decoration;
             for (const auto & diagnostic: preprocessing.diagnostics)
@@ -255,6 +256,29 @@ namespace heimdall
         std::pmr::vector<std::uint32_t> m_match{&m_scratch};
         std::uint32_t m_last_expression_node = Invalid;
         const ParseReuse *m_reuse = nullptr;
+        const TypeNameOracle *m_oracle = nullptr;
+        // File-level names (flags above) and their order-independent hash, seeded
+        // with the oracle's fingerprint; block scopes live on a stack.
+        struct BlockName
+        {
+            std::string_view name;
+            std::uint8_t flags;
+        };
+        // Open-addressing table (power-of-two size, linear probing) over views into the
+        // source: file-level names are looked up and added thousands of times in a header.
+        struct NameSlot
+        {
+            std::string_view name;
+            std::uint64_t hash = 0;
+            std::uint8_t flags = 0;
+        };
+        std::vector<NameSlot> m_slots;
+        std::size_t m_slot_count = 0;
+        std::uint64_t m_names_hash = 0;
+        std::vector<BlockName> m_block_names;
+        std::vector<std::size_t> m_block_starts;
+        std::size_t m_registered_upto = 0;
+        std::uint64_t m_item_names_hash = 0;
         // Top-level item currently being parsed (see FinishItem / TryReuseItem).
         bool m_item_open = false;
         std::size_t m_item_first_sig = 0;
@@ -2271,6 +2295,12 @@ namespace heimdall
 
                 if (i < end && m_tree.m_tokens[m_sig[i]].kind == TokenKind::Identifier)
                 {
+                    // `a * b;` with `a` a variable in scope is a product, whatever it looks like.
+                    if (!Is(begin + 1, "::") && ClassOf(Text(begin)) == kNameValue)
+                    {
+                        return GrammarKind::ExpressionStatement;
+                    }
+
                     return GrammarKind::DeclarationStatement;
                 }
             }
@@ -2369,6 +2399,17 @@ namespace heimdall
                 pos = ParseExpression(pos, end, root, kFourteen);
                 SetNodeRange(root, begin, pos);
                 prefix_kind = GrammarKind::UnaryExpression;
+            }
+            else if (first == "(" && m_match[pos] != Invalid && m_match[pos] < end &&
+                IsCastTypeId(pos + 1, m_match[pos]) && StartsCastOperand(m_match[pos] + 1, end))
+            {
+                // `(T) operand`, with `T` known to be a type: a cast, not a group.
+                const auto close = m_match[pos];
+                root = Add(GrammarKind::CastExpression, begin, close + 1, parent);
+                Add(GrammarKind::TypeSpecifier, pos + 1, close, root);
+                pos = ParseExpression(close + 1, end, root, kFourteen);
+                SetNodeRange(root, begin, pos);
+                prefix_kind = GrammarKind::CastExpression;
             }
             else if (first == "(" && m_match[pos] != Invalid && m_match[pos] < end)
             {
@@ -2836,6 +2877,7 @@ namespace heimdall
                 const auto kind = keyword == "if" ? GrammarKind::IfStatement :
                 keyword == "switch" ? GrammarKind::SwitchStatement : GrammarKind::LoopStatement;
                 const auto node = Add(kind, start, start + 1, parent);
+                m_block_starts.push_back(m_block_names.size()); // `for (int i...)` is visible to the body only
                 ++pos;
                 if (Is(pos, "(") && m_match[pos] != Invalid)
                 {
@@ -2850,6 +2892,7 @@ namespace heimdall
                             {
                                 const auto init = Add(GrammarKind::DeclarationStatement, pos + 1, first_sep, node);
                                 AddDeclarationDetails(pos + 1, first_sep, init);
+                                RegisterNodes(init, m_tree.m_nodes_soa.size());
                             }
                             else if (first_sep > pos + 1)
                             {
@@ -2885,6 +2928,7 @@ namespace heimdall
                             {
                                 const auto init = Add(GrammarKind::DeclarationStatement, pos + 1, colon, node);
                                 AddDeclarationDetails(pos + 1, colon, init);
+                                RegisterNodes(init, m_tree.m_nodes_soa.size());
                                 if (colon + 1 < close)
                                 {
                                     ParseExpression(colon + 1, close, node);
@@ -2921,6 +2965,7 @@ namespace heimdall
                 const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
                 m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
                 m_tree.m_nodes_aos_dirty = true;
+                PopBlock();
                 return;
             }
 
@@ -3012,9 +3057,17 @@ namespace heimdall
         {
             const auto start = pos++;
             const auto node = Add(GrammarKind::CompoundStatement, start, start + 1, parent);
+            m_block_starts.push_back(m_block_names.size());
+            if (parent < m_tree.m_nodes_soa.size() &&
+                static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[parent]) == GrammarKind::FunctionDefinition)
+            {
+                DeclareParameters(parent);
+            }
+
             while (pos < end && !Is(pos, "}"))
             {
                 const auto before = pos;
+                const auto nodes_before = m_tree.m_nodes_soa.size();
                 if (IsDirective(pos))
                 {
                     pos = SkipDirective(pos, end, node);
@@ -3022,6 +3075,16 @@ namespace heimdall
                 else
                 {
                     ParseStatement(pos, end, node);
+                    // Only statements that can declare something are worth scanning.
+                    if (nodes_before < m_tree.m_nodes_soa.size())
+                    {
+                        const auto first_kind = static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[nodes_before]);
+                        if (first_kind == GrammarKind::DeclarationStatement || first_kind == GrammarKind::RecordDefinition ||
+                            first_kind == GrammarKind::UsingDeclaration || first_kind == GrammarKind::Declaration)
+                        {
+                            RegisterNodes(nodes_before, m_tree.m_nodes_soa.size());
+                        }
+                    }
                 }
 
                 if (pos == before)
@@ -3039,6 +3102,8 @@ namespace heimdall
                 m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
                         "expected '}' to close compound statement"});
             }
+
+            PopBlock();
 
             auto &record = m_tree.m_nodes_soa;
             const auto past = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1 : record.first_token[node];
@@ -3141,8 +3206,481 @@ namespace heimdall
             return true;
         }
 
+        // ---- names: what is a type, what is a value -----------------------------
+        //
+        // The grammar reads `a * b;` as a declaration and `(a)x` as a parenthesized
+        // expression because, from token shapes alone, both are possible. A compiler
+        // settles it by looking the name up while it parses; so does this parser. It
+        // registers the names it has already parsed (types and values, in block
+        // scopes and at file level) and asks the TypeNameOracle about the rest (the
+        // included headers). A name nobody knows keeps the shape-based reading, so
+        // missing information never changes what the parser did before.
+        static constexpr std::uint8_t kNameType = 1;
+        static constexpr std::uint8_t kNameValue = 2;
+
+        static std::uint64_t HashName(std::string_view name)
+        {
+            std::uint64_t hash = 14695981039346656037ull;
+            for (const char c: name)
+            {
+                hash ^= static_cast<unsigned char>(c);
+                hash *= 1099511628211ull;
+            }
+
+            return hash;
+        }
+
+        // What one entry contributes to the order-independent hash of the table.
+        static std::uint64_t MixEntry(std::uint64_t hash, std::uint8_t flags)
+        {
+            hash = (hash ^ (static_cast<std::uint64_t>(flags) * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull;
+            return hash ^ (hash >> 32);
+        }
+
+        NameSlot *FindSlot(std::string_view name, std::uint64_t hash)
+        {
+            if (m_slots.empty())
+            {
+                return nullptr;
+            }
+
+            const std::size_t mask = m_slots.size() - 1;
+            for (std::size_t i = hash & mask;; i = (i + 1) & mask)
+            {
+                NameSlot &slot = m_slots[i];
+                if (slot.flags == 0)
+                {
+                    return &slot; // empty: where it would go
+                }
+
+                if (slot.hash == hash && slot.name == name)
+                {
+                    return &slot;
+                }
+            }
+        }
+
+        void Declare(std::string_view name, std::uint8_t flags)
+        {
+            if (name.empty())
+            {
+                return;
+            }
+
+            if (!m_block_starts.empty())
+            {
+                m_block_names.push_back({name, flags});
+                return;
+            }
+
+            if (m_slot_count * 10 >= m_slots.size() * 7)
+            {
+                std::vector<NameSlot> old(m_slots.empty() ? 64 : m_slots.size() * 2);
+                old.swap(m_slots);
+                for (const NameSlot &slot: old)
+                {
+                    if (slot.flags != 0)
+                    {
+                        *FindSlot(slot.name, slot.hash) = slot;
+                    }
+                }
+            }
+
+            const std::uint64_t hash = HashName(name);
+            NameSlot *slot = FindSlot(name, hash);
+            const std::uint8_t before = slot->flags;
+            const auto merged = static_cast<std::uint8_t>(before | flags);
+            if (merged == before)
+            {
+                return;
+            }
+
+            if (before == 0)
+            {
+                slot->name = name;
+                slot->hash = hash;
+                ++m_slot_count;
+            }
+            else
+            {
+                m_names_hash ^= MixEntry(hash, before);
+            }
+
+            slot->flags = merged;
+            // Order-independent, so a replay of reused items reaches the same hash.
+            m_names_hash ^= MixEntry(hash, merged);
+        }
+
+        // 0 when unknown; kNameType or kNameValue when the innermost declaration
+        // says so; both bits when the file declares the name both ways.
+        std::uint8_t ClassOf(std::string_view name) const
+        {
+            for (auto entry = m_block_names.rbegin(); entry != m_block_names.rend(); ++entry)
+            {
+                if (entry->name == name)
+                {
+                    return entry->flags;
+                }
+            }
+
+            if (!m_slots.empty())
+            {
+                const NameSlot *slot = const_cast<GrammarParser *>(this)->FindSlot(name, HashName(name));
+                if (slot->flags != 0)
+                {
+                    return slot->flags;
+                }
+            }
+
+            return m_oracle != nullptr && m_oracle->IsType(name) ? kNameType : std::uint8_t {0};
+        }
+
+        std::string_view RawText(std::uint32_t token) const
+        {
+            const auto &t = m_tree.m_tokens[token];
+            return m_tree.m_source.substr(t.offset, t.length);
+        }
+
+        static bool StartsTag(std::string_view word)
+        {
+            return word == "class" || word == "struct" || word == "union" || word == "enum" || word == "typedef";
+        }
+
+        std::size_t SigOf(std::uint32_t token) const
+        {
+            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(), token) - m_sig.begin());
+        }
+
+        // Name introduced by `class X`, `struct [[a]] X`, `enum class X`, `union X`
+        // starting at sig index `begin` (the keyword may be preceded by `typedef`).
+        std::string_view TagNameAt(std::size_t begin) const
+        {
+            std::size_t i = begin;
+            if (Is(i, "typedef"))
+            {
+                ++i;
+            }
+
+            if (!(Is(i, "class") || Is(i, "struct") || Is(i, "union") || Is(i, "enum")))
+            {
+                return {};
+            }
+
+            const bool is_enum = Is(i, "enum");
+            ++i;
+            if (is_enum && (Is(i, "class") || Is(i, "struct")))
+            {
+                ++i;
+            }
+
+            while (i < m_sig.size() && (IsAttributeStart(i, m_sig.size()) || Is(i, "alignas")))
+            {
+                if (Is(i, "alignas"))
+                {
+                    i = Is(i + 1, "(") && m_match[i + 1] != Invalid ? m_match[i + 1] + 1 : i + 1;
+                }
+                else
+                {
+                    const auto close = m_match[i];
+                    i = close != Invalid && close > i ? close + 1 : i + 1;
+                    // `[[` ... `]]`: skip the inner pair too
+                    if (i < m_sig.size() && Is(i, "]"))
+                    {
+                        ++i;
+                    }
+                }
+            }
+
+            if (i < m_sig.size() && IsIdentifierToken(i) && m_sig_tok[i] == Tok::None && !Is(i + 1, "::"))
+            {
+                return Text(i);
+            }
+
+            return {};
+        }
+
+        // Registers the names the nodes in [from, to) declare: types, variables,
+        // functions, enumerators. Function bodies, lambdas and parameter lists are
+        // skipped: their names belong to the block scopes opened by ParseCompound.
+        void RegisterNodes(std::size_t from, std::size_t to)
+        {
+            const auto &nodes = m_tree.m_nodes_soa;
+            to = std::min(to, nodes.size());
+            for (std::size_t n = from; n < to; ++n)
+            {
+                const std::uint32_t first = nodes.first_token[n];
+                const auto kind = static_cast<GrammarKind>(nodes.kind[n]);
+                switch (kind)
+                {
+                case GrammarKind::CompoundStatement:
+                case GrammarKind::LambdaExpression:
+                case GrammarKind::ParameterDeclaration:
+                {
+                    // Everything inside starts before `limit`, and whatever follows starts at or
+                    // after it: the end of the subtree is found by bisection instead of a walk.
+                    const std::uint32_t limit = first + nodes.token_count[n];
+                    std::size_t low = n + 1;
+                    std::size_t high = to;
+                    while (low < high)
+                    {
+                        const std::size_t mid = low + (high - low) / 2;
+                        if (nodes.first_token[mid] < limit)
+                        {
+                            low = mid + 1;
+                        }
+                        else
+                        {
+                            high = mid;
+                        }
+                    }
+
+                    n = low - 1;
+                    break;
+                }
+                case GrammarKind::RecordDefinition:
+                    Declare(TagNameAt(SigOf(first)), kNameType);
+                    break;
+                case GrammarKind::UsingDeclaration:
+                {
+                    const auto head = SigOf(first);
+                    if (Is(head, "using") && IsIdentifierToken(head + 1) && Is(head + 2, "="))
+                    {
+                        Declare(Text(head + 1), kNameType);
+                    }
+
+                    break;
+                }
+                case GrammarKind::Declaration:
+                case GrammarKind::DeclarationStatement:
+                    // `struct Foo;` and `typedef struct Foo Bar;` name types too.
+                    if (StartsTag(RawText(first)))
+                    {
+                        Declare(TagNameAt(SigOf(first)), kNameType);
+                    }
+
+                    break;
+                case GrammarKind::Enumerator:
+                    Declare(RawText(first), kNameValue);
+                    break;
+                case GrammarKind::DeclaredName:
+                {
+                    const auto declarator = nodes.parent[n];
+                    if (declarator >= nodes.size() || static_cast<GrammarKind>(nodes.kind[declarator]) != GrammarKind::Declarator)
+                    {
+                        break;
+                    }
+
+                    // One token: unqualified. `A::f` is a member defined out of line, already known.
+                    if (nodes.token_count[n] != 1 || m_tree.m_tokens[first].kind != TokenKind::Identifier)
+                    {
+                        break;
+                    }
+
+                    // Climb out of the declarator to the declaration that owns it. Only a
+                    // plain variable declaration records a value: functions are not recorded
+                    // (a constructor shares its class's name, and `f * x;` is never a
+                    // declaration of something called f), nor are parameters.
+                    std::size_t owner = nodes.parent[n];
+                    while (owner < nodes.size())
+                    {
+                        const auto owner_kind = static_cast<GrammarKind>(nodes.kind[owner]);
+                        if (owner_kind != GrammarKind::Declarator && owner_kind != GrammarKind::InitDeclarator)
+                        {
+                            break;
+                        }
+
+                        owner = nodes.parent[owner];
+                    }
+
+                    if (owner >= nodes.size() ||
+                        (static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::Declaration &&
+                            static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::DeclarationStatement))
+                    {
+                        break;
+                    }
+
+                    const bool typedef_declaration = owner < nodes.size() && RawText(nodes.first_token[owner]) == "typedef";
+                    Declare(RawText(first), typedef_declaration ? kNameType : kNameValue);
+                    break;
+                }
+                default:
+                    break;
+                }
+            }
+        }
+
+        void PopBlock()
+        {
+            m_block_names.resize(m_block_starts.back());
+            m_block_starts.pop_back();
+        }
+
+        void RegisterPending()
+        {
+            const std::size_t size = m_tree.m_nodes_soa.size();
+            if (m_registered_upto < size)
+            {
+                RegisterNodes(m_registered_upto, size);
+            }
+
+            m_registered_upto = size;
+        }
+
+        // Parameters of the function whose body is about to be parsed.
+        void DeclareParameters(std::size_t function)
+        {
+            const auto &nodes = m_tree.m_nodes_soa;
+            const std::size_t size = nodes.size();
+            for (std::size_t n = function + 1; n < size; ++n)
+            {
+                if (static_cast<GrammarKind>(nodes.kind[n]) != GrammarKind::ParameterDeclaration)
+                {
+                    continue;
+                }
+
+                const std::uint32_t limit = nodes.first_token[n] + nodes.token_count[n];
+                for (std::size_t m = n + 1; m < size && nodes.first_token[m] < limit; ++m)
+                {
+                    if (static_cast<GrammarKind>(nodes.kind[m]) == GrammarKind::DeclaredName)
+                    {
+                        const auto head = SigOf(nodes.first_token[m]);
+                        if (IsIdentifierToken(head) && !Is(head + 1, "::"))
+                        {
+                            Declare(Text(head), kNameValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        // `(begin, end)` read as a type-id whose head is certainly a type: a builtin
+        // (`unsigned long`) or a name the file or its headers declare as a type, then
+        // any `*`, `&`, `const`.
+        bool IsCastTypeId(std::size_t begin, std::size_t end) const
+        {
+            std::size_t i = begin;
+            const auto qualifiers = [&]()
+            {
+                while (i < end && (Is(i, "const") || Is(i, "volatile")))
+                {
+                    ++i;
+                }
+            };
+            qualifiers();
+            if (i >= end)
+            {
+                return false;
+            }
+
+            const auto builtin = [&](std::size_t at)
+            {
+                const auto text = Text(at);
+                return IsBuiltinType(text) && text != "auto" && text != "decltype";
+            };
+            if (builtin(i))
+            {
+                while (i < end && (builtin(i) || Is(i, "const") || Is(i, "volatile")))
+                {
+                    ++i;
+                }
+            }
+            else
+            {
+                if (Is(i, "typename") || Is(i, "struct") || Is(i, "class") || Is(i, "union") || Is(i, "enum"))
+                {
+                    ++i;
+                }
+
+                if (Is(i, "::"))
+                {
+                    ++i;
+                }
+
+                std::string_view last;
+                while (i < end && IsIdentifierToken(i) && m_sig_tok[i] == Tok::None)
+                {
+                    last = Text(i);
+                    ++i;
+                    if (i < end && Is(i, "<"))
+                    {
+                        const auto close = FindTemplateClose(i, end);
+                        if (close == Invalid)
+                        {
+                            return false;
+                        }
+
+                        i = close + 1;
+                    }
+
+                    if (i + 1 < end && Is(i, "::"))
+                    {
+                        ++i;
+                        continue;
+                    }
+
+                    break;
+                }
+
+                if (last.empty())
+                {
+                    return false;
+                }
+
+                // Most parenthesized expressions fail on shape alone: look the name up last.
+                std::size_t tail = i;
+                while (tail < end && (Is(tail, "*") || Is(tail, "&") || Is(tail, "&&") || Is(tail, "const") ||
+                           Is(tail, "volatile")))
+                {
+                    ++tail;
+                }
+
+                return tail == end && ClassOf(last) == kNameType;
+            }
+
+            qualifiers();
+            while (i < end && (Is(i, "*") || Is(i, "&") || Is(i, "&&") || Is(i, "const") || Is(i, "volatile")))
+            {
+                ++i;
+            }
+
+            return i == end;
+        }
+
+        bool StartsCastOperand(std::size_t pos, std::size_t end) const
+        {
+            if (pos >= end)
+            {
+                return false;
+            }
+
+            const auto &token = m_tree.m_tokens[m_sig[pos]];
+            switch (token.kind)
+            {
+            case TokenKind::Number:
+            case TokenKind::StringLiteral:
+            case TokenKind::CharacterLiteral:
+            case TokenKind::RawStringLiteral:
+                return true;
+            case TokenKind::Identifier:
+            {
+                const auto text = Text(pos);
+                return text != "and" && text != "or" && text != "xor" && text != "and_eq" && text != "or_eq" &&
+                    text != "xor_eq" && text != "not_eq" && text != "bitand" && text != "bitor" && text != "const" &&
+                    text != "volatile" && text != "noexcept" && text != "override" && text != "final" &&
+                    text != "requires";
+            }
+            default:
+                break;
+            }
+
+            const auto text = Text(pos);
+            return text == "(" || text == "!" || text == "~" || text == "-" || text == "+" || text == "*" ||
+                text == "&" || text == "++" || text == "--" || text == "::";
+        }
+
         void BeginItem(std::size_t pos)
         {
+            m_item_names_hash = m_names_hash;
             m_item_open = true;
             m_item_first_sig = pos;
             m_item_node_begin = m_tree.m_nodes_soa.size();
@@ -3165,6 +3703,7 @@ namespace heimdall
             item.diag_begin = static_cast<std::uint32_t>(m_item_diag_begin);
             item.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             item.sig_count = static_cast<std::uint32_t>(pos - m_item_first_sig);
+            item.names_hash = m_item_names_hash;
             item.first_token = m_sig[m_item_first_sig];
             item.token_end = pos > m_item_first_sig ? m_sig[pos - 1] + 1 : item.first_token;
             bool reusable = complete && pos > m_item_first_sig && item.node_end > item.node_begin &&
@@ -3231,6 +3770,12 @@ namespace heimdall
             }
 
             const TopLevelItem &item = *found;
+            // Read under other known names, the same tokens may parse differently.
+            if (item.names_hash != m_names_hash)
+            {
+                return false;
+            }
+
             if (after)
             {
                 if (old_offset < old_end)
@@ -3294,6 +3839,9 @@ namespace heimdall
                     subtree_end);
             }
             m_tree.m_nodes_aos_dirty = true;
+            // The copied nodes declare what a fresh parse of them would have declared.
+            RegisterNodes(node_base, m_tree.m_nodes_soa.size());
+            m_registered_upto = m_tree.m_nodes_soa.size();
 
             const std::uint32_t diag_base = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             for (auto d = item.diag_begin; d < item.diag_end; ++d)
@@ -3328,6 +3876,7 @@ namespace heimdall
                     return;
                 }
 
+                RegisterPending();
                 if (top_level)
                 {
                     FinishItem(pos, true);
@@ -3670,6 +4219,7 @@ namespace heimdall
                 break;
             }
 
+            RegisterPending();
             if (top_level)
             {
                 FinishItem(pos, pos >= end);
@@ -3681,9 +4231,10 @@ namespace heimdall
     {
 
         void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse * reuse)
+            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse * reuse,
+            const TypeNameOracle * type_names)
         {
-            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse);
+            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse, type_names);
             parser.Run();
         }
 

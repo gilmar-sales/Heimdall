@@ -117,6 +117,11 @@ namespace heimdall
         {
             return m_scopes;
         }
+        // Type names of the headers, for ParserOptions::type_names; never null.
+        const std::shared_ptr<const TypeNameOracle> & TypeNames() const noexcept
+        {
+            return m_type_names;
+        }
         bool Empty() const noexcept
         {
             return m_scopes.empty();
@@ -129,6 +134,7 @@ namespace heimdall
 
     private:
         ScopeIndex m_scopes;
+        std::shared_ptr<const TypeNameOracle> m_type_names;
         std::vector<std::filesystem::path> m_files;
     };
 

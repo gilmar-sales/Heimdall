@@ -4022,6 +4022,44 @@ namespace heimdall
                             return chain;
                         }
 
+                        // `((T*)p)`: a C-style cast, taken as one only when `T` names a type
+                        // the index knows (`(a)*p` with a variable `a` is a product).
+                        const std::size_t cast_close = PreviousSignificant(m_tokens, group.head_token, m_source);
+                        if (cast_close < m_tokens.size() && IsPunct(cast_close, ")"))
+                        {
+                            const std::size_t cast_open = MatchBackward(cast_close);
+                            if (cast_open >= m_tokens.size() ||
+                                PreviousSignificant(m_tokens, cast_open, m_source) != group_open)
+                            {
+                                return chain;
+                            }
+
+                            const std::size_t first = NextSignificant(cast_open);
+                            const std::size_t last = PreviousSignificant(m_tokens, cast_close, m_source);
+                            if (first >= cast_close || last >= m_tokens.size() || last < first)
+                            {
+                                return chain;
+                            }
+
+                            const std::string type_text(m_source.substr(m_tokens[first].offset,
+                                m_tokens[last].offset + m_tokens[last].length - m_tokens[first].offset));
+                            const TypeName type = ParseTypeName(type_text);
+                            const bool variable = type.ok && type.path.size() == 1 &&
+                                ResolveVariable(type.path.front(), 0).ok;
+                            if (!type.ok || variable || !ResolveType(type, m_hint, 0).ok)
+                            {
+                                return chain;
+                            }
+
+                            ChainSegment cast;
+                            cast.name = "static_cast";
+                            cast.targs = {type_text};
+                            cast.post = "(";
+                            group.segments = {std::move(cast)};
+                            group.ops = {")"};
+                            group.head_token = cast_open;
+                        }
+
                         // The group must be exactly `(` [`*`] chain `)`.
                         std::size_t head = PreviousSignificant(m_tokens, group.head_token, m_source);
                         const bool star = head < m_tokens.size() && IsPunct(head, "*");
@@ -4181,6 +4219,17 @@ namespace heimdall
             }
 
         private:
+            std::size_t NextSignificant(std::size_t token) const
+            {
+                std::size_t i = token + 1;
+                while (i < m_tokens.size() && IsTrivia(m_tokens[i].kind))
+                {
+                    ++i;
+                }
+
+                return i;
+            }
+
             bool IsPunct(std::size_t token, std::string_view text) const
             {
                 return m_tokens[token].kind == TokenKind::Punctuation &&
@@ -4861,15 +4910,39 @@ namespace heimdall
                 // for `T` (only a bare parameter, with its `const`, `&` and `*`).
                 if (found.owner == owner.path)
                 {
+                    // The declared text keeps the specifiers (`constexpr const _Tp`): what is
+                    // left once `&`, `*` and a trailing `const` go is the last word, and only
+                    // when nothing qualifies it (`std::vector<_Tp>`, `A::_Tp` are not bare).
                     std::string_view bare = found.item->type_text;
-                    while (!bare.empty() && (bare.back() == '&' || bare.back() == '*' || bare.back() == ' '))
+                    for (bool trimmed = true; trimmed;)
                     {
-                        bare.remove_suffix(1);
+                        trimmed = false;
+                        while (!bare.empty() && (bare.back() == '&' || bare.back() == '*' || bare.back() == ' '))
+                        {
+                            bare.remove_suffix(1);
+                            trimmed = true;
+                        }
+
+                        if (bare.size() > 5 && bare.ends_with(" const"))
+                        {
+                            bare.remove_suffix(6);
+                            trimmed = true;
+                        }
                     }
 
-                    if (bare.starts_with("const "))
+                    std::size_t word = bare.size();
+                    while (word > 0 && IsIdentChar(bare[word - 1]))
                     {
-                        bare.remove_prefix(6);
+                        --word;
+                    }
+
+                    if (word > 0 && bare[word - 1] != ' ')
+                    {
+                        bare = {};
+                    }
+                    else
+                    {
+                        bare.remove_prefix(word);
                     }
 
                     for (const IndexedScope * scope: ScopesAt(found.owner))
@@ -5015,6 +5088,89 @@ namespace heimdall
     }
 
     } // namespace
+
+    namespace
+    {
+
+        class IndexedTypeNames final : public TypeNameOracle
+        {
+        public:
+            explicit IndexedTypeNames(std::unordered_set<std::string> names) : m_names(std::move(names))
+            {
+                // Order-independent, so equal indexes have equal fingerprints.
+                for (const auto & name: m_names)
+                {
+                    m_fingerprint += std::hash<std::string>{}(name) * 0x9E3779B97F4A7C15ull;
+                }
+
+                m_fingerprint ^= m_names.size() << 1 | 1;
+            }
+            bool IsType(std::string_view name) const noexcept override
+            {
+                return m_names.find(std::string(name)) != m_names.end();
+            }
+            std::uint64_t Fingerprint() const noexcept override
+            {
+                return m_fingerprint;
+            }
+
+        private:
+            std::unordered_set<std::string> m_names;
+            std::uint64_t m_fingerprint = 0;
+        };
+
+    } // namespace
+
+    std::shared_ptr<const TypeNameOracle> CompletionEngine::TypeNamesOf(const ScopeIndex &index)
+    {
+        // A scope entry does not say whether it is a namespace or a record, but its
+        // parent lists it as a Namespace member in the first case and as a Type in the
+        // second. Records list their members as Types too (nested classes, member
+        // aliases): only namespace-level names are visible without a qualifier.
+        const auto key_of = [](const std::vector<std::string> & path, std::string_view last)
+        {
+            std::string key;
+            for (const auto & part: path)
+            {
+                key += part;
+                key += "::";
+            }
+
+            key += last;
+            return key;
+        };
+        std::unordered_set<std::string> namespaces;
+        for (const auto & scope: index)
+        {
+            for (const auto & member: scope.members)
+            {
+                if (member.kind == CompletionKind::Namespace)
+                {
+                    namespaces.insert(key_of(scope.path, member.label));
+                }
+            }
+        }
+
+        std::unordered_set<std::string> names;
+        for (const auto & scope: index)
+        {
+            if (!scope.path.empty() &&
+                namespaces.find(key_of({scope.path.begin(), scope.path.end() - 1}, scope.path.back())) == namespaces.end())
+            {
+                continue;
+            }
+
+            for (const auto & member: scope.members)
+            {
+                if (member.kind == CompletionKind::Type && !member.label.empty() && member.label.front() != '_')
+                {
+                    names.insert(member.label);
+                }
+            }
+        }
+
+        return std::make_shared<const IndexedTypeNames>(std::move(names));
+    }
 
     std::string CompletionEngine::PrefixAt(std::string_view source, std::size_t offset)
     {

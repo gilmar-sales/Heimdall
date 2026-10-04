@@ -1065,3 +1065,48 @@ TEST(CompletionSpec, AutoChainsThroughParenthesesDereferencesAndNamedCasts)
     // Not a plain receiver: stays unresolved rather than guessing.
     EXPECT_TRUE(AutoChain("int x; auto a = (x + 1).first();").first.empty());
 }
+
+TEST(CompletionSpec, AutoChainsThroughCStyleCastsOnlyWhenTheTypeIsKnown)
+{
+    EXPECT_TRUE(Has(AutoChain("void* v; auto a = ((lib::Item*)v)->name();").first, "length"));
+    EXPECT_TRUE(Has(AutoChain("void* v; auto a = ((const lib::Repo&)v).first();").first, "name"));
+    EXPECT_EQ(AutoChain("void* v; auto a = ((lib::Repo*)v)->first();").second, "Item");
+    // A type the index does not hold: no guess.
+    EXPECT_TRUE(AutoChain("void* v; auto a = ((Unknown*)v)->first();").first.empty());
+    // `(x)*p` with a variable `x` is a product, not a cast to `x`.
+    EXPECT_TRUE(AutoChain("lib::Item x; lib::Item* p; auto a = ((x)*p).name();").first.empty());
+}
+
+TEST(CompletionSpec, TemplateParametersAreFoundBehindDeclarationSpecifiers)
+{
+    // libstdc++ spells it `constexpr const _Tp& value() const &`: the index keeps the specifiers.
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace std {\n"
+        "template<typename _Tp, typename _Er> class [[nodiscard]] expected {\n"
+        "public:\n"
+        "  constexpr const _Tp& value() const &;\n"
+        "  constexpr _Tp&& value() &&;\n"
+        "  constexpr bool has_value() const noexcept;\n"
+        "  static inline _Tp* make();\n"
+        "};\n"
+        "class string {};\n"
+        "}\n"
+        "namespace lib {\n"
+        "struct Config { bool root; };\n"
+        "std::expected<Config, std::string> Load(const char *path);\n"
+        "}\n", {});
+    const auto labels = [&](const std::string &statement)
+    {
+        const std::string source = "void run() {\n    " + statement + "\n    loaded.value().\n}\n";
+        const auto cursor = source.find("value().") + 8;
+        std::vector<std::string> result;
+        for (const auto &item: heimdall::CompletionEngine::Complete(source, {}, cursor, &index))
+        {
+            result.push_back(item.label);
+        }
+
+        return result;
+    };
+    EXPECT_TRUE(Has(labels("auto loaded = lib::Load(\"x\");"), "root"));
+    EXPECT_TRUE(Has(labels("std::expected<lib::Config, std::string> loaded = lib::Load(\"x\");"), "root"));
+}

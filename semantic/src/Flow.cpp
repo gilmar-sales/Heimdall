@@ -424,6 +424,25 @@ namespace heimdall
                 case GrammarKind::ParenthesizedExpression:
                     current = parent;
                     continue;
+                case GrammarKind::CastExpression:
+                {
+                    // `(double)x` reads x; `(T&)x` hands out a reference to it.
+                    if (kids.size() != 2 || kids[1] != current)
+                    {
+                        return EventKind::Escape;
+                    }
+
+                    const auto [type_begin, type_end] = view.Range(kids[0]);
+                    for (auto p = type_begin; p < type_end; ++p)
+                    {
+                        if (view.At(p) == Tok::Amp || view.At(p) == Tok::AmpAmp)
+                        {
+                            return EventKind::Escape;
+                        }
+                    }
+
+                    return shape.scalar || shape.external ? EventKind::Read : EventKind::Escape;
+                }
                 case GrammarKind::UnaryExpression:
                 {
                     const Tok first = view.At(begin);

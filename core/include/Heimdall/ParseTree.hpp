@@ -2,6 +2,7 @@
 
 #include <Heimdall/SyntaxTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/TypeNames.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -73,7 +74,10 @@ namespace heimdall
         ErrorExpression,
         Error,
         AccessSpecifier,
-        LanguageLinkageSpec
+        LanguageLinkageSpec,
+        // `(T) operand`: child 0 is the TypeSpecifier inside the parentheses, child 1
+        // the operand. Only produced when `T` is certainly a type (see TypeNameOracle).
+        CastExpression
     };
 
     // AoS layout (kept for backward compatibility)
@@ -156,6 +160,8 @@ namespace heimdall
         CppStandard standard = CppStandard::Cpp20;
         Preprocessor::MacroMap predefined_macros;
         std::shared_ptr<const Preprocessor::MacroMap> shared_macros;
+        // Type names declared by the headers the file includes; may be null.
+        std::shared_ptr<const TypeNameOracle> type_names;
         const Preprocessor::MacroMap & Macros() const noexcept
         {
             return shared_macros ? *shared_macros : predefined_macros;
@@ -174,6 +180,9 @@ namespace heimdall
         std::uint32_t node_end;
         std::uint32_t diag_begin;
         std::uint32_t diag_end;
+        // Names the parser knew when the item began: a parse that knows others may
+        // read the same tokens differently, so the item is only reused under this hash.
+        std::uint64_t names_hash;
         bool reusable;
     };
 
@@ -194,7 +203,8 @@ namespace heimdall
     namespace detail
     {
         void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse *reuse);
+            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse *reuse,
+            const TypeNameOracle *type_names);
     } // namespace detail
 
     // Initial recursive-descent grammar layer over the lossless lexer. It parses
@@ -302,7 +312,7 @@ namespace heimdall
     private:
         friend class GrammarParser;
         friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &,
-            std::stop_token, const Preprocessor::MacroMap *, const ParseReuse *);
+            std::stop_token, const Preprocessor::MacroMap *, const ParseReuse *, const TypeNameOracle *);
 
         // Called by GrammarParser after parsing to build auxiliary structures
         void BuildAuxiliary();

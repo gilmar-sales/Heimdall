@@ -481,3 +481,47 @@ TEST(IncludeContextSpec, RejectsEverythingThatIsNotAnOpenIncludeDelimiter)
     ASSERT_TRUE(inside.has_value());
     EXPECT_TRUE(inside->angled);
 }
+
+TEST(IncludeIndexSpec, TypeNamesFeedTheParserOfTheIncludingFile)
+{
+    auto command = CommandWithIncludes();
+    command.defines["MYLIB_API"] = "";
+    command.defines["MYLIB_NOEXCEPT"] = "noexcept";
+    command.defines["MYLIB_NODISCARD"] = "[[nodiscard]]";
+    const std::string text =
+        "#include \"mylib/shapes.hpp\"\n"
+        "void f(void *p, int a, int b) {\n"
+        "    auto s = (mylib::Shape*)p;\n"
+        "    mylib::Base * base = nullptr;\n"
+        "    a * b;\n"
+        "}\n";
+    const auto index = heimdall::IncludeIndex::Build(IncludeDir(), text, &command);
+    ASSERT_NE(index.TypeNames(), nullptr);
+    EXPECT_TRUE(index.TypeNames()->IsType("Shape"));
+    EXPECT_TRUE(index.TypeNames()->IsType("Base"));
+    EXPECT_TRUE(index.TypeNames()->IsType("ShapeAlias"));
+    EXPECT_FALSE(index.TypeNames()->IsType("area")); // a member function
+    EXPECT_FALSE(index.TypeNames()->IsType("base_value"));
+
+    const auto count = [](const heimdall::ParseTree &tree, heimdall::GrammarKind kind)
+    {
+        std::size_t n = 0;
+        for (const auto &node: tree.Nodes())
+        {
+            n += node.kind == kind;
+        }
+
+        return n;
+    };
+    heimdall::ParserOptions options;
+    options.type_names = index.TypeNames();
+    const auto with_headers = heimdall::ParseTree::Parse(text, options);
+    EXPECT_EQ(count(with_headers, heimdall::GrammarKind::CastExpression), 1);
+    EXPECT_EQ(count(with_headers, heimdall::GrammarKind::ExpressionStatement), 1); // `a * b;`
+
+    // A second index over the same headers answers the same: reuse across parses stays valid.
+    const auto again = heimdall::IncludeIndex::Build(IncludeDir(), text, &command);
+    EXPECT_EQ(again.TypeNames()->Fingerprint(), index.TypeNames()->Fingerprint());
+    const auto without = heimdall::ParseTree::Parse(text, {});
+    EXPECT_EQ(count(without, heimdall::GrammarKind::CastExpression), 0);
+}

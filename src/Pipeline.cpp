@@ -134,6 +134,8 @@ namespace heimdall::cli
             return "Error";
         case GrammarKind::LanguageLinkageSpec:
             return "LanguageLinkageSpec";
+        case GrammarKind::CastExpression:
+            return "CastExpression";
         }
 
         return "Unknown";
