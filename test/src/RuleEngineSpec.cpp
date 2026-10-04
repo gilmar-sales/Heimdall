@@ -557,3 +557,20 @@ TEST(RuleEngineSpec, SortIncludesHonorsSuppressionsAndOverrides)
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
         "#include <vector>\n#include <map>\n").empty());
 }
+
+TEST(RuleEngineSpec, SortIncludesEnabledByOverride)
+{
+    // Opt-in rule: an enabled override turns it on, like
+    // --rule cpp/sort-includes=warning or the 'rules' section.
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/sort-includes", true, heimdall::Severity::Warning});
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include <map>\n");
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Warning);
+
+    options.overrides[0].enabled = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
+        "#include <vector>\n#include <map>\n").empty());
+}

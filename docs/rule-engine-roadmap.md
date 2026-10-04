@@ -154,6 +154,7 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `cpp/prefer-forward-declaration` | Mesma análise de includes (`IncludeAnalyzer`), só em arquivos `.h/.hh/.hpp/.hxx/.h++` e só para headers fora dos diretórios do sistema. Todos os nomes do header usados no arquivo precisam ser `class`/`struct`/`union` não-template, fora de namespace anônimo/`inline`, e cada uso precisa ser `N *`/`N &` (com `const`/`volatile`), `class N;` ou `friend class N;`. Qualquer outro uso (valor, base, `N::`, argumento de template, `sizeof`, macro, corpo de função, inicializador, enumerador) impede o aviso, assim como desreferenciar por nome (`p->`, `p.`, `p[`, `*p`, `delete p`, casts) um ponteiro/referência declarado como `N *p` | Mesmos requisitos de `--semantic` + compile command. O quick fix troca a linha do include pelas declarações (`namespace a::b { class N; }`), mas não é aplicado por `--fix`: o `.cpp` correspondente precisa incluir o header. Corpos inline que só repassam o ponteiro são aceitos |
 | `cpp/no-circular-include` | `IncludeAnalyzer` compara o fecho transitivo de cada `#include` não condicional com o próprio arquivo (`std::filesystem::equivalent`) | Único aviso com severidade `error` por padrão; sem quick fix (a correção certa é reestruturar, por exemplo com forward declaration). Quando há ciclo, só ele é reportado para aquele include: os nomes do próprio arquivo "voltam" pelo ciclo e mascarariam `no-unused-include`. Requer `--semantic` + compile command |
 | `cpp/modernize-using` | Reescreve `typedef` de declarador simples como `using T = ...`, com autofix | Pula ponteiros de função, definições de classe, múltiplos declaradores e atributos; requer forma tokenizável |
+| `cpp/sort-includes` | `RuleEngine` agrupa includes literais em blocos de linhas adjacentes e compara cada bloco com a ordem configurada (`include-order`) | Opt-in: só roda quando `"rules"` ou `--rule` habilita o código (a ordem é convenção do projeto). Autofix seguro em lote reordena apenas dentro de um bloco; linhas em branco, comentários, outras diretivas, `#include_next` e includes por macro quebram blocos. Ordem padrão `angle` antes de `quote`, comparação sem maiúsculas/minúsculas (configurável); preserva terminadores de linha e indentação |
 | `semantic/no-unused-local` | Analisador semântico detecta algumas variáveis locais não usadas | Cobertura limitada a declarações simples; requer `--semantic` e contexto de compilação |
 
 ## Priorização sugerida
@@ -179,7 +180,15 @@ A Rule Engine agora também oferece:
   severidade padrão, camada requerida e disponibilidade de autofix de cada regra.
   `IsKnownRuleCode()` é a fonte única de validação dos códigos no carregador de
   configuração e na CLI, então uma regra nova só precisa de uma entrada no catálogo.
-- **Overrides por código** via `RuleOptions::overrides`, com habilitação/desabilitação e severidade (`Warning`/`Error`). O último override para o mesmo código prevalece.
+- **Overrides por código** via `RuleOptions::overrides`, com habilitação/desabilitação e severidade (`Warning`/`Error`). O último override para o mesmo código prevalece. Para regras opt-in como `cpp/sort-includes`, um override habilitado também liga a regra.
+- **Ordem de includes** (`cpp/sort-includes`): a seção `"include-order"` do arquivo de configuração registra a convenção do projeto:
+
+  ```json
+  {"rules": {"cpp/sort-includes": "warning"},
+   "include-order": {"groups": ["angle", "quote"], "case-insensitive": true}}
+  ```
+
+  `groups` lista os grupos `"angle"` (`<...>`) e `"quote"` (`"..."`) na ordem desejada, ambos obrigatórios; `case-insensitive` (padrão `true`) define a comparação. A configuração mais próxima prevalece. A regra é opt-in: só diagnostica quando habilitada por `"rules"` ou por `--rule cpp/sort-includes=warning`.
 - **CLI**: `heimdall lint --rule cpp/no-null=off arquivo.cpp` desabilita uma regra; `--rule cpp/no-null=error` eleva sua severidade. Os valores aceitos são `off`, `warning` e `error`; códigos desconhecidos são rejeitados. A opção está disponível em `lint` e `check`.
 - **Supressão por comentário**: `// heimdall-disable-line cpp/no-null` suprime o código na linha do comentário; `// heimdall-disable-next-line cpp/no-null` suprime na linha seguinte. Pode-se listar códigos separados por espaço/vírgula ou omitir a lista/usar `*` para suprimir todos os diagnósticos naquela linha.
 - **Validação de autofix**: `ApplyFixes` ignora edições cuja faixa não esteja contida na faixa do diagnóstico, além de rejeitar edições fora do arquivo ou sobrepostas. Não muda a política de quais regras oferecem correções.
@@ -189,6 +198,7 @@ Exemplos:
 ```sh
 heimdall lint --rule cpp/no-null=error src
 heimdall check --rule format/no-trailing-whitespace=off src
+heimdall lint --rule cpp/sort-includes=warning --fix src
 ```
 
 Esses mecanismos são infraestrutura; não adicionam regras de lint além das listadas como implementadas acima. Supressões de bloco (`disable`/`enable`) e configuração via arquivo ainda não estão disponíveis.

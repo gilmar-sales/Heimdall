@@ -105,7 +105,7 @@ namespace heimdall::lsp
                     "\"documentRangeFormattingProvider\":true,"
                     "\"codeActionProvider\":true,\"hoverProvider\":true,"
                     "\"definitionProvider\":true,\"implementationProvider\":true,"
-                    "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\"],"
+                    "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\",\"/\",\"<\",\"\\\"\"],"
                     "\"resolveProvider\":false}},"
                     "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
             }
@@ -1034,6 +1034,92 @@ namespace heimdall::lsp
 
     } // namespace
 
+    void LanguageServer::RespondIncludeCompletion(std::string_view id, const std::string & uri,
+        const std::string & text, const LineIndex & lines, std::size_t offset,
+        const heimdall::IncludeContext & context, const heimdall::CompileCommand * command)
+    {
+        const std::filesystem::path file_path = PathFromUri(uri);
+        const std::filesystem::path base_dir =
+            file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
+        const std::string_view typed = std::string_view(text).substr(context.typed_offset,
+            offset - context.typed_offset);
+        const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(base_dir, context.angled, typed, command, 1000);
+
+        // Only the last path segment is replaced; earlier ones are already typed.
+        const std::size_t slash = typed.find_last_of("/\\");
+        const std::size_t name_begin = context.typed_offset + (slash == std::string_view::npos ? 0 : slash + 1);
+        const char closing = context.angled ? '>' : '"';
+        const bool has_closing = offset < text.size() && text[offset] == closing;
+        const Position start = lines.ToPosition(name_begin);
+        const Position end = lines.ToPosition(offset);
+
+        // A full page means the cap may have dropped entries (an empty prefix
+        // over a big system directory). The client filters what it has locally
+        // as the user types: claim incompleteness so it asks again with the
+        // longer prefix instead of never finding `vector`.
+        constexpr std::size_t page_size = 1000;
+        std::string response = candidates.size() >= page_size ? "{\"isIncomplete\":true,\"items\":["
+        : "{\"isIncomplete\":false,\"items\":[";
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            const auto & candidate = candidates[i];
+            if (i != 0)
+            {
+                response += ',';
+            }
+
+            const char *origin = "";
+            switch (candidate.origin)
+            {
+            case heimdall::IncludeOrigin::Local:
+                origin = "current directory";
+                break;
+            case heimdall::IncludeOrigin::Quote:
+                origin = "-iquote directory";
+                break;
+            case heimdall::IncludeOrigin::Include:
+                origin = "include directory";
+                break;
+            case heimdall::IncludeOrigin::System:
+                origin = "system include";
+                break;
+            case heimdall::IncludeOrigin::Absolute:
+                origin = "absolute path";
+                break;
+            }
+
+            char sort[16];
+            std::snprintf(sort, sizeof(sort), "%05zu", i);
+            std::string new_text = candidate.label;
+            if (!candidate.directory && !has_closing)
+            {
+                new_text += closing;
+            }
+
+            response += "{\"label\":";
+            QuoteJson(candidate.label, response);
+            response += ",\"kind\":" + std::string(candidate.directory ? "19" : "17") + ",\"detail\":";
+            QuoteJson(origin, response);
+            response += ",\"sortText\":\"" + std::string(sort) + "\",\"textEdit\":{\"range\":{\"start\":";
+            AppendPosition(start, response);
+            response += ",\"end\":";
+            AppendPosition(end, response);
+            response += "},\"newText\":";
+            QuoteJson(new_text, response);
+            response += '}';
+            if (candidate.directory)
+            {
+                // Keep going: offer the directory's contents right away.
+                response += ",\"command\":{\"title\":\"Suggest\",\"command\":\"editor.action.triggerSuggest\"}";
+            }
+
+            response += '}';
+        }
+
+        response += "]}";
+        Respond(id, response);
+    }
+
     void LanguageServer::CompleteDocument(simdjson::dom::element request, std::string_view id)
     {
         if (RequestCancelled())
@@ -1086,6 +1172,12 @@ namespace heimdall::lsp
         const std::size_t offset = lines->OffsetFromPosition(cursor);
 
         const heimdall::CompileCommand * command = CommandFor(uri_string);
+        if (const auto include_context = heimdall::IncludeIndex::IncludeContextAt(*text, offset))
+        {
+            RespondIncludeCompletion(id, uri_string, *text, *lines, offset, *include_context, command);
+            return;
+        }
+
         const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
         const HeaderView headers = HeaderScopes(uri_string, text, command);
         const auto tree = CachedParse(uri_string, text, version, command);

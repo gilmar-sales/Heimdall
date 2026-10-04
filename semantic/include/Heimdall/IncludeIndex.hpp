@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,6 +22,34 @@ struct IncludeLimits
     // that supplied the including header). Off by default: completion only
     // needs the first definition of each name.
     bool follow_include_next = false;
+};
+
+// Where an include completion candidate was found.
+enum class IncludeOrigin
+{
+    Local,    // the including file's own directory (`"..."` only)
+    Quote,    // -iquote (`"..."` only)
+    Include,  // -I / -isystem / -idirafter
+    System,   // compiler default include directories
+    Absolute  // the typed path was absolute
+};
+
+// One entry offered after `#include "` or `#include <`. `label` is the next
+// path segment; directories end in `/`.
+struct IncludeCandidate
+{
+    std::string label;
+    bool directory = false;
+    IncludeOrigin origin = IncludeOrigin::Include;
+    std::filesystem::path location;
+};
+
+// The cursor sits inside the delimiters of an `#include` line.
+struct IncludeContext
+{
+    bool angled = false;
+    // Offset of the first character after the opening `<` or `"`.
+    std::size_t typed_offset = 0;
 };
 
 // Out-parameter of ResolveHeaders: whether the walk saw every header it was
@@ -48,6 +77,19 @@ class IncludeIndex
                                                              const CompileCommand* command,
                                                              const Limits& limits = Limits {},
                                                              ResolveReport* report = nullptr);
+    // Completion of the path typed after `#include "` (angled = false) or
+    // `#include <` (angled = true). `typed` is the text between the opening
+    // delimiter and the cursor, e.g. `Heimdall/Le`. Quoted includes also search
+    // `base_dir` and the -iquote directories; angled ones never do, exactly as
+    // the compiler resolves them. Duplicates across directories collapse to the
+    // first one found; sources, binaries and dotfiles are skipped.
+    static std::vector<IncludeCandidate> CompleteIncludePath(const std::filesystem::path& base_dir, bool angled,
+                                                             std::string_view typed,
+                                                             const CompileCommand* command,
+                                                             std::size_t max_results = 1000);
+    // Include context when `offset` is after `#include <` / `#include "` (also
+    // `#include_next`) and before any closing delimiter on that line.
+    static std::optional<IncludeContext> IncludeContextAt(std::string_view text, std::size_t offset);
     static std::string CacheKey(const std::vector<std::filesystem::path>& headers,
                                 const CompileCommand* command);
     // Cheap fingerprint of the file's own `#include` lines plus the search

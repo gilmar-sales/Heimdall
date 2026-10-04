@@ -125,7 +125,9 @@ outside the extension) still needs to be closed before relinking.
   `cpp/no-empty-catch` flags empty catch blocks; `cpp/no-duplicate-include`
   flags repeated literal includes outside conditional blocks;
   `cpp/modernize-using` rewrites plain `typedef` declarations as `using`
-  aliases. Diagnostics
+  aliases; `cpp/sort-includes` (opt-in) flags include blocks out of the
+  configured order (`include-order` in `.heimdall.json`) and safely
+  reorders each block in batch. Diagnostics
   carry byte ranges and 1-based line/column, with non-overlapping text edits applied
   from right to left. Rules can be enabled independently.
 - **Local semantic rule**: `semantic/no-unused-local` reports unused simple local variables when

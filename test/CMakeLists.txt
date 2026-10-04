@@ -82,6 +82,11 @@ if (Python3_Interpreter_FOUND)
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
+    NAME LspIncludeCompletionSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncludeCompletionSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
     NAME LspCancelSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspCancelSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"

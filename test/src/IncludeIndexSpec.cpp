@@ -3,7 +3,10 @@
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <string_view>
 
 namespace
@@ -225,4 +228,256 @@ TEST(IncludeIndexSpec, MemberAccessResolvesGuardedDecoratedHeaderTypes)
     EXPECT_TRUE(Contains(items, "cached"));
     EXPECT_TRUE(Contains(items, "base_value")); // inherited
     EXPECT_TRUE(Contains(items, "base_run"));
+}
+
+namespace
+{
+
+    class IncludeTree
+    {
+    public:
+        IncludeTree()
+        {
+            static std::atomic<int> counter{0};
+            m_root = std::filesystem::temp_directory_path() /
+                ("heimdall-include-completion-" + std::to_string(counter.fetch_add(1)) + "-" +
+                std::to_string(std::filesystem::file_time_type::clock::now().time_since_epoch().count()));
+            Touch("src/local.hpp");
+            Touch("src/notes.txt");
+            Touch("src/main.cpp");
+            Touch("src/.hidden.hpp");
+            Touch("src/sub/nested.hpp");
+            Touch("inc/lib/api.hpp");
+            Touch("inc/lib/detail/impl.hpp");
+            Touch("inc/shared.hpp");
+            Touch("inc/local.hpp");
+            Touch("quote/only_quoted.hpp");
+            Touch("extra/extra.h");
+            m_command.include_directories = {m_root / "inc", m_root / "extra"};
+            m_command.quote_directories = {m_root / "quote"};
+        }
+
+        ~IncludeTree()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(m_root, ec);
+        }
+
+        IncludeTree(const IncludeTree &) = delete;
+        IncludeTree & operator=(const IncludeTree &) = delete;
+
+        std::filesystem::path Src() const
+        {
+            return m_root / "src";
+        }
+
+        const heimdall::CompileCommand * Command() const
+        {
+            return &m_command;
+        }
+
+        std::vector<std::string> Labels(bool angled, std::string_view typed) const
+        {
+            std::vector<std::string> labels;
+            for (const auto & candidate: heimdall::IncludeIndex::CompleteIncludePath(Src(), angled, typed, &m_command))
+            {
+                if (candidate.origin != heimdall::IncludeOrigin::System)
+                {
+                    labels.push_back(candidate.label);
+                }
+            }
+
+            return labels;
+        }
+
+    private:
+        void Touch(const std::string & relative) const
+        {
+            const auto path = m_root / relative;
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream(path, std::ios::binary) << "// fixture\n";
+        }
+
+        std::filesystem::path m_root;
+        heimdall::CompileCommand m_command;
+    };
+
+    bool Has(const std::vector<std::string> & labels, std::string_view label)
+    {
+        return std::find(labels.begin(), labels.end(), label) != labels.end();
+    }
+
+} // namespace
+
+TEST(IncludeCompletionSpec, QuotedIncludesSearchLocalAndQuoteDirectoriesFirst)
+{
+    IncludeTree tree;
+    const auto labels = tree.Labels(false, "");
+    EXPECT_TRUE(Has(labels, "local.hpp"));
+    EXPECT_TRUE(Has(labels, "sub/"));
+    EXPECT_TRUE(Has(labels, "only_quoted.hpp"));
+    EXPECT_TRUE(Has(labels, "shared.hpp"));
+    EXPECT_TRUE(Has(labels, "lib/"));
+    EXPECT_TRUE(Has(labels, "extra.h"));
+}
+
+TEST(IncludeCompletionSpec, AngledIncludesNeverSearchTheIncludingDirectoryOrQuoteDirectories)
+{
+    IncludeTree tree;
+    const auto labels = tree.Labels(true, "");
+    EXPECT_FALSE(Has(labels, "sub/"));
+    EXPECT_FALSE(Has(labels, "only_quoted.hpp"));
+    EXPECT_TRUE(Has(labels, "shared.hpp"));
+    EXPECT_TRUE(Has(labels, "lib/"));
+    EXPECT_TRUE(Has(labels, "extra.h"));
+    // `local.hpp` exists next to the file and in -I: only the -I copy may be offered.
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "local", tree.Command());
+    std::vector<heimdall::IncludeCandidate> project;
+    for (const auto & candidate: candidates)
+    {
+        if (candidate.origin != heimdall::IncludeOrigin::System)
+        {
+            project.push_back(candidate);
+        }
+    }
+
+    ASSERT_EQ(project.size(), 1);
+    EXPECT_EQ(project[0].origin, heimdall::IncludeOrigin::Include);
+}
+
+TEST(IncludeCompletionSpec, QuotedDuplicateKeepsTheFirstDirectoryInSearchOrder)
+{
+    IncludeTree tree;
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "local", tree.Command());
+    std::size_t count = 0;
+    for (const auto & candidate: candidates)
+    {
+        if (candidate.label == "local.hpp")
+        {
+            ++count;
+            EXPECT_EQ(candidate.origin, heimdall::IncludeOrigin::Local);
+        }
+    }
+
+    EXPECT_EQ(count, 1);
+}
+
+TEST(IncludeCompletionSpec, CompletesInsideDirectoriesAlreadyTyped)
+{
+    IncludeTree tree;
+    EXPECT_EQ(tree.Labels(true, "lib/"), (std::vector<std::string>{"detail/", "api.hpp"}));
+    EXPECT_EQ(tree.Labels(true, "lib/detail/"), (std::vector<std::string>{"impl.hpp"}));
+    EXPECT_EQ(tree.Labels(false, "sub/"), (std::vector<std::string>{"nested.hpp"}));
+    EXPECT_TRUE(tree.Labels(true, "sub/").empty());
+    EXPECT_TRUE(tree.Labels(true, "missing/").empty());
+}
+
+TEST(IncludeCompletionSpec, FiltersByPrefixIgnoringCase)
+{
+    IncludeTree tree;
+    EXPECT_EQ(tree.Labels(true, "SHA"), (std::vector<std::string>{"shared.hpp"}));
+    EXPECT_EQ(tree.Labels(true, "lib/AP"), (std::vector<std::string>{"api.hpp"}));
+    EXPECT_TRUE(tree.Labels(true, "zzz").empty());
+}
+
+TEST(IncludeCompletionSpec, SkipsSourcesBinariesAndDotFiles)
+{
+    IncludeTree tree;
+    const auto labels = tree.Labels(false, "");
+    EXPECT_FALSE(Has(labels, "main.cpp"));
+    EXPECT_FALSE(Has(labels, "notes.txt"));
+    EXPECT_FALSE(Has(labels, ".hidden.hpp"));
+}
+
+TEST(IncludeCompletionSpec, ProjectEntriesComeBeforeSystemOnesAndDirectoriesFirstWithinAnOrigin)
+{
+    IncludeTree tree;
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "", tree.Command());
+    for (std::size_t i = 0; i < candidates.size(); ++i)
+    {
+        EXPECT_EQ(candidates[i].directory, candidates[i].label.back() == '/');
+        if (i == 0)
+        {
+            continue;
+        }
+
+        const auto & previous = candidates[i - 1];
+        EXPECT_LE(static_cast<int>(previous.origin), static_cast<int>(candidates[i].origin));
+        if (previous.origin == candidates[i].origin)
+        {
+            EXPECT_FALSE(!previous.directory && candidates[i].directory) << candidates[i].label;
+        }
+    }
+}
+
+TEST(IncludeCompletionSpec, TheLimitNeverDropsProjectHeadersForSystemOnes)
+{
+    IncludeTree tree;
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "", tree.Command(), 4);
+    ASSERT_EQ(candidates.size(), 4);
+    for (const auto & candidate: candidates)
+    {
+        EXPECT_EQ(candidate.origin, heimdall::IncludeOrigin::Include) << candidate.label;
+    }
+}
+
+TEST(IncludeCompletionSpec, AbsolutePathsAreListedAsTyped)
+{
+    IncludeTree tree;
+    const std::string typed = (tree.Src() / "sub").generic_string() + "/";
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath({}, false, typed, tree.Command());
+    ASSERT_EQ(candidates.size(), 1);
+    EXPECT_EQ(candidates[0].label, "nested.hpp");
+    EXPECT_EQ(candidates[0].origin, heimdall::IncludeOrigin::Absolute);
+}
+
+TEST(IncludeCompletionSpec, WorksWithoutACompileCommand)
+{
+    IncludeTree tree;
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "loc", nullptr);
+    const auto local = std::find_if(candidates.begin(), candidates.end(),
+        [](const heimdall::IncludeCandidate &candidate) { return candidate.label == "local.hpp"; });
+    ASSERT_NE(local, candidates.end());
+    EXPECT_EQ(local->origin, heimdall::IncludeOrigin::Local);
+}
+
+TEST(IncludeCompletionSpec, HonorsTheResultLimit)
+{
+    IncludeTree tree;
+    EXPECT_EQ(heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "", tree.Command(), 2).size(), 2);
+}
+
+TEST(IncludeContextSpec, DetectsTheDelimiterAndTheTypedOffset)
+{
+    constexpr std::string_view text = "int a;\n#include <vec";
+    const auto angled = heimdall::IncludeIndex::IncludeContextAt(text, text.size());
+    ASSERT_TRUE(angled.has_value());
+    EXPECT_TRUE(angled->angled);
+    EXPECT_EQ(text.substr(angled->typed_offset), "vec");
+
+    constexpr std::string_view quoted = "  #  include_next \"dir/";
+    const auto context = heimdall::IncludeIndex::IncludeContextAt(quoted, quoted.size());
+    ASSERT_TRUE(context.has_value());
+    EXPECT_FALSE(context->angled);
+    EXPECT_EQ(quoted.substr(context->typed_offset), "dir/");
+
+    const auto empty = heimdall::IncludeIndex::IncludeContextAt("#include <", 10);
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_EQ(empty->typed_offset, 10);
+}
+
+TEST(IncludeContextSpec, RejectsEverythingThatIsNotAnOpenIncludeDelimiter)
+{
+    using heimdall::IncludeIndex;
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("#include <vector>", 17).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("#include \"a.h\"", 14).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("#include ", 9).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("#define X <", 11).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("int a = 1 < 2;", 12).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("// #include <", 13).has_value());
+    EXPECT_FALSE(IncludeIndex::IncludeContextAt("#includes <a", 12).has_value());
+    // Cursor in the middle of a closed include: the name is being edited, not started.
+    const auto inside = heimdall::IncludeIndex::IncludeContextAt("#include <vector>", 12);
+    ASSERT_TRUE(inside.has_value());
+    EXPECT_TRUE(inside->angled);
 }

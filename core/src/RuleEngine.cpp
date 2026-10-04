@@ -339,6 +339,20 @@ namespace heimdall
         return {begin, end - begin, ""};
     }
 
+    bool RuleEngine::RuleEnabled(std::string_view code, bool default_enabled) const
+    {
+        bool enabled = default_enabled;
+        for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+        {
+            if (override->code == code)
+            {
+                enabled = override->enabled;
+                break;
+            }
+        }
+        return enabled;
+    }
+
     std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
     {
         const auto tokens = Lexer(source).Lex();
@@ -708,7 +722,7 @@ namespace heimdall
             }
         }
 
-        if (m_options.sort_includes)
+        if (RuleEnabled("cpp/sort-includes", m_options.sort_includes))
         {
             // Literal includes only: #include_next and macro includes
             // have no target to order.

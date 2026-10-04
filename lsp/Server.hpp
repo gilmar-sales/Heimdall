@@ -101,6 +101,11 @@ namespace heimdall::lsp
         void RangeFormatDocument(simdjson::dom::element request, std::string_view id);
         void CodeActions(simdjson::dom::element request, std::string_view id);
         void CompleteDocument(simdjson::dom::element request, std::string_view id);
+        // `#include "` / `#include <` path completion; quoted and angled
+        // includes search different directories.
+        void RespondIncludeCompletion(std::string_view id, const std::string & uri, const std::string & text,
+            const LineIndex & lines, std::size_t offset, const heimdall::IncludeContext & context,
+            const heimdall::CompileCommand * command);
         void HoverDocument(simdjson::dom::element request, std::string_view id);
         void GotoDocument(simdjson::dom::element request, std::string_view id, bool implementation);
         // HeaderScopes, but waits (bounded, cancellable) for a background index

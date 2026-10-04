@@ -131,6 +131,10 @@ namespace heimdall
         static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic> & diagnostics);
 
     private:
+        // Opt-in rules run when enabled in RuleOptions or through an
+        // enabled override (config file or --rule); the last override
+        // for the code wins.
+        bool RuleEnabled(std::string_view code, bool default_enabled) const;
         std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, std::string_view source,
             const std::vector<Token> & tokens) const;
         std::vector<Diagnostic> AnalyzeImpl(std::string_view source, const std::vector<Token> & tokens,

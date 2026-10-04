@@ -690,6 +690,211 @@ namespace heimdall
         return ordered;
     }
 
+    namespace
+    {
+
+        bool IsIncludableFile(const std::filesystem::path & path)
+        {
+            // Standard headers have no extension; skip sources and binaries.
+            static const std::unordered_set<std::string> accepted = {
+                "", ".h", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".inc", ".def", ".tpp", ".ipp", ".tcc", ".cuh",
+            };
+            std::string extension = path.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return accepted.contains(extension);
+        }
+
+        bool StartsWithNoCase(std::string_view text, std::string_view prefix)
+        {
+            if (text.size() < prefix.size())
+            {
+                return false;
+            }
+
+            for (std::size_t i = 0; i < prefix.size(); ++i)
+            {
+                if (std::tolower(static_cast<unsigned char>(text[i])) !=
+                    std::tolower(static_cast<unsigned char>(prefix[i])))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+    } // namespace
+
+    std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(const std::filesystem::path & base_dir,
+        bool angled, std::string_view typed, const CompileCommand *command, std::size_t max_results)
+    {
+        // `typed` is what follows the opening delimiter: `dir/sub/na`.
+        std::string_view directory_part;
+        std::string_view name_prefix = typed;
+        if (const auto slash = typed.find_last_of("/\\"); slash != std::string_view::npos)
+        {
+            directory_part = typed.substr(0, slash + 1);
+            name_prefix = typed.substr(slash + 1);
+        }
+
+        // Search order mirrors the compiler: `"..."` looks next to the including
+        // file and in -iquote directories first, `<...>` never does.
+        struct Root
+        {
+            std::filesystem::path path;
+            IncludeOrigin origin;
+        };
+
+        std::vector<Root> roots;
+        const std::filesystem::path typed_directory(directory_part);
+        if (typed_directory.is_absolute())
+        {
+            roots.push_back({{}, IncludeOrigin::Absolute});
+        }
+        else
+        {
+            if (!angled)
+            {
+                if (!base_dir.empty())
+                {
+                    roots.push_back({base_dir, IncludeOrigin::Local});
+                }
+
+                if (command != nullptr)
+                {
+                    for (const auto & dir: command->quote_directories)
+                    {
+                        roots.push_back({dir, IncludeOrigin::Quote});
+                    }
+                }
+            }
+
+            if (command != nullptr)
+            {
+                for (const auto & dir: command->include_directories)
+                {
+                    roots.push_back({dir, IncludeOrigin::Include});
+                }
+            }
+
+            for (const auto & dir: SystemIncludes(DriverOf(command)))
+            {
+                roots.push_back({dir, IncludeOrigin::System});
+            }
+        }
+
+        std::vector<IncludeCandidate> result;
+        std::unordered_set<std::string> seen;
+        for (const auto & root: roots)
+        {
+            const std::filesystem::path directory = root.origin == IncludeOrigin::Absolute
+                ? typed_directory
+                : NormalizedAbsolute(root.path / typed_directory);
+            std::error_code ec;
+            std::filesystem::directory_iterator iterator(directory, std::filesystem::directory_options::skip_permission_denied, ec);
+            if (ec)
+            {
+                continue;
+            }
+
+            for (const auto & entry: iterator)
+            {
+                const std::string name = entry.path().filename().string();
+                if (name.empty() || name.front() == '.' || !StartsWithNoCase(name, name_prefix))
+                {
+                    continue;
+                }
+
+                std::error_code type_ec;
+                const bool is_directory = entry.is_directory(type_ec);
+                if (type_ec || (!is_directory && (!entry.is_regular_file(type_ec) || !IsIncludableFile(entry.path()))))
+                {
+                    continue;
+                }
+
+                std::string label = is_directory ? name + "/" : name;
+                if (!seen.insert(label).second)
+                {
+                    continue;
+                }
+
+                result.push_back({std::move(label), is_directory, root.origin, directory});
+            }
+        }
+
+        // Project directories before system ones (the cap must never drop a
+        // project header in favour of a system one); inside an origin,
+        // directories first because they lead to the rest of the tree.
+        std::sort(result.begin(), result.end(), [](const IncludeCandidate &a, const IncludeCandidate &b)
+            {
+                if (a.origin != b.origin)
+                {
+                    return a.origin < b.origin;
+                }
+
+                return a.directory != b.directory ? a.directory : a.label < b.label;
+        });
+        if (result.size() > max_results)
+        {
+            result.resize(max_results);
+        }
+
+        return result;
+    }
+
+    std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text, std::size_t offset)
+    {
+        offset = std::min(offset, text.size());
+        const std::size_t line_begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
+        const std::string_view line = text.substr(line_begin, offset - line_begin);
+        std::size_t i = 0;
+        auto skip_blanks = [&]
+        {
+            while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
+            {
+                ++i;
+            }
+        };
+
+        skip_blanks();
+        if (i >= line.size() || line[i] != '#')
+        {
+            return std::nullopt;
+        }
+
+        ++i;
+        skip_blanks();
+        constexpr std::string_view keyword = "include";
+        if (line.substr(i, keyword.size()) != keyword)
+        {
+            return std::nullopt;
+        }
+
+        i += keyword.size();
+        constexpr std::string_view next_suffix = "_next";
+        if (line.substr(i, next_suffix.size()) == next_suffix)
+        {
+            i += next_suffix.size();
+        }
+
+        skip_blanks();
+        if (i >= line.size() || (line[i] != '<' && line[i] != '"'))
+        {
+            return std::nullopt;
+        }
+
+        const bool angled = line[i] == '<';
+        const char closing = angled ? '>' : '"';
+        ++i;
+        if (line.substr(i).find(closing) != std::string_view::npos)
+        {
+            return std::nullopt;
+        }
+
+        return IncludeContext{angled, line_begin + i};
+    }
+
     std::filesystem::path IncludeIndex::ResolveIncludeAt(const std::filesystem::path & base_dir,
         std::string_view text, std::size_t offset, const CompileCommand *command)
     {
