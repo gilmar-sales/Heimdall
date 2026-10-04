@@ -82,6 +82,7 @@ namespace heimdall::lsp
             m_pool.Shutdown();
             m_index_worker.request_stop();
             m_diag_worker.request_stop();
+            m_scan_worker.request_stop();
             m_index_cv.notify_all();
             m_diag_cv.notify_all();
         };
@@ -129,7 +130,16 @@ namespace heimdall::lsp
                     "\"resolveProvider\":false}},"
                     "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
             }
-            else if (method == "initialized") {}
+            else if (method == "initialized")
+            {
+                if (m_workspace_scan.load(std::memory_order_relaxed))
+                {
+                    m_scan_worker = std::jthread([this](std::stop_token stop)
+                        {
+                            WorkspaceScanMain(stop);
+                    });
+                }
+            }
             else if (method == "shutdown")
             {
                 // Answer every request received so far before acknowledging.
@@ -418,6 +428,11 @@ namespace heimdall::lsp
             }
         }
 
+        {
+            // Only an explicit workspace is scanned; the cwd fallback below is not.
+            const std::lock_guard<std::mutex> lock(m_init_mu);
+            m_workspace_root = workspace_root;
+        }
         std::error_code cwd_error;
         const auto cwd = std::filesystem::current_path(cwd_error);
         if (workspace_root.empty())
@@ -453,6 +468,12 @@ namespace heimdall::lsp
                     m_rule_options = std::move(* *cwd_rules);
                 }
             }
+        }
+
+        bool scan = true;
+        if (has_options && !options["workspaceDiagnostics"].get_bool().get(scan))
+        {
+            m_workspace_scan.store(scan, std::memory_order_relaxed);
         }
 
         bool enabled = false;
@@ -984,10 +1005,197 @@ namespace heimdall::lsp
                 m_diag_stop.request_stop();
             }
         }
+        const std::filesystem::path closed_path = PathFromUri(uri);
+        if (m_workspace_scan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
+        {
+            // The file stays part of the workspace: show what is on disk instead of clearing.
+            m_pool.Submit(ThreadPool::Task([this, closed_path]()
+                {
+                    PublishWorkspaceFile(closed_path, std::stop_token{});
+            }), ThreadPool::Priority::Background);
+            return;
+        }
+
         std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
         message += ",\"diagnostics\":[]}}";
         Send(message);
+    }
+
+    bool LanguageServer::IsWorkspaceSource(const std::filesystem::path & file)
+    {
+        static constexpr std::string_view kExtensions[] = {
+            ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h", ".ipp", ".tpp", ".inl", ".cppm", ".ixx",
+        };
+        const std::string extension = file.extension().string();
+        return std::ranges::find(kExtensions, extension) != std::end(kExtensions);
+    }
+
+    int LanguageServer::PublishWorkspaceFile(const std::filesystem::path & file, std::stop_token stop)
+    {
+        constexpr std::uintmax_t kMaxFileBytes = 2u * 1024u * 1024u;
+        std::error_code error;
+        const auto size = std::filesystem::file_size(file, error);
+        if (error || size > kMaxFileBytes)
+        {
+            return -1;
+        }
+
+        std::ifstream input(file, std::ios::binary);
+        if (!input)
+        {
+            return -1;
+        }
+
+        auto text = std::make_shared<std::string>((std::istreambuf_iterator<char>(input)),
+            std::istreambuf_iterator<char>());
+        const std::string uri = UriFromPath(file);
+        const auto is_open = [&]
+        {
+            const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
+            return m_documents.contains(uri);
+        };
+        if (is_open())
+        {
+            return -1;
+        }
+
+        const heimdall::CompileCommand * command = CommandFor(uri);
+        auto tree = heimdall::ParseTree::Parse(*text, ParserOptionsFor(command), stop);
+        if (tree.Cancelled())
+        {
+            return -1;
+        }
+
+        tree.HoldSource(text);
+        auto diagnostics = RuleDiagnostics(uri, tree, command);
+        {
+            // RuleDiagnostics caches a per-document include profile; a one-shot scan must not keep it.
+            const std::lock_guard<std::mutex> lock(m_profile_mu);
+            m_include_profiles.erase(uri);
+        }
+
+        std::vector<heimdall::SemanticDiagnostic> semantic;
+        if (m_enable_semantic.load(std::memory_order_relaxed) && command != nullptr)
+        {
+            semantic = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(tree, command);
+        }
+
+        LineIndex lines;
+        lines.Build(*text);
+        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
+        QuoteJson(uri, message);
+        message += ",\"diagnostics\":[";
+        int count = 0;
+        const auto append = [&](std::size_t offset, std::size_t length, int severity, std::string_view code,
+                                std::string_view text_message)
+        {
+            if (count++ > 0)
+            {
+                message += ',';
+            }
+
+            message += "{\"range\":{\"start\":";
+            AppendPosition(lines.ToPosition(offset), message);
+            message += ",\"end\":";
+            AppendPosition(lines.ToPosition(offset + length), message);
+            message += "},\"severity\":" + std::to_string(severity) + ",\"code\":";
+            QuoteJson(code, message);
+            message += ",\"source\":\"heimdall\",\"message\":";
+            QuoteJson(text_message, message);
+            message += '}';
+        };
+        for (const auto & diagnostic: diagnostics)
+        {
+            append(diagnostic.offset, diagnostic.length, 2, diagnostic.code, diagnostic.message);
+        }
+
+        for (const auto & diagnostic: semantic)
+        {
+            append(diagnostic.offset, diagnostic.length, 2, diagnostic.code, diagnostic.message);
+        }
+
+        for (const auto & diagnostic: tree.Diagnostics())
+        {
+            append(diagnostic.offset, 0, 1, "syntax/parse-error", diagnostic.message);
+        }
+
+        message += "]}}";
+        // Opened while analyzing: the editor pass owns the diagnostics now.
+        if (is_open())
+        {
+            return -1;
+        }
+
+        Send(message);
+        return count;
+    }
+
+    void LanguageServer::WorkspaceScanMain(std::stop_token stop)
+    {
+        std::filesystem::path root;
+        {
+            const std::lock_guard<std::mutex> lock(m_init_mu);
+            root = m_workspace_root;
+        }
+        std::error_code error;
+        if (root.empty() || !std::filesystem::is_directory(root, error))
+        {
+            return;
+        }
+
+        constexpr std::size_t kMaxFiles = 20000;
+        const auto skipped_directory = [](const std::string & name)
+        {
+            return name.starts_with('.') || name.starts_with("build") || name.starts_with("cmake-build") ||
+                name == "node_modules" || name == "_deps" || name == "vcpkg_installed" || name == "out";
+        };
+
+        std::vector<std::filesystem::path> files;
+        for (std::filesystem::recursive_directory_iterator it(
+                 root, std::filesystem::directory_options::skip_permission_denied, error), end;
+             !error && it != end && files.size() < kMaxFiles; it.increment(error))
+        {
+            if (stop.stop_requested())
+            {
+                return;
+            }
+
+            if (it->is_directory(error))
+            {
+                if (skipped_directory(it->path().filename().string()))
+                {
+                    it.disable_recursion_pending();
+                }
+            }
+            else if (IsWorkspaceSource(it->path()))
+            {
+                files.push_back(it->path());
+            }
+        }
+
+        std::size_t scanned = 0;
+        std::size_t warnings = 0;
+        for (const auto & file: files)
+        {
+            if (stop.stop_requested())
+            {
+                return;
+            }
+
+            if (const int count = PublishWorkspaceFile(file, stop); count >= 0)
+            {
+                ++scanned;
+                warnings += static_cast<std::size_t>(count);
+            }
+        }
+
+        std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":3,\"message\":";
+        QuoteJson("Heimdall: workspace scan finished: " + std::to_string(scanned) + " files, " +
+                std::to_string(warnings) + " diagnostics",
+            notification);
+        notification += "}}";
+        Send(notification);
     }
 
     void LanguageServer::FormatDocument(simdjson::dom::element request, std::string_view id)

@@ -220,6 +220,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         synchronize: { configurationSection: 'heimdall' },
         initializationOptions: {
             enableSemantic: configuration.get<boolean>('enableSemantic', false),
+            workspaceDiagnostics: configuration.get<boolean>('workspaceDiagnostics', true),
             compileCommands,
             workspaceRoot,
         },
@@ -279,6 +280,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (event.affectsConfiguration('heimdall.serverPath') ||
             event.affectsConfiguration('heimdall.serverVersion') ||
             event.affectsConfiguration('heimdall.enableSemantic') ||
+            event.affectsConfiguration('heimdall.workspaceDiagnostics') ||
             event.affectsConfiguration('heimdall.compileCommands')) {
             await restartClient(context);
         }

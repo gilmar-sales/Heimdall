@@ -95,6 +95,11 @@ if (Python3_Interpreter_FOUND)
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
+    NAME LspWorkspaceScanSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspWorkspaceScanSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
     NAME LspRuleConfigSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspRuleConfigSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"

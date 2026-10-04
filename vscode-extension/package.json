@@ -71,6 +71,11 @@
           "default": false,
           "description": "Enable simple local semantic diagnostics using compile_commands.json."
         },
+        "heimdall.workspaceDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint every C++ file in the workspace in the background (not only open files), so the Problems panel shows the project-wide warning count."
+        },
         "heimdall.compileCommands": {
           "type": "string",
           "default": "build/compile_commands.json",

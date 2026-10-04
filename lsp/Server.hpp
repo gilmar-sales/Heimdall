@@ -131,6 +131,14 @@ namespace heimdall::lsp
         std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string & uri, const heimdall::ParseTree & tree,
             const heimdall::CompileCommand * command);
 
+        // Workspace-wide linting: after `initialized`, a background pass publishes
+        // diagnostics for every C++ source under the workspace root that is not
+        // open in the editor, so the Problems panel shows the project total.
+        void WorkspaceScanMain(std::stop_token stop);
+        // Returns the number of diagnostics published, or -1 when the file was
+        // skipped (open in the editor, unreadable, cancelled).
+        int PublishWorkspaceFile(const std::filesystem::path & file, std::stop_token stop);
+        static bool IsWorkspaceSource(const std::filesystem::path & file);
         void IndexWorkerMain(std::stop_token stop);
         void DiagWorkerMain(std::stop_token stop);
         void EnqueueDiagnostics(const std::string & uri, std::int64_t version);
@@ -256,6 +264,9 @@ namespace heimdall::lsp
         m_macro_cache;
 
         std::atomic<bool> m_enable_semantic = false;
+        std::atomic<bool> m_workspace_scan = true;
+        std::filesystem::path m_workspace_root; // guarded by m_init_mu
+        std::jthread m_scan_worker;
         std::string m_initialization_error;
         std::condition_variable_any m_index_cv;
         std::mutex m_index_mu;
