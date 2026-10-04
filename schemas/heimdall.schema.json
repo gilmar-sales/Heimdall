@@ -169,6 +169,13 @@
             "error"
           ]
         },
+        "cpp/designated-init-order": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",

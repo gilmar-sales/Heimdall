@@ -606,6 +606,8 @@ namespace heimdall
                 "semântica", true, "derived function that hides the virtual overloads of a base"},
             {RuleId::ApiVirtualCallInConstructor, "api/virtual-call-in-constructor", "api", Severity::Warning,
                 "semântica", false, "virtual call in a constructor or destructor"},
+            {RuleId::DesignatedInitOrder, "cpp/designated-init-order", "cpp", Severity::Warning,
+                "semântica", true, "designated initializers out of member declaration order"},
         };
         return catalog;
     }

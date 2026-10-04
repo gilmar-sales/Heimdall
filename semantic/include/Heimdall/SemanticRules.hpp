@@ -133,6 +133,12 @@ namespace heimdall
         // `final` classes and functions, lambdas and qualified calls are skipped.
         static std::vector<Diagnostic> AnalyzeVirtualCallInConstructor(const SemanticModel &model);
 
+        // cpp/designated-init-order: `T{.b = 1, .a = 2}` where the members are declared
+        // `a` then `b`. C++20 requires the declaration order. Needs the class to be
+        // defined in this file with no bases; silent for anything unresolved. The quick
+        // fix (never applied by --fix: it changes evaluation order) permutes the entries.
+        static std::vector<Diagnostic> AnalyzeDesignatedInitOrder(const SemanticModel &model);
+
         // Every rule above except the project-level ones, sorted by offset. The
         // overload without a TypeModel runs the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);

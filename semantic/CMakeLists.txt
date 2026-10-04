@@ -21,6 +21,7 @@ add_library(heimdall_semantic STATIC
   src/ConstantAnalysis.cpp
   src/ModernizeConst.cpp
   src/ApiRules.cpp
+  src/DesignatedInit.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
 

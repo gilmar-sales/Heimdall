@@ -3923,6 +3923,8 @@ namespace heimdall
             // The type as written, when it came from a declaration (`const T&`).
             std::string text;
             bool ok = false;
+            // Initializer was `new T...`: the variable holds a `T*` (hover only).
+            bool from_new = false;
         };
 
         class MemberResolver
@@ -4169,6 +4171,11 @@ namespace heimdall
                     written += ">";
                 }
 
+                if (value.from_new)
+                {
+                    written += "*";
+                }
+
                 return written;
             }
 
@@ -4210,6 +4217,60 @@ namespace heimdall
             {
                 std::unordered_set<std::string> visited;
                 CollectInto(path, prefix, interner, best, visited, 0);
+            }
+
+            // Class initialized by the brace list opened at token `open`: `T{`,
+            // `new T{`, `T x{` and `T x = {`. `ok` is false for anything else.
+            Resolved ResolveBraceOwner(std::size_t open) const
+            {
+                std::size_t end = open;
+                const std::size_t before = PreviousSignificant(m_tokens, open, m_source);
+                if (before < m_tokens.size() && IsPunct(before, "="))
+                {
+                    end = before;
+                }
+
+                const Chain chain = ParseReceiver(end);
+                if (!chain.ok || chain.segments.empty())
+                {
+                    return {};
+                }
+
+                Resolved value = ResolveChain(chain);
+                if (value.ok)
+                {
+                    return value;
+                }
+
+                const ChainSegment & last = chain.segments.back();
+                if (chain.segments.size() != 1 || !last.post.empty())
+                {
+                    return {};
+                }
+
+                TypeName type;
+                type.path = Join(last.qualifier, {last.name});
+                type.args = last.targs;
+                type.ok = true;
+                return ResolveType(type, m_hint, 0);
+            }
+
+            // Data members of `path` (designators of an initializer list).
+            void CollectFields(const std::vector<std::string> & path, std::string_view prefix,
+                const std::unordered_set<std::string> & used, StringInterner & interner,
+                FlatHashMap<CompletionItem> & best) const
+            {
+                for (const IndexedScope * scope: ScopesAt(path))
+                {
+                    for (const auto & member: scope->members)
+                    {
+                        if (member.kind == CompletionKind::Variable && !used.contains(member.label) &&
+                            MatchesPrefix(member.label, prefix))
+                        {
+                            InsertItem(interner, best, member);
+                        }
+                    }
+                }
             }
 
             // First token of `a.b.c` style chains, for `auto` deduction.
@@ -4746,7 +4807,9 @@ namespace heimdall
                     return {};
                 }
 
-                return ResolveChain(chain, depth + 1);
+                Resolved value = ResolveChain(chain, depth + 1);
+                value.from_new = value.ok && chain.new_expression && chain.segments.size() == 1;
+                return value;
             }
 
             // Parses the chain whose last token precedes `end`; it must start right
@@ -4999,6 +5062,18 @@ namespace heimdall
             std::vector<std::string> m_hint;                 // namespace/class path at the cursor
         };
 
+        // Next token after `token` that is not whitespace or a comment, or tokens.size().
+        std::size_t NextSignificantToken(const std::vector<Token> & tokens, std::size_t token)
+        {
+            std::size_t i = token + 1;
+            while (i < tokens.size() && IsTrivia(tokens[i].kind))
+            {
+                ++i;
+            }
+
+            return i;
+        }
+
         void CompleteMember(const ParseTree &tree, std::size_t offset, std::string_view prefix,
             const ScopeIndex *external, StringInterner & interner, FlatHashMap<CompletionItem> & best)
         {
@@ -5017,6 +5092,91 @@ namespace heimdall
             }
 
             const MemberResolver resolver(tree, external, offset);
+
+            // `T{ .na`: a designator names a member of the class being initialized.
+            // The `.` follows `{` or `,` (a member access follows an expression).
+            const std::size_t lead = PreviousSignificant(tokens, op, source);
+            if (op_text == "." && lead < tokens.size() && tokens[lead].kind == TokenKind::Punctuation &&
+                (TokenText(source, tokens[lead]) == "{" || TokenText(source, tokens[lead]) == ","))
+            {
+                std::size_t open = lead;
+                if (TokenText(source, tokens[lead]) == ",")
+                {
+                    int depth = 0;
+                    for (open = lead; open > 0; --open)
+                    {
+                        const Token & token = tokens[open - 1];
+                        if (token.kind != TokenKind::Punctuation)
+                        {
+                            continue;
+                        }
+
+                        const std::string_view p = TokenText(source, token);
+                        if (p == ")" || p == "]" || p == "}")
+                        {
+                            ++depth;
+                        }
+                        else if ((p == "(" || p == "[" || p == "{") && depth-- == 0)
+                        {
+                            --open;
+                            break;
+                        }
+                    }
+
+                    if (open >= tokens.size() || TokenText(source, tokens[open]) != "{")
+                    {
+                        return;
+                    }
+                }
+
+                // Members already designated in this list are not offered again.
+                std::unordered_set<std::string> used;
+                int nest = 0;
+                for (std::size_t i = open; i + 2 < tokens.size(); ++i)
+                {
+                    if (tokens[i].kind != TokenKind::Punctuation)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view p = TokenText(source, tokens[i]);
+                    if (p == "{" || p == "(" || p == "[")
+                    {
+                        ++nest;
+                    }
+                    else if (p == "}" || p == ")" || p == "]")
+                    {
+                        if (--nest == 0)
+                        {
+                            break;
+                        }
+                    }
+                    else if (p == "." && nest == 1 && i != op)
+                    {
+                        const std::size_t name = NextSignificantToken(tokens, i);
+                        const std::size_t after = name < tokens.size() ? NextSignificantToken(tokens, name)
+                                                                       : tokens.size();
+                        const std::size_t lead_in = PreviousSignificant(tokens, i, source);
+                        if (name < tokens.size() && after < tokens.size() &&
+                            tokens[name].kind == TokenKind::Identifier &&
+                            (TokenText(source, tokens[after]) == "=" || TokenText(source, tokens[after]) == "{") &&
+                            lead_in < tokens.size() &&
+                            (TokenText(source, tokens[lead_in]) == "{" || TokenText(source, tokens[lead_in]) == ","))
+                        {
+                            used.emplace(TokenText(source, tokens[name]));
+                        }
+                    }
+                }
+
+                const Resolved owner = resolver.ResolveBraceOwner(open);
+                if (owner.ok)
+                {
+                    resolver.CollectFields(owner.path, prefix, used, interner, best);
+                }
+
+                return;
+            }
+
             const Chain chain = resolver.ParseReceiver(op);
             const Resolved type = resolver.ResolveChain(chain);
             if (!type.ok)

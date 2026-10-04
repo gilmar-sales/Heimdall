@@ -46,7 +46,8 @@ namespace heimdall
         ApiVirtualDestructor,
         ApiExplicitConstructor,
         ApiOverloadHiding,
-        ApiVirtualCallInConstructor
+        ApiVirtualCallInConstructor,
+        DesignatedInitOrder
     };
 
     struct RuleOverride

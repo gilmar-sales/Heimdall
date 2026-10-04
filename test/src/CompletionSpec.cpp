@@ -1110,3 +1110,62 @@ TEST(CompletionSpec, TemplateParametersAreFoundBehindDeclarationSpecifiers)
     EXPECT_TRUE(Has(labels("auto loaded = lib::Load(\"x\");"), "root"));
     EXPECT_TRUE(Has(labels("std::expected<lib::Config, std::string> loaded = lib::Load(\"x\");"), "root"));
 }
+
+TEST(CompletionSpec, HoverOfAutoFromANewExpressionIsAPointer)
+{
+    const std::string source =
+        "struct Node { Node* next; int value; };\n"
+        "int main() {\n"
+        "    auto root = new Node{ .next = 0, .value = 10 };\n"
+        "    auto plain = Node{ .next = 0, .value = 1 };\n"
+        "}\n";
+    const auto detail = [&](const char *needle)
+    {
+        const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1);
+        return hover.has_value() ? hover->detail : std::string("<none>");
+    };
+    EXPECT_EQ(detail("root"), "Node*");
+    EXPECT_EQ(detail("plain"), "Node");
+}
+
+TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
+{
+    const auto labels = [](std::string source)
+    {
+        const auto at = source.find('|');
+        source.erase(at, 1);
+        return heimdall::CompletionEngine::Complete(source, at);
+    };
+    const std::string node = "struct Node { Node* next; int value; void run(); };\n";
+
+    for (const char *form: {"void f() { auto p = new Node{ .| }; }\n", "void f() { Node n{ .| }; }\n",
+             "void f() { Node n = { .| }; }\n", "void f() { auto n = Node{ .| }; }\n"})
+    {
+        const auto items = labels(node + form);
+        EXPECT_TRUE(Contains(items, "next")) << form;
+        EXPECT_TRUE(Contains(items, "value")) << form;
+        EXPECT_FALSE(Contains(items, "run")) << form; // only data members are designators
+    }
+
+    // After a comma and with a prefix.
+    const auto later = labels(node + "void f() { Node n{ .next = 0,\n .va| }; }\n");
+    EXPECT_TRUE(Contains(later, "value"));
+    EXPECT_FALSE(Contains(later, "next"));
+
+    // Members already designated, before or after the cursor, are not offered again.
+    const auto rest = labels(node + "void f() { auto p = new Node{
+ .next = 0,
+ .|
+ }; }
+");
+    EXPECT_TRUE(Contains(rest, "value"));
+    EXPECT_FALSE(Contains(rest, "next"));
+    const auto ahead = labels(node + "void f() { Node n{ .|, .value = 1 }; }
+");
+    EXPECT_TRUE(Contains(ahead, "next"));
+    EXPECT_FALSE(Contains(ahead, "value"));
+
+    // A member access after an expression is not a designator.
+    const auto access = labels(node + "void f(Node n) { int x = n.| }\n");
+    EXPECT_TRUE(Contains(access, "run"));
+}
