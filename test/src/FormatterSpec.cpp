@@ -257,8 +257,8 @@ TEST(FormatterSpec, NormalizesSpacing)
         "foo(a, b, c);\n"
         "if (x) {}\n"
         "for (int i = 0; i<10; ++i) {}\n"
-        "int *x;\n"
-        "int &r = x;\n"
+        "int* x;\n"
+        "int& r = x;\n"
         "a == b;\n"
         "x * (y + 1);\n"
         "} else {\n";
@@ -405,7 +405,7 @@ TEST(FormatterSpec, SplitsBracesAfterFunctionSuffixes)
     check("std::size_t C::M(int i) noexcept { return i; }\n",
           "std::size_t C::M(int i) noexcept\n{\n    return i;\n}\n");
     check("bool X::operator==(const X& o) const { return true; }\n",
-          "bool X::operator==(const X &o) const\n{\n    return true;\n}\n");
+          "bool X::operator==(const X& o) const\n{\n    return true;\n}\n");
     check("C::C() : x(1) {}\n", "C::C() : x(1) {}\n");
     check("template <typename T> T f(T t) requires C<T> { return t; }\n",
           "template <typename T> T f(T t) requires C<T>\n{\n    return t;\n}\n");
@@ -516,7 +516,13 @@ TEST(FormatterSpec, AlignsReferencesAfterQualifiedTypes)
 {
     constexpr std::string_view source =
         "std::filesystem::path AbsoluteNormalized(const std::filesystem::path & path);\n"
-        "foo::Bar *alias;\n";
+        "foo::Bar *alias;\n"
+        "int *Make();\n"
+        "foo::Bar *Create();\n"
+        "void Consume(const std::vector<Token> & tokens);\n"
+        "void Take(std::vector<int> && values);\n"
+        "x = a * b();\n"
+        "f(a * b());\n";
 
     const auto check = [](heimdall::FormatOptions options, std::string_view expected)
     {
@@ -526,12 +532,25 @@ TEST(FormatterSpec, AlignsReferencesAfterQualifiedTypes)
         EXPECT_EQ(formatter.Format(formatted), formatted);
     };
 
-    check({}, "std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path);\n"
-        "foo::Bar *alias;\n");
-    check({ .pointer_alignment = heimdall::PointerAlignment::Left,
-            .reference_alignment = heimdall::ReferenceAlignment::Left },
-        "std::filesystem::path AbsoluteNormalized(const std::filesystem::path& path);\n"
-        "foo::Bar* alias;\n");
+    // Defaults bind to the type.
+    check({}, "std::filesystem::path AbsoluteNormalized(const std::filesystem::path& path);\n"
+        "foo::Bar* alias;\n"
+        "int* Make();\n"
+        "foo::Bar* Create();\n"
+        "void Consume(const std::vector<Token>& tokens);\n"
+        "void Take(std::vector<int>&& values);\n"
+        "x = a * b();\n"
+        "f(a * b());\n");
+    check({ .pointer_alignment = heimdall::PointerAlignment::Right,
+            .reference_alignment = heimdall::ReferenceAlignment::Right },
+        "std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path);\n"
+        "foo::Bar *alias;\n"
+        "int *Make();\n"
+        "foo::Bar *Create();\n"
+        "void Consume(const std::vector<Token> &tokens);\n"
+        "void Take(std::vector<int> &&values);\n"
+        "x = a * b();\n"
+        "f(a * b());\n");
 }
 
 TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
@@ -546,12 +565,16 @@ TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
         EXPECT_EQ(formatter.Format(formatted), formatted);
     };
 
-    // Defaults: both bind to the declarator name.
-    check({}, "int *x;\nint &r = x;\nvoid f(int &&v);\nint *const p = nullptr;\n");
+    // Right: both bind to the declarator name.
+    check({ .pointer_alignment = heimdall::PointerAlignment::Right,
+            .reference_alignment = heimdall::ReferenceAlignment::Right },
+        "int *x;\nint &r = x;\nvoid f(int &&v);\nint *const p = nullptr;\n");
     // Split: pointers to the type, references to the name.
-    check({ .pointer_alignment = heimdall::PointerAlignment::Left },
+    check({ .pointer_alignment = heimdall::PointerAlignment::Left,
+            .reference_alignment = heimdall::ReferenceAlignment::Right },
         "int* x;\nint &r = x;\nvoid f(int &&v);\nint * const p = nullptr;\n");
-    check({ .reference_alignment = heimdall::ReferenceAlignment::Left },
+    check({ .pointer_alignment = heimdall::PointerAlignment::Right,
+            .reference_alignment = heimdall::ReferenceAlignment::Left },
         "int *x;\nint& r = x;\nvoid f(int&& v);\nint *const p = nullptr;\n");
     check({ .pointer_alignment = heimdall::PointerAlignment::Left,
             .reference_alignment = heimdall::ReferenceAlignment::Left },
@@ -754,7 +777,7 @@ TEST(FormatterSpec, KeepsStackedPointersTogether)
 {
     const heimdall::Formatter formatter({ .brace_style = heimdall::BraceStyle::Attach });
     EXPECT_EQ(formatter.Format("int main(int argc, char **argv, const char *const *p);\n"),
-              "int main(int argc, char **argv, const char *const *p);\n");
+              "int main(int argc, char**argv, const char* const* p);\n");
     EXPECT_EQ(formatter.Format("void f() { x = a * *p; }\n"), "void f() {\n    x = a * *p;\n}\n");
 }
 

@@ -21,6 +21,7 @@ add_executable(Tests_run
   src/SemanticAnalyzerSpec.cpp
   src/SemanticModelSpec.cpp
   src/SemanticRulesSpec.cpp
+  src/ApiRulesSpec.cpp
   src/SemanticModernizeSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
   src/SemanticTyperSpec.cpp

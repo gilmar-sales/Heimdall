@@ -1601,7 +1601,8 @@ namespace heimdall
         auto all = AnalyzeOverride(model);
         for (auto &&part: {AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
                  AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
-                 AnalyzeConstexpr(flow)})
+                 AnalyzeConstexpr(flow), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
+                 AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model)})
         {
             all.insert(all.end(), part.begin(), part.end());
         }

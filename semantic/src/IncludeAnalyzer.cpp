@@ -50,7 +50,7 @@ namespace heimdall
     namespace
     {
 
-        const std::unordered_set<std::string_view> & Keywords()
+        const std::unordered_set<std::string_view>& Keywords()
         {
             static const std::unordered_set<std::string_view> keywords = {
                 "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break",
@@ -93,7 +93,7 @@ namespace heimdall
             });
         }
 
-        std::size_t NextSignificant(const std::vector<Token> & tokens, std::size_t index)
+        std::size_t NextSignificant(const std::vector<Token>& tokens, std::size_t index)
         {
             while (index < tokens.size() && IsTrivia(tokens[index].kind))
             {
@@ -103,7 +103,7 @@ namespace heimdall
             return index;
         }
 
-        std::size_t PreviousSignificant(const std::vector<Token> & tokens, std::size_t index)
+        std::size_t PreviousSignificant(const std::vector<Token>& tokens, std::size_t index)
         {
             while (index > 0)
             {
@@ -182,7 +182,7 @@ namespace heimdall
         {
             HeaderSymbols symbols;
             symbols.readable = true;
-            const auto &keywords = Keywords();
+            const auto& keywords = Keywords();
             const std::vector<Token> tokens = Lexer(source).Lex();
             auto text =[&](std::size_t i)
             {
@@ -214,7 +214,7 @@ namespace heimdall
 
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const Token &token = tokens[i];
+                const Token& token = tokens[i];
                 if (IsTrivia(token.kind))
                 {
                     continue;
@@ -304,7 +304,7 @@ namespace heimdall
                         {
                             const std::size_t previous = PreviousSignificant(tokens, i);
                             const bool macro_call = previous < tokens.size() &&
-                                tokens[previous].kind == TokenKind::Identifier && IsAllCaps(text(previous));
+                                tokens[previous].kind == TokenKind::Identifier&& IsAllCaps(text(previous));
                             paren_collects.push_back(saw_typedef || macro_call);
                         }
                         else if (punctuation == ")")
@@ -528,7 +528,7 @@ namespace heimdall
             bool skip_statement = false;
             auto at_declaration_level =[&]
             {
-                return std::all_of(scopes.begin(), scopes.end(),[](const Frame &f)
+                return std::all_of(scopes.begin(), scopes.end(),[](const Frame& f)
                     {
                         return f.is_namespace;
                 });
@@ -536,7 +536,7 @@ namespace heimdall
 
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const Token &token = tokens[i];
+                const Token& token = tokens[i];
                 if (IsTrivia(token.kind))
                 {
                     continue;
@@ -790,13 +790,13 @@ namespace heimdall
         // (after optional cv-qualifiers), or is itself a `class N;` declaration.
         // Everything inside function bodies and initializers is treated as a
         // use of the complete type.
-        UseClassification ClassifyUses(const ParseTree &tree,
-            const std::unordered_set<std::string_view> & interest)
+        UseClassification ClassifyUses(const ParseTree& tree,
+            const std::unordered_set<std::string_view>& interest)
         {
             UseClassification result;
             const std::string_view source = tree.Source();
-            const auto &tokens = tree.Tokens();
-            const auto &directives = tree.Directives();
+            const auto& tokens = tree.Tokens();
+            const auto& directives = tree.Directives();
             auto text =[&](std::size_t i)
             {
                 return source.substr(tokens[i].offset, tokens[i].length);
@@ -841,7 +841,7 @@ namespace heimdall
 
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
-                const Token &token = tokens[i];
+                const Token& token = tokens[i];
                 if (IsTrivia(token.kind))
                 {
                     continue;
@@ -1052,7 +1052,7 @@ namespace heimdall
             return result;
         }
 
-        std::string ReadWholeFile(const std::filesystem::path & path, std::size_t max_bytes)
+        std::string ReadWholeFile(const std::filesystem::path& path, std::size_t max_bytes)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
@@ -1073,14 +1073,14 @@ namespace heimdall
             return content;
         }
 
-        std::int64_t MTimeOf(const std::filesystem::path & path)
+        std::int64_t MTimeOf(const std::filesystem::path& path)
         {
             std::error_code ec;
             const auto time = std::filesystem::last_write_time(path, ec);
             return ec ? 0 : static_cast<std::int64_t>(time.time_since_epoch().count());
         }
 
-        std::uintmax_t SizeOf(const std::filesystem::path & path)
+        std::uintmax_t SizeOf(const std::filesystem::path& path)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
@@ -1088,7 +1088,7 @@ namespace heimdall
         }
 
         // Process-wide: the same <vector> is extracted once across documents.
-        std::shared_ptr<const HeaderSymbols> SymbolsFor(const std::filesystem::path & path, bool strict)
+        std::shared_ptr<const HeaderSymbols> SymbolsFor(const std::filesystem::path& path, bool strict)
         {
             struct Cached
             {
@@ -1140,7 +1140,7 @@ namespace heimdall
         }
 
         // `#ifndef X` / `#define X` ... `#endif` wrapping the whole file.
-        bool HasIncludeGuard(const std::vector<PreprocessorDirective> & directives)
+        bool HasIncludeGuard(const std::vector<PreprocessorDirective>& directives)
         {
             if (directives.size() < 3 || directives.front().kind != DirectiveKind::Ifndef ||
                 directives[1].kind != DirectiveKind::Define || directives.back().kind != DirectiveKind::Endif)
@@ -1178,10 +1178,10 @@ namespace heimdall
 
         // Direct `#include "x"` / `#include <x>` directives, in source order.
         // Macro includes and `#include_next` have no literal target to judge.
-        std::vector<IncludeDirective> ScanDirectIncludes(const ParseTree &tree)
+        std::vector<IncludeDirective> ScanDirectIncludes(const ParseTree& tree)
         {
             const std::string_view source = tree.Source();
-            const auto &directives = tree.Directives();
+            const auto& directives = tree.Directives();
 
             const std::size_t base_depth = HasIncludeGuard(directives) ? 1 : 0;
 
@@ -1278,7 +1278,7 @@ namespace heimdall
         // Headers whose job is not to be named: they are used implicitly by
         // language features (braced lists, <=>, typeid, new, coroutines,
         // structured bindings) or textually included.
-        bool IsImplicitUseHeader(std::string_view target, const std::filesystem::path & header)
+        bool IsImplicitUseHeader(std::string_view target, const std::filesystem::path& header)
         {
             static const std::unordered_set<std::string_view> implicit = {
                 "<initializer_list>", "<compare>", "<typeinfo>", "<new>", "<coroutine>", "<tuple>",
@@ -1296,17 +1296,17 @@ namespace heimdall
 
         // Configuration headers every standard header drags in: their names say
         // nothing about which include is needed.
-        bool IsAmbientConfigHeader(const std::filesystem::path & file)
+        bool IsAmbientConfigHeader(const std::filesystem::path& file)
         {
             const std::string name = file.filename().string();
             return name == "c++config.h" || name == "os_defines.h" || name == "cpu_defines.h";
         }
 
-        bool IsSystemFile(const std::filesystem::path & file,
-            const std::vector<std::filesystem::path> & system_dirs)
+        bool IsSystemFile(const std::filesystem::path& file,
+            const std::vector<std::filesystem::path>& system_dirs)
         {
             const auto normalized = file.lexically_normal();
-            return std::any_of(system_dirs.begin(), system_dirs.end(),[&](const std::filesystem::path & dir)
+            return std::any_of(system_dirs.begin(), system_dirs.end(),[&](const std::filesystem::path& dir)
                 {
                     const auto relative = normalized.lexically_relative(dir);
                     return!relative.empty() && *relative.begin() != "..";
@@ -1325,8 +1325,8 @@ namespace heimdall
             std::vector<std::pair<std::uintmax_t, std::int64_t>> stamps;
         };
 
-        std::string ClosureKey(const std::filesystem::path & base_dir, std::string_view target,
-            const CompileCommand *command)
+        std::string ClosureKey(const std::filesystem::path& base_dir, std::string_view target,
+            const CompileCommand* command)
         {
             std::string key;
             const bool quoted =!target.empty() && target.front() == '"';
@@ -1363,13 +1363,13 @@ namespace heimdall
             return key;
         }
 
-        std::mutex & ClosureMutex()
+        std::mutex& ClosureMutex()
         {
             static std::mutex mutex;
             return mutex;
         }
 
-        std::unordered_map<std::string, CachedClosure> & ClosureCache()
+        std::unordered_map<std::string, CachedClosure>& ClosureCache()
         {
             static std::unordered_map<std::string, CachedClosure> cache;
             return cache;
@@ -1377,9 +1377,9 @@ namespace heimdall
 
         // Closure of `#include <target>` seen from base_dir; `complete` is false
         // for anything that could not be fully resolved (never cached).
-        std::vector<std::filesystem::path> ResolveClosure(const std::filesystem::path & base_dir,
-            const std::string & target, const CompileCommand *command, const IncludeIndex::Limits & limits,
-            bool &complete)
+        std::vector<std::filesystem::path> ResolveClosure(const std::filesystem::path& base_dir,
+            const std::string& target, const CompileCommand* command, const IncludeIndex::Limits& limits,
+            bool& complete)
         {
             const std::string key = ClosureKey(base_dir, target, command);
             {
@@ -1387,7 +1387,7 @@ namespace heimdall
                 const auto found = ClosureCache().find(key);
                 if (found != ClosureCache().end())
                 {
-                    const CachedClosure &cached = found->second;
+                    const CachedClosure& cached = found->second;
                     bool fresh = true;
                     for (std::size_t i = 0; i < cached.files.size() && fresh; ++i)
                     {
@@ -1428,7 +1428,7 @@ namespace heimdall
             return files;
         }
 
-        std::string PathKey(const std::filesystem::path & path)
+        std::string PathKey(const std::filesystem::path& path)
         {
             return path.lexically_normal().generic_string();
         }
@@ -1437,13 +1437,13 @@ namespace heimdall
 
     // Forward declarations replacing the include, one line each, or nothing
     // when some use of `matched` needs more than a declaration.
-    static std::optional<std::vector<std::string>> ForwardDeclarations(const ParseTree &tree,
-        const IncludeProfile::Entry & entry, const std::vector<std::string_view> & matched)
+    static std::optional<std::vector<std::string>> ForwardDeclarations(const ParseTree& tree,
+        const IncludeProfile::Entry& entry, const std::vector<std::string_view>& matched)
     {
         std::vector<RecordDecl> chosen;
         for (const std::string_view name: matched)
         {
-            const RecordDecl *found = nullptr;
+            const RecordDecl* found = nullptr;
             for (const auto & provider: entry.providers)
             {
                 for (const auto & record: provider->records)
@@ -1490,25 +1490,25 @@ namespace heimdall
         return lines;
     }
 
-    std::vector<DirectInclude> IncludeAnalyzer::DirectIncludes(const ParseTree &tree)
+    std::vector<DirectInclude> IncludeAnalyzer::DirectIncludes(const ParseTree& tree)
     {
         return ScanDirectIncludes(tree);
     }
 
-    bool IncludeProfile::IsSystemFile(const std::filesystem::path & file) const
+    bool IncludeProfile::IsSystemFile(const std::filesystem::path& file) const
     {
         return heimdall::IsSystemFile(file, system_dirs);
     }
 
-    std::string IncludeAnalyzer::Fingerprint(const std::filesystem::path & file, const ParseTree &tree,
-        const CompileCommand *command)
+    std::string IncludeAnalyzer::Fingerprint(const std::filesystem::path& file, const ParseTree& tree,
+        const CompileCommand* command)
     {
         const std::filesystem::path base_dir = file.has_parent_path() ? file.parent_path() : std::filesystem::path();
         return IncludeIndex::IncludeFingerprint(base_dir, tree.Source(), command);
     }
 
-    std::shared_ptr<const IncludeProfile> IncludeAnalyzer::BuildProfile(const std::filesystem::path & file,
-        const ParseTree &tree, const CompileCommand *command)
+    std::shared_ptr<const IncludeProfile> IncludeAnalyzer::BuildProfile(const std::filesystem::path& file,
+        const ParseTree& tree, const CompileCommand* command)
     {
         auto profile = std::make_shared<IncludeProfile>();
         profile->fingerprint = Fingerprint(file, tree, command);
@@ -1542,7 +1542,7 @@ namespace heimdall
         std::vector<Closure> closures(includes.size());
         for (std::size_t i = 0; i < includes.size(); ++i)
         {
-            auto &entry = profile->entries[i];
+            auto& entry = profile->entries[i];
             entry.target = includes[i].target;
             entry.conditional = includes[i].conditional;
             if (includes[i].conditional)
@@ -1605,14 +1605,14 @@ namespace heimdall
         const std::string primary_stem = Lowercase(file.stem().string());
         for (std::size_t i = 0; i < includes.size(); ++i)
         {
-            auto &entry = profile->entries[i];
-            const Closure &closure = closures[i];
+            auto& entry = profile->entries[i];
+            const Closure& closure = closures[i];
             if (!closure.complete)
             {
                 continue;
             }
 
-            const std::filesystem::path & header = closure.files.front();
+            const std::filesystem::path& header = closure.files.front();
             const std::string header_key = PathKey(header);
             if (Lowercase(header.stem().string()) == primary_stem || IsImplicitUseHeader(entry.target, header))
             {
@@ -1684,17 +1684,17 @@ namespace heimdall
         return profile;
     }
 
-    bool IncludeAnalyzer::IsFresh(const IncludeProfile &profile)
+    bool IncludeAnalyzer::IsFresh(const IncludeProfile& profile)
     {
         return std::all_of(profile.stamps.begin(), profile.stamps.end(),
-            [](const IncludeProfile::FileStamp & stamp)
+            [](const IncludeProfile::FileStamp& stamp)
             {
                 return SizeOf(stamp.path) == stamp.size && MTimeOf(stamp.path) == stamp.mtime;
         });
     }
 
-    std::vector<Diagnostic> IncludeAnalyzer::Analyze(const ParseTree &tree,
-        const IncludeProfile &profile)
+    std::vector<Diagnostic> IncludeAnalyzer::Analyze(const ParseTree& tree,
+        const IncludeProfile& profile)
     {
         std::vector<Diagnostic> diagnostics;
         const auto includes = ScanDirectIncludes(tree);
@@ -1704,9 +1704,9 @@ namespace heimdall
         }
 
         const std::string_view source = tree.Source();
-        const auto &tokens = tree.Tokens();
-        const auto &directives = tree.Directives();
-        const auto &keywords = Keywords();
+        const auto& tokens = tree.Tokens();
+        const auto& directives = tree.Directives();
+        const auto& keywords = Keywords();
 
         // Every identifier of the file outside #include lines. Comments and
         // literals are separate token kinds, so they never count.
@@ -1763,7 +1763,7 @@ namespace heimdall
 
         // A file with nothing but includes (an umbrella header) re-exports them.
         if (used.empty() && std::none_of(profile.entries.begin(), profile.entries.end(),
-            [](const IncludeProfile::Entry & entry)
+            [](const IncludeProfile::Entry& entry)
             {
                 return entry.circular;
         }))
@@ -1775,8 +1775,8 @@ namespace heimdall
         lines.Build(source);
         for (std::size_t i = 0; i < includes.size(); ++i)
         {
-            const auto &include = includes[i];
-            const auto &entry = profile.entries[i];
+            const auto& include = includes[i];
+            const auto& entry = profile.entries[i];
             if (entry.circular && !include.conditional && entry.target == include.target)
             {
                 const auto position = lines.Lookup(include.target_offset);
@@ -1796,7 +1796,7 @@ namespace heimdall
             for (const std::string_view word: used)
             {
                 if (std::any_of(entry.providers.begin(), entry.providers.end(),
-                    [&](const auto &provider)
+                    [&](const auto& provider)
                     {
                         return provider->names.contains(word);
                 }))

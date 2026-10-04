@@ -146,6 +146,7 @@ namespace heimdall
         constexpr int kTypeDefinitionScanLimit = 64;   // backward scan for a type-definition opener
         constexpr int kBaseListScanLimit = 64;          // backward scan for a base-list colon
         constexpr int kBlockBraceScanLimit = 256;      // backward scan for a block-introducing token
+        constexpr int kMaxTemplateLookback = 64;       // backward scan for a template-id `<`
 
         bool IsSpaceBeforeParenKeyword(std::string_view text)
         {
@@ -196,11 +197,48 @@ namespace heimdall
             return IsBinaryOperator(text);
         }
 
+        // True when the `>`/`>>` at `gt` closes a template-id
+        // (`vector<Token> &tokens`): a `<` is reachable by scanning back over
+        // template arguments only. Bails on anything that cannot appear inside
+        // `<...>`, so `a > &b`, `f(a > &b)` and `x = (a > &b)` stay binary.
+        bool ClosesTemplateId(const std::vector<Sig> & sigs, std::size_t gt)
+        {
+            for (int steps = 0; steps < kMaxTemplateLookback && gt > 0; ++steps)
+            {
+                --gt;
+                if (sigs[gt].kind == TokenKind::Punctuation)
+                {
+                    const std::string_view text = sigs[gt].text;
+                    if (text == "<")
+                    {
+                        return true;
+                    }
+
+                    if (text == ";" || text == "{" || text == "}" || text == "(" || text == ")" ||
+                        text == "[" || text == "]")
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (sigs[gt].kind != TokenKind::Identifier && sigs[gt].kind != TokenKind::Number)
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
         // True when sigs[k] (`*`, `&` or `&&`) declares rather than computes:
-        // `T *p`, `T &r = ...`, `f(T&&)`. Genuinely ambiguous cases (`f(a & b)`,
-        // `x * y;`) follow the declaration reading, matching the grammar;
-        // `=`-preceded and condition-paren positions stay binary (`x = a & b`,
-        // `if (a && b)`).
+        // `T *p`, `T &r = ...`, `f(T&&)`, `T *f()`. Genuinely ambiguous cases
+        // (`f(a & b)`, `x * y;`) follow the declaration reading, matching the
+        // grammar; `=`-preceded and condition-paren positions stay binary
+        // (`x = a & b`, `if (a && b)`). A call paren after the name (`*f()`)
+        // is a function declarator only when the type side is unmistakably a
+        // type; plain `a * b()` stays a multiplication.
         bool IsDeclaratorStar(const std::vector<Sig> & sigs, std::size_t k)
         {
             const std::string_view text = sigs[k].text;
@@ -254,7 +292,8 @@ namespace heimdall
             }
 
             const std::string_view after = sigs[name + 1].text;
-            if (after != ";" && after != "=" && after != "," && after != ")")
+            const bool function_declarator = after == "(";
+            if (after != ";" && after != "=" && after != "," && after != ")" && !function_declarator)
             {
                 return false;
             }
@@ -267,6 +306,13 @@ namespace heimdall
 
             if (sigs[k - 1].kind != TokenKind::Identifier)
             {
+                // `const std::vector<Token> &tokens`: the type ends in a
+                // template-id close rather than an identifier.
+                if ((prev == ">" || prev == ">>") && ClosesTemplateId(sigs, k - 1))
+                {
+                    return true;
+                }
+
                 return false;
             }
 
@@ -276,6 +322,16 @@ namespace heimdall
             } // `Widget *p;`
 
             const std::string_view before = sigs[k - kTwoTokenOffset].text;
+            if (function_declarator)
+            {
+                // `int *f()` never reaches here (early `true` above via
+                // IsTypeKeyword/`*`/`&`); whatever remains must prove it is a
+                // type, otherwise `a * b()` and `f(a * b())` stay multiplications.
+                // A template-id `>` is deliberately not accepted: `a > *f()` is
+                // a comparison with a dereference, not a declarator.
+                return before == "::" || IsQualifierKeyword(before);
+            }
+
             return before == "(" || before == "," || before == ";" || before == "{" || before == "}" ||
                 before == "<" || before == ">" || before == ":" || before == "::" ||
                 IsQualifierKeyword(before);

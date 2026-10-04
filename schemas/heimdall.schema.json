@@ -141,6 +141,34 @@
             "error"
           ]
         },
+        "api/virtual-destructor": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/explicit-constructor": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/overload-hiding": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/virtual-call-in-constructor": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",
@@ -229,7 +257,7 @@
             "left",
             "right"
           ],
-          "default": "right",
+          "default": "left",
           "description": "Attachment of declarator `*`: 'left' formats `int* x`, 'right' formats `int *x`."
         },
         "reference-alignment": {
@@ -237,7 +265,7 @@
             "left",
             "right"
           ],
-          "default": "right",
+          "default": "left",
           "description": "Attachment of declarator `&`/`&&`: 'left' formats `int& x`, 'right' formats `int &x`."
         }
       },

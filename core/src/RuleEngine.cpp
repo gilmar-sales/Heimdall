@@ -598,6 +598,14 @@ namespace heimdall
                 "semântica", true, "local variable that is never modified and could be const"},
             {RuleId::ModernizeConstexpr, "cpp/modernize-constexpr", "cpp", Severity::Warning,
                 "semântica", true, "variable or function that could be constexpr"},
+            {RuleId::ApiVirtualDestructor, "api/virtual-destructor", "api", Severity::Warning,
+                "semântica", true, "polymorphic class whose destructor is not virtual"},
+            {RuleId::ApiExplicitConstructor, "api/explicit-constructor", "api", Severity::Warning,
+                "semântica", true, "constructor callable with one argument that is not explicit"},
+            {RuleId::ApiOverloadHiding, "api/overload-hiding", "api", Severity::Warning,
+                "semântica", true, "derived function that hides the virtual overloads of a base"},
+            {RuleId::ApiVirtualCallInConstructor, "api/virtual-call-in-constructor", "api", Severity::Warning,
+                "semântica", false, "virtual call in a constructor or destructor"},
         };
         return catalog;
     }

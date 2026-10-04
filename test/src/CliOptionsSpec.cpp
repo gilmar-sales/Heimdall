@@ -56,14 +56,14 @@ TEST(CliOptionsSpec, RejectsAlignmentFlagsOnOtherCommands)
     EXPECT_FALSE(ParseArgs({"check", "--reference-alignment", "right", "a.cpp"}, options));
 }
 
-TEST(CliOptionsSpec, AlignmentDefaultsToRightWithoutFlags)
+TEST(CliOptionsSpec, AlignmentDefaultsToLeftWithoutFlags)
 {
     heimdall::cli::Options options{};
     EXPECT_TRUE(ParseArgs({"format", "a.cpp"}, options));
     EXPECT_FALSE(options.pointer_alignment_override);
     EXPECT_FALSE(options.reference_alignment_override);
-    EXPECT_EQ(options.pointer_alignment, heimdall::PointerAlignment::Right);
-    EXPECT_EQ(options.reference_alignment, heimdall::ReferenceAlignment::Right);
+    EXPECT_EQ(options.pointer_alignment, heimdall::PointerAlignment::Left);
+    EXPECT_EQ(options.reference_alignment, heimdall::ReferenceAlignment::Left);
 }
 
 TEST(CliOptionsSpec, FixUnsafeImpliesFix)

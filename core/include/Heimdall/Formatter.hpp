@@ -61,8 +61,8 @@ namespace heimdall
         std::size_t max_empty_lines = 1;
         // Maximum line width before comma-driven breaks; 0 disables breaking.
         std::size_t column_limit = kDefaultColumnLimit;
-        PointerAlignment pointer_alignment = PointerAlignment::Right;
-        ReferenceAlignment reference_alignment = ReferenceAlignment::Right;
+        PointerAlignment pointer_alignment = PointerAlignment::Left;
+        ReferenceAlignment reference_alignment = ReferenceAlignment::Left;
         BraceStyle brace_style = BraceStyle::Allman;
         // Single-statement control blocks: Keep (default), SingleLine, Indent or
         // IndentWithBraces. Only `if`/`else`/`for`/`while`/`do` bodies are touched;

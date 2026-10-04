@@ -107,6 +107,32 @@ namespace heimdall
         // derive from them. The fix (quick fix only) adds `final`.
         static std::vector<Diagnostic> AnalyzeFinal(const SemanticModel &model, const ProjectContext &context);
 
+        // api/virtual-destructor: a struct/class that declares virtual functions
+        // whose destructor is not virtual and is public (a protected one is the
+        // accepted way to forbid deleting through the base) and that inherits no
+        // virtual destructor. Silent when some base is not resolved and for `final`
+        // classes. The quick fix (only when the destructor is declared) writes
+        // `virtual`.
+        static std::vector<Diagnostic> AnalyzeVirtualDestructor(const SemanticModel &model);
+
+        // api/explicit-constructor: a constructor of a class defined in this file
+        // callable with one argument (further parameters have defaults) that is
+        // not `explicit`. Copy/move constructors, `std::initializer_list` and
+        // variadic ones are left alone. The quick fix writes `explicit`.
+        static std::vector<Diagnostic> AnalyzeExplicitConstructor(const SemanticModel &model);
+
+        // api/overload-hiding: a member function that has the name of a virtual
+        // function of a resolved base but a signature the derived class does not
+        // match, so the base overload is hidden, and no `using Base::name;`. The
+        // quick fix adds the using-declaration before the function.
+        static std::vector<Diagnostic> AnalyzeOverloadHiding(const SemanticModel &model);
+
+        // api/virtual-call-in-constructor: an unqualified (or `this->`) call to a
+        // virtual member function in the body of a constructor or destructor
+        // defined inside the class: it does not reach overrides of derived classes.
+        // `final` classes and functions, lambdas and qualified calls are skipped.
+        static std::vector<Diagnostic> AnalyzeVirtualCallInConstructor(const SemanticModel &model);
+
         // Every rule above except the project-level ones, sorted by offset. The
         // overload without a TypeModel runs the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);

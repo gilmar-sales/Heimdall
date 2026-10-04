@@ -19,7 +19,7 @@ namespace heimdall
 
         constexpr std::size_t kMaxHeaderBytes = 4u << 20;
 
-        std::string ReadFile(const std::filesystem::path & path)
+        std::string ReadFile(const std::filesystem::path& path)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
@@ -40,28 +40,28 @@ namespace heimdall
             return content;
         }
 
-        std::uintmax_t SizeOf(const std::filesystem::path & path)
+        std::uintmax_t SizeOf(const std::filesystem::path& path)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
             return ec ? 0 : size;
         }
 
-        std::int64_t MTimeOf(const std::filesystem::path & path)
+        std::int64_t MTimeOf(const std::filesystem::path& path)
         {
             std::error_code ec;
             const auto time = std::filesystem::last_write_time(path, ec);
             return ec ? 0 : static_cast<std::int64_t>(time.time_since_epoch().count());
         }
 
-        bool IsTextualExtension(const std::filesystem::path & path)
+        bool IsTextualExtension(const std::filesystem::path& path)
         {
             std::string extension = path.extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(),
                 [](unsigned char c)
                 {
                     return static_cast<char>(std::tolower(c));
-                });
+            });
             return extension == ".inc" || extension == ".def" || extension == ".inl" || extension == ".tpp" ||
                 extension == ".ipp" || extension == ".tcc";
         }
@@ -71,10 +71,10 @@ namespace heimdall
     class HeaderSummaryBuilder
     {
     public:
-        HeaderSummaryBuilder(HeaderSummary &summary, const ParseTree &tree, const SemanticModel &model) : m_summary(summary),
-          m_tree(tree), m_model(model), m_qualified(model.Scopes().Size()), m_state(model.Scopes().Size(), 0)
-        {
-        }
+        HeaderSummaryBuilder(HeaderSummary& summary, const ParseTree& tree,
+            const SemanticModel& model) : m_summary(summary),
+            m_tree(tree), m_model(model), m_qualified(model.Scopes().Size()),
+            m_state(model.Scopes().Size(), 0) {}
 
         void Run()
         {
@@ -109,9 +109,9 @@ namespace heimdall
 
         // `a::b` for a scope made only of named namespaces; false when the scope
         // cannot be named from outside the header.
-        bool Qualification(ScopeId scope, std::string & out)
+        bool Qualification(ScopeId scope, std::string& out)
         {
-            const auto &scopes = m_model.Scopes();
+            const auto& scopes = m_model.Scopes();
             if (m_state[scope] == Unknown)
             {
                 if (scopes.kind[scope] == ScopeKind::TranslationUnit)
@@ -228,8 +228,8 @@ namespace heimdall
 
         void ScanSymbols()
         {
-            const auto &symbols = m_model.Symbols();
-            const auto &bases = m_model.Bases();
+            const auto& symbols = m_model.Symbols();
+            const auto& bases = m_model.Bases();
             const auto virtual_members = detail::ClassesWithVirtualMembers(m_model);
             constexpr std::uint32_t kNotExported = SymbolFlag::Qualified | SymbolFlag::Friend |
                 SymbolFlag::Constructor | SymbolFlag::Destructor | SymbolFlag::Operator;
@@ -238,13 +238,13 @@ namespace heimdall
             {
                 const auto kind = symbols.kind[symbol];
                 const auto name = symbols.name[symbol];
-                if (!Exportable(kind) || name == kNone || (symbols.flags[symbol] & kNotExported) != 0)
+                if (!Exportable(kind) || name == kNone ||(symbols.flags[symbol] & kNotExported) != 0)
                 {
                     continue;
                 }
 
                 const std::string_view text = m_model.Names().Text(name);
-                if (text.empty() || text.front() == '_' || !Qualification(symbols.scope[symbol], qualification))
+                if (text.empty() || text.front() == '_' ||!Qualification(symbols.scope[symbol], qualification))
                 {
                     continue;
                 }
@@ -309,9 +309,9 @@ namespace heimdall
             }
         }
 
-        HeaderSummary &m_summary;
-        const ParseTree &m_tree;
-        const SemanticModel &m_model;
+        HeaderSummary& m_summary;
+        const ParseTree& m_tree;
+        const SemanticModel& m_model;
         std::unordered_map<std::string, std::uint32_t> m_ids;
         std::vector<std::string> m_qualified;
         std::vector<std::uint8_t> m_state;
@@ -331,7 +331,7 @@ namespace heimdall
         return summary;
     }
 
-    std::shared_ptr<const HeaderSummary> HeaderSummary::Load(const std::filesystem::path & path)
+    std::shared_ptr<const HeaderSummary> HeaderSummary::Load(const std::filesystem::path& path)
     {
         struct Cached
         {
@@ -358,7 +358,7 @@ namespace heimdall
         const std::string content = ReadFile(path);
         std::error_code exists_ec;
         (void) std::filesystem::file_size(path, exists_ec);
-        if (exists_ec || (content.empty() && size != 0))
+        if (exists_ec ||(content.empty() && size != 0))
         {
             auto unreadable = std::make_shared<HeaderSummary>();
             unreadable->m_path = path;

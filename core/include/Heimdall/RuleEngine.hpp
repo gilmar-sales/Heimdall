@@ -42,7 +42,11 @@ namespace heimdall
         IncludeWhatYouUse,
         ModernizeFinal,
         ModernizeConst,
-        ModernizeConstexpr
+        ModernizeConstexpr,
+        ApiVirtualDestructor,
+        ApiExplicitConstructor,
+        ApiOverloadHiding,
+        ApiVirtualCallInConstructor
     };
 
     struct RuleOverride

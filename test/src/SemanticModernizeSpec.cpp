@@ -478,7 +478,7 @@ TEST(ModernizeAuto, ToleratesBrokenInput)
 TEST(SemanticRulesAll, ReturnsEveryRuleSortedByOffset)
 {
     const std::string source =
-        "struct Base { virtual void f(); };\n"
+        "struct Base { virtual void f(); virtual ~Base(); };\n"
         "struct D : Base { void f(); };\n"
         "void g(int* p) {\n"
         "    p = 0;\n"
