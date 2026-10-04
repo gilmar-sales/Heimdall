@@ -16,8 +16,9 @@ int main(int argc, char **argv)
     heimdall::cli::Options options{};
     if (!heimdall::cli::ParseOptions(argc, argv, options))
     {
-        std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories...>\n";
+        std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories-or-globs...>\n";
         std::cerr << "       heimdall init [directory] [--force]\n";
+        std::cerr << "       globs support '*', '**', '?' and '[...]': e.g. src/**/*.cpp, src/**.cpp\n";
         return 2;
     }
 

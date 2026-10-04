@@ -32,8 +32,10 @@ add_executable(Tests_run
   src/ProjectRulesSpec.cpp
   src/ParserTruncationSpec.cpp
   src/IncrementalParseSpec.cpp
+  src/FileDiscoverySpec.cpp
   ../../lsp/Document.cpp
   ../../src/CliOptions.cpp
+  ../../src/FileDiscovery.cpp
   ../../src/Init.cpp
 )
 
