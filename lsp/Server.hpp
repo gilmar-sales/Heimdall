@@ -4,6 +4,7 @@
 #include "ThreadPool.hpp"
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
@@ -115,6 +116,11 @@ namespace heimdall::lsp
             const heimdall::CompileCommand * command);
         heimdall::ParserOptions ParserOptionsFor(const heimdall::CompileCommand * command);
 
+        // Rule-engine diagnostics plus, when semantic analysis is on and the file
+        // has a compile command, cpp/no-unused-include (policy already applied).
+        std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string & uri, const heimdall::ParseTree & tree,
+            const heimdall::CompileCommand * command);
+
         void IndexWorkerMain(std::stop_token stop);
         void DiagWorkerMain(std::stop_token stop);
         void EnqueueDiagnostics(const std::string & uri, std::int64_t version);
@@ -163,6 +169,9 @@ namespace heimdall::lsp
         };
 
         std::unordered_map<std::string, IncludeCacheEntry> m_include_cache;
+        // cpp/no-unused-include: one profile per document, rebuilt only when the
+        // include block, the search flags or a header on disk change.
+        std::unordered_map<std::string, std::shared_ptr<const heimdall::IncludeProfile>> m_include_profiles;
         struct GlobalIndexEntry
         {
             std::shared_ptr<const heimdall::IncludeIndex> index;

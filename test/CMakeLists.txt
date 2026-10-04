@@ -22,6 +22,7 @@ add_executable(Tests_run
   src/NavigationSpec.cpp
   src/DocumentSpec.cpp
   src/IncludeIndexSpec.cpp
+  src/IncludeAnalyzerSpec.cpp
   ../../lsp/Document.cpp
 )
 
@@ -73,6 +74,11 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspRuleConfigSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspRuleConfigSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspUnusedIncludeSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspUnusedIncludeSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

@@ -17,6 +17,19 @@ struct IncludeLimits
     std::size_t max_headers = 256;
     std::size_t max_file_bytes = 1 << 20;
     int max_depth = 16;
+    // Also follow `#include_next` (searching the directories after the one
+    // that supplied the including header). Off by default: completion only
+    // needs the first definition of each name.
+    bool follow_include_next = false;
+};
+
+// Out-parameter of ResolveHeaders: whether the walk saw every header it was
+// supposed to. Unresolved includes inside system headers are ignored (they are
+// platform branches); anything else that is missing, unreadable or cut by a
+// limit makes `complete` false.
+struct ResolveReport
+{
+    bool complete = true;
 };
 
 // Transitive header index for completion: resolves `#include`s (quoted and
@@ -33,7 +46,8 @@ class IncludeIndex
     static std::vector<std::filesystem::path> ResolveHeaders(const std::filesystem::path& base_dir,
                                                              std::string_view text,
                                                              const CompileCommand* command,
-                                                             const Limits& limits = Limits {});
+                                                             const Limits& limits = Limits {},
+                                                             ResolveReport* report = nullptr);
     static std::string CacheKey(const std::vector<std::filesystem::path>& headers,
                                 const CompileCommand* command);
     // Cheap fingerprint of the file's own `#include` lines plus the search

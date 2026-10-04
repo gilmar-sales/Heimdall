@@ -190,6 +190,8 @@ namespace heimdall
                 "diretivas", false, "same header included more than once"},
             {RuleId::LegacyTypedef, "cpp/modernize-using", "cpp", Severity::Warning,
                 "sintática", true, "replace typedef with a using alias"},
+            {RuleId::UnusedInclude, "cpp/no-unused-include", "cpp", Severity::Warning,
+                "semântica", false, "included header whose symbols are never used"},
         };
         return catalog;
     }
@@ -219,6 +221,37 @@ namespace heimdall
     bool IsKnownRuleCode(std::string_view code)
     {
         return FindRuleByCode(code) != nullptr;
+    }
+
+    TextEdit RemoveDirectiveLine(std::string_view source, std::size_t offset, std::size_t length)
+    {
+        std::size_t begin = std::min(offset, source.size());
+        while (begin > 0 && (source[begin - 1] == ' ' || source[begin - 1] == 0x09))
+        {
+            --begin;
+        }
+
+        std::size_t end = std::min(offset + length, source.size());
+        std::size_t probe = end;
+        while (probe < source.size() && (source[probe] == ' ' || source[probe] == 0x09))
+        {
+            ++probe;
+        }
+
+        if (probe == source.size())
+        {
+            end = probe;
+        }
+        else if (source[probe] == 0x0A)
+        {
+            end = probe + 1;
+        }
+        else if (source[probe] == 0x0D && probe + 1 < source.size() && source[probe + 1] == 0x0A)
+        {
+            end = probe + 2;
+        }
+
+        return {begin, end - begin, ""};
     }
 
     std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
@@ -469,39 +502,12 @@ namespace heimdall
                 {
                     const auto offset = directive.offset + open;
 
-                    // Drop the whole directive line. Not safe in batch: a
-                    // #define/#undef between the includes may make the
-                    // second one meaningful (X-macro headers).
-                    std::size_t begin = directive.offset;
-                    while (begin > 0 && (source[begin - 1] == ' ' || source[begin - 1] == '	'))
-                    {
-                        --begin;
-                    }
-
-                    std::size_t end = directive.offset + directive.length;
-                    std::size_t probe = end;
-                    while (probe < source.size() && (source[probe] == ' ' || source[probe] == '	'))
-                    {
-                        ++probe;
-                    }
-
-                    if (probe == source.size())
-                    {
-                        end = probe;
-                    }
-                    else if (source[probe] == '\n')
-                    {
-                        end = probe + 1;
-                    }
-                    else if (source[probe] == '\r' && probe + 1 < source.size() && source[probe + 1] == '\n')
-                    {
-                        end = probe + 2;
-                    }
-
+                    // Not safe in batch: a #define/#undef between the includes
+                    // may make the second one meaningful (X-macro headers).
                     auto diagnostic = MakeDiagnostic(
                         RuleId::DuplicateInclude, "cpp/no-duplicate-include",
                         "duplicate include of " + std::string(target), offset, target.length(),
-                        lines.Lookup(offset), {begin, end - begin, ""});
+                        lines.Lookup(offset), RemoveDirectiveLine(source, directive.offset, directive.length));
                     diagnostic.fix_is_safe = false;
                     diagnostic.fix_title = "Remove duplicate include of " + std::string(target);
                     diagnostics.push_back(std::move(diagnostic));
@@ -651,6 +657,15 @@ namespace heimdall
                     {offset, length, std::move(replacement)}));
             }
         }
+
+        return ApplyPolicy(std::move(diagnostics), source, tokens);
+    }
+
+    std::vector<Diagnostic> RuleEngine::ApplyPolicy(std::vector<Diagnostic> diagnostics,
+        std::string_view source, const std::vector<Token> & tokens) const
+    {
+        LineTable lines;
+        lines.Build(source);
 
         std::sort(diagnostics.begin(), diagnostics.end(),[](const Diagnostic &a, const Diagnostic &b)
             {

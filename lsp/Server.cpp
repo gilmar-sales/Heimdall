@@ -6,6 +6,7 @@
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Navigation.hpp>
@@ -466,7 +467,7 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto diagnostics = heimdall::RuleEngine(m_rule_options).Analyze(*tree);
+        const auto diagnostics = RuleDiagnostics(uri, *tree, command);
         if (!IsCurrentVersion(uri, version))
         {
             return;
@@ -818,6 +819,7 @@ namespace heimdall::lsp
         {
             const std::lock_guard<std::mutex> lock(m_mu);
             m_include_cache.erase(std::string(uri));
+            m_include_profiles.erase(std::string(uri));
             m_parse_cache.erase(std::string(uri));
         }
         {
@@ -878,6 +880,47 @@ namespace heimdall::lsp
         Respond(id, response);
     }
 
+    std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(const std::string & uri,
+        const heimdall::ParseTree & tree, const heimdall::CompileCommand * command)
+    {
+        const heimdall::RuleEngine engine(m_rule_options);
+        auto diagnostics = engine.Analyze(tree);
+        if (!m_enable_semantic.load(std::memory_order_relaxed) || command == nullptr)
+        {
+            return diagnostics;
+        }
+
+        const std::filesystem::path file_path = PathFromUri(uri);
+        const std::string fingerprint = heimdall::IncludeAnalyzer::Fingerprint(file_path, tree, command);
+        std::shared_ptr<const heimdall::IncludeProfile> profile;
+        {
+            const std::lock_guard<std::mutex> lock(m_mu);
+            if (const auto found = m_include_profiles.find(uri); found != m_include_profiles.end())
+            {
+                profile = found->second;
+            }
+        }
+
+        // The profile reads every transitive header: keep it across keystrokes.
+        if (!profile || profile->fingerprint != fingerprint || !heimdall::IncludeAnalyzer::IsFresh(*profile))
+        {
+            profile = heimdall::IncludeAnalyzer::BuildProfile(file_path, tree, command);
+            const std::lock_guard<std::mutex> lock(m_mu);
+            m_include_profiles[uri] = profile;
+        }
+
+        auto unused = engine.ApplyPolicy(heimdall::IncludeAnalyzer::Analyze(tree, *profile), tree);
+        if (!unused.empty())
+        {
+            diagnostics.insert(diagnostics.end(), std::make_move_iterator(unused.begin()),
+                std::make_move_iterator(unused.end()));
+            std::stable_sort(diagnostics.begin(), diagnostics.end(),
+                [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b) { return a.offset < b.offset; });
+        }
+
+        return diagnostics;
+    }
+
     void LanguageServer::CodeActions(simdjson::dom::element request, std::string_view id)
     {
         std::string_view uri;
@@ -907,7 +950,7 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto diagnostics = heimdall::RuleEngine(m_rule_options).Analyze(*tree);
+        const auto diagnostics = RuleDiagnostics(uri_string, *tree, command);
         std::string response = "[";
         bool first = true;
         for (const auto & diagnostic: diagnostics)

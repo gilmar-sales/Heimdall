@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace heimdall
@@ -24,7 +25,8 @@ namespace heimdall
         MissingFinalNewline,
         EmptyCatch,
         DuplicateInclude,
-        LegacyTypedef
+        LegacyTypedef,
+        UnusedInclude
     };
 
     struct RuleOverride
@@ -90,6 +92,10 @@ namespace heimdall
     const RuleInfo * FindRule(RuleId id);
     bool IsKnownRuleCode(std::string_view code);
 
+    // Edit that deletes the preprocessor directive at [offset, offset+length)
+    // together with its indentation and line terminator.
+    TextEdit RemoveDirectiveLine(std::string_view source, std::size_t offset, std::size_t length);
+
     class RuleEngine
     {
     public:
@@ -97,9 +103,19 @@ namespace heimdall
 
         std::vector<Diagnostic> Analyze(std::string_view source) const;
         std::vector<Diagnostic> Analyze(const ParseTree &tree) const;
+        // Severity overrides, disabled rules and suppression comments, for
+        // diagnostics produced outside core (for example by the semantic layer).
+        // Returns them sorted by offset.
+        std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, const ParseTree &tree) const
+        {
+            return ApplyPolicy(std::move(diagnostics), tree.Source(), tree.Tokens());
+        }
+
         static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic> & diagnostics);
 
     private:
+        std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, std::string_view source,
+            const std::vector<Token> & tokens) const;
         std::vector<Diagnostic> AnalyzeImpl(std::string_view source, const std::vector<Token> & tokens,
             const std::vector<PreprocessorDirective> & directives) const;
         RuleOptions m_options;

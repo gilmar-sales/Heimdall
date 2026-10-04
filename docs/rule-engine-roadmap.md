@@ -30,6 +30,7 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | `cpp/no-empty-catch` | Bloco `catch` vazio | Sintática | Não | Implementada |
 | `cpp/no-todo` | Comentários `TODO`, `FIXME` ou `XXX` | Lexical | Não | Não implementada |
 | `cpp/no-duplicate-include` | Includes duplicados | Diretivas | Possível | Implementada |
+| `cpp/no-unused-include` | Include direto cujos nomes nunca aparecem no arquivo | Semântica/projeto | Quick fix (não em lote) | Implementada |
 | `cpp/sort-includes` | Includes fora da ordem configurada | Diretivas | Seguro com configuração | Não implementada |
 | `cpp/include-what-you-use` | Includes ausentes ou desnecessários | Semântica/projeto | Fora da primeira fase | Não implementada |
 
@@ -147,6 +148,7 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 | `format/require-final-newline` | Garante newline final | Preserva CRLF quando detecta esse estilo |
 | `cpp/no-empty-catch` | `RuleEngine` encontra `catch` com corpo vazio (só espaço/comentários), fora de comentários, literais e diretivas | Quick fix (só no editor, não aplicado por `--fix`): insere `throw;` preservando comentários do corpo, pois a ação correta depende do contexto |
 | `cpp/no-duplicate-include` | Compara includes literais (`<...>` e `"..."`) fora de blocos condicionais | Quick fix (só no editor, não aplicado por `--fix`) remove a linha do include duplicado: não é seguro em lote por causa de `#define`/`#undef` entre includes (X-macros); includes em ramos `#ifdef` distintos são ignorados |
+| `cpp/no-unused-include` | `IncludeAnalyzer` resolve cada `#include` direto e seu fecho transitivo (inclui `#include_next`), extrai os nomes declarados em escopo de namespace/global, enumeradores e macros, e reporta o include se nenhum identificador do arquivo (fora de comentários, literais e linhas `#include`) coincide com eles | Requer `--semantic` + compile command (como `semantic/no-unused-local`). Conservadora: um nome fornecido transitivamente mantém o include direto "usado", exceto quando outro include direto já o cobre. Nunca reporta: header não resolvido ou com fecho incompleto, includes dentro de `#if` (guarda de include ignorada), header primário (`foo.cpp`/`foo.hpp`), `// IWYU pragma: keep/export`, arquivos só com includes, `.inc/.def/.inl/.tpp/.ipp/.tcc`, headers de uso implícito (`<initializer_list>`, `<compare>`, `<typeinfo>`, `<new>`, `<coroutine>`, `<tuple>`...) e headers do projeto com `operator` ou especialização em escopo de namespace. Nomes após `.`/`->` não contam. Cabeçalhos de sistema usam extração estrita (só nomes declarados); do projeto, extração ampla. Quick fix remove a linha, mas não é aplicado por `--fix` (pode haver dependência transitiva) |
 | `cpp/modernize-using` | Reescreve `typedef` de declarador simples como `using T = ...`, com autofix | Pula ponteiros de função, definições de classe, múltiplos declaradores e atributos; requer forma tokenizável |
 | `semantic/no-unused-local` | Analisador semântico detecta algumas variáveis locais não usadas | Cobertura limitada a declarações simples; requer `--semantic` e contexto de compilação |
 

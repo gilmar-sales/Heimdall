@@ -26,6 +26,7 @@ namespace heimdall
         {
             std::string name;
             bool angled = false;
+            bool next = false;
         };
 
         std::vector<IncludeRef> ScanIncludes(std::string_view text)
@@ -55,10 +56,13 @@ namespace heimdall
                 }
 
                 i = significant(i + 1);
-                if (i >= tokens.size() || tokens[i].kind != TokenKind::Identifier || text_of(i) != "include")
+                if (i >= tokens.size() || tokens[i].kind != TokenKind::Identifier ||
+                    (text_of(i) != "include" && text_of(i) != "include_next"))
                 {
                     continue;
                 }
+
+                const bool next = text_of(i) == "include_next";
 
                 i = significant(i + 1);
                 if (i >= tokens.size())
@@ -73,7 +77,7 @@ namespace heimdall
                     const std::size_t close = quoted.rfind('"');
                     if (open != std::string_view::npos && close != std::string_view::npos && close > open)
                     {
-                        refs.push_back({std::string(quoted.substr(open + 1, close - open - 1)), false});
+                        refs.push_back({std::string(quoted.substr(open + 1, close - open - 1)), false, next});
                     }
                 }
                 else if (tokens[i].kind == TokenKind::Punctuation && text_of(i) == "<")
@@ -101,7 +105,7 @@ namespace heimdall
 
                         if (!name.empty())
                         {
-                            refs.push_back({std::string(name), true});
+                            refs.push_back({std::string(name), true, next});
                         }
                     }
                 }
@@ -153,6 +157,59 @@ namespace heimdall
                 }
 
                 const auto candidate = NormalizedAbsolute(dir / name);
+                if (std::filesystem::exists(candidate, ec) && !ec &&
+                    std::filesystem::is_regular_file(candidate, ec))
+                {
+                    return candidate;
+                }
+            }
+
+            return {};
+        }
+
+        bool IsUnder(const std::filesystem::path & path, const std::filesystem::path & dir)
+        {
+            if (dir.empty())
+            {
+                return false;
+            }
+
+            const auto relative = path.lexically_relative(dir);
+            return !relative.empty() && *relative.begin() != "..";
+        }
+
+        // `#include_next`: continue the angled search after the directory that
+        // supplied `current`.
+        std::filesystem::path TryResolveNext(const std::string & name, const std::filesystem::path & current,
+            const CompileCommand *command, const std::vector<std::filesystem::path> & system_dirs)
+        {
+            std::vector<std::filesystem::path> dirs;
+            if (command != nullptr)
+            {
+                dirs.insert(dirs.end(), command->include_directories.begin(),
+                    command->include_directories.end());
+            }
+
+            dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
+            std::size_t first = 0;
+            for (std::size_t i = 0; i < dirs.size(); ++i)
+            {
+                if (IsUnder(current, NormalizedAbsolute(dirs[i])))
+                {
+                    first = i + 1;
+                    break;
+                }
+            }
+
+            std::error_code ec;
+            for (std::size_t i = first; i < dirs.size(); ++i)
+            {
+                if (dirs[i].empty())
+                {
+                    continue;
+                }
+
+                const auto candidate = NormalizedAbsolute(dirs[i] / name);
                 if (std::filesystem::exists(candidate, ec) && !ec &&
                     std::filesystem::is_regular_file(candidate, ec))
                 {
@@ -514,9 +571,28 @@ namespace heimdall
     std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(const std::filesystem::path & base_dir,
         std::string_view text,
         const CompileCommand *command,
-        const Limits &limits)
+        const Limits &limits, ResolveReport *report)
     {
         const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
+        std::vector<std::filesystem::path> normalized_system;
+        normalized_system.reserve(system_dirs.size());
+        for (const auto & dir: system_dirs)
+        {
+            normalized_system.push_back(NormalizedAbsolute(dir));
+        }
+
+        auto in_system = [&](const std::filesystem::path & file)
+        {
+            return std::any_of(normalized_system.begin(), normalized_system.end(),
+                [&](const std::filesystem::path &dir) { return IsUnder(file, dir); });
+        };
+        auto incomplete = [&]
+        {
+            if (report != nullptr)
+            {
+                report->complete = false;
+            }
+        };
         std::vector<std::filesystem::path> ordered;
         std::unordered_set<std::string> visited;
         // Worklist of (including directory, include name, angled, depth).
@@ -525,14 +601,17 @@ namespace heimdall
             std::filesystem::path dir;
             std::string name;
             bool angled = false;
+            bool next = false;
             int depth = 0;
+            std::filesystem::path from;
         };
 
         // Breadth-first, project (quoted) includes before system (angled) ones:
         // with the header cap a depth-first walk spent the whole budget inside
         // the last <standard header> and never reached the project's own headers.
         std::deque<Work> stack;
-        auto enqueue =[&](const std::filesystem::path & dir, int depth, std::string_view source)
+        auto enqueue =[&](const std::filesystem::path & dir, int depth, std::string_view source,
+            const std::filesystem::path & from)
         {
             const std::vector<IncludeRef> refs = ScanIncludes(source);
             for (const bool angled:
@@ -542,27 +621,42 @@ namespace heimdall
             {
                 for (const auto & ref: refs)
                 {
-                    if (ref.angled == angled)
+                    if (ref.angled != angled || (ref.next && !limits.follow_include_next))
                     {
-                        stack.push_back({dir, ref.name, ref.angled, depth});
+                        continue;
                     }
+
+                    stack.push_back({dir, ref.name, ref.angled, ref.next, depth, from});
                 }
             }
         };
-        enqueue(base_dir, 0, text);
+        enqueue(base_dir, 0, text, {});
 
         while (!stack.empty() && ordered.size() < limits.max_headers)
         {
             Work work = std::move(stack.front());
             stack.pop_front();
+            const bool from_system = !work.from.empty() && in_system(work.from);
             if (work.depth > limits.max_depth)
             {
+                if (!from_system)
+                {
+                    incomplete();
+                }
+
                 continue;
             }
 
-            const auto resolved = TryResolve(work.name, work.angled, work.dir, command, system_dirs);
+            const auto resolved = work.next
+                ? TryResolveNext(work.name, work.from, command, system_dirs)
+                : TryResolve(work.name, work.angled, work.dir, command, system_dirs);
             if (resolved.empty())
             {
+                if (!from_system)
+                {
+                    incomplete();
+                }
+
                 continue;
             }
 
@@ -576,10 +670,21 @@ namespace heimdall
             const std::string nested = ReadFile(resolved, limits.max_file_bytes);
             if (nested.empty())
             {
+                std::error_code size_ec;
+                if (std::filesystem::file_size(resolved, size_ec) != 0 || size_ec)
+                {
+                    incomplete();
+                }
+
                 continue;
             }
 
-            enqueue(resolved.parent_path(), work.depth + 1, nested);
+            enqueue(resolved.parent_path(), work.depth + 1, nested, resolved);
+        }
+
+        if (!stack.empty())
+        {
+            incomplete();
         }
 
         return ordered;
@@ -598,7 +703,7 @@ namespace heimdall
 
         // begin wraps to 0 when no newline precedes the offset (npos + 1).
         const std::vector<IncludeRef> refs = ScanIncludes(text.substr(begin, end - begin));
-        if (refs.empty())
+        if (refs.empty() || refs.front().next)
         {
             return {};
         }
@@ -916,7 +1021,7 @@ namespace heimdall
     IncludeIndex IncludeIndex::Build(const std::filesystem::path & base_dir, std::string_view text,
         const CompileCommand *command, const Limits &limits)
     {
-        return Build(ResolveHeaders(base_dir, text, command, limits), command, limits);
+        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr), command, limits);
     }
 
 } // namespace heimdall

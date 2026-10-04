@@ -326,7 +326,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto & catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 6);
+    ASSERT_EQ(catalog.size(), 7);
     for (const auto & info: catalog)
     {
         EXPECT_FALSE(info.code.empty());
@@ -346,4 +346,32 @@ TEST(RuleEngineSpec, CatalogDescribesEveryRule)
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include")->autofix, false);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->autofix, true);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
+}
+
+TEST(RuleEngineSpec, RemoveDirectiveLineTakesIndentationAndLineTerminator)
+{
+    constexpr std::string_view source = "int a;\n  #include <x>  \r\nint b;\n";
+    const auto edit = heimdall::RemoveDirectiveLine(source, source.find('#'), std::string_view("#include <x>").size());
+    std::string text(source);
+    text.replace(edit.offset, edit.length, edit.replacement);
+    EXPECT_EQ(text, "int a;\nint b;\n");
+
+    const auto last = heimdall::RemoveDirectiveLine("#include <x>", 0, 12);
+    EXPECT_EQ(last.offset, 0);
+    EXPECT_EQ(last.length, 12);
+}
+
+TEST(RuleEngineSpec, ApplyPolicyFiltersExternalDiagnosticsAndSortsThem)
+{
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/no-unused-include", false, heimdall::Severity::Warning});
+    const auto tree = heimdall::ParseTree::Parse("int a;\n", {});
+    heimdall::Diagnostic late{heimdall::RuleId::UnusedInclude, heimdall::Severity::Warning, "cpp/no-unused-include",
+        "m", 5, 1, 1, 6, false, {}};
+    heimdall::Diagnostic early{heimdall::RuleId::NullMacro, heimdall::Severity::Warning, "cpp/no-null", "m", 1, 1,
+        1, 2, false, {}};
+    const auto kept = heimdall::RuleEngine().ApplyPolicy({late, early}, tree);
+    ASSERT_EQ(kept.size(), 2);
+    EXPECT_EQ(kept[0].code, "cpp/no-null");
+    EXPECT_EQ(heimdall::RuleEngine(options).ApplyPolicy({late, early}, tree).size(), 1);
 }

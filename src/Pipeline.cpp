@@ -2,8 +2,10 @@
 
 #include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/LineTable.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -297,6 +299,26 @@ namespace heimdall::cli
         {
             const heimdall::RuleEngine rule_engine(options.rule_options);
             result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
+            if (tree && options.semantic && database != nullptr)
+            {
+                // cpp/no-unused-include needs the headers on disk, so like the
+                // other semantic rules it needs a compile command. Headers are
+                // absent from compile databases: borrow the nearest entry, as the
+                // language server does.
+                if (const auto *command = database->FindOrNearest(path); command != nullptr)
+                {
+                    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
+                    auto unused = rule_engine.ApplyPolicy(heimdall::IncludeAnalyzer::Analyze(*tree, *profile), *tree);
+                    result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(unused.begin()),
+                        std::make_move_iterator(unused.end()));
+                    std::stable_sort(result.diagnostics.begin(), result.diagnostics.end(),
+                        [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+                        {
+                            return a.offset < b.offset;
+                    });
+                }
+            }
+
             if (options.fix && !result.diagnostics.empty())
             {
                 result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics);

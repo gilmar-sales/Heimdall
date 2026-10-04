@@ -12,8 +12,7 @@
 
 int main(int argc, char **argv)
 {
-    heimdall::cli::Options options
-    {};
+    heimdall::cli::Options options{};
     if (!heimdall::cli::ParseOptions(argc, argv, options))
     {
         std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories...>\n";
@@ -30,6 +29,7 @@ int main(int argc, char **argv)
                 std::cerr << loaded.error() << '\n';
                 return 2;
             }
+
             options.rule_options = std::move(loaded->options);
         }
         else
@@ -40,11 +40,13 @@ int main(int argc, char **argv)
                 std::cerr << loaded.error() << '\n';
                 return 2;
             }
+
             if (*loaded)
             {
-                options.rule_options = std::move(**loaded);
+                options.rule_options = std::move(* *loaded);
             }
         }
+
         options.rule_options.overrides.insert(options.rule_options.overrides.end(),
             options.rule_overrides.begin(), options.rule_overrides.end());
     }
