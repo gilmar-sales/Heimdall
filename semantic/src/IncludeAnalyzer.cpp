@@ -1311,6 +1311,120 @@ namespace heimdall
             });
         }
 
+        // The include closure of one directive depends only on the target, the
+        // search configuration and the headers on disk. Typing in the include block
+        // changes the file's fingerprint on every keystroke, and re-walking the
+        // closure of <string>, <vector>, ... (hundreds of headers each) took about
+        // half a second per rebuild. Complete closures are therefore memoized
+        // process-wide and revalidated by stat.
+        struct CachedClosure
+        {
+            std::vector<std::filesystem::path> files;
+            std::vector<std::pair<std::uintmax_t, std::int64_t>> stamps;
+        };
+
+        std::string ClosureKey(const std::filesystem::path & base_dir, std::string_view target,
+            const CompileCommand *command)
+        {
+            std::string key;
+            const bool quoted = !target.empty() && target.front() == '"';
+            if (quoted)
+            {
+                key += base_dir.lexically_normal().generic_string();
+            }
+
+            key += '\0';
+            key += target;
+            key += '\0';
+            if (command != nullptr)
+            {
+                if (!command->arguments.empty())
+                {
+                    key += command->arguments.front();
+                }
+
+                key += '\0';
+                for (const auto & dir: command->include_directories)
+                {
+                    key += dir.generic_string();
+                    key += '\1';
+                }
+
+                key += '\0';
+                for (const auto & dir: command->quote_directories)
+                {
+                    key += dir.generic_string();
+                    key += '\1';
+                }
+            }
+
+            return key;
+        }
+
+        std::mutex & ClosureMutex()
+        {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        std::unordered_map<std::string, CachedClosure> & ClosureCache()
+        {
+            static std::unordered_map<std::string, CachedClosure> cache;
+            return cache;
+        }
+
+        // Closure of `#include <target>` seen from base_dir; `complete` is false
+        // for anything that could not be fully resolved (never cached).
+        std::vector<std::filesystem::path> ResolveClosure(const std::filesystem::path & base_dir,
+            const std::string &target, const CompileCommand *command, const IncludeIndex::Limits &limits,
+            bool &complete)
+        {
+            const std::string key = ClosureKey(base_dir, target, command);
+            {
+                const std::lock_guard<std::mutex> lock(ClosureMutex());
+                const auto found = ClosureCache().find(key);
+                if (found != ClosureCache().end())
+                {
+                    const CachedClosure &cached = found->second;
+                    bool fresh = true;
+                    for (std::size_t i = 0; i < cached.files.size() && fresh; ++i)
+                    {
+                        fresh = SizeOf(cached.files[i]) == cached.stamps[i].first &&
+                            MTimeOf(cached.files[i]) == cached.stamps[i].second;
+                    }
+
+                    if (fresh)
+                    {
+                        complete = true;
+                        return cached.files;
+                    }
+                }
+            }
+
+            ResolveReport report;
+            auto files = IncludeIndex::ResolveHeaders(base_dir, "#include " + target + "\n", command, limits, &report);
+            complete = report.complete && !files.empty();
+            if (complete)
+            {
+                CachedClosure cached;
+                cached.files = files;
+                for (const auto & path: files)
+                {
+                    cached.stamps.emplace_back(SizeOf(path), MTimeOf(path));
+                }
+
+                const std::lock_guard<std::mutex> lock(ClosureMutex());
+                if (ClosureCache().size() > 1024)
+                {
+                    ClosureCache().clear();
+                }
+
+                ClosureCache()[key] = std::move(cached);
+            }
+
+            return files;
+        }
+
         std::string PathKey(const std::filesystem::path & path)
         {
             return path.lexically_normal().generic_string();
@@ -1421,10 +1535,7 @@ namespace heimdall
                 continue;
             }
 
-            ResolveReport report;
-            closures[i].files = IncludeIndex::ResolveHeaders(base_dir, "#include " + includes[i].target + "\n",
-                command, limits, &report);
-            closures[i].complete = report.complete && !closures[i].files.empty();
+            closures[i].files = ResolveClosure(base_dir, includes[i].target, command, limits, closures[i].complete);
             for (const auto & path: closures[i].files)
             {
                 closures[i].keys.insert(PathKey(path));

@@ -669,3 +669,31 @@ TEST(CircularIncludeSpec, PolicyCanDowngradeOrDisableTheRule)
     EXPECT_TRUE(heimdall::RuleEngine(options).ApplyPolicy(raw, tree).empty());
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-circular-include")->default_severity, heimdall::Severity::Error);
 }
+
+TEST(IncludeAnalyzerSpec, RebuildingAfterReorderingIncludesGivesTheSameFindings)
+{
+    Project project;
+    project.Header("a.hpp", "struct Alpha {};\n");
+    project.Header("b.hpp", "struct Beta {};\n");
+    project.Header("c.hpp", "#include <a.hpp>\nstruct Gamma {};\n");
+    const auto first = project.Analyze("#include <a.hpp>\n#include <b.hpp>\n#include <c.hpp>\nAlpha x;\nGamma y;\n");
+    const auto second = project.Analyze("#include <c.hpp>\n#include <a.hpp>\n#include <b.hpp>\nAlpha x;\nGamma y;\n");
+    ASSERT_EQ(first.size(), 1);
+    ASSERT_EQ(second.size(), 1);
+    EXPECT_EQ(first[0].message, second[0].message);
+    EXPECT_EQ(first[0].message, "included header <b.hpp> is not used directly");
+}
+
+TEST(IncludeAnalyzerSpec, MemoizedClosuresNoticeHeaderEditsAndNewlyCreatedHeaders)
+{
+    Project project;
+    project.Header("a.hpp", "struct Alpha {};\n");
+    constexpr std::string_view source = "#include <a.hpp>\n#include <later.hpp>\nChanged value;\n";
+    // First pass fills the closure cache; `later.hpp` does not exist yet.
+    EXPECT_EQ(project.Analyze(source).size(), 1);
+    project.Header("a.hpp", "struct Alpha {};\nstruct Changed { int padding_to_change_the_size; };\n");
+    project.Header("later.hpp", "struct Later {};\n");
+    const auto diagnostics = project.Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].message, "included header <later.hpp> is not used directly");
+}
