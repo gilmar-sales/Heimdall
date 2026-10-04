@@ -6,6 +6,7 @@
 #include <exception>
 #include <system_error>
 #include <algorithm>
+#include <cctype>
 
 namespace heimdall
 {
@@ -18,6 +19,18 @@ namespace heimdall
             std::error_code ec;
             auto absolute = std::filesystem::absolute(path, ec);
             return (ec ? path : absolute).lexically_normal();
+        }
+
+        // Comparison form of a path: the Windows file system ignores case, and
+        // editors disagree with compile databases on drive-letter case (`c:` vs `C:`).
+        std::filesystem::path ComparableKey(const std::filesystem::path & path)
+        {
+            auto text = AbsoluteNormalized(path).generic_string();
+#if defined(_WIN32)
+            std::transform(text.begin(), text.end(), text.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+            return std::filesystem::path(text);
         }
 
         void ParseOption(CompileCommand &command, std::string_view arg, std::string_view next,
@@ -174,8 +187,9 @@ namespace heimdall
             std::string current;
             char quote = '\0';
             bool escaped = false;
-            for (char c: command)
+            for (std::size_t i = 0; i < command.size(); ++i)
             {
+                const char c = command[i];
                 if (escaped)
                 {
                     current += c;
@@ -183,7 +197,17 @@ namespace heimdall
                 }
                 else if (c == '\\' && quote != '\'')
                 {
-                    escaped = true;
+                    // Only quotes, backslashes and blanks are escapable; any other
+                    // backslash is a Windows path separator (`C:\mingw64\bin\g++`).
+                    const char next = i + 1 < command.size() ? command[i + 1] : '\0';
+                    if (next == '"' || next == '\'' || next == '\\' || next == ' ' || next == '\t')
+                    {
+                        escaped = true;
+                    }
+                    else
+                    {
+                        current += c;
+                    }
                 }
                 else if (quote != '\0')
                 {
@@ -339,16 +363,45 @@ namespace heimdall
 
     const CompileCommand * CompileDatabase::Find(std::filesystem::path file) const
     {
-        file = AbsoluteNormalized(file);
+        file = ComparableKey(file);
         for (const auto & command: m_commands)
         {
-            if (AbsoluteNormalized(command.file) == file)
+            if (ComparableKey(command.file) == file)
             {
                 return &command;
             }
         }
 
         return nullptr;
+    }
+
+    const CompileCommand * CompileDatabase::FindOrNearest(std::filesystem::path file) const
+    {
+        if (const auto * exact = Find(file))
+        {
+            return exact;
+        }
+
+        file = ComparableKey(file);
+        const CompileCommand * best = nullptr;
+        std::size_t best_score = 0;
+        for (const auto & command: m_commands)
+        {
+            const auto other = ComparableKey(command.file);
+            std::size_t score = 0;
+            for (auto a = file.begin(), b = other.begin(); a != file.end() && b != other.end() && *a == *b; ++a, ++b)
+            {
+                ++score;
+            }
+
+            if (best == nullptr || score > best_score)
+            {
+                best = &command;
+                best_score = score;
+            }
+        }
+
+        return best;
     }
 
 } // namespace heimdall

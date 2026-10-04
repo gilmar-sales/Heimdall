@@ -147,3 +147,59 @@ TEST(IncludeIndexSpec, IndexedItemsRecordTheirHeaderFileAndOffset)
     }
     EXPECT_TRUE(saw_located);
 }
+
+namespace
+{
+
+std::filesystem::path ResolveAt(std::string_view text, std::string_view marker)
+{
+    const auto command = CommandWithIncludes();
+    return heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(marker), &command);
+}
+
+} // namespace
+
+TEST(IncludeIndexSpec, ResolveIncludeAtFindsQuotedAndAngledHeaders)
+{
+    constexpr std::string_view text = "#include \"mylib/core.hpp\"\n#include <mylib/extra.hpp>\n";
+    EXPECT_EQ(ResolveAt(text, "mylib/core").filename(), "core.hpp");
+    EXPECT_EQ(ResolveAt(text, "mylib/extra").filename(), "extra.hpp");
+}
+
+TEST(IncludeIndexSpec, ResolveIncludeAtAcceptsAnyColumnOfTheLine)
+{
+    constexpr std::string_view text = "#include <mylib/core.hpp>\n";
+    EXPECT_EQ(ResolveAt(text, "#include").filename(), "core.hpp");
+    EXPECT_EQ(ResolveAt(text, ">").filename(), "core.hpp");
+}
+
+TEST(IncludeIndexSpec, ResolveIncludeAtHandlesCrlfLineEndings)
+{
+    constexpr std::string_view text = "#include <gtest_missing.h>\r\n\r\n#include <mylib/core.hpp>\r\nint x;\r\n";
+    EXPECT_EQ(ResolveAt(text, "mylib/core").filename(), "core.hpp");
+}
+
+TEST(IncludeIndexSpec, ResolveIncludeAtIgnoresOtherLinesAndMissingHeaders)
+{
+    constexpr std::string_view text = "#include <mylib/core.hpp>\nint x = 1;\n#include <nope/missing.hpp>\n";
+    EXPECT_TRUE(ResolveAt(text, "int x").empty());
+    EXPECT_TRUE(ResolveAt(text, "nope/missing").empty());
+}
+
+// Regression: `#include <vector>` must resolve to the header file (not to the
+// homonymous type) through the compiler's system include directories.
+TEST(IncludeIndexSpec, ResolveIncludeAtFindsSystemHeadersNamedLikeTypes)
+{
+    if (heimdall::IncludeIndex::SystemIncludes("c++").empty())
+    {
+        GTEST_SKIP() << "no C++ compiler on PATH";
+    }
+
+    constexpr std::string_view text = "#include <vector>\n#include <string>\n";
+    for (const std::string_view name: {"vector", "string"})
+    {
+        const auto header = heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(name), nullptr);
+        ASSERT_FALSE(header.empty()) << name;
+        EXPECT_EQ(header.filename().string(), name);
+    }
+}

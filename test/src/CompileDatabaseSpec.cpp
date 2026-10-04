@@ -64,3 +64,66 @@ TEST(CompileDatabaseSpec, SelectsLatestRecognizedLanguageStandardOption)
     EXPECT_EQ(database->Commands()[0].standard, heimdall::CppStandard::Cpp23);
     std::filesystem::remove(path);
 }
+
+namespace
+{
+
+std::filesystem::path WriteDatabase(const char* name, std::string_view entries)
+{
+    const auto path = std::filesystem::temp_directory_path() / name;
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << '[' << entries << ']';
+    return path;
+}
+
+} // namespace
+
+#if defined(_WIN32)
+// Editors send `c:` while compile databases record `C:`; the lookup must match.
+TEST(CompileDatabaseSpec, FindIgnoresPathCaseOnWindows)
+{
+    const auto path = WriteDatabase("heimdall_compile_commands_case_test.json",
+        R"({"directory":"C:/proj/build","file":"C:/proj/test/Spec.cpp","arguments":["g++","-IC:/proj/include"]})");
+    auto database = heimdall::CompileDatabase::Load(path);
+    ASSERT_TRUE(database);
+    EXPECT_NE(database->Find("c:/proj/test/spec.cpp"), nullptr);
+    EXPECT_NE(database->Find(R"(c:\proj\test\Spec.cpp)"), nullptr);
+    std::filesystem::remove(path);
+}
+#endif
+
+TEST(CompileDatabaseSpec, FindOrNearestFallsBackToClosestDirectoryForHeaders)
+{
+    const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
+    const std::string dir = root.generic_string();
+    const auto path = WriteDatabase("heimdall_compile_commands_nearest_test.json",
+        "{\"directory\":\"" + dir + "\",\"file\":\"other/a.cpp\",\"arguments\":[\"g++\",\"-Iother_inc\"]},"
+        "{\"directory\":\"" + dir + "\",\"file\":\"core/src/b.cpp\",\"arguments\":[\"g++\",\"-Icore_inc\"]}");
+    auto database = heimdall::CompileDatabase::Load(path);
+    ASSERT_TRUE(database);
+
+    EXPECT_EQ(database->Find(root / "core" / "include" / "x.hpp"), nullptr);
+    const auto* nearest = database->FindOrNearest(root / "core" / "include" / "x.hpp");
+    ASSERT_NE(nearest, nullptr);
+    EXPECT_EQ(nearest->file.filename(), "b.cpp");
+    // An exact entry always wins.
+    EXPECT_EQ(database->FindOrNearest(root / "other" / "a.cpp")->file.filename(), "a.cpp");
+    std::filesystem::remove(path);
+}
+
+// Regression: `C:\mingw64\bin\g++.exe` lost its backslashes, so the compiler
+// driver was invalid and system include directories (<vector>) never resolved.
+TEST(CompileDatabaseSpec, CommandStringKeepsWindowsPathSeparators)
+{
+    const auto path = WriteDatabase("heimdall_compile_commands_winpath_test.json",
+        R"({"directory":"C:/proj/build","file":"C:/proj/a.cpp","command":"C:\\mingw64\\bin\\g++.exe -IC:\\proj\\inc -DNAME=\\\"x\\\" -c C:\\proj\\a.cpp"})");
+    auto database = heimdall::CompileDatabase::Load(path);
+    ASSERT_TRUE(database);
+    ASSERT_EQ(database->Commands().size(), 1);
+    const auto& command = database->Commands()[0];
+    EXPECT_EQ(command.arguments.front(), R"(C:\mingw64\bin\g++.exe)");
+    ASSERT_EQ(command.include_directories.size(), 1);
+    EXPECT_EQ(command.include_directories[0].generic_string(), "C:/proj/inc");
+    EXPECT_EQ(command.defines.at("NAME"), "\"x\"");
+    std::filesystem::remove(path);
+}

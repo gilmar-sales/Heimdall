@@ -12,15 +12,14 @@ namespace heimdall::cli
     enum class Command
     {
         Lint,
-            Check,
-            Format,
-            Parse
+        Check,
+        Format,
+        Parse
     };
 
     struct Options
     {
-        Command command
-        {};
+        Command command{};
         std::size_t jobs = 1;
         bool json = false;
         bool write = false;

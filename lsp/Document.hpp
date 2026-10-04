@@ -45,7 +45,6 @@ namespace heimdall::lsp
     Position ToPosition(std::string_view text, std::size_t offset);
     std::size_t OffsetFromPosition(std::string_view text, Position position);
     std::filesystem::path PathFromUri(std::string_view uri);
-    // Inverse of PathFromUri: `file:///C:/dir/a%20b.hpp` (percent-encoded).
     std::string UriFromPath(const std::filesystem::path & path);
     void AppendPosition(Position position, std::string & out);
 

@@ -1599,6 +1599,34 @@ namespace heimdall::lsp
             }
         }
 
+        // On an `#include` line, navigate to the header file itself.
+        if (!implementation)
+        {
+            const std::filesystem::path self_file = PathFromUri(uri_string);
+            const heimdall::CompileCommand * include_command = command;
+            if (include_command == nullptr)
+            {
+                const std::lock_guard<std::mutex> lock(m_mu);
+                if (m_compile_database != std::nullopt)
+                {
+                    include_command = m_compile_database->FindOrNearest(self_file);
+                }
+            }
+
+            const std::filesystem::path header = heimdall::IncludeIndex::ResolveIncludeAt(
+                self_file.has_parent_path() ? self_file.parent_path() : std::filesystem::path(), *text, offset,
+                include_command);
+            if (!header.empty())
+            {
+                std::string response = "[{\"uri\":";
+                QuoteJson(UriFromPath(header), response);
+                response += ",\"range\":{\"start\":{\"line\":0,\"character\":0},"
+                "\"end\":{\"line\":0,\"character\":0}}}]";
+                Respond(id, response);
+                return;
+            }
+        }
+
         const HeaderView headers = HeaderScopes(uri_string, text, command);
         const auto tree = CachedParse(uri_string, text, version, command);
         if (WasCancelled(std::string(id)))

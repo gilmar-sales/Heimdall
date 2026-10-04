@@ -42,6 +42,11 @@ class IncludeIndex
     // did not change: no disk I/O at all on the fast path.
     static std::string IncludeFingerprint(const std::filesystem::path& base_dir,
                                           std::string_view text, const CompileCommand* command);
+    // Header named by the `#include` line containing `offset`, or empty when
+    // that line is not an include or the header cannot be found.
+    static std::filesystem::path ResolveIncludeAt(const std::filesystem::path& base_dir,
+                                                  std::string_view text, std::size_t offset,
+                                                  const CompileCommand* command);
     static IncludeIndex Build(const std::vector<std::filesystem::path>& headers,
                               const CompileCommand* command, const Limits& limits = Limits {});
     static IncludeIndex Build(const std::filesystem::path& base_dir, std::string_view text,

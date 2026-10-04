@@ -352,6 +352,28 @@ namespace heimdall
         return ordered;
     }
 
+    std::filesystem::path IncludeIndex::ResolveIncludeAt(const std::filesystem::path & base_dir,
+        std::string_view text, std::size_t offset, const CompileCommand *command)
+    {
+        offset = std::min(offset, text.size());
+        const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
+        std::size_t end = text.find('\n', offset);
+        if (end == std::string_view::npos)
+        {
+            end = text.size();
+        }
+
+        // begin wraps to 0 when no newline precedes the offset (npos + 1).
+        const std::vector<IncludeRef> refs = ScanIncludes(text.substr(begin, end - begin));
+        if (refs.empty())
+        {
+            return {};
+        }
+
+        return TryResolve(refs.front().name, refs.front().angled, base_dir, command,
+            SystemIncludes(DriverOf(command)));
+    }
+
     std::string IncludeIndex::IncludeFingerprint(const std::filesystem::path & base_dir,
         std::string_view text, const CompileCommand *command)
     {
