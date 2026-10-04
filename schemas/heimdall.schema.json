@@ -92,6 +92,27 @@
             "error"
           ]
         },
+        "cpp/no-implicit-bool-conversion": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-range-loop": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-loop-convert": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",

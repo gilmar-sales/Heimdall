@@ -189,4 +189,29 @@ Decisões e limites desta fase:
 - Um conflito entre regras foi resolvido de propósito: `modernize-auto` não reporta cast de constante nula, porque depois do fix de `modernize-nullptr` não sobraria nada para o `auto` deduzir.
 - Ainda não há reuso incremental por `TopLevelItem` (seção 6) nem `HeaderSummary` (seção 8): o modelo é refeito a cada versão do documento, como o `ParseTree`.
 
-Próxima fase: F2 (Typer), com `modernize-range-loop`, `modernize-loop-convert` e `no-implicit-bool-conversion`.
+**F2 (Typer): concluída.** Regras entregues: `cpp/no-implicit-bool-conversion`, `cpp/modernize-range-loop` e `cpp/modernize-loop-convert`.
+
+| Peça | Onde |
+|---|---|
+| `TypeTable` (hash-consing), `TypeModel` (tipo de cada símbolo e de cada expressão), `Typer::Type(const SemanticModel&)` | `semantic/include/Heimdall/TypeModel.hpp`, `semantic/src/Typer.cpp` |
+| `SemanticRules::AnalyzeImplicitBool/AnalyzeRangeLoop/AnalyzeLoopConvert` e `Analyze(model, types)` | `semantic/src/SemanticRules.cpp` |
+| Testes de unidade do Typer e das regras | `test/src/SemanticTyperSpec.cpp` |
+| Benchmarks (`BM_Type`, `BM_TypeFunctions`, `BM_TypeRules`) | `bench/src/SemanticBench.cpp` |
+
+O que o modelo oferece às regras: `TypeModel::SymbolType(symbol)` (tipo declarado de variáveis, parâmetros e campos; tipo de retorno de funções; tipo denotado por aliases), `NodeType(node)` (tipo do valor de uma expressão, nunca referência), `Types()` com `Kind`, `Strip`, `Decay`, `IsInteger`, `IsPointer`... e `Spell(type)` para mensagens. O Typer é uma consulta separada do Binder: `Analyze(model)` o calcula uma vez e o repassa às regras; regras da F1 não pagam por ele.
+
+Decisões e limites desta fase:
+
+- **Tipos.** `Builtin`, `Class`/`Enum` (símbolos do próprio arquivo), `External`, `Pointer`, `LRef`, `RRef`, `Const`, `Array` e `Unknown` (id 0). Um ponteiro para tipo desconhecido (`T* p`) continua sendo um ponteiro conhecido; referência e `const` de `Unknown` colapsam em `Unknown`.
+- **`External`.** Tipos qualificados com `std::` ficam como nomes internados, com os argumentos de template escritos (`std::vector<int>`); só o "cabeça" (`std::vector`) importa para as regras, e `std::vector<bool>` é excluído dos laços porque o elemento é um proxy. Nomes não qualificados de bibliotecas (`vector<int>` após `using namespace std`) são `Unknown`. Exceção: `std::size_t` e `size_t` não declarado viram `SizeT`.
+- **`SizeT`.** Tipo próprio (sem sinal, largura da plataforma). Conversões aritméticas que dependem da largura de `long` (`long` com `unsigned`, `long long` com `unsigned long`) e literais maiores que `int` sem sufixo resultam em `Unknown`, para o resultado não variar entre LP64 e LLP64.
+- **Expressões.** Literais (inclusive `true`, `false`, `nullptr`, que a gramática lê como identificadores), identificadores, `this`, parênteses, operadores unários e binários sobre tipos primitivos e ponteiros (conversões aritméticas usuais, promoção inteira, aritmética de ponteiros), `?:`, subscript (array, ponteiro, `operator[]` de classe), acesso a membro (`.`, `->`, `::`, inclusive bases do próprio arquivo), chamadas de função (todas as sobrecargas do nome precisam ter o mesmo tipo de retorno; funções-template, construtores e destrutores são `Unknown`), `T(x)`, `static_cast<T>`/`dynamic_cast`/`reinterpret_cast`/`const_cast`, `sizeof` e `size()`/`empty()`/`length()`/`capacity()` de contêineres da biblioteca padrão. Operadores sobre classes e `External` (`a + b`, `a < b`, `!a`, `&a`) são `Unknown`: podem estar sobrecarregados.
+- **`auto`.** `auto x = e;` deduz do tipo de `e` (sem referência, `const` de topo e array); `auto&` e `const auto&` mantêm a referência. `auto*`, `auto&&`, inicializador entre chaves/parênteses e `auto` sem inicializador de tipo conhecido são `Unknown`; tipo de retorno `auto` sem trailing return também (não olha o corpo).
+- **Casts C e `new`.** A gramática liga o operando de `(T)x` e de `new T` ao pai errado. O Typer só confia em um nó quando o primeiro filho começa onde o próprio nó começa; caso contrário o resultado é `Unknown`, e as regras exigem que o filho cubra exatamente o trecho de tokens esperado.
+- **Aliases.** `using X = T;` e `typedef T X;` são resolvidos recursivamente com guarda contra ciclos (ciclo = `Unknown`); aliases-template (`template <class T> using V = ...`) e instâncias de classes-template (`Box<int>`) são `Unknown`.
+- **Profundidade.** Expressões encadeadas são tipadas com recursão limitada (192 níveis; passou disso, `Unknown`); cadeias à esquerda (`a + 1 + 1 + ...`) não consomem pilha porque os nós filhos têm índice menor.
+- **Laços.** As duas regras de laço só reescrevem quando todo uso do índice/iterador e do contêiner no corpo segue o padrão esperado, e o contêiner é variável local ou parâmetro (membros e globais podem ser alterados por qualquer chamada); qualquer lambda no corpo desativa a regra. O autofix é sempre um quick fix: o corpo é reescrito por padrão de tokens.
+- **Gramática.** `if (init; cond)` e declarações em condição não dão ao `cond` um nó próprio, e `do { } while (cond)` não parseia `cond`: essas condições não são verificadas. Um encadeamento de milhares de `a = a = a = ...` estoura a pilha do parser (anterior a esta fase) antes de chegar ao Typer.
+- Ainda não há reuso incremental do `TypeModel` nem cache entre documentos: ele é refeito a cada versão, como o `SemanticModel`.
+
+Próxima fase: F3 (Projeto), com `HeaderSummary`, `include-what-you-use` e `modernize-final`.

@@ -2,6 +2,7 @@
 
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticModel.hpp>
+#include <Heimdall/TypeModel.hpp>
 
 #include <vector>
 
@@ -36,8 +37,27 @@ namespace heimdall
         // the type of the container and are not reported. Class members are skipped.
         static std::vector<Diagnostic> AnalyzeAuto(const SemanticModel &model);
 
-        // Every rule above, sorted by offset.
+        // cpp/no-implicit-bool-conversion: an integer, floating-point or pointer
+        // expression whose type the Typer knows used where a bool is expected: the
+        // condition of `if`/`while`/`for`/`?:`, operands of `!`, `&&` and `||`.
+        // Literals (`while (1)`) and `!!x` are intentional and left alone. No fix:
+        // the comparison to write depends on the intent.
+        static std::vector<Diagnostic> AnalyzeImplicitBool(const TypeModel &types);
+
+        // cpp/modernize-range-loop: `for (int i = 0; i < c.size(); ++i)` over a local
+        // array or standard sequence container whose body only reads `c[i]`. The
+        // fix (quick fix only) writes the range-based for.
+        static std::vector<Diagnostic> AnalyzeRangeLoop(const TypeModel &types);
+
+        // cpp/modernize-loop-convert: `for (auto it = c.begin(); it != c.end(); ++it)`
+        // over a standard container whose body only uses `*it` and `it->`. The fix
+        // (quick fix only) writes the range-based for.
+        static std::vector<Diagnostic> AnalyzeLoopConvert(const TypeModel &types);
+
+        // Every rule above, sorted by offset. The overload without a TypeModel runs
+        // the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);
+        static std::vector<Diagnostic> Analyze(const SemanticModel &model, const TypeModel &types);
     };
 
 } // namespace heimdall

@@ -570,6 +570,12 @@ namespace heimdall
                 "semântica", true, "0 used as a null pointer"},
             {RuleId::ModernizeAuto, "cpp/modernize-auto", "cpp", Severity::Warning,
                 "semântica", true, "explicit type that repeats the initializer"},
+            {RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion", "cpp", Severity::Warning,
+                "semântica", false, "integer, floating-point or pointer used as a condition"},
+            {RuleId::ModernizeRangeLoop, "cpp/modernize-range-loop", "cpp", Severity::Warning,
+                "semântica", true, "index loop replaceable by a range-based for"},
+            {RuleId::ModernizeLoopConvert, "cpp/modernize-loop-convert", "cpp", Severity::Warning,
+                "semântica", true, "iterator loop replaceable by a range-based for"},
         };
         return catalog;
     }

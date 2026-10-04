@@ -265,6 +265,20 @@ namespace heimdall
                 m_diagnostics.push_back(std::move(diagnostic));
             }
 
+            void ReportNoFix(RuleId rule, std::string_view code, std::string message, std::size_t offset,
+                std::size_t length)
+            {
+                if (!m_lines_built)
+                {
+                    m_lines.Build(m_model.Tree().Source());
+                    m_lines_built = true;
+                }
+
+                const auto position = m_lines.Lookup(offset);
+                m_diagnostics.push_back(Diagnostic {rule, Severity::Warning, std::string(code), std::move(message),
+                    offset, length, position.line, position.column, false, TextEdit {0, 0, std::string()}});
+            }
+
             std::vector<Diagnostic> Take()
             {
                 std::sort(m_diagnostics.begin(), m_diagnostics.end(),
@@ -311,6 +325,17 @@ namespace heimdall
             std::string_view Text(std::size_t position) const
             {
                 return position < m_sig.size() ? m_model.Tree().Text(m_tokens[m_sig[position]]) : std::string_view {};
+            }
+            bool IsLiteralToken(std::size_t position) const
+            {
+                if (position >= m_sig.size())
+                {
+                    return false;
+                }
+
+                const auto kind = m_tokens[m_sig[position]].kind;
+                return kind == TokenKind::Number || kind == TokenKind::StringLiteral ||
+                    kind == TokenKind::CharacterLiteral || kind == TokenKind::RawStringLiteral;
             }
             std::size_t Offset(std::size_t position) const
             {
@@ -931,10 +956,783 @@ namespace heimdall
         return reporter.Take();
     }
 
+    namespace
+    {
+
+        // Child of `parent` whose significant tokens are exactly [begin, end).
+        std::uint32_t ChildSpanning(const SemanticModel &model, const TokenView &view, std::uint32_t parent,
+            std::size_t begin, std::size_t end)
+        {
+            for (const auto child: model.ChildrenOf(parent))
+            {
+                const auto [b, e] = view.Range(child);
+                if (b == begin && e == end)
+                {
+                    return child;
+                }
+            }
+
+            return kNone;
+        }
+
+        // The expression a control statement tests, or kNone when the statement is
+        // not a plain `if`/`while`/classic `for` or the grammar did not give the
+        // condition a node of its own (declaration conditions, C-style casts).
+        std::uint32_t ConditionOf(const SemanticModel &model, const TokenView &view, std::uint32_t stmt)
+        {
+            const auto [begin, end] = view.Range(stmt);
+            const Tok keyword = view.At(begin);
+            if (keyword != Tok::KwIf && keyword != Tok::KwWhile && keyword != Tok::KwFor)
+            {
+                return kNone;
+            }
+
+            std::size_t open = begin + 1;
+            if (keyword == Tok::KwIf && (view.At(open) == Tok::KwConstexpr || view.At(open) == Tok::KwConsteval))
+            {
+                ++open;
+            }
+
+            if (view.At(open) != Tok::LParen)
+            {
+                return kNone;
+            }
+
+            const auto close = view.Match(open, end);
+            if (close >= end)
+            {
+                return kNone;
+            }
+
+            std::vector<std::size_t> semis;
+            for (std::size_t i = open + 1; i < close; ++i)
+            {
+                const Tok tok = view.At(i);
+                if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
+                {
+                    const auto match = view.Match(i, close);
+                    if (match >= close)
+                    {
+                        return kNone;
+                    }
+
+                    i = match;
+                }
+                else if (tok == Tok::Semi)
+                {
+                    semis.push_back(i);
+                }
+            }
+
+            std::size_t first = open + 1;
+            std::size_t last = close;
+            if (keyword == Tok::KwWhile && semis.empty())
+            {
+                // the whole parenthesized expression
+            }
+            else if (keyword == Tok::KwIf && semis.size() <= 1)
+            {
+                first = semis.empty() ? open + 1 : semis[0] + 1;
+            }
+            else if (keyword == Tok::KwFor && semis.size() == 2)
+            {
+                first = semis[0] + 1;
+                last = semis[1];
+            }
+            else
+            {
+                return kNone;
+            }
+
+            return first < last ? ChildSpanning(model, view, stmt, first, last) : kNone;
+        }
+
+        bool IsVectorOfBool(const TypeModel &types, TypeId type)
+        {
+            const auto &table = types.Types();
+            return table.Kind(type) == TypeKind::External &&
+                types.ExternalNames().Text(table.Arg(type)).starts_with("std::vector<bool");
+        }
+
+        // The classic `for (init; cond; inc) body`, as positions in the significant
+        // tokens: `kw` is `for`, [open, close] its parentheses, `end` just past the body.
+        struct ForLoop
+        {
+            std::uint32_t node = kNone;
+            std::size_t kw = 0;
+            std::size_t open = 0;
+            std::size_t semi1 = 0;
+            std::size_t semi2 = 0;
+            std::size_t close = 0;
+            std::size_t end = 0;
+        };
+
+        bool SplitFor(const TokenView &view, std::uint32_t node, ForLoop &loop)
+        {
+            const auto [begin, end] = view.Range(node);
+            if (view.At(begin) != Tok::KwFor || view.At(begin + 1) != Tok::LParen)
+            {
+                return false;
+            }
+
+            loop.node = node;
+            loop.kw = begin;
+            loop.open = begin + 1;
+            loop.close = view.Match(loop.open, end);
+            loop.end = end;
+            if (loop.close >= end)
+            {
+                return false;
+            }
+
+            std::vector<std::size_t> semis;
+            for (std::size_t i = loop.open + 1; i < loop.close; ++i)
+            {
+                const Tok tok = view.At(i);
+                if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
+                {
+                    const auto match = view.Match(i, loop.close);
+                    if (match >= loop.close)
+                    {
+                        return false;
+                    }
+
+                    i = match;
+                }
+                else if (tok == Tok::Semi)
+                {
+                    semis.push_back(i);
+                }
+            }
+
+            if (semis.size() != 2)
+            {
+                return false;
+            }
+
+            loop.semi1 = semis[0];
+            loop.semi2 = semis[1];
+            return loop.close + 1 < loop.end;
+        }
+
+        // `++i`, `i++` or `i += 1` over [begin, end).
+        bool IsIncrementOf(const SemanticModel &model, const TokenView &view, std::size_t begin, std::size_t end,
+            SymbolId variable)
+        {
+            const auto names = [&](std::size_t position)
+            {
+                return view.IsWord(position) && model.ResolveToken(view.TokenAt(position)) == variable;
+            };
+            if (end == begin + 2)
+            {
+                return (view.At(begin) == Tok::PlusPlus && names(begin + 1)) ||
+                    (names(begin) && view.At(begin + 1) == Tok::PlusPlus);
+            }
+
+            return end == begin + 3 && names(begin) && view.At(begin + 1) == Tok::PlusEq && view.Text(begin + 2) == "1";
+        }
+
+        // Picks a name for the loop variable that nothing in the loop or the file
+        // already uses.
+        std::string FreshElementName(const SemanticModel &model, const TokenView &view, const ForLoop &loop)
+        {
+            for (const std::string_view candidate: {"element", "item", "entry", "value"})
+            {
+                bool used = model.Names().Find(candidate) != kNone;
+                for (std::size_t i = loop.kw; i < loop.end && !used; ++i)
+                {
+                    used = view.Text(i) == candidate;
+                }
+
+                if (!used)
+                {
+                    return std::string(candidate);
+                }
+            }
+
+            return std::string();
+        }
+
+        // A `[` that does not subscript anything starts a lambda or an attribute:
+        // captures would change meaning when the loop variable changes.
+        bool StartsLambda(const TokenView &view, std::size_t position, std::size_t body_begin)
+        {
+            if (view.At(position) != Tok::LBracket)
+            {
+                return false;
+            }
+
+            if (position == body_begin)
+            {
+                return true;
+            }
+
+            return !(view.IsWord(position - 1) || view.At(position - 1) == Tok::RBracket ||
+                view.At(position - 1) == Tok::RParen);
+        }
+
+        bool EndsOperand(const TokenView &view, std::size_t position)
+        {
+            if (view.IsWord(position) || view.IsLiteralToken(position))
+            {
+                return true;
+            }
+
+            const Tok tok = view.At(position);
+            return tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::KwThis || tok == Tok::KwTrue ||
+                tok == Tok::KwFalse || tok == Tok::KwNullptr;
+        }
+
+        struct Edit
+        {
+            std::size_t first;
+            std::size_t last; // positions, inclusive
+            std::string text;
+        };
+
+        // The loop as a range-based for: `header` replaces everything up to the
+        // closing parenthesis and `edits` (ascending, disjoint) rewrite the body.
+        Diagnostic BuildLoopDiagnostic(const SemanticModel &model, const TokenView &view, const ForLoop &loop,
+            RuleId rule, std::string_view code, std::string message, const std::string &header,
+            const std::vector<Edit> &edits, LineTable &lines, bool &lines_built)
+        {
+            const auto source = model.Tree().Source();
+            const auto body_offset = view.End(loop.close);
+            const auto loop_end = view.End(loop.end - 1);
+            std::string body(source.substr(body_offset, loop_end - body_offset));
+            for (auto it = edits.rbegin(); it != edits.rend(); ++it)
+            {
+                const auto offset = view.Offset(it->first) - body_offset;
+                body.replace(offset, view.End(it->last) - view.Offset(it->first), it->text);
+            }
+
+            if (!lines_built)
+            {
+                lines.Build(source);
+                lines_built = true;
+            }
+
+            const auto offset = view.Offset(loop.kw);
+            const auto position = lines.Lookup(offset);
+            Diagnostic diagnostic {rule, Severity::Warning, std::string(code), std::move(message), offset,
+                body_offset - offset, position.line, position.column, true,
+                TextEdit {offset, loop_end - offset, header + body}};
+            // The body is rewritten by pattern: offered as a quick fix, not in batch.
+            diagnostic.fix_is_safe = false;
+            diagnostic.fix_title = "Convert to a range-based for";
+            return diagnostic;
+        }
+
+        void SortByOffset(std::vector<Diagnostic> &diagnostics)
+        {
+            std::sort(diagnostics.begin(), diagnostics.end(),
+                [](const Diagnostic &a, const Diagnostic &b)
+                {
+                    return a.offset < b.offset;
+                });
+        }
+
+    } // namespace
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeImplicitBool(const TypeModel &types)
+    {
+        const auto &model = types.Model();
+        const auto &table = types.Types();
+        const auto &nodes = model.Tree().Nodes();
+        Reporter reporter(model);
+        const TokenView view(model);
+        const auto check = [&](std::uint32_t operand, std::string_view context)
+        {
+            if (operand >= nodes.size() || nodes[operand].kind == GrammarKind::LiteralExpression)
+            {
+                return;
+            }
+
+            const auto [begin, end] = view.Range(operand);
+            if (begin >= end || !model.IsCode(view.TokenAt(begin)))
+            {
+                return;
+            }
+
+            const auto type = table.Strip(types.NodeType(operand));
+            const char *advice = nullptr;
+            if (table.IsInteger(type))
+            {
+                advice = "compare with 0 explicitly";
+            }
+            else if (table.IsFloating(type))
+            {
+                advice = "compare with 0.0 explicitly";
+            }
+            else if (table.IsPointer(type) || table.IsArray(type))
+            {
+                advice = "compare with nullptr explicitly";
+            }
+
+            if (advice == nullptr)
+            {
+                return;
+            }
+
+            const auto offset = view.Offset(begin);
+            reporter.ReportNoFix(RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion",
+                "implicit conversion of '" + types.Spell(type) + "' to bool in " + std::string(context) + "; " + advice,
+                offset, view.End(end - 1) - offset);
+        };
+
+        for (std::uint32_t node = 1; node < nodes.size(); ++node)
+        {
+            const auto kids = model.ChildrenOf(node);
+            const auto [begin, end] = view.Range(node);
+            if (begin >= end)
+            {
+                continue;
+            }
+
+            switch (nodes[node].kind)
+            {
+            case GrammarKind::UnaryExpression:
+            {
+                if (view.At(begin) != Tok::Bang || kids.empty() || view.Range(kids[0]).first != begin + 1 ||
+                    view.Range(kids[0]).second != end)
+                {
+                    break;
+                }
+
+                // `!!x` is the idiom for an explicit conversion.
+                const auto parent = nodes[node].parent;
+                if (parent < nodes.size() && nodes[parent].kind == GrammarKind::UnaryExpression &&
+                    view.Range(parent).first + 1 == begin && view.At(view.Range(parent).first) == Tok::Bang)
+                {
+                    break;
+                }
+
+                check(kids[0], "the operand of '!'");
+                break;
+            }
+            case GrammarKind::BinaryExpression:
+            {
+                if (kids.size() != 2 || view.Range(kids[0]).first != begin)
+                {
+                    break;
+                }
+
+                const auto op = view.Range(kids[0]).second;
+                if (view.At(op) != Tok::AmpAmp && view.At(op) != Tok::PipePipe)
+                {
+                    break;
+                }
+
+                const std::string context = "an operand of '" + std::string(view.Text(op)) + "'";
+                check(kids[0], context);
+                if (view.Range(kids[1]).first == op + 1 && view.Range(kids[1]).second == end)
+                {
+                    check(kids[1], context);
+                }
+
+                break;
+            }
+            case GrammarKind::ConditionalExpression:
+                if (kids.size() == 3 && view.Range(kids[0]).first == begin &&
+                    view.At(view.Range(kids[0]).second) == Tok::Question)
+                {
+                    check(kids[0], "the condition of '?:'");
+                }
+
+                break;
+            case GrammarKind::IfStatement:
+                if (const auto condition = ConditionOf(model, view, node); condition != kNone)
+                {
+                    check(condition, "an 'if' condition");
+                }
+
+                break;
+            case GrammarKind::LoopStatement:
+                if (const auto condition = ConditionOf(model, view, node); condition != kNone)
+                {
+                    check(condition, view.At(begin) == Tok::KwFor ? "a 'for' condition" : "a 'while' condition");
+                }
+
+                break;
+            default:
+                break;
+            }
+        }
+
+        return reporter.Take();
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeRangeLoop(const TypeModel &types)
+    {
+        const auto &model = types.Model();
+        const auto &table = types.Types();
+        const auto &nodes = model.Tree().Nodes();
+        const auto &symbols = model.Symbols();
+        const TokenView view(model);
+        std::vector<Diagnostic> diagnostics;
+        LineTable lines;
+        bool lines_built = false;
+
+        const auto indexable = [&](SymbolId symbol, bool allow_array)
+        {
+            if (symbol == kNone ||
+                (symbols.kind[symbol] != SymbolKind::Variable && symbols.kind[symbol] != SymbolKind::Parameter))
+            {
+                return false;
+            }
+
+            // A member may be changed by any call in the body.
+            if (model.Scopes().kind[symbols.scope[symbol]] == ScopeKind::Class)
+            {
+                return false;
+            }
+
+            const auto type = table.Strip(types.SymbolType(symbol));
+            if (table.IsArray(type))
+            {
+                return allow_array;
+            }
+
+            return table.Kind(type) == TypeKind::External && !IsVectorOfBool(types, type) &&
+                IsStdIndexableHead(types.ExternalHead(type));
+        };
+
+        for (std::uint32_t node = 1; node < nodes.size(); ++node)
+        {
+            ForLoop loop;
+            if (nodes[node].kind != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+                !model.IsCode(view.TokenAt(loop.kw)))
+            {
+                continue;
+            }
+
+            // init: `T i = 0`
+            if (loop.semi1 < loop.open + 5)
+            {
+                continue;
+            }
+
+            const auto name_pos = loop.semi1 - 3;
+            if (!view.IsWord(name_pos) || view.At(name_pos + 1) != Tok::Eq || !view.IsZeroLiteral(name_pos + 2))
+            {
+                continue;
+            }
+
+            bool simple = true;
+            for (std::size_t i = loop.open + 1; i < name_pos && simple; ++i)
+            {
+                simple = view.At(i) != Tok::Comma;
+            }
+
+            const auto name_id = model.Names().Find(view.Text(name_pos));
+            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node), name_id);
+            if (!simple || variable == kNone || symbols.decl_token[variable] != view.TokenAt(name_pos) ||
+                symbols.kind[variable] != SymbolKind::Variable ||
+                !table.IsInteger(table.Strip(types.SymbolType(variable))))
+            {
+                continue;
+            }
+
+            // cond: `i < bound`, inc: `++i`
+            if (loop.semi2 < loop.semi1 + 4 || !view.IsWord(loop.semi1 + 1) ||
+                model.ResolveToken(view.TokenAt(loop.semi1 + 1)) != variable || view.At(loop.semi1 + 2) != Tok::Lt ||
+                !IsIncrementOf(model, view, loop.semi2 + 1, loop.close, variable))
+            {
+                continue;
+            }
+
+            const auto bound = loop.semi1 + 3;
+            const auto bound_end = loop.semi2;
+            SymbolId container = kNone;
+            if (bound_end == bound + 5 && view.IsWord(bound) && view.At(bound + 1) == Tok::Dot &&
+                view.Text(bound + 2) == "size" && view.At(bound + 3) == Tok::LParen && view.At(bound + 4) == Tok::RParen)
+            {
+                container = model.ResolveToken(view.TokenAt(bound));
+                if (!indexable(container, false))
+                {
+                    continue;
+                }
+            }
+            else if (bound_end == bound + 6 && view.Text(bound) == "std" && view.At(bound + 1) == Tok::ColonColon &&
+                view.Text(bound + 2) == "size" && view.At(bound + 3) == Tok::LParen && view.IsWord(bound + 4) &&
+                view.At(bound + 5) == Tok::RParen)
+            {
+                container = model.ResolveToken(view.TokenAt(bound + 4));
+                if (!indexable(container, true))
+                {
+                    continue;
+                }
+            }
+            else if (bound_end == bound + 1 && view.IsLiteralToken(bound))
+            {
+                const auto text = view.Text(bound);
+                if (text.empty() || text.size() >= 10 || text.find_first_not_of("0123456789") != std::string_view::npos)
+                {
+                    continue;
+                }
+
+                std::uint64_t literal = 0;
+                for (const char c: text)
+                {
+                    literal = literal * 10 + static_cast<std::uint64_t>(c - '0');
+                }
+
+                // The array is the first `x[i]` of the body.
+                for (std::size_t p = loop.close + 1; p + 3 < loop.end && container == kNone; ++p)
+                {
+                    if (view.IsWord(p) && view.At(p + 1) == Tok::LBracket && view.IsWord(p + 2) &&
+                        model.ResolveToken(view.TokenAt(p + 2)) == variable && view.At(p + 3) == Tok::RBracket)
+                    {
+                        container = model.ResolveToken(view.TokenAt(p));
+                    }
+                }
+
+                const auto array = container == kNone ? TypeTable::Unknown : table.Strip(types.SymbolType(container));
+                if (!indexable(container, true) || !table.IsArray(array) || table.Extent(array) != literal)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                continue;
+            }
+
+            // body: every use of `i` and of the container is `c[i]`.
+            const auto variable_name = view.Text(name_pos);
+            const auto container_name = model.Names().Text(symbols.name[container]);
+            std::vector<Edit> edits;
+            bool ok = true;
+            const auto body_begin = loop.close + 1;
+            for (std::size_t p = body_begin; p < loop.end && ok; ++p)
+            {
+                if (StartsLambda(view, p, body_begin))
+                {
+                    ok = false;
+                }
+                else if (!view.IsWord(p))
+                {
+                    continue;
+                }
+                else if (view.Text(p) == container_name)
+                {
+                    const bool pattern = p + 3 < loop.end && view.At(p + 1) == Tok::LBracket && view.IsWord(p + 2) &&
+                        model.ResolveToken(view.TokenAt(p + 2)) == variable && view.At(p + 3) == Tok::RBracket &&
+                        model.ResolveToken(view.TokenAt(p)) == container;
+                    if (!pattern)
+                    {
+                        ok = false;
+                        break;
+                    }
+
+                    edits.push_back({p, p + 3, std::string()});
+                    p += 3;
+                }
+                else if (view.Text(p) == variable_name)
+                {
+                    ok = false; // the use is not inside `c[i]`
+                }
+            }
+
+            const auto element = FreshElementName(model, view, loop);
+            if (!ok || edits.empty() || element.empty())
+            {
+                continue;
+            }
+
+            for (auto &edit: edits)
+            {
+                edit.text = element;
+            }
+
+            const std::string header = std::string("for (") +
+                (table.IsConstQualified(types.SymbolType(container)) ? "const auto& " : "auto& ") + element + " : " +
+                std::string(container_name) + ")";
+            diagnostics.push_back(BuildLoopDiagnostic(model, view, loop, RuleId::ModernizeRangeLoop,
+                "cpp/modernize-range-loop",
+                "loop over '" + std::string(container_name) + "' by index can be a range-based for", header, edits,
+                lines, lines_built));
+        }
+
+        SortByOffset(diagnostics);
+        return diagnostics;
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeLoopConvert(const TypeModel &types)
+    {
+        const auto &model = types.Model();
+        const auto &table = types.Types();
+        const auto &nodes = model.Tree().Nodes();
+        const auto &symbols = model.Symbols();
+        const TokenView view(model);
+        std::vector<Diagnostic> diagnostics;
+        LineTable lines;
+        bool lines_built = false;
+
+        for (std::uint32_t node = 1; node < nodes.size(); ++node)
+        {
+            ForLoop loop;
+            if (nodes[node].kind != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+                !model.IsCode(view.TokenAt(loop.kw)))
+            {
+                continue;
+            }
+
+            // init: `auto it = c.begin()` or `auto it = std::begin(c)`
+            const auto first = loop.open + 1;
+            if (view.At(first) != Tok::KwAuto || !view.IsWord(first + 1) || view.At(first + 2) != Tok::Eq)
+            {
+                continue;
+            }
+
+            std::size_t container_pos = 0;
+            std::string_view begin_name;
+            if (loop.semi1 == first + 8 && view.IsWord(first + 3) && view.At(first + 4) == Tok::Dot &&
+                view.IsWord(first + 5) && view.At(first + 6) == Tok::LParen && view.At(first + 7) == Tok::RParen)
+            {
+                container_pos = first + 3;
+                begin_name = view.Text(first + 5);
+            }
+            else if (loop.semi1 == first + 9 && view.Text(first + 3) == "std" && view.At(first + 4) == Tok::ColonColon &&
+                view.IsWord(first + 5) && view.At(first + 6) == Tok::LParen && view.IsWord(first + 7) &&
+                view.At(first + 8) == Tok::RParen)
+            {
+                container_pos = first + 7;
+                begin_name = view.Text(first + 5);
+            }
+            else
+            {
+                continue;
+            }
+
+            const bool free_form = container_pos == first + 7;
+            if (begin_name != "begin" && begin_name != "cbegin")
+            {
+                continue;
+            }
+
+            const auto name_pos = first + 1;
+            const auto name_id = model.Names().Find(view.Text(name_pos));
+            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node), name_id);
+            const auto container = model.ResolveToken(view.TokenAt(container_pos));
+            if (variable == kNone || container == kNone || symbols.decl_token[variable] != view.TokenAt(name_pos) ||
+                symbols.kind[variable] != SymbolKind::Variable ||
+                (symbols.kind[container] != SymbolKind::Variable && symbols.kind[container] != SymbolKind::Parameter) ||
+                model.Scopes().kind[symbols.scope[container]] == ScopeKind::Class)
+            {
+                continue;
+            }
+
+            const auto container_type = table.Strip(types.SymbolType(container));
+            const bool known_container = (table.Kind(container_type) == TypeKind::External &&
+                                             !IsVectorOfBool(types, container_type) &&
+                                             IsStdContainerHead(types.ExternalHead(container_type))) ||
+                (free_form && table.IsArray(container_type));
+            if (!known_container)
+            {
+                continue;
+            }
+
+            // cond: `it != c.end()` / `it != std::end(c)`, inc: `++it`
+            const auto condition = loop.semi1 + 1;
+            const std::string_view end_name = begin_name == "begin" ? "end" : "cend";
+            const bool cond_shape = free_form
+                ? loop.semi2 == condition + 8 && view.Text(condition + 2) == "std" &&
+                    view.At(condition + 3) == Tok::ColonColon && view.Text(condition + 4) == end_name &&
+                    view.At(condition + 5) == Tok::LParen && view.IsWord(condition + 6) &&
+                    view.At(condition + 7) == Tok::RParen && model.ResolveToken(view.TokenAt(condition + 6)) == container
+                : loop.semi2 == condition + 7 && view.IsWord(condition + 2) &&
+                    model.ResolveToken(view.TokenAt(condition + 2)) == container &&
+                    view.At(condition + 3) == Tok::Dot && view.Text(condition + 4) == end_name &&
+                    view.At(condition + 5) == Tok::LParen && view.At(condition + 6) == Tok::RParen;
+            if (!cond_shape || !view.IsWord(condition) || model.ResolveToken(view.TokenAt(condition)) != variable ||
+                view.At(condition + 1) != Tok::BangEq)
+            {
+                continue;
+            }
+
+            const auto inc_begin = loop.semi2 + 1;
+            if (loop.close != inc_begin + 2 ||
+                !((view.At(inc_begin) == Tok::PlusPlus && view.IsWord(inc_begin + 1) &&
+                      model.ResolveToken(view.TokenAt(inc_begin + 1)) == variable) ||
+                    (view.IsWord(inc_begin) && model.ResolveToken(view.TokenAt(inc_begin)) == variable &&
+                        view.At(inc_begin + 1) == Tok::PlusPlus)))
+            {
+                continue;
+            }
+
+            // body: the iterator is only dereferenced, the container is not touched.
+            const auto iterator_name = view.Text(name_pos);
+            const auto container_name = model.Names().Text(symbols.name[container]);
+            const auto element = FreshElementName(model, view, loop);
+            std::vector<Edit> edits;
+            bool ok = true;
+            const auto body_begin = loop.close + 1;
+            for (std::size_t p = body_begin; p < loop.end && ok; ++p)
+            {
+                if (StartsLambda(view, p, body_begin))
+                {
+                    ok = false;
+                }
+                else if (!view.IsWord(p))
+                {
+                    continue;
+                }
+                else if (view.Text(p) == container_name)
+                {
+                    ok = false;
+                }
+                else if (view.Text(p) == iterator_name)
+                {
+                    if (model.ResolveToken(view.TokenAt(p)) != variable)
+                    {
+                        ok = false;
+                    }
+                    else if (p > body_begin && view.At(p - 1) == Tok::Star &&
+                        (p - 1 == body_begin || !EndsOperand(view, p - 2)))
+                    {
+                        edits.push_back({p - 1, p, element}); // `*it`
+                    }
+                    else if (view.At(p + 1) == Tok::Arrow && p + 1 < loop.end)
+                    {
+                        edits.push_back({p, p + 1, element + "."}); // `it->`
+                    }
+                    else
+                    {
+                        ok = false;
+                    }
+                }
+            }
+
+            if (!ok || edits.empty() || element.empty())
+            {
+                continue;
+            }
+
+            const bool read_only = begin_name == "cbegin" || table.IsConstQualified(types.SymbolType(container));
+            const std::string header = std::string("for (") + (read_only ? "const auto& " : "auto& ") + element +
+                " : " + std::string(container_name) + ")";
+            diagnostics.push_back(BuildLoopDiagnostic(model, view, loop, RuleId::ModernizeLoopConvert,
+                "cpp/modernize-loop-convert",
+                "iterator loop over '" + std::string(container_name) + "' can be a range-based for", header, edits,
+                lines, lines_built));
+        }
+
+        SortByOffset(diagnostics);
+        return diagnostics;
+    }
+
+
     std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel &model)
     {
+        return Analyze(model, Typer::Type(model));
+    }
+
+    std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel &model, const TypeModel &types)
+    {
         auto all = AnalyzeOverride(model);
-        for (auto &&part: {AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model)})
+        for (auto &&part: {AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
+                 AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types)})
         {
             all.insert(all.end(), part.begin(), part.end());
         }

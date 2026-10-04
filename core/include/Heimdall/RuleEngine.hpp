@@ -35,7 +35,10 @@ namespace heimdall
         ModernizeOverride,
         ModernizeNullptr,
         NoZeroAsNull,
-        ModernizeAuto
+        ModernizeAuto,
+        NoImplicitBoolConversion,
+        ModernizeRangeLoop,
+        ModernizeLoopConvert
     };
 
     struct RuleOverride

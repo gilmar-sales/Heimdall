@@ -23,6 +23,7 @@ add_executable(Tests_run
   src/SemanticRulesSpec.cpp
   src/SemanticModernizeSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
+  src/SemanticTyperSpec.cpp
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
   src/DocumentSpec.cpp

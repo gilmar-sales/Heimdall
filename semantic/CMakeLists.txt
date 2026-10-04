@@ -10,6 +10,7 @@ add_library(heimdall_semantic STATIC
   src/IncludeAnalyzer.cpp
   src/SemanticModel.cpp
   src/Binder.cpp
+  src/Typer.cpp
   src/SemanticRules.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
