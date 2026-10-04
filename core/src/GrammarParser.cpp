@@ -3443,6 +3443,20 @@ namespace heimdall
                     }
                 }
 
+                // Check for language linkage specification: extern "C" { ... } or extern "C++" { ... }
+                bool language_linkage = false;
+                if (Is(declaration_start, "extern") && declaration_start + 1 < end)
+                {
+                    const auto next = declaration_start + 1;
+                    if (m_tree.m_tokens[m_sig[next]].kind == TokenKind::StringLiteral)
+                    {
+                        // extern "C" or extern "C++" etc.
+                        if (next + 1 < end && Is(next + 1, "{"))
+                        {
+                            language_linkage = true;
+                        }
+                    }
+                }
                 const bool namespace_decl = Is(declaration_start, "namespace");
                 const bool record_decl = Is(declaration_start, "class") || Is(declaration_start, "struct") ||
                     Is(declaration_start, "union") || Is(declaration_start, "enum");
@@ -3509,7 +3523,7 @@ namespace heimdall
                     }}
 
                     const bool function_body = has_function_parens && !namespace_decl && !record_decl;
-                    if (!namespace_decl && !record_decl && !function_body)
+                    if (!namespace_decl && !record_decl && !function_body && !language_linkage)
                     {
                         const auto semi = FindSemicolon(brace +(closed ? 1 : 0), end);
                         if (semi < end)
@@ -3528,7 +3542,8 @@ namespace heimdall
                         }
                     }
 
-                    const auto node_kind = namespace_decl ? GrammarKind::NamespaceDefinition :
+                    const auto node_kind = language_linkage ? GrammarKind::LanguageLinkageSpec :
+                    namespace_decl ? GrammarKind::NamespaceDefinition :
                     record_decl ? GrammarKind::RecordDefinition :
                     function_body ? GrammarKind::FunctionDefinition : GrammarKind::Error;
                     const auto item_end = closed ? close + 1 : close;
@@ -3548,7 +3563,18 @@ namespace heimdall
                         AddTypeAndDeclarator(declaration_start, brace, node);
                     }
 
-                    if (node_kind == GrammarKind::NamespaceDefinition || node_kind == GrammarKind::RecordDefinition)
+                    if (node_kind == GrammarKind::LanguageLinkageSpec)
+                    {
+                        // Parse the contents of the language linkage specification (like a namespace)
+                        ParseScope(brace + 1, close, node, false);
+
+                        if (!closed)
+                        {
+                            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[brace]].offset,
+                                    "expected '}' to close language linkage specification"});
+                        }
+                    }
+                    else if (node_kind == GrammarKind::NamespaceDefinition || node_kind == GrammarKind::RecordDefinition)
                     {
                         if (node_kind == GrammarKind::RecordDefinition && Is(declaration_start, "enum"))
                         {

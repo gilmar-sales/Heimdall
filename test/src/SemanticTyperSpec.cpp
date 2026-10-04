@@ -309,12 +309,83 @@ TEST(Typer, AutoDropsReferencesAndTopLevelConst)
     EXPECT_EQ(typed.Of("h"), "const int&");
 }
 
-TEST(Typer, AutoPointersAndForwardingReferencesAreUnknown)
+TEST(Typer, AutoPointerDeduction)
 {
-    const Typed typed(Body("int x = 0; auto* p = &x; auto&& r = x; auto q = &x;"));
-    EXPECT_EQ(typed.Of("p"), "<unknown>");
-    EXPECT_EQ(typed.Of("r"), "<unknown>");
-    EXPECT_EQ(typed.Of("q"), "int*");
+    const Typed typed(Body(
+        "int x = 0; const int cx = 0; int arr[3] = {};\n"
+        "auto* p = &x; const auto* q = &x; auto* r = arr; auto* const s = &x; auto* t = &cx; auto* u = x;"));
+    EXPECT_EQ(typed.Of("p"), "int*");
+    EXPECT_EQ(typed.Of("q"), "const int*");
+    EXPECT_EQ(typed.Of("r"), "int*");
+    EXPECT_EQ(typed.Of("s"), "int* const");
+    EXPECT_EQ(typed.Of("t"), "const int*");
+    EXPECT_EQ(typed.Of("u"), "<unknown>"); // ill-formed: not a pointer
+}
+
+TEST(Typer, AutoForwardingReferences)
+{
+    const Typed typed(Body(
+        "int x = 0; const int cx = 0;\n"
+        "auto&& a = x; auto&& b = cx; auto&& c = 1; auto&& d = x + 1; const auto&& e = 2;"));
+    EXPECT_EQ(typed.Of("a"), "int&");
+    EXPECT_EQ(typed.Of("b"), "const int&");
+    EXPECT_EQ(typed.Of("c"), "int&&");
+    EXPECT_EQ(typed.Of("d"), "int&&");
+    EXPECT_EQ(typed.Of("e"), "const int&&");
+}
+
+TEST(Typer, AutoWithDirectAndBraceInitialization)
+{
+    const Typed typed(Body(
+        "int x = 0; double d = 0;\n"
+        "auto a{x}; auto b{d}; auto c = {x}; auto e{1, 2}; auto& f{x};"));
+    EXPECT_EQ(typed.Of("a"), "int");
+    EXPECT_EQ(typed.Of("b"), "double");
+    EXPECT_EQ(typed.Of("c"), "<unknown>"); // std::initializer_list
+    EXPECT_EQ(typed.Of("e"), "<unknown>"); // ill-formed
+    EXPECT_EQ(typed.Of("f"), "int&");
+}
+
+TEST(Typer, AutoInRangeFor)
+{
+    const Typed typed(Body(
+        "int arr[3] = {}; const int carr[2] = {};\n"
+        "for (auto a : arr) {}\n"
+        "for (auto& b : arr) {}\n"
+        "for (const auto& c : carr) {}\n"
+        "for (auto&& d : arr) {}\n"
+        "for (auto e : carr) {}"));
+    EXPECT_EQ(typed.Of("a"), "int");
+    EXPECT_EQ(typed.Of("b"), "int&");
+    EXPECT_EQ(typed.Of("c"), "const int&");
+    EXPECT_EQ(typed.Of("d"), "int&");
+    EXPECT_EQ(typed.Of("e"), "int");
+}
+
+TEST(Typer, AutoReturnTypeIsDeducedFromTheBody)
+{
+    const Typed typed(
+        "auto f1() { return 1; }\n"
+        "auto f2() { int x = 0; return x; }\n"
+        "const auto f3() { return 1.5; }\n"
+        "auto f4(bool b) { if (b) return 1; return 2; }\n"
+        "auto f5(bool b) { if (b) return 1; return 2.0; }\n"
+        "auto f6() { auto l = [] { return 3.0; }; return 1; }\n"
+        "auto f7() { }\n"
+        "auto f8() { return f1(); }\n"
+        "auto f9() -> long { return 1; }\n"
+        "void use() { auto v = f1(); auto w = f8(); }\n");
+    EXPECT_EQ(typed.Of("f1"), "int");
+    EXPECT_EQ(typed.Of("f2"), "int");
+    EXPECT_EQ(typed.Of("f3"), "const double");
+    EXPECT_EQ(typed.Of("f4"), "int");
+    EXPECT_EQ(typed.Of("f5"), "<unknown>"); // conflicting deductions: ill-formed
+    EXPECT_EQ(typed.Of("f6"), "int");       // the lambda's return is not ours
+    EXPECT_EQ(typed.Of("f7"), "void");
+    EXPECT_EQ(typed.Of("f8"), "int");
+    EXPECT_EQ(typed.Of("f9"), "long");
+    EXPECT_EQ(typed.Of("v"), "int");
+    EXPECT_EQ(typed.Of("w"), "int");
 }
 
 // ---- expressions ------------------------------------------------------------------------

@@ -888,3 +888,32 @@ TEST(CompletionSpec, HeaderNamespaceMembersVisibleInNestedNamespaceOnly)
     EXPECT_FALSE(hover("namespace heimdall { LanguageServer* p; }\n").has_value());
     EXPECT_FALSE(hover("namespace other::lsp { LanguageServer* p; }\n").has_value());
 }
+
+
+TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace lib {\n"
+        "struct Config {};\n"
+        "std::expected<Config, std::string> Load(const char *path);\n"
+        "const Config& Shared();\n"
+        "}\n", {});
+    const std::string source =
+        "void run() {\n"
+        "    auto loaded = lib::Load(\"x\");\n"
+        "    const auto& shared = lib::Shared();\n"
+        "    auto copy = lib::Shared();\n"
+        "    auto made = lib::Config();\n"
+        "    auto unknown = other();\n"
+        "}\n";
+    const auto detail = [&](const char *needle)
+    {
+        const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, &index);
+        return hover.has_value() ? hover->detail : std::string("<none>");
+    };
+    EXPECT_EQ(detail("loaded"), "std::expected<Config, std::string>");
+    EXPECT_EQ(detail("shared"), "const Config"); // the grammar drops the `&` of the declared type
+    EXPECT_EQ(detail("copy"), "Config");
+    EXPECT_EQ(detail("made"), "lib::Config");
+    EXPECT_EQ(detail("unknown"), "auto");
+}

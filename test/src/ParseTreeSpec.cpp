@@ -587,3 +587,36 @@ TEST(ParseTreeSpec, AuxiliaryTokenIndicesMatchTokenKinds)
     EXPECT_FALSE(expected.empty());
     EXPECT_EQ(tree.DirectiveTokens(), expected);
 }
+
+TEST(ParseTreeSpec, ParsesLanguageLinkageSpecifications)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "extern \"C\" {\n"
+        "    void foo();\n"
+        "    int bar();\n"
+        "}\n"
+        "extern \"C++\" {\n"
+        "    void baz();\n"
+        "}\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::LanguageLinkageSpec), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 3);
+}
+
+TEST(ParseTreeSpec, ParsesLanguageLinkageWithNestedDeclarations)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "extern \"C\" {\n"
+        "    struct S { int x; };\n"
+        "    int value = 42;\n"
+        "    void func(int param);\n"
+        "}\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::LanguageLinkageSpec), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1);
+    // struct S {} is both a RecordDefinition and a Declaration; int value is a Declaration
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 4); // S, value, func, param
+}

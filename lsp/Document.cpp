@@ -246,7 +246,7 @@ namespace heimdall::lsp
         return std::filesystem::path(decoded);
     }
 
-    std::string UriFromPath(const std::filesystem::path & path)
+    std::string UriFromPath(const std::filesystem::path& path)
     {
         std::string generic = path.generic_string();
         std::string uri = "file://";
@@ -277,7 +277,7 @@ namespace heimdall::lsp
         return uri;
     }
 
-    void AppendPosition(Position position, std::string & out)
+    void AppendPosition(Position position, std::string& out)
     {
         out += "{\"line\":" + std::to_string(position.line) + ",\"character\":" +
             std::to_string(position.character) + "}";

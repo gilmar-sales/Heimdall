@@ -3928,6 +3928,130 @@ namespace heimdall
                 return chain;
             }
 
+            // Type written for the initializer of the `auto` variable named at token
+            // `name`, when the initializer is a lone call: `= ns::f(...)` or
+            // `{ns::f(...)}`. A function found in this file or its includes yields its
+            // return type; a type yields its own name. Empty when unknown.
+            std::string DeducedTypeText(std::size_t name) const
+            {
+                const auto next = [&](std::size_t i)
+                {
+                    ++i;
+                    while (i < m_tokens.size() && IsTrivia(m_tokens[i].kind))
+                    {
+                        ++i;
+                    }
+
+                    return i;
+                };
+                const auto text = [&](std::size_t i)
+                {
+                    return i < m_tokens.size() ? TokenText(m_source, m_tokens[i]) : std::string_view {};
+                };
+
+                std::size_t t = next(name);
+                const std::string_view open = text(t);
+                if (open != "=" && open != "{")
+                {
+                    return {};
+                }
+
+                t = next(t);
+                if (text(t) == "::")
+                {
+                    t = next(t);
+                }
+
+                std::vector<std::string> qualifier;
+                std::string function;
+                while (t < m_tokens.size() && m_tokens[t].kind == TokenKind::Identifier)
+                {
+                    std::string word(text(t));
+                    t = next(t);
+                    if (text(t) == "::")
+                    {
+                        qualifier.push_back(std::move(word));
+                        t = next(t);
+                        continue;
+                    }
+
+                    function = std::move(word);
+                    break;
+                }
+
+                if (function.empty() || text(t) != "(")
+                {
+                    return {};
+                }
+
+                int depth = 0;
+                for (; t < m_tokens.size(); t = next(t))
+                {
+                    const std::string_view p = text(t);
+                    if (p == "(")
+                    {
+                        ++depth;
+                    }
+                    else if (p == ")" && --depth == 0)
+                    {
+                        break;
+                    }
+                }
+
+                t = next(t); // past `)`
+                if (open == "{")
+                {
+                    if (text(t) != "}")
+                    {
+                        return {};
+                    }
+
+                    t = next(t);
+                }
+
+                if (t >= m_tokens.size() || text(t) != ";")
+                {
+                    return {};
+                }
+
+                std::vector<std::vector<std::string>> scopes;
+                for (const auto & record: m_records)
+                {
+                    scopes.push_back(record);
+                }
+
+                for (const auto & prefix: Prefixes(m_hint))
+                {
+                    scopes.push_back(Join(prefix, qualifier));
+                }
+
+                for (const auto & scope: scopes)
+                {
+                    std::unordered_set<std::string> visited;
+                    const Found found = FindDeep(scope, function, CompletionKind::Function, visited, 0);
+                    if (found.item != nullptr && !found.item->type_text.empty())
+                    {
+                        return found.item->type_text;
+                    }
+                }
+
+                TypeName type;
+                type.path = Join(qualifier, {function});
+                type.ok = true;
+                if (ResolveType(type, m_hint, 0).ok)
+                {
+                    std::string written;
+                    for (const auto & part: qualifier)
+                    {
+                        written += part + "::";
+                    }
+
+                    return written + function;
+                }
+
+                return {};
+            }
+
             Resolved ResolveChain(const Chain &chain, int depth = 0) const
             {
                 constexpr int kMaxChainDepth = 6;
@@ -4700,6 +4824,66 @@ namespace heimdall
             resolver.CollectMembers(type.path, prefix, interner, best);
         }
 
+    // `auto x = f();` hovers as the type `f` returns instead of `auto`. Only the
+    // spelling of `auto` is replaced, so `const auto&` stays `const T&`; a plain
+    // `auto` drops the reference and top-level const the function declared.
+    void RefineAutoDetail(const ParseTree &tree, const ScopeIndex *external, std::size_t offset, CompletionItem &item)
+    {
+        if (item.kind != CompletionKind::Variable || !item.has_location || item.type_text.empty())
+        {
+            return;
+        }
+
+        const std::string_view declared = item.type_text;
+        const auto at = declared.find("auto");
+        const auto is_word = [&](std::size_t i)
+        {
+            return i < declared.size() && IsIdentChar(declared[i]);
+        };
+        if (at == std::string_view::npos || (at > 0 && is_word(at - 1)) || is_word(at + 4))
+        {
+            return;
+        }
+
+        const auto &tokens = tree.Tokens();
+        const auto token = std::lower_bound(tokens.begin(), tokens.end(), item.offset,
+            [](const Token &t, std::uint32_t value) { return t.offset < value; });
+        if (token == tokens.end() || token->offset != item.offset)
+        {
+            return;
+        }
+
+        const MemberResolver resolver(tree, external, offset);
+        std::string deduced = resolver.DeducedTypeText(static_cast<std::size_t>(token - tokens.begin()));
+        if (deduced.empty())
+        {
+            return;
+        }
+
+        // `auto` never deduces a reference; it keeps the function's const only when
+        // the declaration does not add its own (`const auto`) or drop it (plain `auto`).
+        const auto strip = [&](std::string_view part, bool front)
+        {
+            if (front ? deduced.starts_with(part) : deduced.ends_with(part))
+            {
+                deduced.erase(front ? 0 : deduced.size() - part.size(), part.size());
+                return true;
+            }
+
+            return false;
+        };
+        const bool declared_const = declared.substr(0, at).find("const") != std::string_view::npos;
+        while (strip("&&", false) || strip("&", false) || strip(" ", false) ||
+            ((declared == "auto" || declared_const) && (strip("const ", true) || strip(" const", false))))
+        {
+        }
+
+        std::string detail(declared.substr(0, at));
+        detail += deduced;
+        detail += declared.substr(at + 4);
+        item.detail = std::move(detail);
+    }
+
     } // namespace
 
     std::string CompletionEngine::PrefixAt(std::string_view source, std::size_t offset)
@@ -4916,7 +5100,13 @@ namespace heimdall
         {
             if (item.label == word)
             {
-                return item;
+                auto hovered = item;
+                if (hovered.kind == CompletionKind::Variable && hovered.type_text.find("auto") != std::string::npos)
+                {
+                    RefineAutoDetail(ParseTree::Parse(source, options), external, end, hovered);
+                }
+
+                return hovered;
             }
         }
 
@@ -4966,7 +5156,9 @@ namespace heimdall
         {
             if (item.label == word)
             {
-                return item;
+                auto hovered = item;
+                RefineAutoDetail(tree, external, end, hovered);
+                return hovered;
             }
         }
 

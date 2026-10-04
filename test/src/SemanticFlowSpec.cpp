@@ -710,6 +710,14 @@ TEST(ModernizeConstexpr, MarksInternalFunctionsThatOnlyCompute)
         "inline constexpr int plus_one(int x) { return x + 1; }\n");
 }
 
+TEST(ModernizeConstexpr, DeducedAutoReturnTypesAreLiteralTypes)
+{
+    const std::string source = "static auto square(int x) { return x * x; }\n";
+    const auto diagnostics = Constexpr(source);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(Flagged(source, diagnostics[0]), "square");
+}
+
 TEST(ModernizeConstexpr, FunctionFixIsOnlyAQuickFix)
 {
     const std::string source = "static int square(int x) { return x * x; }\n";
@@ -797,7 +805,7 @@ TEST(ModernizeConstexpr, SilentForNonConstantGlobalsAndNonLiteralTypes)
     EXPECT_TRUE(Constexpr("static std::string f(int x) { return {}; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(std::string s) { return 1; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { std::string s; return x; }\n").empty());
-    EXPECT_TRUE(Constexpr("static auto f(int x) { return x; }\n").empty());
+    EXPECT_TRUE(Constexpr("static auto f(int x) { return std::string(); }\n").empty()); // return type not deduced
     EXPECT_TRUE(Constexpr("static int f(int) { return 1; }\n").empty());
 }
 

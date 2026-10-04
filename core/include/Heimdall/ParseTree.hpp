@@ -72,7 +72,8 @@ namespace heimdall
         Requirement,
         ErrorExpression,
         Error,
-        AccessSpecifier
+        AccessSpecifier,
+        LanguageLinkageSpec
     };
 
     // AoS layout (kept for backward compatibility)

@@ -435,6 +435,8 @@ TEST(FormatterSpec, SplitsBracesOfNamedScopes)
     check("union { int i; float f; };\n", "union\n{\n    int i;\n    float f;\n};\n");
     check("typedef struct { int x; } Name;\n", "typedef struct\n{\n    int x;\n} Name;\n");
     check("extern \"C\" { int f(); }\n", "extern \"C\"\n{\n    int f();\n}\n");
+    check("extern \"C++\" { void g(); }\n", "extern \"C++\"\n{\n    void g();\n}\n");
+    check("extern \"C\" {\n    void a();\n    int b();\n}\n", "extern \"C\"\n{\n    void a();\n    int b();\n}\n");
 }
 
 TEST(FormatterSpec, KeepsInitializerBracesAttached)
