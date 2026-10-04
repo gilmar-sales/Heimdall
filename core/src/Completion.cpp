@@ -20,6 +20,302 @@ namespace heimdall
     namespace
     {
 
+        // ---- Flat hash map with interned string IDs (u32) for Completion ----
+        // Replaces unordered_map<string, CompletionItem> to avoid string hashing/allocation
+        // on hot paths. Uses open addressing with linear probing, power-of-two table.
+        class StringInterner
+        {
+        public:
+            // Get or assign an ID for a string. Returns existing ID if present.
+            std::uint32_t GetOrAssign(std::string_view s)
+            {
+                if (s.empty())
+                {
+                    return 0;
+                }
+                const std::size_t hash = Hash(s);
+                const std::size_t mask = m_table.size() - 1;
+                std::size_t idx = hash & mask;
+
+                while (m_table[idx].id != 0)
+                {
+                    if (m_strings[m_table[idx].id] == s)
+                    {
+                        return m_table[idx].id;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+
+                const std::uint32_t new_id = static_cast<std::uint32_t>(m_strings.size());
+                m_strings.push_back(std::string(s));
+                m_table[idx] = {new_id, hash};
+                if (++m_count > m_table.size() / 2)
+                {
+                    Rehash();
+                }
+                return new_id;
+            }
+
+            // Get ID for a string, or 0 if not found.
+            std::uint32_t Get(std::string_view s) const
+            {
+                if (s.empty())
+                {
+                    return 0;
+                }
+                const std::size_t hash = Hash(s);
+                const std::size_t mask = m_table.size() - 1;
+                std::size_t idx = hash & mask;
+
+                while (m_table[idx].id != 0)
+                {
+                    if (m_strings[m_table[idx].id] == s)
+                    {
+                        return m_table[idx].id;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+                return 0;
+            }
+
+            std::string_view Resolve(std::uint32_t id) const
+            {
+                return id < m_strings.size() ? m_strings[id] : std::string_view{};
+            }
+
+            std::size_t Size() const { return m_strings.size(); }
+
+        private:
+            struct Entry
+            {
+                std::uint32_t id = 0;
+                std::size_t hash = 0;
+            };
+
+            static std::size_t Hash(std::string_view s)
+            {
+                // FNV-1a 64-bit
+                std::uint64_t h = 14695981039346656037ull;
+                for (unsigned char c : s)
+                {
+                    h ^= c;
+                    h *= 1099511628211ull;
+                }
+                return static_cast<std::size_t>(h);
+            }
+
+            void Rehash()
+            {
+                std::vector<Entry> old = std::move(m_table);
+                m_table.assign(old.size() * 2, Entry{});
+                m_count = 0;
+                for (const auto &e : old)
+                {
+                    if (e.id != 0)
+                    {
+                        const std::string_view s = m_strings[e.id];
+                        const std::size_t idx = e.hash & (m_table.size() - 1);
+                        std::size_t i = idx;
+                        while (m_table[i].id != 0)
+                        {
+                            i = (i + 1) & (m_table.size() - 1);
+                        }
+                        m_table[i] = e;
+                        ++m_count;
+                    }
+                }
+            }
+
+            std::vector<std::string> m_strings{1}; // index 0 = empty
+            std::vector<Entry> m_table{8, Entry{}};
+            std::size_t m_count = 0;
+        };
+
+        // Flat hash map from interned string ID (u32) to CompletionItem
+        // Uses open addressing with linear probing, power-of-two table.
+        template <typename Value>
+        class FlatHashMap
+        {
+        public:
+            struct Entry
+            {
+                std::uint32_t key = 0;
+                Value value;
+            };
+
+            FlatHashMap() = default;
+
+            explicit FlatHashMap(std::size_t reserve)
+            {
+                Reserve(reserve);
+            }
+
+            void Reserve(std::size_t n)
+            {
+                const std::size_t cap = NextPowerOfTwo(n * 2);
+                m_entries.assign(cap, Entry{});
+                m_mask = cap - 1;
+            }
+
+            // Insert or update. Returns pair<iterator, bool> like unordered_map.
+            std::pair<Entry *, bool> InsertOrAssign(std::uint32_t key, Value && value)
+            {
+                if (key == 0)
+                {
+                    return {nullptr, false};
+                }
+                if (m_size > m_entries.size() / 2)
+                {
+                    Rehash();
+                }
+                std::size_t idx = key & m_mask;
+                while (m_entries[idx].key != 0)
+                {
+                    if (m_entries[idx].key == key)
+                    {
+                        return {&m_entries[idx], false};
+                    }
+                    idx = (idx + 1) & m_mask;
+                }
+                m_entries[idx] = {key, std::move(value)};
+                ++m_size;
+                return {&m_entries[idx], true};
+            }
+
+            // Find by key, returns nullptr if not found.
+            Entry * Find(std::uint32_t key)
+            {
+                if (key == 0 || m_entries.empty())
+                {
+                    return nullptr;
+                }
+                std::size_t idx = key & m_mask;
+                while (m_entries[idx].key != 0)
+                {
+                    if (m_entries[idx].key == key)
+                    {
+                        return &m_entries[idx];
+                    }
+                    idx = (idx + 1) & m_mask;
+                }
+                return nullptr;
+            }
+
+            const Entry * Find(std::uint32_t key) const
+            {
+                if (key == 0 || m_entries.empty())
+                {
+                    return nullptr;
+                }
+                std::size_t idx = key & m_mask;
+                while (m_entries[idx].key != 0)
+                {
+                    if (m_entries[idx].key == key)
+                    {
+                        return &m_entries[idx];
+                    }
+                    idx = (idx + 1) & m_mask;
+                }
+                return nullptr;
+            }
+
+            std::size_t Size() const { return m_size; }
+            const std::vector<Entry> & Entries() const { return m_entries; }
+
+            // Iterate all entries (for collecting results)
+            template <typename F>
+            void ForEach(F && f) const
+            {
+                for (const auto &e : m_entries)
+                {
+                    if (e.key != 0)
+                    {
+                        f(e.key, e.value);
+                    }
+                }
+            }
+
+        private:
+            static std::size_t NextPowerOfTwo(std::size_t n)
+            {
+                std::size_t p = 1;
+                while (p < n)
+                {
+                    p <<= 1;
+                }
+                return std::max(p, std::size_t(8));
+            }
+
+            void Rehash()
+            {
+                std::vector<Entry> old = std::move(m_entries);
+                m_entries.assign(old.size() * 2, Entry{});
+                m_mask = m_entries.size() - 1;
+                m_size = 0;
+                for (auto &e : old)
+                {
+                    if (e.key != 0)
+                    {
+                        std::size_t idx = e.key & m_mask;
+                        while (m_entries[idx].key != 0)
+                        {
+                            idx = (idx + 1) & m_mask;
+                        }
+                        m_entries[idx] = std::move(e);
+                        ++m_size;
+                    }
+                }
+            }
+
+            std::vector<Entry> m_entries;
+            std::size_t m_mask = 0;
+            std::size_t m_size = 0;
+        };
+
+        // Helper to collect CompletionItems from FlatHashMap into a sorted vector
+        template <typename Map>
+        std::vector<CompletionItem> CollectAndSort(const Map & map, const StringInterner & interner)
+        {
+            std::vector<CompletionItem> items;
+            items.reserve(map.Size());
+            map.ForEach([&](std::uint32_t key, const CompletionItem & value)
+            {
+                items.push_back(value);
+            });
+            std::sort(items.begin(), items.end(),
+                [&](const CompletionItem & left, const CompletionItem & right)
+                {
+                    const std::string_view l = interner.Resolve(
+                        std::uint32_t(left.label.empty() ? 0 : interner.Get(left.label)));
+                    const std::string_view r = interner.Resolve(
+                        std::uint32_t(right.label.empty() ? 0 : interner.Get(right.label)));
+                    if (l != r) return l < r;
+                    return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+                });
+            return items;
+        }
+
+        // Overload for string-based labels (when we don't have interner IDs in CompletionItem)
+        template <typename Map>
+        std::vector<CompletionItem> CollectAndSort(const Map & map)
+        {
+            std::vector<CompletionItem> items;
+            items.reserve(map.Size());
+            map.ForEach([&](std::uint32_t key, const CompletionItem & value)
+            {
+                items.push_back(value);
+            });
+            std::sort(items.begin(), items.end(),
+                [&](const CompletionItem & left, const CompletionItem & right)
+                {
+                    if (left.label != right.label) return left.label < right.label;
+                    return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+                });
+            return items;
+        }
+
+        // ---- End flat hash map ----
+
         constexpr unsigned int kNonAsciiThreshold = 0x80;
         constexpr int kPriorityMacro = 5;
         constexpr int kPriorityTypeNamespace = 4;
@@ -401,21 +697,22 @@ namespace heimdall
             return CompletionKind::Variable;
         }
 
-        void InsertItem(std::unordered_map<std::string, CompletionItem> & best, CompletionItem item)
+        // InsertItem for FlatHashMap with StringInterner
+        void InsertItem(StringInterner & interner, FlatHashMap<CompletionItem> & best, CompletionItem item)
         {
-            if (item.label.empty() ||!IsIdentStart(item.label.front()))
+            if (item.label.empty() || !IsIdentStart(item.label.front()))
             {
                 return;
             }
 
-            const auto found = best.find(item.label);
-            if (found == best.end())
+            const std::uint32_t key = interner.GetOrAssign(item.label);
+            auto [entry, inserted] = best.InsertOrAssign(key, std::move(item));
+            if (inserted)
             {
-                best.emplace(item.label, std::move(item));
                 return;
             }
 
-            CompletionItem &old = found->second;
+            CompletionItem &old = entry->value;
             if (KindPriority(item.kind) > KindPriority(old.kind))
             {
                 // The same symbol seen as a record scope (with its doc comment) and
@@ -456,6 +753,61 @@ namespace heimdall
             else if (old.documentation.empty() && !item.documentation.empty())
             {
                 // Lower-priority sighting (record scope) that carries the doc comment.
+                old.documentation = std::move(item.documentation);
+            }
+        }
+
+        // Legacy InsertItem for string-based maps (used in some preprocessor paths)
+        void InsertItem(std::unordered_map<std::string, CompletionItem> & best, CompletionItem item)
+        {
+            if (item.label.empty() || !IsIdentStart(item.label.front()))
+            {
+                return;
+            }
+
+            const auto found = best.find(item.label);
+            if (found == best.end())
+            {
+                best.emplace(item.label, std::move(item));
+                return;
+            }
+
+            CompletionItem &old = found->second;
+            if (KindPriority(item.kind) > KindPriority(old.kind))
+            {
+                if (item.documentation.empty())
+                {
+                    item.documentation = std::move(old.documentation);
+                }
+
+                if (item.type_text.empty())
+                {
+                    item.type_text = std::move(old.type_text);
+                }
+
+                old = std::move(item);
+                return;
+            }
+
+            if (item.kind == old.kind)
+            {
+                if (old.documentation.empty() && !item.documentation.empty())
+                {
+                    old.documentation = std::move(item.documentation);
+                }
+
+                if (old.type_text.empty() && !item.type_text.empty())
+                {
+                    old.type_text = std::move(item.type_text);
+                }
+
+                if (old.detail == KindDetail(old.kind) && item.detail != KindDetail(item.kind))
+                {
+                    old.detail = std::move(item.detail);
+                }
+            }
+            else if (old.documentation.empty() && !item.documentation.empty())
+            {
                 old.documentation = std::move(item.documentation);
             }
         }
@@ -2265,6 +2617,30 @@ namespace heimdall
         }
 
         void CollectDefines(std::string_view source, const std::vector<Token> & tokens,
+            StringInterner & interner, FlatHashMap<CompletionItem> & best, std::string_view prefix)
+        {
+            std::vector<Define> defines;
+            ScanDefines(source, tokens, defines);
+            for (const auto & define: defines)
+            {
+                if (!prefix.empty() && !StartsWith(define.name, prefix))
+                {
+                    continue;
+                }
+
+                std::string detail = define.value.empty() ? "macro" : define.value;
+                if (detail.size() > kMaxShortDetailLen)
+                {
+                    detail.resize(kMaxShortDetailLen);
+                }
+
+                InsertItem(interner, best, {std::string(define.name), CompletionKind::Macro, std::move(detail),
+                        DocCommentFor(source, tokens, define.hash_token)});
+            }
+        }
+
+        // Overload for string-based unordered_map (preprocessor path)
+        void CollectDefines(std::string_view source, const std::vector<Token> & tokens,
             std::unordered_map<std::string, CompletionItem> & best, std::string_view prefix)
         {
             std::vector<Define> defines;
@@ -2288,7 +2664,7 @@ namespace heimdall
         }
 
         void CollectTagNamesIn(std::string_view source, const std::vector<Token> & tokens,
-            std::unordered_map<std::string, CompletionItem> & best, std::string_view prefix,
+            StringInterner & interner, FlatHashMap<CompletionItem> & best, std::string_view prefix,
             std::size_t range_start, std::size_t range_end)
         {
             std::vector<TagName> tags;
@@ -2310,14 +2686,14 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, MakeTagItem(source, tokens, tag));
+                InsertItem(interner, best, MakeTagItem(source, tokens, tag));
             }
         }
 
         void CollectTagNames(std::string_view source, const std::vector<Token> & tokens,
-            std::unordered_map<std::string, CompletionItem> & best, std::string_view prefix)
+            StringInterner & interner, FlatHashMap<CompletionItem> & best, std::string_view prefix)
         {
-            CollectTagNamesIn(source, tokens, best, prefix, 0, source.size());
+            CollectTagNamesIn(source, tokens, interner, best, prefix, 0, source.size());
         }
 
         // Nested scope names below a qualifier: for `ns::`, a scope with path
@@ -2328,7 +2704,7 @@ namespace heimdall
             const std::vector<Token> & tokens,
             const std::vector<std::vector<std::string>> & scope_paths,
             const std::vector<std::string> & qualifier,
-            std::unordered_map<std::string, CompletionItem> & best, std::string_view prefix)
+            StringInterner & interner, FlatHashMap<CompletionItem> & best, std::string_view prefix)
         {
             for (std::size_t n = 0; n < scope_paths.size(); ++n)
             {
@@ -2376,7 +2752,7 @@ namespace heimdall
                 }
 
                 std::vector<std::string> full_path(path.begin(), path.begin() + qualifier.size() + 1);
-                InsertItem(best, MakeNamespaceItem(tree, source, tokens, n, full_path));
+                InsertItem(interner, best, MakeNamespaceItem(tree, source, tokens, n, full_path));
             }
         }
 
@@ -2738,7 +3114,7 @@ namespace heimdall
             const std::vector<CallableInterval> & callables,
             const std::vector<std::vector<std::string>> & scope_paths, std::size_t offset,
             std::string_view prefix, const ScopeIndex *external,
-            std::unordered_map<std::string, CompletionItem> & best)
+            StringInterner & interner, FlatHashMap<CompletionItem> & best)
         {
             for (const auto keyword: kKeywords)
             {
@@ -2750,7 +3126,7 @@ namespace heimdall
                 // `compl`/`co_await` appear twice in the table; dedupe keeps one.
                 const CompletionKind kind =
                     IsBuiltinType(keyword) ? CompletionKind::Type : CompletionKind::Keyword;
-                InsertItem(best, {std::string(keyword), kind, KindDetail(kind), {}});
+                InsertItem(interner, best, {std::string(keyword), kind, KindDetail(kind), {}});
             }
 
             // Lexical fallback with occurrence visibility: an identifier is usable
@@ -2797,13 +3173,13 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, {std::string(text), CompletionKind::Variable, "variable", {}});
+                InsertItem(interner, best, {std::string(text), CompletionKind::Variable, "variable", {}});
             }
 
             // Declared names upgrade the kind (function/type vs plain variable) and
             // carry signatures plus documentation. Tag names (`struct Widget`) are
             // not always DeclaredName nodes, so collect them lexically as well.
-            CollectTagNames(source, tokens, best, prefix);
+            CollectTagNames(source, tokens, interner, best, prefix);
             for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
             {
                 if (tree.Nodes()[n].kind != GrammarKind::DeclaredName)
@@ -2850,7 +3226,7 @@ namespace heimdall
                         continue;
                     }
 
-                    InsertItem(best, DescribeDeclared(tree, source, tokens, n, name,
+                    InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name,
                         CompletionKind::Variable));
                     continue;
                 }
@@ -2861,7 +3237,7 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, DescribeDeclared(tree, source, tokens, n, name, kind));
+                InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
             }
 
             // Top-level namespaces are visible unqualified (as qualifier heads) with
@@ -2890,11 +3266,11 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, MakeNamespaceItem(tree, source, tokens, n, path));
+                InsertItem(interner, best, MakeNamespaceItem(tree, source, tokens, n, path));
             }
 
             // Macros from `#define` and predefined compile-command defines.
-            CollectDefines(source, tokens, best, prefix);
+            CollectDefines(source, tokens, interner, best, prefix);
             for (const auto &[name, value]: options.Macros())
             {
                 if (!prefix.empty() && !StartsWith(name, prefix))
@@ -2908,7 +3284,7 @@ namespace heimdall
                     detail.resize(kMaxShortDetailLen);
                 }
 
-                InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
+                InsertItem(interner, best, {name, CompletionKind::Macro, std::move(detail), {}});
             }
 
             // Header globals (top-level functions, macros, using-aliases) are visible
@@ -2948,7 +3324,7 @@ namespace heimdall
                             continue;
                         }
 
-                        InsertItem(best, member);
+                        InsertItem(interner, best, member);
                     }
                 }
             }
@@ -2965,7 +3341,7 @@ namespace heimdall
             const std::vector<CallableInterval> & callables,
             const std::vector<ScopeInterval> & named_scopes, std::size_t offset,
             std::string_view prefix, const ScopeIndex *external,
-            std::unordered_map<std::string, CompletionItem> & best)
+            StringInterner & interner, FlatHashMap<CompletionItem> & best)
         {
             const std::size_t scope_op = AccessOperatorBefore(source, tokens, offset, prefix);
             if (scope_op >= tokens.size() || TokenText(source, tokens[scope_op]) != "::")
@@ -3013,7 +3389,7 @@ namespace heimdall
                         continue;
                     }
 
-                    InsertItem(best, DescribeDeclared(tree, source, tokens, n, name, kind));
+                    InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
                 }
 
                 std::unordered_set<std::string_view> seen_global;
@@ -3046,10 +3422,10 @@ namespace heimdall
                         continue;
                     }
 
-                    InsertItem(best, {std::string(text), CompletionKind::Variable, "variable", {}});
+                    InsertItem(interner, best, {std::string(text), CompletionKind::Variable, "variable", {}});
                 }
 
-                CollectChildScopes(tree, source, tokens, scope_paths, {}, best, prefix);
+                CollectChildScopes(tree, source, tokens, scope_paths, {}, interner, best, prefix);
                 if (external != nullptr)
                 {
                     for (const auto & scope: *external)
@@ -3063,7 +3439,7 @@ namespace heimdall
                                     continue;
                                 }
 
-                                InsertItem(best, member);
+                                InsertItem(interner, best, member);
                             }
                         }
                         else if (scope.path.size() == 1)
@@ -3073,7 +3449,7 @@ namespace heimdall
                                 continue;
                             }
 
-                            InsertItem(best, {scope.path.front(), scope.kind, KindDetail(scope.kind), {}});
+                            InsertItem(interner, best, {scope.path.front(), scope.kind, KindDetail(scope.kind), {}});
                         }
                     }
                 }
@@ -3102,7 +3478,7 @@ namespace heimdall
                             continue;
                         }
 
-                        InsertItem(best, member);
+                        InsertItem(interner, best, member);
                     }
                 }
 
@@ -3137,7 +3513,7 @@ namespace heimdall
                         continue;
                     }
 
-                    InsertItem(best, {name, scope.kind, KindDetail(scope.kind), {}});
+                    InsertItem(interner, best, {name, scope.kind, KindDetail(scope.kind), {}});
                 }
             }
 
@@ -3188,7 +3564,7 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, DescribeDeclared(tree, source, tokens, n, name, kind));
+                InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
             }
 
             // Nested scopes (`struct Inner` / `namespace inner`) owned by a target.
@@ -3217,18 +3593,18 @@ namespace heimdall
                     continue;
                 }
 
-                InsertItem(best, MakeNamespaceItem(tree, source, tokens, n, full_path));
+                InsertItem(interner, best, MakeNamespaceItem(tree, source, tokens, n, full_path));
             }
 
             for (const auto target: targets)
             {
                 const auto[start, end] = NodeRange(tree, target);
-                CollectTagNamesIn(source, tokens, best, prefix, start, end);
+                CollectTagNamesIn(source, tokens, interner, best, prefix, start, end);
             }
 
             // Members introduced by deeper compound definitions (`ns::a::b` makes `a`
             // visible under `ns::` even without an intermediate node).
-            CollectChildScopes(tree, source, tokens, scope_paths, qualifier.path, best, prefix);
+            CollectChildScopes(tree, source, tokens, scope_paths, qualifier.path, interner, best, prefix);
         }
 
         // --- Member access (`obj.` / `ptr->`) -----------------------------------
@@ -3583,10 +3959,10 @@ namespace heimdall
             }
 
             void CollectMembers(const std::vector<std::string> & path, std::string_view prefix,
-                std::unordered_map<std::string, CompletionItem> & best) const
+                StringInterner & interner, FlatHashMap<CompletionItem> & best) const
             {
                 std::unordered_set<std::string> visited;
-                CollectInto(path, prefix, best, visited, 0);
+                CollectInto(path, prefix, interner, best, visited, 0);
             }
 
             // First token of `a.b.c` style chains, for `auto` deduction.
@@ -3848,7 +4224,7 @@ namespace heimdall
             }
 
             void CollectInto(const std::vector<std::string> & path, std::string_view prefix,
-                std::unordered_map<std::string, CompletionItem> & best,
+                StringInterner & interner, FlatHashMap<CompletionItem> & best,
                 std::unordered_set<std::string> & visited, int depth) const
             {
                 constexpr int kMaxCollectDepth = 16;
@@ -3876,7 +4252,7 @@ namespace heimdall
                             continue;
                         }
 
-                        InsertItem(best, member);
+                        InsertItem(interner, best, member);
                     }
                 }
 
@@ -3887,7 +4263,7 @@ namespace heimdall
                         const Resolved resolved = ResolveType(ParseTypeName(base), Parent(path), 0);
                         if (resolved.ok)
                         {
-                            CollectInto(resolved.path, prefix, best, visited, depth + 1);
+                            CollectInto(resolved.path, prefix, interner, best, visited, depth + 1);
                         }
                     }
                 }
@@ -4297,7 +4673,7 @@ namespace heimdall
         };
 
         void CompleteMember(const ParseTree &tree, std::size_t offset, std::string_view prefix,
-            const ScopeIndex *external, std::unordered_map<std::string, CompletionItem> & best)
+            const ScopeIndex *external, StringInterner & interner, FlatHashMap<CompletionItem> & best)
         {
             const std::string_view source = tree.Source();
             const std::vector<Token> & tokens = tree.Tokens();
@@ -4321,7 +4697,7 @@ namespace heimdall
                 return;
             }
 
-            resolver.CollectMembers(type.path, prefix, best);
+            resolver.CollectMembers(type.path, prefix, interner, best);
         }
 
     } // namespace
@@ -4369,7 +4745,10 @@ namespace heimdall
 
         if (context == CursorContext::Suppressed) return {};
 
-        std::unordered_map<std::string, CompletionItem> best;
+        // Use flat hash map with interned strings for better cache behavior
+        StringInterner interner;
+        FlatHashMap<CompletionItem> best;
+        best.Reserve(256);
 
         if (context == CursorContext::Preprocessor)
         {
@@ -4377,11 +4756,13 @@ namespace heimdall
             {
                 if (prefix.empty() || StartsWith(directive, prefix))
                 {
-                    InsertItem(best, {std::string(directive), CompletionKind::Directive, "directive", {}});
+                    InsertItem(interner, best, {std::string(directive), CompletionKind::Directive, "directive", {}});
                 }
             }
 
-            CollectDefines(source, tokens, best, prefix);
+            // Preprocessor path still uses string map for simplicity (less hot)
+            std::unordered_map<std::string, CompletionItem> best_str;
+            CollectDefines(source, tokens, best_str, prefix);
             for (const auto &[name, value]: options.Macros())
             {
                 if (!prefix.empty() && !StartsWith(name, prefix))
@@ -4395,7 +4776,12 @@ namespace heimdall
                     detail.resize(kMaxShortDetailLen);
                 }
 
-                InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
+                InsertItem(best_str, {name, CompletionKind::Macro, std::move(detail), {}});
+            }
+            // Merge string map into flat map
+            for (auto &[label, item] : best_str)
+            {
+                InsertItem(interner, best, std::move(item));
             }
         }
         else
@@ -4406,24 +4792,7 @@ namespace heimdall
             return Complete(tree, options, offset, external);
         }
 
-        std::vector<CompletionItem> items;
-        items.reserve(best.size());
-        for (auto &[label, item]: best)
-        {
-            (void) label;
-            items.push_back(std::move(item));
-        }
-
-        std::sort(items.begin(), items.end(),[](const CompletionItem &left, const CompletionItem &right)
-            {
-                if (left.label != right.label)
-                {
-                    return left.label < right.label;
-            }
-
-                return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-        });
-        return items;
+        return CollectAndSort(best);
     }
 
     std::vector<CompletionItem> CompletionEngine::Complete(const ParseTree &tree,
@@ -4442,19 +4811,24 @@ namespace heimdall
 
         if (context == CursorContext::Suppressed) return {};
 
-        std::unordered_map<std::string, CompletionItem> best;
+        // Use flat hash map with interned strings for better cache behavior
+        StringInterner interner;
+        FlatHashMap<CompletionItem> best;
+        best.Reserve(512);
 
         if (context == CursorContext::Preprocessor)
         {
+            // Preprocessor path uses string map for simplicity (less hot)
+            std::unordered_map<std::string, CompletionItem> best_str;
             for (const auto directive: kDirectives)
             {
                 if (prefix.empty() || StartsWith(directive, prefix))
                 {
-                    InsertItem(best, {std::string(directive), CompletionKind::Directive, "directive", {}});
+                    InsertItem(best_str, {std::string(directive), CompletionKind::Directive, "directive", {}});
                 }
             }
 
-            CollectDefines(source, tokens, best, prefix);
+            CollectDefines(source, tokens, best_str, prefix);
             for (const auto &[name, value]: options.Macros())
             {
                 if (!prefix.empty() && !StartsWith(name, prefix))
@@ -4468,7 +4842,12 @@ namespace heimdall
                     detail.resize(kMaxShortDetailLen);
                 }
 
-                InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
+                InsertItem(best_str, {name, CompletionKind::Macro, std::move(detail), {}});
+            }
+            // Merge string map into flat map
+            for (auto &[label, item] : best_str)
+            {
+                InsertItem(interner, best, std::move(item));
             }
         }
         else
@@ -4477,39 +4856,22 @@ namespace heimdall
             const std::vector<std::vector<std::string>> scope_paths = BuildScopePaths(tree);
             if (context == CursorContext::MemberAccess)
             {
-                CompleteMember(tree, offset, prefix, external, best);
+                CompleteMember(tree, offset, prefix, external, interner, best);
             }
             else if (context == CursorContext::ScopeAccess)
             {
                 const std::vector<ScopeInterval> named_scopes = BuildNamedScopeIntervals(tree);
                 CompleteQualified(tree, source, tokens, scope_paths, callables, named_scopes,
-                    offset, prefix, external, best);
+                    offset, prefix, external, interner, best);
             }
             else
             {
                 CompleteExpression(tree, source, tokens, options, callables, scope_paths, offset,
-                    prefix, external, best);
+                    prefix, external, interner, best);
             }
         }
 
-        std::vector<CompletionItem> items;
-        items.reserve(best.size());
-        for (auto &[label, item]: best)
-        {
-            (void) label;
-            items.push_back(std::move(item));
-        }
-
-        std::sort(items.begin(), items.end(),[](const CompletionItem &left, const CompletionItem &right)
-            {
-                if (left.label != right.label)
-                {
-                    return left.label < right.label;
-            }
-
-                return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-        });
-        return items;
+        return CollectAndSort(best, interner);
     }
 
     std::optional<CompletionItem> CompletionEngine::Hover(std::string_view source,

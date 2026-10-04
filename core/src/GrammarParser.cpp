@@ -231,9 +231,13 @@ namespace heimdall
 
         void Run()
         {
-            m_tree.m_nodes.push_back({GrammarKind::TranslationUnit, 0,
-                    static_cast<std::uint32_t>(m_tree.m_tokens.size()),
-                    static_cast<std::uint32_t>(ParseTree::RootNode), 1});
+            m_tree.m_nodes_soa.push_back(
+                static_cast<std::uint8_t>(GrammarKind::TranslationUnit),
+                0,
+                static_cast<std::uint32_t>(m_tree.m_tokens.size()),
+                static_cast<std::uint32_t>(ParseTree::RootNode),
+                1);
+            m_tree.m_nodes_aos_dirty = true;
             ParseScope(0, m_sig.size(), ParseTree::RootNode, false);
         }
 
@@ -275,11 +279,15 @@ namespace heimdall
         {
             const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
             const std::size_t past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
-            const std::uint32_t index = static_cast<std::uint32_t>(m_tree.m_nodes.size());
-            m_tree.m_nodes.push_back({kind, static_cast<std::uint32_t>(first),
-                    static_cast<std::uint32_t>(past - first),
-                    static_cast<std::uint32_t>(parent), index + 1});
-            return m_tree.m_nodes.size() - 1;
+            const std::uint32_t index = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
+            m_tree.m_nodes_soa.push_back(
+                static_cast<std::uint8_t>(kind),
+                static_cast<std::uint32_t>(first),
+                static_cast<std::uint32_t>(past - first),
+                static_cast<std::uint32_t>(parent),
+                index + 1);
+            m_tree.m_nodes_aos_dirty = true; // Invalidate AoS cache
+            return m_tree.m_nodes_soa.size() - 1;
         }
 
         // `Is(i, "template")`: the literal is resolved to a Tok at compile time, so
@@ -314,10 +322,10 @@ namespace heimdall
 
         void SetNodeRange(std::size_t node, std::size_t begin, std::size_t end)
         {
-            auto &record = m_tree.m_nodes[node];
-            record.first_token = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
-            const auto past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : record.first_token;
-            record.token_count = past - record.first_token;
+            m_tree.m_nodes_soa.first_token[node] = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
+            const auto past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+            m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
+            m_tree.m_nodes_aos_dirty = true;
         }
 
         bool IsDirective(std::size_t sig) const
@@ -1917,13 +1925,18 @@ namespace heimdall
                     auto scan = begin;
                     // Consume attributes + decl-specifier keywords + user type to locate split.
                     // Reuse ParseDeclSpecifiers extent by probing with a temporary node then rolling back.
-                    const auto nodes_before = m_tree.m_nodes.size();
+                    const auto nodes_before = m_tree.m_nodes_soa.size();
                     const auto probe_end = ParseDeclSpecifiers(begin, code_end, parent);
                     // Remove the duplicate TypeSpecifier + children emitted by the probe.
-                    while (m_tree.m_nodes.size() > nodes_before)
+                    while (m_tree.m_nodes_soa.size() > nodes_before)
                     {
-                        m_tree.m_nodes.pop_back();
+                        m_tree.m_nodes_soa.kind.pop_back();
+                        m_tree.m_nodes_soa.first_token.pop_back();
+                        m_tree.m_nodes_soa.token_count.pop_back();
+                        m_tree.m_nodes_soa.parent.pop_back();
+                        m_tree.m_nodes_soa.subtree_end.pop_back();
                     }
+                    m_tree.m_nodes_aos_dirty = true;
 
                     spec_end = probe_end;
                     if (spec_end <= begin)
@@ -2033,15 +2046,20 @@ namespace heimdall
             // C++ declarations share one specifier sequence across comma-separated
             // declarators; keep that prefix explicit instead of duplicating it.
             const auto first_comma = FindComma(body_start, end);
-            const auto nodes_before = m_tree.m_nodes.size();
+            const auto nodes_before = m_tree.m_nodes_soa.size();
             const auto spec_end = ParseDeclSpecifiers(body_start, first_comma, parent);
             const bool has_shared_type = spec_end > body_start;
             if (!has_shared_type)
             {
-                while (m_tree.m_nodes.size() > nodes_before)
+                while (m_tree.m_nodes_soa.size() > nodes_before)
                 {
-                    m_tree.m_nodes.pop_back();
+                    m_tree.m_nodes_soa.kind.pop_back();
+                    m_tree.m_nodes_soa.first_token.pop_back();
+                    m_tree.m_nodes_soa.token_count.pop_back();
+                    m_tree.m_nodes_soa.parent.pop_back();
+                    m_tree.m_nodes_soa.subtree_end.pop_back();
                 }
+                m_tree.m_nodes_aos_dirty = true;
             }
 
             auto part = body_start;
@@ -2481,7 +2499,8 @@ namespace heimdall
                     const auto node = Add(node_kind, begin, close + 1, parent);
                     if (root != Invalid)
                     {
-                        m_tree.m_nodes[root].parent = node;
+                        m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                        m_tree.m_nodes_aos_dirty = true;
                     }
 
                     if (op == "(")
@@ -2518,7 +2537,8 @@ namespace heimdall
                     const auto node = Add(GrammarKind::MemberExpression, begin, pos + kTwo, parent);
                     if (root != Invalid)
                     {
-                        m_tree.m_nodes[root].parent = node;
+                        m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                        m_tree.m_nodes_aos_dirty = true;
                     }
 
                     Add(GrammarKind::IdentifierExpression, pos + 1, pos + kTwo, node);
@@ -2528,9 +2548,9 @@ namespace heimdall
                 }
 
                 if (op == "<" && root != Invalid &&
-                    (m_tree.m_nodes[root].kind == GrammarKind::IdentifierExpression ||
-                    m_tree.m_nodes[root].kind == GrammarKind::MemberExpression ||
-                    m_tree.m_nodes[root].kind == GrammarKind::TemplateIdExpression))
+                    (static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::IdentifierExpression ||
+                    static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::MemberExpression ||
+                    static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::TemplateIdExpression))
                 {
                     const auto close = FindTemplateClose(pos, end);
                     const auto after_template = close == Invalid ? end : close + 1;
@@ -2551,7 +2571,8 @@ namespace heimdall
                     if (close != Invalid && follows_template)
                     {
                         const auto node = Add(GrammarKind::TemplateIdExpression, begin, close + 1, parent);
-                        m_tree.m_nodes[root].parent = node;
+                        m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                        m_tree.m_nodes_aos_dirty = true;
                         auto arg = pos + 1;
                         while (arg < close)
                         {
@@ -2589,7 +2610,8 @@ namespace heimdall
                     const auto node = Add(GrammarKind::UnaryExpression, begin, pos + 1, parent);
                     if (root != Invalid)
                     {
-                        m_tree.m_nodes[root].parent = node;
+                        m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                        m_tree.m_nodes_aos_dirty = true;
                     }
 
                     ++pos;
@@ -2602,7 +2624,8 @@ namespace heimdall
                     const auto node = Add(GrammarKind::ConditionalExpression, begin, end, parent);
                     if (root != Invalid)
                     {
-                        m_tree.m_nodes[root].parent = node;
+                        m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                        m_tree.m_nodes_aos_dirty = true;
                     }
 
                     ++pos;
@@ -2640,7 +2663,7 @@ namespace heimdall
                 // expression-start token after the type/keyword continues this
                 // expression rather than starting a new declaration.
                 const bool after_paren =
-                    root != Invalid && m_tree.m_nodes[root].kind == GrammarKind::ParenthesizedExpression;
+                    root != Invalid && static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::ParenthesizedExpression;
                 const auto token_kind_here = m_tree.m_tokens[m_sig[pos]].kind;
                 const bool operand_start =
                     token_kind_here == TokenKind::Identifier || token_kind_here == TokenKind::Number ||
@@ -2671,7 +2694,8 @@ namespace heimdall
                 const auto node = Add(GrammarKind::BinaryExpression, begin, end, parent);
                 if (root != Invalid)
                 {
-                    m_tree.m_nodes[root].parent = node;
+                    m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+                    m_tree.m_nodes_aos_dirty = true;
                 }
 
                 ++pos;
@@ -2765,8 +2789,9 @@ namespace heimdall
                             "expected while after do statement"});
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes[node].first_token;
-                m_tree.m_nodes[node].token_count = past - m_tree.m_nodes[node].first_token;
+                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_aos_dirty = true;
                 return;
             }
 
@@ -2798,8 +2823,9 @@ namespace heimdall
                     }
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes[node].first_token;
-                m_tree.m_nodes[node].token_count = past - m_tree.m_nodes[node].first_token;
+                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_aos_dirty = true;
                 return;
             }
 
@@ -2892,8 +2918,9 @@ namespace heimdall
                     }
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes[node].first_token;
-                m_tree.m_nodes[node].token_count = past - m_tree.m_nodes[node].first_token;
+                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
+                m_tree.m_nodes_aos_dirty = true;
                 return;
             }
 
@@ -3013,9 +3040,10 @@ namespace heimdall
                         "expected '}' to close compound statement"});
             }
 
-            auto &record = m_tree.m_nodes[node];
-            const auto past = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1 : record.first_token;
-            record.token_count = past - record.first_token;
+            auto &record = m_tree.m_nodes_soa;
+            const auto past = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1 : record.first_token[node];
+            record.token_count[node] = past - record.first_token[node];
+            m_tree.m_nodes_aos_dirty = true;
             return node;
         }
 
@@ -3117,7 +3145,7 @@ namespace heimdall
         {
             m_item_open = true;
             m_item_first_sig = pos;
-            m_item_node_begin = m_tree.m_nodes.size();
+            m_item_node_begin = m_tree.m_nodes_soa.size();
             m_item_diag_begin = m_tree.m_diagnostics.size();
         }
 
@@ -3133,7 +3161,7 @@ namespace heimdall
             m_item_open = false;
             TopLevelItem item{};
             item.node_begin = static_cast<std::uint32_t>(m_item_node_begin);
-            item.node_end = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            item.node_end = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
             item.diag_begin = static_cast<std::uint32_t>(m_item_diag_begin);
             item.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             item.sig_count = static_cast<std::uint32_t>(pos - m_item_first_sig);
@@ -3147,11 +3175,14 @@ namespace heimdall
                 (Is(pos - 1, ";") || Is(pos - 1, "}"));
             for (auto n = item.node_begin; reusable && n < item.node_end; ++n)
             {
-                const auto &node = m_tree.m_nodes[n];
-                reusable = node.kind != GrammarKind::Error && node.kind != GrammarKind::ErrorExpression &&
-                    node.first_token >= item.first_token && node.first_token < item.token_end &&
-                    node.first_token + node.token_count <= item.token_end &&
-                    (node.parent == ParseTree::RootNode || (node.parent >= item.node_begin && node.parent < item.node_end));
+                const GrammarKind kind = static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[n]);
+                const std::uint32_t first_token = m_tree.m_nodes_soa.first_token[n];
+                const std::uint32_t token_count = m_tree.m_nodes_soa.token_count[n];
+                const std::uint32_t parent = m_tree.m_nodes_soa.parent[n];
+                reusable = kind != GrammarKind::Error && kind != GrammarKind::ErrorExpression &&
+                    first_token >= item.first_token && first_token < item.token_end &&
+                    first_token + token_count <= item.token_end &&
+                    (parent == ParseTree::RootNode || (parent >= item.node_begin && parent < item.node_end));
             }
 
             item.reusable = reusable;
@@ -3242,18 +3273,27 @@ namespace heimdall
                 return false;
             }
 
-            const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
             for (auto n = item.node_begin; n < item.node_end; ++n)
             {
-                GrammarNode node = prev.m_nodes[n];
-                node.first_token = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(node.first_token) + token_shift);
-                if (node.parent != ParseTree::RootNode)
+                const GrammarKind kind = static_cast<GrammarKind>(prev.m_nodes_soa.kind[n]);
+                const std::uint32_t first_token = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(prev.m_nodes_soa.first_token[n]) + token_shift);
+                const std::uint32_t token_count = prev.m_nodes_soa.token_count[n];
+                std::uint32_t parent = prev.m_nodes_soa.parent[n];
+                if (parent != ParseTree::RootNode)
                 {
-                    node.parent = node.parent - item.node_begin + node_base;
+                    parent = parent - item.node_begin + node_base;
                 }
+                const std::uint32_t subtree_end = prev.m_nodes_soa.subtree_end[n] - item.node_begin + node_base;
 
-                m_tree.m_nodes.push_back(node);
+                m_tree.m_nodes_soa.push_back(
+                    static_cast<std::uint8_t>(kind),
+                    first_token,
+                    token_count,
+                    parent,
+                    subtree_end);
             }
+            m_tree.m_nodes_aos_dirty = true;
 
             const std::uint32_t diag_base = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             for (auto d = item.diag_begin; d < item.diag_end; ++d)
@@ -3267,7 +3307,7 @@ namespace heimdall
             copy.first_token = token;
             copy.token_end = static_cast<std::uint32_t>(token + token_count);
             copy.node_begin = node_base;
-            copy.node_end = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+            copy.node_end = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
             copy.diag_begin = diag_base;
             copy.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             m_tree.m_items.push_back(copy);

@@ -49,7 +49,7 @@ namespace heimdall::cli
         return out;
     }
 
-    bool WriteFile(const std::filesystem::path & path, std::string_view data)
+    bool WriteFile(const std::filesystem::path& path, std::string_view data)
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         if (!out)
@@ -61,14 +61,14 @@ namespace heimdall::cli
         return static_cast<bool>(out);
     }
 
-    int ReportResults(const std::vector<FileResult> & results, const Options &options)
+    int ReportResults(const std::vector<FileResult>& results, const Options& options)
     {
         constexpr int kExitUsageError = 2;
         bool failed = false;
         bool has_diagnostics = false;
         const auto severity_name =[](heimdall::Severity severity)
         {
-            return severity == heimdall::Severity::Error ? "error": "warning";
+            return severity == heimdall::Severity::Error ? "error" : "warning";
         };
         if (options.command == Command::Parse && options.json)
         {

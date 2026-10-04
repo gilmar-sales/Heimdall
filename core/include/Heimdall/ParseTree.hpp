@@ -75,6 +75,7 @@ namespace heimdall
         AccessSpecifier
     };
 
+    // AoS layout (kept for backward compatibility)
     struct GrammarNode
     {
         GrammarKind kind;
@@ -82,6 +83,55 @@ namespace heimdall
         std::uint32_t token_count;
         std::uint32_t parent;
         std::uint32_t subtree_end;
+    };
+
+    // SoA layout: hot columns split for cache-friendly filtering
+    // kind[u8] + first_token[u32] are the hottest; token_count/parent/subtree_end less so
+    struct GrammarNodeSoA
+    {
+        std::vector<std::uint8_t> kind;          // GrammarKind as u8
+        std::vector<std::uint32_t> first_token;  // first token index
+        std::vector<std::uint32_t> token_count;  // token count
+        std::vector<std::uint32_t> parent;       // parent node index
+        std::vector<std::uint32_t> subtree_end;  // exclusive end of subtree (pre-order)
+
+        // Convenience: total node count
+        std::size_t size() const noexcept { return kind.size(); }
+
+        // Resize all columns together
+        void resize(std::size_t n)
+        {
+            kind.resize(n);
+            first_token.resize(n);
+            token_count.resize(n);
+            parent.resize(n);
+            subtree_end.resize(n);
+        }
+
+        // Push a new node (all columns must be provided)
+        void push_back(std::uint8_t k, std::uint32_t ft, std::uint32_t tc, std::uint32_t p, std::uint32_t se)
+        {
+            kind.push_back(k);
+            first_token.push_back(ft);
+            token_count.push_back(tc);
+            parent.push_back(p);
+            subtree_end.push_back(se);
+        }
+
+        // Accessors for compatibility with existing code
+        struct View
+        {
+            const GrammarNodeSoA &soa;
+            std::size_t index;
+
+            GrammarKind GetKind() const noexcept { return static_cast<GrammarKind>(soa.kind[index]); }
+            std::uint32_t GetFirstToken() const noexcept { return soa.first_token[index]; }
+            std::uint32_t GetTokenCount() const noexcept { return soa.token_count[index]; }
+            std::uint32_t GetParent() const noexcept { return soa.parent[index]; }
+            std::uint32_t GetSubtreeEnd() const noexcept { return soa.subtree_end[index]; }
+        };
+
+        View operator[](std::size_t i) const noexcept { return {*this, i}; }
     };
 
     struct GrammarDiagnostic
@@ -167,9 +217,17 @@ namespace heimdall
         {
             return m_tokens;
         }
+        // SoA nodes - primary access
+        const GrammarNodeSoA & NodesSoA() const noexcept
+        {
+            return m_nodes_soa;
+        }
+        // AoS view for backward compatibility (constructed on demand)
+        // NOTE: Avoid in hot paths. Use NodesSoA() and GrammarNodeSoA::View instead.
         const std::vector<GrammarNode> & Nodes() const noexcept
         {
-            return m_nodes;
+            EnsureNodesAoS();
+            return m_nodes_aos;
         }
         const std::vector<GrammarDiagnostic> & Diagnostics() const noexcept
         {
@@ -215,22 +273,50 @@ namespace heimdall
             m_source = {};
         }
 
+        // Pre-computed token classification masks for RuleEngine/linter fast paths
+        // Built once per ParseTree, used for dense iteration without branching
+        const std::vector<std::uint8_t> & TokenKindMask() const noexcept
+        {
+            return m_token_kind_mask;
+        }
+        const std::vector<std::uint32_t> & IdentifierTokens() const noexcept
+        {
+            return m_identifier_tokens;
+        }
+        const std::vector<std::uint32_t> & DirectiveTokens() const noexcept
+        {
+            return m_directive_tokens;
+        }
+
     private:
         friend class GrammarParser;
         friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &,
             std::stop_token, const Preprocessor::MacroMap *, const ParseReuse *);
 
+        // Called by GrammarParser after parsing to build auxiliary structures
+        void BuildAuxiliary();
+
+        // Lazy construction of AoS view for backward compatibility
+        mutable std::vector<GrammarNode> m_nodes_aos;
+        mutable bool m_nodes_aos_dirty = true;
+        void EnsureNodesAoS() const;
+
         std::shared_ptr<const std::string> m_owned_source;
         std::string_view m_source;
         CppStandard m_standard = CppStandard::Cpp20;
         std::vector<Token> m_tokens;
-        std::vector<GrammarNode> m_nodes;
+        GrammarNodeSoA m_nodes_soa;              // SoA layout (primary)
         std::vector<GrammarDiagnostic> m_diagnostics;
         std::vector<PreprocessorDirective> m_directives;
         bool m_cancelled = false;
         std::vector<bool> m_decoration;
         std::vector<TopLevelItem> m_items;
         std::size_t m_reused_items = 0;
+
+        // Pre-computed auxiliary data for fast queries
+        std::vector<std::uint8_t> m_token_kind_mask;   // 1 = trivia (whitespace/comment), 0 = significant
+        std::vector<std::uint32_t> m_identifier_tokens; // indices of all identifier tokens
+        std::vector<std::uint32_t> m_directive_tokens;  // indices of all directive tokens
     };
 
 } // namespace heimdall

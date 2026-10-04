@@ -46,9 +46,9 @@ namespace heimdall::cli
         heimdall::FormatOptions format_options;
     };
 
-    bool ParseStandardValue(std::string_view value, heimdall::CppStandard &standard);
-    bool ParsePointerAlignment(std::string_view value, heimdall::PointerAlignment &alignment);
-    bool ParseReferenceAlignment(std::string_view value, heimdall::ReferenceAlignment &alignment);
-    bool ParseOptions(int argc, char **argv, Options &options);
+    bool ParseStandardValue(std::string_view value, heimdall::CppStandard& standard);
+    bool ParsePointerAlignment(std::string_view value, heimdall::PointerAlignment& alignment);
+    bool ParseReferenceAlignment(std::string_view value, heimdall::ReferenceAlignment& alignment);
+    bool ParseOptions(int argc, char**argv, Options& options);
 
 } // namespace heimdall::cli

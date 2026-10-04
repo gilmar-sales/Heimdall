@@ -11,7 +11,7 @@
 #include <iostream>
 #include <vector>
 
-int main(int argc, char **argv)
+int main(int argc, char**argv)
 {
     constexpr int kExitUsageError = 2;
     heimdall::cli::Options options{};
@@ -117,7 +117,7 @@ int main(int argc, char **argv)
     }
 
     heimdall::CompileDatabase database;
-    const heimdall::CompileDatabase * database_ptr = nullptr;
+    const heimdall::CompileDatabase* database_ptr = nullptr;
     if (!options.compile_commands.empty())
     {
         auto loaded = heimdall::CompileDatabase::Load(options.compile_commands);

@@ -3,10 +3,12 @@
 #include <iostream>
 #include <mutex>
 
+#include <simdjson.h>
+
 namespace heimdall::lsp
 {
 
-    void QuoteJson(std::string_view value, std::string & out)
+    void QuoteJson(std::string_view value, std::string& out)
     {
         constexpr char hex[] = "0123456789abcdef";
         out += '"';
@@ -56,7 +58,7 @@ namespace heimdall::lsp
         std::cout.flush();
     }
 
-    bool ReadMessage(std::string & body)
+    bool ReadMessage(std::string& body)
     {
         std::string line;
         std::size_t length = 0;
@@ -101,12 +103,12 @@ namespace heimdall::lsp
         return static_cast<std::size_t>(std::cin.gcount()) == length;
     }
 
-    bool GetString(simdjson::dom::object object, const char *key, std::string_view & output)
+    bool GetString(simdjson::dom::object object, const char* key, std::string_view& output)
     {
         return!object[key].get_string().get(output);
     }
 
-    bool GetObject(simdjson::dom::element element, const char *key, simdjson::dom::object & output)
+    bool GetObject(simdjson::dom::element element, const char* key, simdjson::dom::object& output)
     {
         return!element[key].get_object().get(output);
     }
