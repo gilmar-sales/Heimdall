@@ -173,10 +173,13 @@ TEST(RuleEngineSpec, RewritesSimpleTypedefsWithUsing)
         "typedef int * IntPtr;\n"
         "typedef int arr[10];\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
-    ASSERT_EQ(diagnostics.size(), 5);
+    ASSERT_EQ(diagnostics.size(), 6);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-using");
     EXPECT_EQ(diagnostics[0].line, 1);
     EXPECT_TRUE(diagnostics[0].has_fix);
+    ASSERT_EQ(diagnostics[5].code, "cpp/no-magic-numbers");
+    EXPECT_EQ(diagnostics[5].line, 5);
+    EXPECT_FALSE(diagnostics[5].has_fix);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
               "using Count = int;\n"
               "using size_type = unsigned long;\n"
@@ -213,11 +216,15 @@ TEST(RuleEngineSpec, NewRulesCanBeDisabledIndependently)
         "typedef int T;\n"
         "void f() { try { g(); } catch (...) {} }\n"
         "#include <vector>\n"
-        "#include <vector>\n";
+        "#include <vector>\n"
+        "// TODO: remove this\n"
+        "int timeout = 30;\n";
     heimdall::RuleOptions options;
     options.legacy_typedef = false;
     options.empty_catch = false;
     options.duplicate_include = false;
+    options.todo_comment = false;
+    options.magic_numbers = false;
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
 
     heimdall::RuleOptions only_typedef = options;
@@ -239,6 +246,84 @@ TEST(RuleEngineSpec, NewRulesHonorSeverityAndDisableOverrides)
     options.overrides[0].enabled = false;
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(
         "void f() { try { g(); } catch (...) {} }\n").empty());
+}
+
+TEST(RuleEngineSpec, FindsTodoMarkersInLineAndBlockComments)
+{
+    constexpr std::string_view source =
+        "// TODO: refactor this\n"
+        "int x = 0; /* FIXME urgent */\n"
+        "// XXX workaround\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 3);
+    EXPECT_EQ(diagnostics[0].code, "cpp/no-todo");
+    EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::TodoComment);
+    EXPECT_EQ(diagnostics[0].line, 1);
+    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_EQ(diagnostics[1].line, 2);
+    EXPECT_EQ(diagnostics[2].line, 3);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+}
+
+TEST(RuleEngineSpec, IgnoresTodoSubstringsProseAndCode)
+{
+    constexpr std::string_view source =
+        "// todo lowercase stays quiet\n"
+        "// todolist is one word\n"
+        "// TODOs is one word\n"
+        "// a method to fix things\n"
+        "const char* s = \"TODO\";\n"
+        "int todo_count = 0;\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, FlagsMagicNumbersOutsideDirectives)
+{
+    constexpr std::string_view source =
+        "#define LIMIT 42\n"
+        "int retry = 3;\n"
+        "double ratio = 0.5;\n"
+        "const char* s = \"42\";\n"
+        "// 42 in a comment\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 2);
+    EXPECT_EQ(diagnostics[0].code, "cpp/no-magic-numbers");
+    EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::MagicNumber);
+    EXPECT_EQ(diagnostics[0].line, 2);
+    EXPECT_FALSE(diagnostics[0].has_fix);
+    EXPECT_EQ(diagnostics[1].line, 3);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+}
+
+TEST(RuleEngineSpec, AllowsTrivialZeroAndOneSpellings)
+{
+    constexpr std::string_view source =
+        "int a = 0;\n"
+        "int b = 1;\n"
+        "unsigned c = 1u;\n"
+        "long d = 0L;\n"
+        "double e = 0.0;\n"
+        "float f = 1.0f;\n"
+        "int g = 0x0;\n"
+        "int h = 0b1;\n";
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, NewTodoAndMagicRulesHonorOverridesAndSuppressions)
+{
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/no-todo", true, heimdall::Severity::Error});
+    auto diagnostics = heimdall::RuleEngine(options).Analyze("// TODO: x\n");
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+
+    options.overrides[0].enabled = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze("// TODO: x\n").empty());
+
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(
+        "// TODO: x // heimdall-disable-line cpp/no-todo\n").empty());
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(
+        "int timeout = 30; // heimdall-disable-line cpp/no-magic-numbers\n").empty());
 }
 
 TEST(RuleEngineSpec, SuppressionsCoverNewRules)
@@ -326,7 +411,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto & catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 10);
+    ASSERT_EQ(catalog.size(), 12);
     for (const auto & info: catalog)
     {
         EXPECT_FALSE(info.code.empty());

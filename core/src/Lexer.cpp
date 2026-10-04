@@ -413,7 +413,17 @@ namespace heimdall
                 }
             }
 
-            return {kind, static_cast<std::uint32_t>(start), static_cast<std::uint32_t>(i - start)};
+            Tok tok = Tok::None;
+            if (kind == TokenKind::Punctuation)
+            {
+                tok = i - start == 1 ? SingleCharTok(c) : LookupTok(m_source.substr(start, i - start));
+            }
+            else if (kind == TokenKind::Identifier && MayBeKeyword(m_source.substr(start, i - start)))
+            {
+                tok = LookupTok(m_source.substr(start, i - start));
+            }
+
+            return {kind, tok, static_cast<std::uint32_t>(start), static_cast<std::uint32_t>(i - start)};
         }
     }
 

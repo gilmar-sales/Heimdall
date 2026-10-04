@@ -91,6 +91,20 @@
             "warning",
             "error"
           ]
+        },
+        "cpp/no-todo": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-magic-numbers": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
         }
       },
       "additionalProperties": {

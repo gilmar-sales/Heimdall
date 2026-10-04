@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -249,6 +251,129 @@ namespace heimdall
             return true;
         }
 
+        bool IsWordChar(char c)
+        {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '_';
+        }
+
+        // First uppercase TODO/FIXME/XXX whole-word marker in a comment,
+        // or nullopt. Matching is case-sensitive: lowercase prose
+        // ("todo list", "fixme later?") stays quiet.
+        std::optional<std::string_view> FindTodoMarker(std::string_view text)
+        {
+            constexpr std::string_view markers[] = {"TODO", "FIXME", "XXX"};
+            for (std::size_t i = 0; i < text.size(); ++i)
+            {
+                for (const auto marker : markers)
+                {
+                    if (i + marker.size() > text.size() || text.substr(i, marker.size()) != marker)
+                    {
+                        continue;
+                    }
+
+                    const bool left_ok = i == 0 || !IsWordChar(text[i - 1]);
+                    const bool right_ok = i + marker.size() == text.size() ||
+                        !IsWordChar(text[i + marker.size()]);
+                    if (left_ok && right_ok)
+                    {
+                        return marker;
+                    }
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        // Numeric literals that need no name: 0 and 1 in any base or
+        // spelling (0x0, 0b1, 1u, 0.0, 1.0f, 1e0...). Anything else,
+        // including user-defined literal suffixes and unparseable
+        // spellings, is treated as a magic number.
+        bool IsTrivialNumericLiteral(std::string_view text)
+        {
+            std::string clean;
+            clean.reserve(text.size());
+            for (const char c : text)
+            {
+                if (c != '\'')
+                {
+                    clean.push_back(c);
+                }
+            }
+
+            if (clean.empty())
+            {
+                return false;
+            }
+
+            const bool hex = clean.size() > 2 && clean[0] == '0' &&
+                (clean[1] == 'x' || clean[1] == 'X');
+            const bool binary = clean.size() > 2 && clean[0] == '0' &&
+                (clean[1] == 'b' || clean[1] == 'B');
+            bool is_float = false;
+            if (hex)
+            {
+                is_float = clean.find('.') != std::string::npos ||
+                    clean.find('p') != std::string::npos || clean.find('P') != std::string::npos;
+            }
+            else if (!binary)
+            {
+                is_float = clean.find('.') != std::string::npos ||
+                    clean.find('e') != std::string::npos || clean.find('E') != std::string::npos;
+            }
+
+            errno = 0;
+            if (is_float)
+            {
+                char *end = nullptr;
+                const double value = std::strtod(clean.c_str(), &end);
+                if (end == clean.c_str() || errno == ERANGE)
+                {
+                    return false;
+                }
+
+                const std::string_view suffix(end);
+                if (!suffix.empty() && suffix != "f" && suffix != "F" &&
+                    suffix != "l" && suffix != "L")
+                {
+                    return false;
+                }
+
+                return value == 0.0 || value == 1.0;
+            }
+
+            const char *digits = clean.c_str();
+            int base = 10;
+            if (hex || binary)
+            {
+                digits += 2;
+                base = hex ? 16 : 2;
+            }
+            else if (clean.size() > 1 && clean[0] == '0' &&
+                clean[1] >= '0' && clean[1] <= '9')
+            {
+                base = 8;
+            }
+
+            char *end = nullptr;
+            const unsigned long long value = std::strtoull(digits, &end, base);
+            if (end == digits || errno == ERANGE)
+            {
+                return false;
+            }
+
+            for (const char *p = end; *p != '\0'; ++p)
+            {
+                if (*p != 'u' && *p != 'U' && *p != 'l' && *p != 'L' &&
+                    *p != 'z' && *p != 'Z')
+                {
+                    return false;
+                }
+            }
+
+            return value <= 1;
+        }
+
     } // namespace
 
     const std::vector<RuleInfo> & RuleCatalog()
@@ -277,6 +402,10 @@ namespace heimdall
                 "semântica", false, "include that leads back to the including file"},
             {RuleId::UnsortedIncludes, "cpp/sort-includes", "cpp", Severity::Warning,
                 "diretivas", true, "includes out of the configured order"},
+            {RuleId::TodoComment, "cpp/no-todo", "cpp", Severity::Warning,
+                "lexical", false, "unresolved TODO, FIXME or XXX comment"},
+            {RuleId::MagicNumber, "cpp/no-magic-numbers", "cpp", Severity::Warning,
+                "sintática", false, "numeric literal without a named constant"},
         };
         return catalog;
     }
@@ -437,6 +566,57 @@ namespace heimdall
                 RuleId::MissingFinalNewline, "format/require-final-newline", "file must end with a newline",
                 source.size(), 0,
                 position, {source.size(), 0, crlf ? "\r\n" : "\n"}));
+        }
+
+        if (m_options.todo_comment)
+        {
+            for (const auto & token : tokens)
+            {
+                if (token.kind != TokenKind::LineComment &&
+                    token.kind != TokenKind::BlockComment)
+                {
+                    continue;
+                }
+
+                const auto marker = FindTodoMarker(source.substr(token.offset, token.length));
+                if (!marker)
+                {
+                    continue;
+                }
+
+                const auto position = lines.Lookup(token.offset);
+                auto diagnostic = MakeDiagnostic(
+                    RuleId::TodoComment, "cpp/no-todo",
+                    std::string(*marker) + " comment should be resolved or tracked",
+                    token.offset, token.length, position, {0, 0, ""}, false);
+                diagnostics.push_back(std::move(diagnostic));
+            }
+        }
+
+        if (m_options.magic_numbers)
+        {
+            std::size_t directive_cursor = 0;
+            for (const auto & token : tokens)
+            {
+                if (token.kind != TokenKind::Number ||
+                    IsInDirective(token.offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                const auto text = source.substr(token.offset, token.length);
+                if (IsTrivialNumericLiteral(text))
+                {
+                    continue;
+                }
+
+                const auto position = lines.Lookup(token.offset);
+                auto diagnostic = MakeDiagnostic(
+                    RuleId::MagicNumber, "cpp/no-magic-numbers",
+                    "magic number '" + std::string(text) + "' should use a named constant",
+                    token.offset, token.length, position, {0, 0, ""}, false);
+                diagnostics.push_back(std::move(diagnostic));
+            }
         }
 
         if (m_options.empty_catch)

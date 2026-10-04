@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include <Heimdall/Tok.hpp>
+
 namespace heimdall
 {
 
@@ -25,9 +27,13 @@ namespace heimdall
     struct Token
     {
         TokenKind kind;
-        std::uint32_t offset;
-        std::uint32_t length;
+        // Keyword/punctuator classification; lives in the padding after `kind`.
+        Tok tok = Tok::None;
+        std::uint32_t offset = 0;
+        std::uint32_t length = 0;
     };
+
+    static_assert(sizeof(Token) == 12);
 
     class Lexer
     {

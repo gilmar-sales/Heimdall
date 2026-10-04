@@ -135,7 +135,10 @@ outside the extension) still needs to be closed before relinking.
   `cpp/no-empty-catch` flags empty catch blocks; `cpp/no-duplicate-include`
   flags repeated literal includes outside conditional blocks;
   `cpp/modernize-using` rewrites plain `typedef` declarations as `using`
-  aliases; `cpp/sort-includes` (opt-in) flags include blocks out of the
+  aliases; `cpp/no-todo` flags uppercase `TODO`/`FIXME`/`XXX` markers in
+  comments (no autofix); `cpp/no-magic-numbers` flags numeric literals other
+  than `0`/`1` (any base or suffix spelling) outside comments, literals and
+  directives (no autofix); `cpp/sort-includes` (opt-in) flags include blocks out of the
   configured order (`include-order` in `.heimdall.json`) and safely
   reorders each block in batch. Diagnostics
   carry byte ranges and 1-based line/column, with non-overlapping text edits applied

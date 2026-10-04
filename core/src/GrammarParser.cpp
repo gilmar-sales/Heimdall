@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory_resource>
@@ -159,11 +160,10 @@ namespace heimdall
                 }
             }
 
-            m_sig_text.reserve(m_sig.size());
+            m_sig_tok.reserve(m_sig.size());
             for (const std::size_t token_index: m_sig)
             {
-                const auto &token = tree.m_tokens[token_index];
-                m_sig_text.push_back(tree.m_source.substr(token.offset, token.length));
+                m_sig_tok.push_back(tree.m_tokens[token_index].tok);
             }
 
             m_match.resize(m_sig.size(), Invalid);
@@ -171,14 +171,14 @@ namespace heimdall
             std::pmr::vector<std::uint32_t> stack(&m_scratch);
             for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(m_sig.size()); ++i)
             {
-                const auto t = Text(i);
-                if (t == "(" || t == "[" || t == "{")
+                const Tok t = m_sig_tok[i];
+                if (t == Tok::LParen || t == Tok::LBracket || t == Tok::LBrace)
                 {
                     stack.push_back(i);
                 }
-                else if (t == ")" || t == "]" || t == "}")
+                else if (t == Tok::RParen || t == Tok::RBracket || t == Tok::RBrace)
                 {
-                    if (!stack.empty() && Closes(Text(stack.back()), t))
+                    if (!stack.empty() && Closes(m_sig_tok[stack.back()], t))
                     {
                         m_match[i] = stack.back();
                         m_match[stack.back()] = i;
@@ -189,7 +189,7 @@ namespace heimdall
                         std::size_t found = stack.size();
                         for (std::size_t k = stack.size(); k > 0; --k)
                         {
-                            if (Closes(Text(stack[k - 1]), t))
+                            if (Closes(m_sig_tok[stack[k - 1]], t))
                             {
                                 found = k - 1;
                                 break;
@@ -233,7 +233,7 @@ namespace heimdall
         std::stop_token m_stop;
         std::pmr::vector<std::uint32_t> m_sig{&m_scratch};
 
-        std::pmr::vector<std::string_view> m_sig_text{&m_scratch};
+        std::pmr::vector<Tok> m_sig_tok{&m_scratch};
         std::pmr::vector<std::uint32_t> m_match{&m_scratch};
         std::uint32_t m_last_expression_node = Invalid;
         const ParseReuse *m_reuse = nullptr;
@@ -245,14 +245,16 @@ namespace heimdall
 
         std::string_view Text(std::size_t sig) const
         {
-            if (sig >= m_sig_text.size()) return {};
-            return m_sig_text[sig];
+            if (sig >= m_sig.size()) return {};
+            const auto &token = m_tree.m_tokens[m_sig[sig]];
+            return m_tree.m_source.substr(token.offset, token.length);
         }
 
-        static bool Closes(std::string_view open, std::string_view close)
+        static bool Closes(Tok open, Tok close)
         {
-            return (open == "(" && close == ")") ||(open == "[" && close == "]") ||
-                (open == "{" && close == "}");
+            return (open == Tok::LParen && close == Tok::RParen) ||
+                (open == Tok::LBracket && close == Tok::RBracket) ||
+                (open == Tok::LBrace && close == Tok::RBrace);
         }
 
         std::size_t Add(GrammarKind kind, std::size_t begin, std::size_t end, std::size_t parent)
@@ -266,20 +268,34 @@ namespace heimdall
             return m_tree.m_nodes.size() - 1;
         }
 
-        bool Is(std::size_t i, std::string_view text) const
+        // `Is(i, "template")`: the literal is resolved to a Tok at compile time, so
+        // keywords and punctuators cost one byte comparison.
+        bool Is(std::size_t i, TokLiteral literal) const
         {
-            if (i >= m_sig_text.size())
+            if (i >= m_sig_tok.size())
             {
                 return false;
             }
 
-            if (text.size() == 1)
+            if (literal.tok != Tok::None)
             {
-                const auto candidate = m_sig_text[i];
-                return candidate.size() == 1 && candidate[0] == text[0];
+                return m_sig_tok[i] == literal.tok;
             }
 
-            return m_sig_text[i] == text;
+            return Text(i) == literal.text;
+        }
+
+        // Runtime text (e.g. a table of operators): classify once, then compare.
+        template <std::same_as<std::string_view> S>
+        bool Is(std::size_t i, S text) const
+        {
+            if (i >= m_sig_tok.size())
+            {
+                return false;
+            }
+
+            const Tok tok = LookupTok(text);
+            return tok != Tok::None ? m_sig_tok[i] == tok : Text(i) == text;
         }
 
         void SetNodeRange(std::size_t node, std::size_t begin, std::size_t end)
@@ -3024,7 +3040,7 @@ namespace heimdall
         {
             for (auto i = begin; i < end; ++i)
             {
-                const auto text = m_sig_text[i];
+                const auto text = Text(i);
                 if (text.size() == 1 && (text[0] == '(' || text[0] == '[' || text[0] == '{' ||
                     text[0] == ')' || text[0] == ']' || text[0] == '}') &&
                     (m_match[i] == Invalid || m_match[i] < begin || m_match[i] >= end))

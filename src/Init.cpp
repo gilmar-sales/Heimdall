@@ -18,7 +18,9 @@ namespace heimdall::cli
     "format/require-final-newline": "warning",
     "cpp/no-empty-catch": "warning",
     "cpp/no-duplicate-include": "warning",
-    "cpp/modernize-using": "warning"
+    "cpp/modernize-using": "warning",
+    "cpp/no-todo": "warning",
+    "cpp/no-magic-numbers": "warning"
   },
   "suppressions": true,
   "include-order": {

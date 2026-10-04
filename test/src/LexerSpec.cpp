@@ -225,3 +225,62 @@ TEST(LexerSpec, RelexMatchesFullLexForRandomEditSequences)
         }
     }
 }
+
+TEST(LexerSpec, ClassifiesKeywordsAndPunctuatorsOnce)
+{
+    const std::string_view source = "template<class T> struct S { T v; auto f() const -> T; };\n"
+                                    "int x = a::b >>= 1; // template\n"
+                                    "\"(\" Template classy 42 R\"x(()x\"";
+    const heimdall::Lexer lexer(source);
+    const auto tokens = lexer.Lex();
+
+    for (const auto& token : tokens)
+    {
+        const auto text = lexer.Text(token);
+        const bool classifiable = token.kind == heimdall::TokenKind::Identifier ||
+            token.kind == heimdall::TokenKind::Punctuation;
+        // Single source of truth: the lexer's tag is exactly the table lookup.
+        EXPECT_EQ(token.tok, classifiable ? heimdall::LookupTok(text) : heimdall::Tok::None) << text;
+    }
+
+    const auto find = [&](std::string_view text)
+    {
+        for (const auto& token : tokens)
+        {
+            if (lexer.Text(token) == text) return token.tok;
+        }
+        return heimdall::Tok::None;
+    };
+    EXPECT_EQ(find("template"), heimdall::Tok::KwTemplate);
+    EXPECT_EQ(find("struct"), heimdall::Tok::KwStruct);
+    EXPECT_EQ(find("->"), heimdall::Tok::Arrow);
+    EXPECT_EQ(find("::"), heimdall::Tok::ColonColon);
+    EXPECT_EQ(find(">>="), heimdall::Tok::ShrEq);
+    EXPECT_EQ(find("T"), heimdall::Tok::None);
+    EXPECT_EQ(find("Template"), heimdall::Tok::None);
+    EXPECT_EQ(find("classy"), heimdall::Tok::None);
+    EXPECT_EQ(find("\"(\""), heimdall::Tok::None);
+    EXPECT_EQ(find("// template"), heimdall::Tok::None);
+}
+
+TEST(LexerSpec, RelexKeepsTokClassification)
+{
+    const std::string before = "int a = 1;\nfor (;;) {}\n";
+    const std::string after = "int a = 1;\nwhile (;;) {}\n";
+    heimdall::Lexer old_lexer(before);
+    auto tokens = old_lexer.Lex();
+    const heimdall::Lexer new_lexer(after);
+    new_lexer.Relex(tokens, {11, 3, 5});
+    const auto fresh = new_lexer.Lex();
+    ASSERT_EQ(tokens.size(), fresh.size());
+    for (std::size_t i = 0; i < fresh.size(); ++i)
+    {
+        EXPECT_EQ(tokens[i].tok, fresh[i].tok) << i;
+        EXPECT_EQ(tokens[i].offset, fresh[i].offset) << i;
+    }
+}
+
+TEST(LexerSpec, TokenStaysTwelveBytes)
+{
+    EXPECT_EQ(sizeof(heimdall::Token), 12u);
+}

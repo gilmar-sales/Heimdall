@@ -29,7 +29,9 @@ namespace heimdall
         UnusedInclude,
         PreferForwardDeclaration,
         UnsortedIncludes,
-        CircularInclude
+        CircularInclude,
+        TodoComment,
+        MagicNumber
     };
 
     struct RuleOverride
@@ -80,6 +82,8 @@ namespace heimdall
         bool empty_catch = true;
         bool duplicate_include = true;
         bool legacy_typedef = true;
+        bool todo_comment = true;
+        bool magic_numbers = true;
         // Opt-in: the order is a project convention, so the rule only
         // runs when enabled together with a configured order.
         bool sort_includes = false;
