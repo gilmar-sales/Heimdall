@@ -53,6 +53,8 @@ namespace heimdall
         std::vector<PreprocessorDirective> directives;
         std::vector<ActiveSourceRange> active_ranges;
         std::vector<PreprocessorDiagnostic> diagnostics;
+        // Object-like macros the file itself #defines (final state, #undef applied).
+        std::unordered_map<std::string, std::string> local_macros;
     };
 
     // Transparent hash so macro lookups take string_view without allocating a

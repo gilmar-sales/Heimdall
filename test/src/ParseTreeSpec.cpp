@@ -787,3 +787,42 @@ TEST(ParseTreeSpec, ConstructorDefinitionsDoNotHideTheirClassName)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 0);
 }
+
+TEST(ParseTreeSpec, AlignasSpecifiesDeclarationsAtEveryScope)
+{
+    constexpr std::string_view source =
+    "struct S {\n"
+    "    alignas(alignof(std::max_align_t)) std::array<std::byte, 16> m_scratch_buffer;\n"
+    "    [[maybe_unused]] alignas(4) int b;\n"
+    "};\n"
+    "alignas(16) static int g;\n"
+    "alignas(S) char storage[sizeof(S)];\n"
+    "void f() {\n"
+    "    alignas(32) float v[8];\n"
+    "    alignas(alignof(long)) int local = alignof(int) + 1;\n"
+    "}\n";
+    const auto tree = heimdall::ParseTree::Parse(source, heimdall::CppStandard::Cpp20);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::AttributeSpecifier), 5);
+}
+
+TEST(ParseTreeSpec, AlignasOnRecordKeepsItsName)
+{
+    constexpr std::string_view source = "struct alignas(16) A { int x; };\nA a;\n";
+    const auto tree = heimdall::ParseTree::Parse(source, heimdall::CppStandard::Cpp20);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1);
+}
+
+TEST(ParseTreeSpec, FileLocalDecorationMacroDoesNotBreakDeclarations)
+{
+    constexpr std::string_view source =
+        "#define STBIDEF extern\n"
+        "#include <stdio.h>\n"
+        "STBIDEF int stbi_is_16_bit_from_file(FILE *f);\n"
+        "STBIDEF void stbi_hdr_to_ldr_gamma(float gamma);\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}

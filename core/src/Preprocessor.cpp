@@ -446,6 +446,47 @@ namespace heimdall
             return!body.empty() && body.back() == '\\';
         }
 
+        // Advances `in_comment` over one source line: whether the next line starts
+        // inside a block comment. Strings, char literals and `//` comments are
+        // skipped so that `/*` inside them does not open a comment.
+        void AdvanceCommentState(std::string_view line, bool & in_comment)
+        {
+            for (std::size_t i = 0; i < line.size(); ++i)
+            {
+                if (in_comment)
+                {
+                    if (line[i] == '*' && i + 1 < line.size() && line[i + 1] == '/')
+                    {
+                        in_comment = false;
+                        ++i;
+                    }
+
+                    continue;
+                }
+
+                const char c = line[i];
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
+                {
+                    in_comment = true;
+                    ++i;
+                }
+                else if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
+                {
+                    return;
+                }
+                else if (c == '"' || c == '\'')
+                {
+                    for (++i; i < line.size() && line[i] != c; ++i)
+                    {
+                        if (line[i] == '\\')
+                        {
+                            ++i;
+                        }
+                    }
+                }
+            }
+        }
+
     } // namespace
 
     PreprocessorResult Preprocessor::Process(std::string_view source, bool build_active_source) const
@@ -467,6 +508,7 @@ namespace heimdall
 
         std::vector<ConditionalFrame> stack;
         bool active = true;
+        bool in_block_comment = false;
         std::size_t offset = 0;
 
         while (offset < source.size())
@@ -499,7 +541,7 @@ namespace heimdall
             // A directive continues over lines ending in a backslash: the whole
             // span is one directive, and its logical text joins the pieces.
             std::string joined;
-            if (!trimmed.empty() && trimmed.front() == '#' && EndsWithBackslash(body))
+            if (!in_block_comment && !trimmed.empty() && trimmed.front() == '#' && EndsWithBackslash(body))
             {
                 joined.assign(body.substr(0, body.size() - 1));
                 while (end < source.size())
@@ -531,7 +573,9 @@ namespace heimdall
                 trimmed = Trim(joined);
             }
 
-            if (!trimmed.empty() && trimmed.front() == '#')
+            const bool line_in_comment = in_block_comment;
+            AdvanceCommentState(line, in_block_comment);
+            if (!line_in_comment && !trimmed.empty() && trimmed.front() == '#')
             {
                 trimmed.remove_prefix(1);
                 trimmed = Trim(trimmed);
@@ -664,6 +708,12 @@ namespace heimdall
         if (!stack.empty())
         {
             result.diagnostics.push_back({source.size(), "unterminated conditional directive"});
+        }
+
+        result.local_macros.reserve(local.size());
+        for (auto & [name, value]: local)
+        {
+            result.local_macros.emplace(name, std::move(value));
         }
 
         return result;

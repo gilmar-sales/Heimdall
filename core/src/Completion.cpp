@@ -4,6 +4,7 @@
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/TypeLayout.hpp>
 
 #include <algorithm>
 #include <array>
@@ -2445,6 +2446,127 @@ namespace heimdall
             return bases;
         }
 
+        // `type_text` only names the specifier; the declarator around the name
+        // (`*`, `&`, `[4]`) decides what is actually stored. Rebuilds the full type
+        // for layout purposes: `static ` marks storage outside the instance, `?` a
+        // declarator that cannot be spelled as a type (bitfield).
+        std::string DeclaredLayoutType(const ParseTree &tree, std::size_t node, const std::string &type_text)
+        {
+            const auto &tokens = tree.Tokens();
+            const std::size_t name = tree.NodesSoA().FirstToken(node);
+            if (type_text.empty() || name >= tokens.size())
+            {
+                return {};
+            }
+
+            const auto trivia = [&](std::size_t i)
+            {
+                return tokens[i].kind == TokenKind::Whitespace || tokens[i].kind == TokenKind::LineComment ||
+                    tokens[i].kind == TokenKind::BlockComment;
+            };
+
+            std::string ops;
+            for (std::size_t j = name; j > 0;)
+            {
+                --j;
+                if (trivia(j))
+                {
+                    continue;
+                }
+
+                const std::string_view text = tree.Text(tokens[j]);
+                if (text != "*" && text != "&" && text != "&&" && text != "const" && text != "volatile")
+                {
+                    break;
+                }
+
+                ops.insert(0, std::string(text) + ' ');
+            }
+
+            std::string dims;
+            std::size_t k = name + 1;
+            const auto skip_trivia = [&]
+            {
+                while (k < tokens.size() && trivia(k))
+                {
+                    ++k;
+                }
+            };
+            skip_trivia();
+            while (k < tokens.size() && tree.Text(tokens[k]) == "[")
+            {
+                std::string dim;
+                int depth = 1;
+                for (++k; k < tokens.size(); ++k)
+                {
+                    const std::string_view text = tree.Text(tokens[k]);
+                    if (text == "[")
+                    {
+                        ++depth;
+                    }
+                    else if (text == "]" && --depth == 0)
+                    {
+                        break;
+                    }
+
+                    if (!trivia(k))
+                    {
+                        dim += text;
+                    }
+                }
+
+                if (k >= tokens.size())
+                {
+                    return "?";
+                }
+
+                ++k;
+                dims += '[' + dim + ']';
+                skip_trivia();
+            }
+
+            if (k < tokens.size() && tree.Text(tokens[k]) == ":")
+            {
+                return "?";
+            }
+
+            bool outside_instance = false;
+            std::size_t current = tree.NodesSoA().Parent(node);
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.NodesSoA().size(); ++depth)
+            {
+                const GrammarKind kind = tree.NodesSoA().Kind(current);
+                if (kind == GrammarKind::Declaration || kind == GrammarKind::DeclarationStatement ||
+                    kind == GrammarKind::ParameterDeclaration)
+                {
+                    const std::size_t first = tree.NodesSoA().FirstToken(current);
+                    for (std::size_t i = first; i < name; ++i)
+                    {
+                        const std::string_view text = tree.Text(tokens[i]);
+                        if (text == "static" || text == "thread_local" || text == "extern" || text == "typedef" ||
+                            text == "friend")
+                        {
+                            outside_instance = true;
+                        }
+                    }
+
+                    break;
+                }
+
+                current = tree.NodesSoA().Parent(current);
+            }
+
+            std::string full = outside_instance ? "static " : "";
+            full += type_text;
+            if (!ops.empty())
+            {
+                ops.pop_back();
+                full += ' ';
+                full += ops;
+            }
+
+            return full + dims;
+        }
+
         CompletionItem DescribeDeclared(const ParseTree &tree, std::string_view source,
             const std::vector<Token> & tokens, std::size_t node,
             std::string_view name, CompletionKind kind)
@@ -2491,6 +2613,7 @@ namespace heimdall
             if (kind == CompletionKind::Variable)
             {
                 item.type_text = VariableTypeDetail(tree, node);
+                item.layout_type = DeclaredLayoutType(tree, node, item.type_text);
             }
             else if (kind == CompletionKind::Function)
             {
@@ -2635,6 +2758,47 @@ namespace heimdall
             }
 
             item.is_definition = defines;
+            if (tag.intro.starts_with("enum"))
+            {
+                // `enum class E : std::uint8_t {`: the underlying type, else implicit.
+                std::string underlying;
+                bool colon = false;
+                for (std::size_t t = tag.name_token + 1; t < tokens.size(); ++t)
+                {
+                    if (tokens[t].kind == TokenKind::Whitespace || tokens[t].kind == TokenKind::LineComment ||
+                        tokens[t].kind == TokenKind::BlockComment)
+                    {
+                        continue;
+                    }
+
+                    const std::string_view next = TokenText(source, tokens[t]);
+                    if (!colon)
+                    {
+                        colon = next == ":";
+                        if (!colon)
+                        {
+                            break;
+                        }
+
+                        continue;
+                    }
+
+                    if (next == "{" || next == ";")
+                    {
+                        break;
+                    }
+
+                    if (!underlying.empty() && IsIdentChar(next.front()) && IsIdentChar(underlying.back()))
+                    {
+                        underlying += ' ';
+                    }
+
+                    underlying += next;
+                }
+
+                item.layout_type = std::move(underlying);
+            }
+
             return item;
         }
 
@@ -2954,6 +3118,13 @@ namespace heimdall
             const CompletionKind kind = ClassifyDeclaredName(tree, n);
             if (for_header && kind == CompletionKind::Variable && name.front() == '_')
             {
+                // Dropped from the index, but still occupies storage in its record.
+                if (scope_kind == GrammarKind::RecordDefinition)
+                {
+                    entry_for(scope < scope_paths.size() ? scope_paths[scope] : ScopePath(tree, scope),
+                        CompletionKind::Type).layout_unknown = true;
+                }
+
                 continue;
             }
 
@@ -2961,6 +3132,55 @@ namespace heimdall
                 : ScopePath(tree, scope),
                 CompletionKind::Type);
             entry.members.push_back(DescribeDeclared(tree, source, tokens, n, name, kind));
+        }
+
+        // Records whose layout the indexed members cannot explain.
+        const bool packed_file = source.find("#pragma pack") != std::string_view::npos;
+        for (std::size_t n = 0; n < tree.NodesSoA().size() && n < scope_paths.size(); ++n)
+        {
+            if (tree.NodesSoA().Kind(n) != GrammarKind::RecordDefinition || scope_paths[n].empty() ||
+                scope_paths[n].back().empty())
+            {
+                continue;
+            }
+
+            bool unknown = packed_file;
+            const auto grammar = tree.NodesSoA()[n];
+            const std::size_t last = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+                tokens.size());
+            for (std::size_t t = grammar.GetFirstToken(); t < last && !unknown; ++t)
+            {
+                if (tokens[t].kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                const std::string_view word = tree.Text(tokens[t]);
+                if (word == "virtual" || word == "alignas" || word == "_Alignas" || word == "packed" ||
+                    word == "__packed__" || word == "aligned" || word == "__aligned__" ||
+                    word == "no_unique_address")
+                {
+                    unknown = true;
+                }
+                else if (word == "struct" || word == "union" || word == "class")
+                {
+                    // Anonymous member record: its fields live in a scope of their own.
+                    std::size_t next = t + 1;
+                    while (next < last && (tokens[next].kind == TokenKind::Whitespace ||
+                        tokens[next].kind == TokenKind::LineComment ||
+                        tokens[next].kind == TokenKind::BlockComment))
+                    {
+                        ++next;
+                    }
+
+                    unknown = next < last && tree.Text(tokens[next]) == "{";
+                }
+            }
+
+            if (unknown)
+            {
+                entry_for(scope_paths[n], CompletionKind::Type).layout_unknown = true;
+            }
         }
 
         // `using Name = Type;` carries no DeclaredName node: index the alias as a
@@ -3201,6 +3421,11 @@ namespace heimdall
                     if (merged.back().type_text.empty() && !member.type_text.empty())
                     {
                         merged.back().type_text = std::move(member.type_text);
+                    }
+
+                    if (merged.back().layout_type.empty() && !member.layout_type.empty())
+                    {
+                        merged.back().layout_type = std::move(member.layout_type);
                     }
 
                     if (merged.back().detail == KindDetail(merged.back().kind) &&
@@ -5566,6 +5791,147 @@ namespace heimdall
         return CollectAndSort(best, interner);
     }
 
+    namespace
+    {
+
+    // Variables hover with the size/alignment of their declared type, types with
+    // that of the type they name. Unknowable layouts leave the item untouched.
+    void AttachLayout(const ParseTree &tree, const ParserOptions &options, const ScopeIndex *external,
+        CompletionItem &item)
+    {
+        const bool tag = item.kind == CompletionKind::Namespace &&
+            (item.detail.starts_with("struct ") || item.detail.starts_with("class ") ||
+                item.detail.starts_with("union ") || item.detail.starts_with("enum "));
+        if (item.kind != CompletionKind::Variable && item.kind != CompletionKind::Type && !tag)
+        {
+            return;
+        }
+
+        std::string text = item.layout_type;
+        if (item.kind == CompletionKind::Variable)
+        {
+            if (text.empty())
+            {
+                return;
+            }
+
+            // `auto x = f();`: the refined detail holds the deduced specifier.
+            const auto at = item.type_text.empty() ? std::string::npos : text.find(item.type_text);
+            if (at != std::string::npos && item.type_text.find("auto") != std::string::npos &&
+                !item.detail.empty())
+            {
+                text.replace(at, item.type_text.size(), item.detail);
+            }
+        }
+
+        const ScopeIndex local = BuildScopeIndex(tree, false);
+        const TypeLayoutResolver resolver(&local, external, LayoutTarget::FromMacros(options.Macros()));
+        const auto layout = item.kind == CompletionKind::Variable ? resolver.OfType(text) : resolver.OfNamed(item.label);
+        if (layout)
+        {
+            item.has_layout = true;
+            item.size_bytes = layout->size;
+            item.align_bytes = layout->align;
+        }
+
+        if (item.kind == CompletionKind::Variable)
+        {
+            if (const auto offset = resolver.OffsetOfField(item))
+            {
+                item.has_field_offset = true;
+                item.field_offset = *offset;
+            }
+        }
+    }
+
+    // `offsetof(Record, member)` evaluates to the member's offset; hovering the
+    // macro name shows it. Only a plain identifier member is understood.
+    std::optional<CompletionItem> OffsetofHover(const ParseTree &tree, const ParserOptions &options,
+        const ScopeIndex *external, std::size_t end)
+    {
+        const std::string_view source = tree.Source();
+        std::size_t i = end;
+        while (i < source.size() && (source[i] == ' ' || source[i] == '\t'))
+        {
+            ++i;
+        }
+
+        if (i >= source.size() || source[i] != '(')
+        {
+            return std::nullopt;
+        }
+
+        int depth = 0;
+        std::size_t comma = std::string_view::npos;
+        std::size_t close = std::string_view::npos;
+        for (std::size_t k = i; k < source.size() && close == std::string_view::npos; ++k)
+        {
+            const char c = source[k];
+            if (c == '(' || c == '<' || c == '[')
+            {
+                ++depth;
+            }
+            else if (c == ')' || c == '>' || c == ']')
+            {
+                if (--depth == 0)
+                {
+                    close = k;
+                }
+            }
+            else if (c == ',' && depth == 1 && comma == std::string_view::npos)
+            {
+                comma = k;
+            }
+            else if (c == ';' || c == '{')
+            {
+                return std::nullopt;
+            }
+        }
+
+        if (comma == std::string_view::npos || close == std::string_view::npos)
+        {
+            return std::nullopt;
+        }
+
+        const auto trim = [](std::string_view text)
+        {
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '\n'))
+            {
+                text.remove_prefix(1);
+            }
+
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\n'))
+            {
+                text.remove_suffix(1);
+            }
+
+            return text;
+        };
+        const std::string_view record = trim(source.substr(i + 1, comma - i - 1));
+        const std::string_view member = trim(source.substr(comma + 1, close - comma - 1));
+        if (record.empty() || member.empty() || !IsIdentStart(member.front()) ||
+            !std::all_of(member.begin(), member.end(), [](char c) { return IsIdentChar(c); }))
+        {
+            return std::nullopt;
+        }
+
+        const ScopeIndex local = BuildScopeIndex(tree, false);
+        const TypeLayoutResolver resolver(&local, external, LayoutTarget::FromMacros(options.Macros()));
+        const auto offset = resolver.OffsetOf(record, member);
+        if (!offset)
+        {
+            return std::nullopt;
+        }
+
+        CompletionItem item{"offsetof", CompletionKind::Macro,
+            "offsetof(" + std::string(record) + ", " + std::string(member) + ")", {}};
+        item.has_field_offset = true;
+        item.field_offset = *offset;
+        return item;
+    }
+
+    } // namespace
+
     std::optional<CompletionItem> CompletionEngine::Hover(std::string_view source,
         const ParserOptions &options, std::size_t offset,
         const ScopeIndex *external)
@@ -5603,17 +5969,27 @@ namespace heimdall
             return std::nullopt;
         }
 
+        if (word == "offsetof")
+        {
+            if (auto folded = OffsetofHover(ParseTree::Parse(source, options), options, external, end))
+            {
+                return folded;
+            }
+        }
+
         const auto items = Complete(source, options, end, external);
         for (const auto & item: items)
         {
             if (item.label == word)
             {
                 auto hovered = item;
+                const ParseTree tree = ParseTree::Parse(source, options);
                 if (hovered.kind == CompletionKind::Variable && hovered.type_text.find("auto") != std::string::npos)
                 {
-                    RefineAutoDetail(ParseTree::Parse(source, options), external, end, hovered);
+                    RefineAutoDetail(tree, external, end, hovered);
                 }
 
+                AttachLayout(tree, options, external, hovered);
                 return hovered;
             }
         }
@@ -5659,6 +6035,14 @@ namespace heimdall
             return std::nullopt;
         }
 
+        if (word == "offsetof")
+        {
+            if (auto folded = OffsetofHover(tree, options, external, end))
+            {
+                return folded;
+            }
+        }
+
         const auto items = Complete(tree, options, end, external);
         for (const auto & item: items)
         {
@@ -5666,6 +6050,7 @@ namespace heimdall
             {
                 auto hovered = item;
                 RefineAutoDetail(tree, external, end, hovered);
+                AttachLayout(tree, options, external, hovered);
                 return hovered;
             }
         }

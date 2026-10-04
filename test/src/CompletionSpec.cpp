@@ -3,6 +3,7 @@
 #include <Heimdall/Completion.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <string_view>
 #include <vector>
 
@@ -1223,4 +1224,283 @@ TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
     // A member access after an expression is not a designator.
     const auto access = labels(node + "void f(Node n) { int x = n.| }\n");
     EXPECT_TRUE(Contains(access, "run"));
+}
+
+namespace
+{
+    struct HoverLayout
+    {
+        bool known = false;
+        std::uint64_t size = 0;
+        std::uint64_t align = 0;
+    };
+
+    // Hovers the last occurrence of `name` in `source`.
+    HoverLayout LayoutAtHover(std::string_view source, std::string_view name,
+        const heimdall::ScopeIndex *external = nullptr)
+    {
+        const auto hovered = heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{},
+            source.rfind(name) + 1, external);
+        if (!hovered.has_value())
+        {
+            return {};
+        }
+
+        return {hovered->has_layout, hovered->size_bytes, hovered->align_bytes};
+    }
+}
+
+TEST(CompletionSpec, HoverReportsSizeAndAlignmentOfFundamentalVariables)
+{
+    const auto integer = LayoutAtHover("int value = 1;\n", "value");
+    ASSERT_TRUE(integer.known);
+    EXPECT_EQ(integer.size, 4u);
+    EXPECT_EQ(integer.align, 4u);
+
+    const auto real = LayoutAtHover("double ratio = 1.0;\n", "ratio");
+    ASSERT_TRUE(real.known);
+    EXPECT_EQ(real.size, 8u);
+    EXPECT_EQ(real.align, 8u);
+
+    const auto flag = LayoutAtHover("unsigned char byte_value = 0;\n", "byte_value");
+    ASSERT_TRUE(flag.known);
+    EXPECT_EQ(flag.size, 1u);
+
+    const auto wide = LayoutAtHover("long long big = 0;\n", "big");
+    ASSERT_TRUE(wide.known);
+    EXPECT_EQ(wide.size, 8u);
+}
+
+TEST(CompletionSpec, HoverLayoutFollowsPointersAndArrays)
+{
+    const auto pointer = LayoutAtHover("char* cursor = nullptr;\n", "cursor");
+    ASSERT_TRUE(pointer.known);
+    EXPECT_EQ(pointer.size, 8u);
+    EXPECT_EQ(pointer.align, 8u);
+
+    const auto array = LayoutAtHover("short samples[10];\n", "samples");
+    ASSERT_TRUE(array.known);
+    EXPECT_EQ(array.size, 20u);
+    EXPECT_EQ(array.align, 2u);
+
+    const auto grid = LayoutAtHover("int grid[3][4];\n", "grid");
+    ASSERT_TRUE(grid.known);
+    EXPECT_EQ(grid.size, 48u);
+
+    const auto reference = LayoutAtHover("int target = 0;\nint& alias = target;\n", "alias");
+    ASSERT_TRUE(reference.known);
+    EXPECT_EQ(reference.size, 4u);
+
+    const auto sized = LayoutAtHover("#include <cstdint>\nstd::uint16_t port = 0;\n", "port");
+    ASSERT_TRUE(sized.known);
+    EXPECT_EQ(sized.size, 2u);
+}
+
+TEST(CompletionSpec, HoverLayoutPadsRecordMembers)
+{
+    constexpr std::string_view source =
+        "struct Packet { char tag; int id; char flag; };\n"
+        "Packet packet;\n";
+    const auto declared = LayoutAtHover(source, "Packet packet");
+    ASSERT_TRUE(declared.known);
+    EXPECT_EQ(declared.size, 12u);
+    EXPECT_EQ(declared.align, 4u);
+
+    const auto variable = LayoutAtHover(source, "packet");
+    ASSERT_TRUE(variable.known);
+    EXPECT_EQ(variable.size, 12u);
+    EXPECT_EQ(variable.align, 4u);
+}
+
+TEST(CompletionSpec, HoverLayoutCountsPointerMembersAndNestedRecords)
+{
+    constexpr std::string_view source =
+        "struct Node { char tag; Node* next; };\n"
+        "struct Pair { Node left; short extra; };\n";
+    const auto node = LayoutAtHover(source, "Node");
+    ASSERT_TRUE(node.known);
+    EXPECT_EQ(node.size, 16u);
+    EXPECT_EQ(node.align, 8u);
+
+    const auto pair = LayoutAtHover(source, "Pair");
+    ASSERT_TRUE(pair.known);
+    EXPECT_EQ(pair.size, 24u);
+    EXPECT_EQ(pair.align, 8u);
+}
+
+TEST(CompletionSpec, HoverLayoutHandlesUnionsEnumsBasesAndStatics)
+{
+    const auto bits = LayoutAtHover("union Word { char byte; int number; double real; };\n", "Word");
+    ASSERT_TRUE(bits.known);
+    EXPECT_EQ(bits.size, 8u);
+    EXPECT_EQ(bits.align, 8u);
+
+    const auto plain = LayoutAtHover("enum Color { Red, Green };\n", "Color");
+    ASSERT_TRUE(plain.known);
+    EXPECT_EQ(plain.size, 4u);
+
+    const auto small = LayoutAtHover("enum class Level : unsigned char { Low, High };\n", "Level");
+    ASSERT_TRUE(small.known);
+    EXPECT_EQ(small.size, 1u);
+
+    const auto derived = LayoutAtHover(
+        "struct Base { int a; };\nstruct Derived : Base { char b; };\n", "Derived");
+    ASSERT_TRUE(derived.known);
+    EXPECT_EQ(derived.size, 8u);
+
+    const auto statics = LayoutAtHover(
+        "struct Counter { static int total; int local; };\n", "Counter");
+    ASSERT_TRUE(statics.known);
+    EXPECT_EQ(statics.size, 4u);
+
+    const auto empty = LayoutAtHover("struct Tag {};\n", "Tag");
+    ASSERT_TRUE(empty.known);
+    EXPECT_EQ(empty.size, 1u);
+}
+
+TEST(CompletionSpec, HoverLayoutIsOmittedWhenItCannotBeProven)
+{
+    EXPECT_FALSE(LayoutAtHover("struct Shape { virtual void draw(); int sides; };\n", "Shape").known);
+    EXPECT_FALSE(LayoutAtHover("struct Flags { unsigned ready : 1; unsigned done : 1; };\n", "Flags").known);
+    EXPECT_FALSE(LayoutAtHover("template <class T> struct Box { T value; };\n", "Box").known);
+    EXPECT_FALSE(LayoutAtHover("struct Aligned { alignas(16) char data[4]; };\n", "Aligned").known);
+    EXPECT_FALSE(LayoutAtHover("Unknown mystery;\n", "mystery").known);
+    EXPECT_FALSE(LayoutAtHover(
+        "struct Outer { struct { int a; int b; } inner; int c; };\n", "Outer").known);
+}
+
+TEST(CompletionSpec, HoverLayoutResolvesTypesFromHeaderIndex)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace geo { struct Point { double x; double y; }; using Coord = Point; }\n", {});
+    const auto point = LayoutAtHover("geo::Point origin;\n", "origin", &index);
+    ASSERT_TRUE(point.known);
+    EXPECT_EQ(point.size, 16u);
+    EXPECT_EQ(point.align, 8u);
+
+    const auto alias = LayoutAtHover("geo::Coord origin;\n", "origin", &index);
+    ASSERT_TRUE(alias.known);
+    EXPECT_EQ(alias.size, 16u);
+}
+
+TEST(CompletionSpec, HoverLayoutKnowsCommonStandardLibraryTypes)
+{
+    const auto text = LayoutAtHover("std::string name;\n", "name");
+    ASSERT_TRUE(text.known);
+    EXPECT_EQ(text.size, 32u);
+
+    const auto list = LayoutAtHover("std::vector<int> items;\n", "items");
+    ASSERT_TRUE(list.known);
+    EXPECT_EQ(list.size, 24u);
+
+    const auto fixed = LayoutAtHover("std::array<short, 5> window;\n", "window");
+    ASSERT_TRUE(fixed.known);
+    EXPECT_EQ(fixed.size, 10u);
+    EXPECT_EQ(fixed.align, 2u);
+
+    const auto owner = LayoutAtHover("std::unique_ptr<int> owner;\n", "owner");
+    ASSERT_TRUE(owner.known);
+    EXPECT_EQ(owner.size, 8u);
+}
+
+namespace
+{
+    // Mirrors the source below, so the compiler building the tests is the oracle.
+    struct SelfLinkedNode
+    {
+        SelfLinkedNode* next;
+        int value;
+    };
+}
+
+TEST(CompletionSpec, HoverLayoutOfSelfReferencingNodeMatchesTheCompiler)
+{
+    constexpr std::string_view source =
+        "struct Node\n"
+        "{\n"
+        "    Node* next;\n"
+        "    int value;\n"
+        "};\n";
+    const auto node = LayoutAtHover(source, "Node");
+    ASSERT_TRUE(node.known);
+    EXPECT_EQ(node.size, sizeof(SelfLinkedNode));
+    EXPECT_EQ(node.align, alignof(SelfLinkedNode));
+    if constexpr (sizeof(void*) == 8)
+    {
+        EXPECT_EQ(node.size, 16u);
+        EXPECT_EQ(node.align, 8u);
+    }
+}
+
+namespace
+{
+    struct OffsetProbe
+    {
+        char tag;
+        double weight;
+        short count;
+    };
+
+    struct HoverOffset
+    {
+        bool known = false;
+        std::uint64_t offset = 0;
+    };
+
+    HoverOffset OffsetAtHover(std::string_view source, std::string_view name, std::size_t occurrence_from_end = 0)
+    {
+        std::size_t at = std::string_view::npos;
+        for (std::size_t n = 0; n <= occurrence_from_end; ++n)
+        {
+            at = source.rfind(name, at == std::string_view::npos ? std::string_view::npos : at - 1);
+        }
+
+        const auto hovered = heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{}, at + 1);
+        if (!hovered.has_value())
+        {
+            return {};
+        }
+
+        return {hovered->has_field_offset, hovered->field_offset};
+    }
+}
+
+TEST(CompletionSpec, HoverOnMemberReportsOffsetWithinRecord)
+{
+    constexpr std::string_view source = "struct Probe { char tag; double weight; short count; };\n";
+    const auto tag = OffsetAtHover(source, "tag");
+    ASSERT_TRUE(tag.known);
+    EXPECT_EQ(tag.offset, offsetof(OffsetProbe, tag));
+
+    const auto weight = OffsetAtHover(source, "weight");
+    ASSERT_TRUE(weight.known);
+    EXPECT_EQ(weight.offset, offsetof(OffsetProbe, weight));
+
+    const auto count = OffsetAtHover(source, "count");
+    ASSERT_TRUE(count.known);
+    EXPECT_EQ(count.offset, offsetof(OffsetProbe, count));
+}
+
+TEST(CompletionSpec, HoverOnMemberOffsetIsZeroInUnionsAndSkipsStatics)
+{
+    const auto member = OffsetAtHover("union Word { char byte; int number; };\n", "number");
+    ASSERT_TRUE(member.known);
+    EXPECT_EQ(member.offset, 0u);
+
+    EXPECT_FALSE(OffsetAtHover("struct C { static int total; int local; };\n", "total").known);
+    EXPECT_FALSE(OffsetAtHover("struct V { virtual void f(); int x; };\n", "x").known);
+    EXPECT_FALSE(OffsetAtHover("int plain = 0;\n", "plain").known);
+}
+
+TEST(CompletionSpec, HoverOnOffsetofEvaluatesTheMember)
+{
+    constexpr std::string_view source =
+        "struct Probe { char tag; double weight; short count; };\n"
+        "auto where = offsetof(Probe, weight);\n";
+    const auto folded = OffsetAtHover(source, "offsetof");
+    ASSERT_TRUE(folded.known);
+    EXPECT_EQ(folded.offset, offsetof(OffsetProbe, weight));
+
+    EXPECT_FALSE(OffsetAtHover("auto w = offsetof(Missing, weight);\n", "offsetof").known);
+    EXPECT_FALSE(OffsetAtHover("struct P { int a; };\nauto w = offsetof(P, nope);\n", "offsetof").known);
 }

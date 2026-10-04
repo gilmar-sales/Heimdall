@@ -129,3 +129,27 @@ TEST(PreprocessorSpec, ContinuedConditionalDirectiveIsEvaluatedAsOneLine)
     EXPECT_EQ(result.active_source, "int on;\n");
     EXPECT_TRUE(result.diagnostics.empty());
 }
+
+TEST(PreprocessorSpec, IgnoresDirectivesInsideBlockComments)
+{
+    constexpr std::string_view source =
+        "#ifndef GUARD\n"
+        "/* history:\n"
+        "     #ifdef unused functions\n"
+        "*/\n"
+        "int kept; // #if 0\n"
+        "const char * s = \"/* not a comment\";\n"
+        "#endif\n";
+
+    const auto result = heimdall::Preprocessor().Process(source);
+    EXPECT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+    EXPECT_EQ(result.directives.size(), 2);
+}
+
+TEST(PreprocessorSpec, ReportsLocalDefines)
+{
+    const auto result = heimdall::Preprocessor().Process("#define API extern\n#define GONE 1\n#undef GONE\n");
+    ASSERT_TRUE(result.local_macros.contains("API"));
+    EXPECT_EQ(result.local_macros.at("API"), "extern");
+    EXPECT_FALSE(result.local_macros.contains("GONE"));
+}

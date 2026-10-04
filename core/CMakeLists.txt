@@ -19,6 +19,7 @@ add_library(heimdall_core STATIC
   src/Preprocessor.cpp
   src/RuleEngine.cpp
   src/Completion.cpp
+  src/TypeLayout.cpp
   src/Navigation.cpp
 )
 add_library(heimdall::core ALIAS heimdall_core)

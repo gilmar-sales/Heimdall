@@ -4,6 +4,8 @@ struct Node
     int value;
 };
 
+auto test = sizeof(Node);
+
 int main()
 {
     auto next = new Node

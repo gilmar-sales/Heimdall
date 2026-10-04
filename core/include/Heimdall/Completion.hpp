@@ -49,6 +49,17 @@ namespace heimdall
         // variable/field, the return type of a function, or the aliased type of
         // a `using`/`typedef` (`basic_string<char>` for `std::string`).
         std::string type_text;
+        // Variables: the type with its declarator (`char*`, `int[4]`), prefixed
+        // `static ` for non-instance storage and `?` when it cannot be spelled
+        // (bitfields). Enums: the underlying type, empty when implicit.
+        std::string layout_type;
+        // Filled by CompletionEngine::Hover when the layout is known.
+        bool has_layout = false;
+        std::uint64_t size_bytes = 0;
+        std::uint64_t align_bytes = 0;
+        // Data members: byte offset inside the owning record (`offsetof`).
+        bool has_field_offset = false;
+        std::uint64_t field_offset = 0;
     };
 
     // One named scope and its direct members. `path` is the qualified path from
@@ -66,6 +77,9 @@ namespace heimdall
         std::vector<std::string> bases;
         // Template parameter names of a record template (`T`, `E` for `expected<T, E>`).
         std::vector<std::string> template_params;
+        // The record's layout cannot be derived from the members indexed here
+        // (virtuals, bitfields, anonymous members, packing, `alignas`, hidden fields).
+        bool layout_unknown = false;
     };
 
     using ScopeIndex = std::vector<IndexedScope>;

@@ -148,15 +148,19 @@ namespace heimdall
                 if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
                 {
-                    if (macros != nullptr && !macros->empty() && !directive && token.kind == TokenKind::Identifier)
+                    if (macros != nullptr && (!macros->empty() || !preprocessing.local_macros.empty()) && !directive &&
+                        token.kind == TokenKind::Identifier)
                     {
                         const std::string_view word = tree.m_source.substr(token.offset, token.length);
                         auto cached = decoration.find(word);
                         if (cached == decoration.end())
                         {
+                            const auto local = preprocessing.local_macros.find(std::string(word));
                             const auto found = macros->find(word);
-                            cached = decoration.emplace(word, found != macros->end() &&
-                                IsDecorationMacro(found->second)).first;
+                            const bool is_decoration = local != preprocessing.local_macros.end()
+                                ? IsDecorationMacro(local->second)
+                                : found != macros->end() && IsDecorationMacro(found->second);
+                            cached = decoration.emplace(word, is_decoration).first;
                         }
 
                         if (cached->second)
@@ -716,11 +720,20 @@ namespace heimdall
             return i + 1 < end && Is(i, "[") && Is(i + 1, "[");
         }
 
+        // `alignas(expr)` / `alignas(type)` is an attribute-like specifier: it
+        // may appear anywhere `[[...]]` may, so it is skipped the same way.
+        bool IsAlignasStart(std::size_t i, std::size_t end) const
+        {
+            return i + 1 < end && Is(i, "alignas") && Is(i + 1, "(") && m_match[i + 1] != Invalid &&
+                m_match[i + 1] < end;
+        }
+
         std::size_t SkipAttributes(std::size_t i, std::size_t end, std::size_t parent)
         {
-            while (IsAttributeStart(i, end))
+            while (IsAttributeStart(i, end) || IsAlignasStart(i, end))
             {
-                const auto outer_close = m_match[i];
+                const bool alignas_spec = Is(i, "alignas");
+                const auto outer_close = alignas_spec ? m_match[i + 1] : m_match[i];
                 if (outer_close == Invalid || outer_close >= end)
                 {
                     break;
@@ -2245,6 +2258,12 @@ namespace heimdall
             if (Is(begin, "using"))
             {
                 return GrammarKind::UsingDeclaration;
+            }
+
+            // `alignas(...)` only decorates declarations.
+            if (IsAlignasStart(begin, end))
+            {
+                return GrammarKind::DeclarationStatement;
             }
 
             constexpr std::string_view type_words[] = {"auto", "bool", "char", "char8_t", "char16_t",
