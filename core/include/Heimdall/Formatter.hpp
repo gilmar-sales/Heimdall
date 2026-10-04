@@ -45,11 +45,14 @@ namespace heimdall
 
     struct FormatOptions
     {
-        std::size_t indent_width = 4;
+        static constexpr std::size_t kDefaultIndentWidth = 4;
+        static constexpr std::size_t kDefaultColumnLimit = 100;
+
+        std::size_t indent_width = kDefaultIndentWidth;
         bool use_tabs = false;
         std::size_t max_empty_lines = 1;
         // Maximum line width before comma-driven breaks; 0 disables breaking.
-        std::size_t column_limit = 100;
+        std::size_t column_limit = kDefaultColumnLimit;
         PointerAlignment pointer_alignment = PointerAlignment::Right;
         BraceStyle brace_style = BraceStyle::Allman;
         // Single-statement control blocks: Keep (default), SingleLine, Indent or

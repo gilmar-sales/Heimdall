@@ -32,7 +32,8 @@ namespace heimdall
         std::uint32_t length = 0;
     };
 
-    static_assert(sizeof(Token) == 12);
+    constexpr std::size_t kExpectedTokenSize = 12;
+    static_assert(sizeof(Token) == kExpectedTokenSize);
 
     class Lexer
     {

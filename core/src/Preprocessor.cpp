@@ -11,6 +11,17 @@ namespace heimdall
     namespace
     {
 
+        constexpr std::string_view kDefinedKeyword = "defined";
+        constexpr int kDecimalBase = 10;
+        constexpr int kHexBase = 16;
+        constexpr int kOctalBase = 8;
+        constexpr std::size_t kHexPrefixLen = 2;
+        constexpr std::size_t kOctalPrefixLen = 1;
+        constexpr std::size_t kMaxMacroExpansionDepth = 16;
+        constexpr std::size_t kCommentDelimLen = 2;
+        constexpr std::size_t kInitialMacroCapacity = 16;
+        constexpr std::size_t kReserveDivisor = 2;
+
         struct ConditionalFrame
         {
             bool parent_active;
@@ -207,9 +218,9 @@ namespace heimdall
                 }
 
                 SkipSpace();
-                if (m_input.substr(m_pos, 7) == "defined")
+                if (m_input.substr(m_pos, kDefinedKeyword.size()) == kDefinedKeyword)
                 {
-                    m_pos += 7;
+                    m_pos += kDefinedKeyword.size();
                     const bool paren = Consume("(");
                     SkipSpace();
                     const std::size_t start = m_pos;
@@ -260,23 +271,23 @@ namespace heimdall
                 }
 
                 long long number = 0;
-                int base = 10;
-                if (atom.size() > 2 && atom[0] == '0' && (atom[1] == 'x' || atom[1] == 'X'))
+                int base = kDecimalBase;
+                if (atom.size() > kHexPrefixLen && atom[0] == '0' && (atom[1] == 'x' || atom[1] == 'X'))
                 {
-                    base = 16;
+                    base = kHexBase;
                 }
                 else if (atom.size() > 1 && atom[0] == '0')
                 {
-                    base = 8;
+                    base = kOctalBase;
                 }
 
-                if (base == 16)
+                if (base == kHexBase)
                 {
-                    atom.remove_prefix(2);
+                    atom.remove_prefix(kHexPrefixLen);
                 }
-                else if (base == 8)
+                else if (base == kOctalBase)
                 {
-                    atom.remove_prefix(1);
+                    atom.remove_prefix(kOctalPrefixLen);
                     if (atom.empty())
                     {
                         return 0;
@@ -350,7 +361,7 @@ namespace heimdall
 
         std::string ExpandObjectMacros(std::string_view line, const MacroScope &macros, unsigned depth = 0)
         {
-            if (depth >= 16)
+            if (depth >= kMaxMacroExpansionDepth)
             {
                 return std::string(line);
             }
@@ -386,8 +397,8 @@ namespace heimdall
 
                 if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
                 {
-                    const auto close = line.find("*/", i + 2);
-                    const std::size_t end = close == std::string_view::npos ? line.size() : close + 2;
+                    const auto close = line.find("*/", i + kCommentDelimLen);
+                    const std::size_t end = close == std::string_view::npos ? line.size() : close + kCommentDelimLen;
                     out.append(line.substr(i, end - i));
                     i = end;
                     continue;
@@ -432,7 +443,7 @@ namespace heimdall
 
         bool EndsWithBackslash(std::string_view body)
         {
-            return !body.empty() && body.back() == '\\';
+            return!body.empty() && body.back() == '\\';
         }
 
     } // namespace
@@ -443,7 +454,7 @@ namespace heimdall
         // Local overlay: file #defines stay small; predefined macros are read
         // through the scope pointer without copying the whole map per file.
         MacroMap local;
-        local.reserve(16);
+        local.reserve(kInitialMacroCapacity);
         ErasedSet erased;
         const MacroScope scope
         {
@@ -451,7 +462,7 @@ namespace heimdall
         };
         if (build_active_source)
         {
-            result.active_source.reserve(source.size() / 2);
+            result.active_source.reserve(source.size() / kReserveDivisor);
         }
 
         std::vector<ConditionalFrame> stack;

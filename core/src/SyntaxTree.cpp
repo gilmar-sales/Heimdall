@@ -55,7 +55,8 @@ namespace heimdall
         tree.m_token_parents.resize(tree.m_tokens.size(), RootNode);
 
         std::vector<std::size_t> group_stack;
-        group_stack.reserve(max_nesting_depth < 4096 ? max_nesting_depth : 4096);
+        constexpr std::size_t kMaxReserveDepth = 4096;
+        group_stack.reserve(max_nesting_depth < kMaxReserveDepth ? max_nesting_depth : kMaxReserveDepth);
         std::size_t current_parent = RootNode;
 
         for (std::size_t i = 0; i < tree.m_tokens.size(); ++i)

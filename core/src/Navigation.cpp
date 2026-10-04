@@ -16,6 +16,12 @@ namespace heimdall
     namespace
     {
         constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+        constexpr std::size_t kMinAmbiguousScopes = 2;
+        constexpr int kDoubleAngleCount = 2;
+        constexpr std::size_t kMaxPlacementWalkDepth = 64;
+        constexpr std::size_t kMinQualifiedParts = 2;
+        constexpr std::size_t kMinScopeGroups = 2;
+        constexpr std::size_t kMaxBaseDepth = 4;
 
         using Path = std::vector<std::string>;
 
@@ -329,7 +335,7 @@ namespace heimdall
                     }
                 }
 
-                return scopes.size() >= 2;
+                return scopes.size() >= kMinAmbiguousScopes;
             }
 
             // Resolve a using-directive/qualifier written relative to `from`.
@@ -770,7 +776,7 @@ namespace heimdall
                             }
                             else if (piece == ">>")
                             {
-                                angle -= 2;
+                                angle -= kDoubleAngleCount;
                             }
                             else if (angle <= 0 && piece == ",")
                             {
@@ -865,7 +871,7 @@ namespace heimdall
                 Placement placement;
                 std::size_t previous = name_node;
                 std::size_t current = nodes[name_node].parent;
-                for (std::size_t depth = 0; depth < 64 && current < nodes.size(); ++depth)
+                for (std::size_t depth = 0; depth < kMaxPlacementWalkDepth && current < nodes.size(); ++depth)
                 {
                     const GrammarKind kind = nodes[current].kind;
                     switch (kind)
@@ -1212,7 +1218,7 @@ namespace heimdall
                 }
 
                 const auto [path, last] = read_path(cursor);
-                if (path.size() >= 2)
+                if (path.size() >= kMinQualifiedParts)
                 {
                     UsingDecl using_decl;
                     using_decl.scope = scope;
@@ -1313,7 +1319,7 @@ namespace heimdall
                 }
             }
 
-            if (groups.size() < 2)
+            if (groups.size() < kMinScopeGroups)
             {
                 return false;
             }
@@ -1339,7 +1345,7 @@ namespace heimdall
                 model.Members(nominated, name, out);
             }
 
-            if (out.empty() && base_depth < 4 && !level.empty() && model.IsRecordScope(level))
+            if (out.empty() && base_depth < kMaxBaseDepth && !level.empty() && model.IsRecordScope(level))
             {
                 for (const Path &base: model.BaseScopes(level))
                 {
@@ -1448,7 +1454,7 @@ namespace heimdall
                 // Skip a balanced template argument list: `vector<int>::iterator`.
                 if (model.Text(qualifier) == ">" || model.Text(qualifier) == ">>")
                 {
-                    int depth = model.Text(qualifier) == ">" ? 1 : 2;
+                    int depth = model.Text(qualifier) == ">" ? 1 : kDoubleAngleCount;
                     while (depth > 0 && qualifier != kNone)
                     {
                         qualifier = model.PrevSig(qualifier);
@@ -1464,7 +1470,7 @@ namespace heimdall
                         }
                         else if (piece == ">>")
                         {
-                            depth += 2;
+                            depth += kDoubleAngleCount;
                         }
                         else if (piece == "<")
                         {

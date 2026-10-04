@@ -37,7 +37,10 @@ namespace heimdall::cli
 
     bool ParseOptions(int argc, char **argv, Options &options)
     {
-        if (argc < 2)
+        constexpr int kMinArgcForCommand = 2;
+        constexpr int kFirstOptionIndex = 2;
+        constexpr std::string_view kStdPrefix = "--std=";
+        if (argc < kMinArgcForCommand)
         {
             return false;
         }
@@ -70,7 +73,7 @@ namespace heimdall::cli
 
         if (options.command == Command::Init)
         {
-            for (int i = 2; i < argc; ++i)
+            for (int i = kFirstOptionIndex; i < argc; ++i)
             {
                 const std::string_view arg = argv[i];
                 if (arg == "--force" || arg == "-f")
@@ -99,7 +102,7 @@ namespace heimdall::cli
 
         options.jobs = std::max<std::size_t>(1u, std::thread::hardware_concurrency());
 
-        for (int i = 2; i < argc; ++i)
+        for (int i = kFirstOptionIndex; i < argc; ++i)
         {
             const std::string_view arg = argv[i];
             if (arg == "--json")
@@ -161,10 +164,11 @@ namespace heimdall::cli
                 options.rule_overrides.push_back(std::move(override));
             }
             else if ((arg == "--std" && i + 1 < argc) ||
-                (arg.starts_with("--std=") && arg.size() > 6))
+                (arg.starts_with(kStdPrefix) && arg.size() > kStdPrefix.size()))
             {
                 const std::string_view value =
-                    arg.starts_with("--std=") ? std::string_view(arg).substr(6) : std::string_view(argv[++i]);
+                    arg.starts_with(kStdPrefix) ? std::string_view(arg).substr(kStdPrefix.size()) :
+                                                  std::string_view(argv[++i]);
                 if (!ParseStandardValue(value, options.standard))
                 {
                     std::cerr << "invalid --std value: " << value << " (expected c++20, c++23 or c++26)\n";

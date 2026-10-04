@@ -44,10 +44,11 @@ namespace heimdall
     {
     public:
         static constexpr std::size_t RootNode = 0;
+        static constexpr std::size_t kDefaultMaxNestingDepth = 512;
 
-        static SyntaxTree Parse(std::string_view source, std::size_t max_nesting_depth = 512);
+        static SyntaxTree Parse(std::string_view source, std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
         static SyntaxTree Parse(std::string_view source, CppStandard standard,
-            std::size_t max_nesting_depth = 512);
+            std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
 
         std::string_view Source() const noexcept
         {

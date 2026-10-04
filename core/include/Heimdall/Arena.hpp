@@ -7,13 +7,15 @@
 namespace heimdall
 {
 
+    constexpr std::size_t kDefaultInitialCapacity = 65536; // 64 KiB
+
     // Monotonic bump arena for SyntaxTree nodes, tokens and scratch data.
     // Allocations are never freed individually; Reset() releases everything
     // at once. Not thread-safe by design (one arena per worker thread).
     class Arena
     {
     public:
-        explicit Arena(std::size_t initial_capacity = 64 * 1024);
+        explicit Arena(std::size_t initial_capacity = kDefaultInitialCapacity);
         Arena(const Arena &) = delete;
         Arena &operator= (const Arena &) = delete;
 

@@ -19,6 +19,18 @@ namespace heimdall
     namespace
     {
 
+        constexpr std::size_t kMinPrefixedLen = 2;
+        constexpr int kDecimalBase = 10;
+        constexpr int kHexBase = 16;
+        constexpr int kBinaryBase = 2;
+        constexpr int kOctalBase = 8;
+        constexpr std::size_t kHexPrefixLen = 2;
+        constexpr int kMaxSignHops = 4;
+        constexpr int kMaxDeclWalkSteps = 25;
+        constexpr int kMaxEnumLookback = 6;
+        constexpr std::size_t kIncludeDelimCount = 2;
+        constexpr std::size_t kMinSortableBlock = 2;
+
         bool IsInDirective(std::size_t offset, const std::vector<PreprocessorDirective> & directives,
             std::size_t & cursor)
         {
@@ -273,7 +285,7 @@ namespace heimdall
                 (c >= '0' && c <= '9') || c == '_';
         }
 
-        // First uppercase TODO/FIXME/XXX whole-word marker in a comment,
+        // First uppercase TODO/FIXME/XXX whole-word marker in a comment, // heimdall-disable-line cpp/no-todo -- documents the rule's own markers.
         // or nullopt. Matching is case-sensitive: lowercase prose
         // ("todo list", "fixme later?") stays quiet.
         std::optional<std::string_view> FindTodoMarker(std::string_view text)
@@ -322,9 +334,9 @@ namespace heimdall
                 return false;
             }
 
-            const bool hex = clean.size() > 2 && clean[0] == '0' &&
+            const bool hex = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
                 (clean[1] == 'x' || clean[1] == 'X');
-            const bool binary = clean.size() > 2 && clean[0] == '0' &&
+            const bool binary = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
                 (clean[1] == 'b' || clean[1] == 'B');
             bool is_float = false;
             if (hex)
@@ -359,16 +371,16 @@ namespace heimdall
             }
 
             const char *digits = clean.c_str();
-            int base = 10;
+            int base = kDecimalBase;
             if (hex || binary)
             {
-                digits += 2;
-                base = hex ? 16 : 2;
+                digits += kHexPrefixLen;
+                base = hex ? kHexBase : kBinaryBase;
             }
             else if (clean.size() > 1 && clean[0] == '0' &&
                 clean[1] >= '0' && clean[1] <= '9')
             {
-                base = 8;
+                base = kOctalBase;
             }
 
             char *end = nullptr;
@@ -401,13 +413,15 @@ namespace heimdall
         // `constexpr std::size_t kN = 512;`, `const int kMax{100};`,
         // `enum E { A = 3 };`. The literal must be the whole initializer
         // (after an optional sign or parentheses), and the declaration
-        // must contain const/constexpr/enum.
+        // must contain const/constexpr/constinit/enum. Note: constinit was
+        // a former false positive (flagged `constinit int kX = 42;`); it
+        // names its value exactly like const/constexpr, so it is exempt.
         bool IsNamedConstantInitializer(const std::vector<Token> & tokens, std::string_view source,
             std::size_t index)
         {
             std::size_t trigger = PrevSignificant(tokens, index);
             int parens = 0;
-            for (int hops = 0; hops < 4 && trigger < tokens.size() &&
+            for (int hops = 0; hops < kMaxSignHops && trigger < tokens.size() &&
                 tokens[trigger].kind == TokenKind::Punctuation; ++hops)
             {
                 const auto text = PunctuationText(source, tokens[trigger]);
@@ -466,7 +480,7 @@ namespace heimdall
             // const/constexpr. A `{` on the way means an enum body or a
             // braced scope: only an enum still names the value.
             std::size_t cursor = trigger;
-            for (int steps = 0; steps < 25; ++steps)
+            for (int steps = 0; steps < kMaxDeclWalkSteps; ++steps)
             {
                 cursor = PrevSignificant(tokens, cursor);
                 if (cursor >= tokens.size())
@@ -479,7 +493,7 @@ namespace heimdall
                     const auto text = PunctuationText(source, tokens[cursor]);
                     if (text == "{")
                     {
-                        for (int inner = 0; inner < 6; ++inner)
+                        for (int inner = 0; inner < kMaxEnumLookback; ++inner)
                         {
                             cursor = PrevSignificant(tokens, cursor);
                             if (cursor >= tokens.size())
@@ -520,7 +534,7 @@ namespace heimdall
                 if (tokens[cursor].kind == TokenKind::Identifier)
                 {
                     const auto word = source.substr(tokens[cursor].offset, tokens[cursor].length);
-                    if (word == "const" || word == "constexpr")
+                    if (word == "const" || word == "constexpr" || word == "constinit")
                     {
                         return true;
                     }
@@ -618,14 +632,14 @@ namespace heimdall
     TextEdit RemoveDirectiveLine(std::string_view source, std::size_t offset, std::size_t length)
     {
         std::size_t begin = std::min(offset, source.size());
-        while (begin > 0 && (source[begin - 1] == ' ' || source[begin - 1] == 0x09))
+        while (begin > 0 && (source[begin - 1] == ' ' || source[begin - 1] == '\t'))
         {
             --begin;
         }
 
         std::size_t end = std::min(offset + length, source.size());
         std::size_t probe = end;
-        while (probe < source.size() && (source[probe] == ' ' || source[probe] == 0x09))
+        while (probe < source.size() && (source[probe] == ' ' || source[probe] == '\t'))
         {
             ++probe;
         }
@@ -634,13 +648,14 @@ namespace heimdall
         {
             end = probe;
         }
-        else if (source[probe] == 0x0A)
+        else if (source[probe] == '\n')
         {
             end = probe + 1;
         }
-        else if (source[probe] == 0x0D && probe + 1 < source.size() && source[probe + 1] == 0x0A)
+        else if (source[probe] == '\r' && probe + 1 < source.size() && source[probe + 1] == '\n')
         {
-            end = probe + 2;
+            constexpr std::size_t kCrlfLen = 2;
+            end = probe + kCrlfLen;
         }
 
         return {begin, end - begin, ""};
@@ -1125,8 +1140,8 @@ namespace heimdall
                     return left_group < right_group;
                 }
 
-                const auto left_name = left.text.substr(1, left.text.size() - 2);
-                const auto right_name = right.text.substr(1, right.text.size() - 2);
+                const auto left_name = left.text.substr(1, left.text.size() - kIncludeDelimCount);
+                const auto right_name = right.text.substr(1, right.text.size() - kIncludeDelimCount);
                 return m_options.include_case_insensitive
                     ? CaseInsensitiveLess(left_name, right_name)
                     : left_name < right_name;
@@ -1151,7 +1166,7 @@ namespace heimdall
                     ++block_end;
                 }
 
-                if (block_end - block_begin >= 2)
+                if (block_end - block_begin >= kMinSortableBlock)
                 {
                     std::vector<std::size_t> order(block_end - block_begin);
                     for (std::size_t i = 0; i < order.size(); ++i)

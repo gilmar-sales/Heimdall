@@ -128,6 +128,25 @@ namespace heimdall
         bool IsBlockOpenBrace(const std::vector<Sig> & sigs, std::size_t brace);
         constexpr std::size_t kNoSig = static_cast<std::size_t>(-1);
 
+        // File-local named constants for the `cpp/no-magic-numbers` rule
+        // (single-literal initializers, which the rule exempts).
+        constexpr std::size_t kTwoTokenOffset = 2;     // neighbor-token lookbehind/lookahead
+        constexpr std::size_t kThreeTokenOffset = 3;   // three-token lookahead
+        constexpr std::size_t kMidpointDivisor = 2;    // binary-search halve (`(lo + hi) / kMidpointDivisor`)
+        constexpr std::size_t kMinLabelTokens = 2;     // minimum head tokens for a scope label
+        constexpr std::size_t kMaxLabelHeadTokens = 4; // head tokens inspected for a scope label
+        constexpr std::size_t kCrlfLength = 2;         // bytes in "\r\n"
+        constexpr std::size_t kCommentMarkerLength = 2; // bytes in the `//` marker
+        constexpr std::size_t kMinCommentRunLength = 2; // trailing-comment runs align from two lines up
+        constexpr std::size_t kIncludeKeywordLength = 7; // bytes in "include"
+        constexpr int kInheritanceScanLimit = 32;      // backward scan for a record/enum keyword
+        constexpr int kSingleLineMaxPasses = 32;       // single-line-style fixpoint iterations
+        constexpr int kEntryCommaScanLimit = 8;        // backward scan for an `enum` keyword
+        constexpr int kColumnSplitMaxAttempts = 8;     // column-limit splits per line
+        constexpr int kTypeDefinitionScanLimit = 64;   // backward scan for a type-definition opener
+        constexpr int kBaseListScanLimit = 64;          // backward scan for a base-list colon
+        constexpr int kBlockBraceScanLimit = 256;      // backward scan for a block-introducing token
+
         bool IsSpaceBeforeParenKeyword(std::string_view text)
         {
             // `if (` but `sizeof(` / `decltype(` / `noexcept(`.
@@ -251,12 +270,12 @@ namespace heimdall
                 return false;
             }
 
-            if (k < 2 || sigs[k - 2].line != sigs[k].line)
+            if (k < kTwoTokenOffset || sigs[k - kTwoTokenOffset].line != sigs[k].line)
             {
                 return true;
             } // `Widget *p;`
 
-            const std::string_view before = sigs[k - 2].text;
+            const std::string_view before = sigs[k - kTwoTokenOffset].text;
             return before == "(" || before == "," || before == ";" || before == "{" || before == "}" ||
                 before == "<" || before == ">" || before == ":" || IsQualifierKeyword(before);
         }
@@ -400,7 +419,7 @@ namespace heimdall
         bool IsInheritanceColon(const std::vector<Sig> & sigs, std::size_t colon)
         {
             int steps = 0;
-            for (auto k = colon; k > 0 && steps++ < 32;)
+            for (auto k = colon; k > 0 && steps++ < kInheritanceScanLimit;)
             {
                 --k;
                 const std::string_view text = sigs[k].text;
@@ -733,24 +752,24 @@ namespace heimdall
         // detection of the indent pass (access labels, case/default, goto labels).
         bool ComputeIsLabel(const std::vector<Sig> & sigs, std::size_t begin, std::size_t end)
         {
-            std::string_view head[4];
-            TokenKind head_kind[4] = {};
+            std::string_view head[kMaxLabelHeadTokens];
+            TokenKind head_kind[kMaxLabelHeadTokens] = {};
             std::size_t head_count = 0;
-            for (auto i = begin; i < end && head_count < 4; ++i)
+            for (auto i = begin; i < end && head_count < kMaxLabelHeadTokens; ++i)
             {
                 head[head_count] = sigs[i].text;
                 head_kind[head_count] = sigs[i].kind;
                 ++head_count;
             }
 
-            if (head_count >= 2)
+            if (head_count >= kMinLabelTokens)
             {
                 const bool access_label = (head[0] == "public" || head[0] == "private" ||
                     head[0] == "protected") &&
                     head[1] == ":";
                 const bool switch_label = head[0] == "case" || head[0] == "default";
                 const bool goto_label =
-                    head_count == 2 && head_kind[0] == TokenKind::Identifier && head[1] == ":";
+                    head_count == kMinLabelTokens && head_kind[0] == TokenKind::Identifier && head[1] == ":";
                 return access_label || switch_label || goto_label;
             }
 
@@ -1078,7 +1097,7 @@ namespace heimdall
                     std::size_t lo = 0, hi = line_starts.size();
                     while (lo + 1 < hi)
                     {
-                        const std::size_t mid = (lo + hi) / 2;
+                        const std::size_t mid = (lo + hi) / kMidpointDivisor;
                         if (line_starts[mid] <= tokens[t].offset)
                         {
                             lo = mid;
@@ -1573,7 +1592,7 @@ namespace heimdall
                     before == "&" || before == "&&" || before == "constexpr" || before == "consteval";
                 if (before == "]")
                 {
-                    return k + 2 < sigs.size() && sigs[k + 2].text == "{";
+                    return k + kTwoTokenOffset < sigs.size() && sigs[k + kTwoTokenOffset].text == "{";
                 }
 
                 if (!declarator_end)
@@ -1582,12 +1601,12 @@ namespace heimdall
                 }
             }
 
-            if (k + 2 >= sigs.size())
+            if (k + kTwoTokenOffset >= sigs.size())
             {
                 return true;
             } // incomplete trailing type at EOF
 
-            const std::string_view after = sigs[k + 2].text;
+            const std::string_view after = sigs[k + kTwoTokenOffset].text;
             if (after == "{" || after == ";" || after == "," || after == "noexcept" ||
                 after == "requires")
             {
@@ -1596,18 +1615,18 @@ namespace heimdall
 
             if (after == "*" || after == "&")
             {
-                if (k + 3 >= sigs.size())
+                if (k + kThreeTokenOffset >= sigs.size())
                 {
                     return true;
                 }
 
-                const std::string_view tail = sigs[k + 3].text;
+                const std::string_view tail = sigs[k + kThreeTokenOffset].text;
                 return tail == "{" || tail == ";" || tail == ",";
             }
 
-            if (after == "=" && k + 3 < sigs.size())
+            if (after == "=" && k + kThreeTokenOffset < sigs.size())
             {
-                const std::string_view tail = sigs[k + 3].text;
+                const std::string_view tail = sigs[k + kThreeTokenOffset].text;
                 return tail == "default" || tail == "delete";
             }
 
@@ -1656,7 +1675,7 @@ namespace heimdall
                 return true;
             }
 
-            for (auto k = open, steps = std::size_t{0}; k > 0 && steps < 8; ++steps)
+            for (auto k = open, steps = std::size_t{0}; k > 0 && steps < kEntryCommaScanLimit; ++steps)
             {
                 --k;
                 if (sigs[k].text == ";" || sigs[k].text == "{" || sigs[k].text == "}")
@@ -1695,7 +1714,7 @@ namespace heimdall
             }
 
             int steps = 0;
-            for (auto k = open; k > 0 && steps++ < 64;)
+            for (auto k = open; k > 0 && steps++ < kTypeDefinitionScanLimit;)
             {
                 --k;
                 const std::string_view text = sigs[k].text;
@@ -1765,7 +1784,7 @@ namespace heimdall
         {
             bool colon = false;
             int steps = 0;
-            while (k > 0 && steps++ < 64)
+            while (k > 0 && steps++ < kBaseListScanLimit)
             {
                 --k;
                 const std::string_view text = sigs[k].text;
@@ -1803,10 +1822,11 @@ namespace heimdall
             // Member/variable brace-initializer `Type name{...}` (`Command command{};`):
             // a declared name right after a type, with no record/enum/namespace
             // header or base-clause colon earlier in the statement.
-            if (brace >= 2 && sigs[brace - 1].kind == TokenKind::Identifier &&
-                (sigs[brace - 2].kind == TokenKind::Identifier || sigs[brace - 2].text == ">" ||
-                sigs[brace - 2].text == "*" || sigs[brace - 2].text == "&" ||
-                sigs[brace - 2].text == "::"))
+            if (brace >= kTwoTokenOffset && sigs[brace - 1].kind == TokenKind::Identifier &&
+                (sigs[brace - kTwoTokenOffset].kind == TokenKind::Identifier ||
+                sigs[brace - kTwoTokenOffset].text == ">" ||
+                sigs[brace - kTwoTokenOffset].text == "*" || sigs[brace - kTwoTokenOffset].text == "&" ||
+                sigs[brace - kTwoTokenOffset].text == "::"))
             {
                 static constexpr std::string_view kHeaderWords[] = {
                     "else", "do", "try", "namespace", "class", "struct",
@@ -1866,7 +1886,7 @@ namespace heimdall
                 "static_assert", "co_await", "co_return", "co_yield", "throw",
             };
             int steps = 0;
-            for (auto k = brace; k > 0 && steps++ < 256;)
+            for (auto k = brace; k > 0 && steps++ < kBlockBraceScanLimit;)
             {
                 --k;
                 const Sig &s = sigs[k];
@@ -2029,7 +2049,7 @@ namespace heimdall
         std::string ApplySingleLineStyle(std::string_view source, SingleLineStyle mode)
         {
             std::string work(source);
-            for (int iter = 0; iter < 32; ++iter)
+            for (int iter = 0; iter < kSingleLineMaxPasses; ++iter)
             {
                 if (mode == SingleLineStyle::SingleLine || mode == SingleLineStyle::Indent)
                 {
@@ -2137,7 +2157,7 @@ namespace heimdall
             {
                 if (stop > line_starts[line] && source[stop - 1] == '\r')
                 {
-                    return source.substr(stop - 1, 2);
+                    return source.substr(stop - 1, kCrlfLength);
                 }
 
                 return source.substr(stop, 1);
@@ -2171,7 +2191,7 @@ namespace heimdall
                 std::size_t lo = 0, hi = line_starts.size();
                 while (lo + 1 < hi)
                 {
-                    const std::size_t mid = (lo + hi) / 2;
+                    const std::size_t mid = (lo + hi) / kMidpointDivisor;
                     if (line_starts[mid] <= tokens[t].offset)
                     {
                         lo = mid;
@@ -2188,7 +2208,7 @@ namespace heimdall
                 std::size_t lo = 0, hi = line_starts.size();
                 while (lo + 1 < hi)
                 {
-                    const std::size_t mid = (lo + hi) / 2;
+                    const std::size_t mid = (lo + hi) / kMidpointDivisor;
                     if (line_starts[mid] <= tok_end - 1)
                     {
                         lo = mid;
@@ -2240,7 +2260,7 @@ namespace heimdall
                 std::size_t lo = 0, hi = line_starts.size();
                 while (lo + 1 < hi)
                 {
-                    const std::size_t mid = (lo + hi) / 2;
+                    const std::size_t mid = (lo + hi) / kMidpointDivisor;
                     if (line_starts[mid] <= tokens[t].offset)
                     {
                         lo = mid;
@@ -2508,9 +2528,9 @@ namespace heimdall
                             first ? std::string_view() : sigs[i - 1].text;
                         // `}` right after an empty `{}` pair is a new closer, not
                         // part of a `}}` run.
-                        const bool prev_empty_pair =!first && prev == "}" && i >= 2 &&
-                            sigs[i - 2].text == "{" &&
-                            sigs[i - 1].match == i - 2;
+                        const bool prev_empty_pair =!first && prev == "}" && i >= kTwoTokenOffset &&
+                            sigs[i - kTwoTokenOffset].text == "{" &&
+                            sigs[i - 1].match == i - kTwoTokenOffset;
                         if (!first && (prev != "}" || prev_empty_pair) && prev != "{" && closes_block)
                         {
                             emit(i);
@@ -2764,7 +2784,7 @@ namespace heimdall
                 std::size_t lo = 0, hi = line_starts.size();
                 while (lo + 1 < hi)
                 {
-                    const std::size_t mid = (lo + hi) / 2;
+                    const std::size_t mid = (lo + hi) / kMidpointDivisor;
                     if (line_starts[mid] <= tokens[t].offset)
                     {
                         lo = mid;
@@ -2791,10 +2811,10 @@ namespace heimdall
 
         auto normalize_comment =[](std::string piece, bool is_line_comment)->std::string
         {
-            if (is_line_comment && piece.size() > 2 && piece[2] != ' ' && piece[2] != '\t' &&
-                piece[2] != '/' && piece[2] != '!' && piece[2] != '<')
+            if (is_line_comment && piece.size() > kCommentMarkerLength && piece[kCommentMarkerLength] != ' ' && piece[kCommentMarkerLength] != '\t' &&
+                piece[kCommentMarkerLength] != '/' && piece[kCommentMarkerLength] != '!' && piece[kCommentMarkerLength] != '<')
             {
-                piece.insert(2, " ");
+                piece.insert(kCommentMarkerLength, " ");
             } // `//c` -> `// c`
 
             return piece;
@@ -2982,7 +3002,7 @@ namespace heimdall
             for (std::size_t r = 0; r < rendered.size(); ++r)
             {
                 int guard = 0;
-                while (rendered[r].text.size() > m_options.column_limit && guard++ < 8)
+                while (rendered[r].text.size() > m_options.column_limit && guard++ < kColumnSplitMaxAttempts)
                 {
                     if (chunks[r].directive || chunks[r].verbatim || chunks[r].begin == chunks[r].end)
                     {
@@ -3182,9 +3202,9 @@ namespace heimdall
                     if (tail > chunk.begin)
                     {
                         if (sigs[tail - 1].text == ";" && tail - 1 > chunk.begin &&
-                            sigs[tail - 2].text == "}")
+                            sigs[tail - kTwoTokenOffset].text == "}")
                         {
-                            after_type_close = IsTypeDefinitionClose(sigs, tail - 2);
+                            after_type_close = IsTypeDefinitionClose(sigs, tail - kTwoTokenOffset);
                         }
 
                         if (sigs[tail - 1].text == "}")
@@ -3229,10 +3249,10 @@ namespace heimdall
                                 ++pos;
                             }
 
-                            if (view.substr(pos, 7) == "include" &&
-                                (pos + 7 == view.size() || view[pos + 7] == ' ' ||
-                                view[pos + 7] == '\t' || view[pos + 7] == '<' ||
-                                view[pos + 7] == '"'))
+                            if (view.substr(pos, kIncludeKeywordLength) == "include" &&
+                                (pos + kIncludeKeywordLength == view.size() || view[pos + kIncludeKeywordLength] == ' ' ||
+                                view[pos + kIncludeKeywordLength] == '\t' || view[pos + kIncludeKeywordLength] == '<' ||
+                                view[pos + kIncludeKeywordLength] == '"'))
                             {
                                 line.is_include = true;
                             }
@@ -3363,7 +3383,7 @@ namespace heimdall
             bool in_run = false;
             auto flush_run =[&](std::size_t start, std::size_t end)
             {
-                if (end - start < 2)
+                if (end - start < kMinCommentRunLength)
                 {
                     return;
                 } // single lines keep one space
@@ -3419,7 +3439,7 @@ namespace heimdall
                     return line;
                 }
 
-                std::string_view rest(line.c_str() + pos + 7);
+                std::string_view rest(line.c_str() + pos + kIncludeKeywordLength);
                 while (!rest.empty() && IsIndent(rest.front()))
                 {
                     rest.remove_prefix(1);

@@ -58,6 +58,11 @@ namespace heimdall
     namespace tok_detail
     {
 
+        constexpr std::uint32_t kFNVOffsetBasis = 2166136261u;
+        constexpr std::uint32_t kFNVPrime = 16777619u;
+        constexpr std::size_t kAlphabetSize = 26;
+        constexpr std::size_t kByteValueCount = 256;
+
         struct Entry
         {
             std::string_view text;
@@ -68,10 +73,10 @@ namespace heimdall
 
         constexpr std::size_t Hash(std::string_view text) noexcept
         {
-            std::uint32_t h = 2166136261u;
+            std::uint32_t h = kFNVOffsetBasis;
             for (const char c: text)
             {
-                h = (h ^ static_cast<unsigned char>(c)) * 16777619u;
+                h = (h ^ static_cast<unsigned char>(c)) * kFNVPrime;
             }
 
             return h;
@@ -107,9 +112,9 @@ namespace heimdall
 
         // Bit n of [first letter] is set when some keyword of length n starts with
         // that letter: rejects most identifiers without hashing them.
-        constexpr std::array<std::uint32_t, 26> BuildKeywordShapes()
+        constexpr std::array<std::uint32_t, kAlphabetSize> BuildKeywordShapes()
         {
-            std::array<std::uint32_t, 26> shapes{};
+            std::array<std::uint32_t, kAlphabetSize> shapes{};
             for (const auto & entry: BuildTable())
             {
                 if (entry.tok != Tok::None && entry.text[0] >= 'a' && entry.text[0] <= 'z')
@@ -121,16 +126,16 @@ namespace heimdall
             return shapes;
         }
 
-        inline constexpr std::array<std::uint32_t, 26> kKeywordShapes = BuildKeywordShapes();
+        inline constexpr std::array<std::uint32_t, kAlphabetSize> kKeywordShapes = BuildKeywordShapes();
 
     } // namespace tok_detail
 
     namespace tok_detail
     {
 
-        constexpr std::array<Tok, 256> BuildSingleChar()
+        constexpr std::array<Tok, kByteValueCount> BuildSingleChar()
         {
-            std::array<Tok, 256> table{};
+            std::array<Tok, kByteValueCount> table{};
             for (const auto & entry: BuildTable())
             {
                 if (entry.tok != Tok::None && entry.text.size() == 1)
@@ -142,7 +147,7 @@ namespace heimdall
             return table;
         }
 
-        inline constexpr std::array<Tok, 256> kSingleChar = BuildSingleChar();
+        inline constexpr std::array<Tok, kByteValueCount> kSingleChar = BuildSingleChar();
 
     } // namespace tok_detail
 
@@ -155,14 +160,18 @@ namespace heimdall
     // True when an identifier of this shape could be a keyword.
     constexpr bool MayBeKeyword(std::string_view text) noexcept
     {
-        return text.size() >= 2 && text.size() < 32 && text[0] >= 'a' && text[0] <= 'z' &&
+        constexpr std::size_t kMinKeywordLen = 2;
+        constexpr std::size_t kMaxKeywordShapeLen = 32;
+        return text.size() >= kMinKeywordLen && text.size() < kMaxKeywordShapeLen && text[0] >= 'a' &&
+            text[0] <= 'z' &&
             ((tok_detail::kKeywordShapes[static_cast<std::size_t>(text[0] - 'a')] >> text.size()) & 1u) != 0;
     }
 
     // Tok::None when `text` is not a keyword or punctuator.
     constexpr Tok LookupTok(std::string_view text) noexcept
     {
-        if (text.empty() || text.size() > 16)
+        constexpr std::size_t kMaxTokLookupLen = 16;
+        if (text.empty() || text.size() > kMaxTokLookupLen)
         {
             return Tok::None;
         }

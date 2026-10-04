@@ -317,14 +317,15 @@ TEST(RuleEngineSpec, DoesNotFlagValuesThatNameAConstant)
         "constexpr double kHalf{0.5};\n"
         "constexpr int kNeg = -42;\n"
         "constexpr int kParen = (64);\n"
+        "constinit int kEpoch = 42;\n"
         "enum Kind { A = 3, B };\n"
         "int plain = 7;\n"
         "const int mixed = 8 + 1;\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-magic-numbers");
-    EXPECT_EQ(diagnostics[0].line, 7);
-    EXPECT_EQ(diagnostics[1].line, 8);
+    EXPECT_EQ(diagnostics[0].line, 8);
+    EXPECT_EQ(diagnostics[1].line, 9);
 }
 
 TEST(RuleEngineSpec, NewTodoAndMagicRulesHonorOverridesAndSuppressions)

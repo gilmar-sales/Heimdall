@@ -26,6 +26,7 @@ namespace heimdall
 
         std::expected<std::string, std::string> ReadAll(const char *path)
         {
+            constexpr std::size_t kReadChunkSize = 65536; // 64 KiB
             std::string out;
             FILE *file = std::fopen(path, "rb");
             if (file == nullptr)
@@ -33,7 +34,7 @@ namespace heimdall
                 return std::unexpected(std::string("cannot open file: ") + path);
             }
 
-            char chunk[64 * 1024];
+            char chunk[kReadChunkSize];
             std::size_t n = 0;
             while ((n = std::fread(chunk, 1, sizeof(chunk), file)) > 0)
             {

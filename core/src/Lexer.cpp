@@ -13,17 +13,31 @@ namespace heimdall
         namespace CharBits
         {
             constexpr std::uint8_t kSpace = 1 << 0;
-            constexpr std::uint8_t kIdentStart = 1 << 1;
-            constexpr std::uint8_t kIdentCont = 1 << 2;
-            constexpr std::uint8_t kDigit = 1 << 3;
-            constexpr std::uint8_t kHex = 1 << 4;
-            constexpr std::uint8_t kPunct = 1 << 5;
+            constexpr std::uint8_t kIdentStart = 2;
+            constexpr std::uint8_t kIdentCont = 4;
+            constexpr std::uint8_t kDigit = 8;
+            constexpr std::uint8_t kHex = 16;
+            constexpr std::uint8_t kPunct = 32;
         } // namespace CharBits
 
-        constexpr std::array<std::uint8_t, 256> BuildCharClass()
+        constexpr std::size_t kByteValueCount = 256;
+        constexpr std::size_t kNonAsciiThreshold = 0x80;
+        constexpr std::size_t kTwoCharPunctLen = 2;
+        constexpr std::size_t kThreeCharPunctLen = 3;
+        constexpr std::size_t kFourCharPunctLen = 4;
+        constexpr std::size_t kMaxDelimLen = 16;
+        constexpr std::size_t kEscapedPairLen = 2;
+        constexpr std::size_t kRawStringSuffixLen = 2;
+        constexpr std::size_t kCommentDelimLen = 2;
+        constexpr std::size_t kPrefixOffset2 = 2;
+        constexpr std::size_t kPrefixOffset3 = 3;
+        constexpr std::size_t kApproxBytesPerToken = 4;
+        constexpr std::size_t kHalfDivisor = 2;
+
+        constexpr std::array<std::uint8_t, kByteValueCount> BuildCharClass()
         {
-            std::array<std::uint8_t, 256> table{};
-            for (int i = 0; i < 256; ++i)
+            std::array<std::uint8_t, kByteValueCount> table{};
+            for (std::size_t i = 0; i < kByteValueCount; ++i)
             {
                 const char c = static_cast<char>(i);
                 std::uint8_t bits = 0;
@@ -32,7 +46,7 @@ namespace heimdall
                     bits |= CharBits::kSpace;
                 }
 
-                const bool ident_start = (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_' || i >= 0x80;
+                const bool ident_start = (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_' || i >= kNonAsciiThreshold;
                 if (ident_start)
                 {
                     bits |= CharBits::kIdentStart | CharBits::kIdentCont;
@@ -60,7 +74,7 @@ namespace heimdall
             return table;
         }
 
-        constexpr std::array<std::uint8_t, 256> kCharClass = BuildCharClass();
+        constexpr std::array<std::uint8_t, kByteValueCount> kCharClass = BuildCharClass();
 
         constexpr bool IsSpace(char c)
         {
@@ -99,7 +113,7 @@ namespace heimdall
 
                 if (s[i] == '\\')
                 {
-                    i += i + 1 < s.size() ? 2 : 1;
+                    i += i + 1 < s.size() ? kEscapedPairLen : 1;
                 }
                 else if (s[i++] == quote)
                 {
@@ -114,7 +128,7 @@ namespace heimdall
         {
             const std::size_t delim_start = quote + 1;
             const std::size_t open = s.find('(', delim_start);
-            if (open == std::string_view::npos || open - delim_start > 16)
+            if (open == std::string_view::npos || open - delim_start > kMaxDelimLen)
             {
                 return ScanQuoted(s, quote, '"');
             }
@@ -126,7 +140,7 @@ namespace heimdall
                 if (pos + delimiter.size() + 1 < s.size() && s[pos + 1 + delimiter.size()] == '"' &&
                     s.substr(pos + 1, delimiter.size()) == delimiter)
                 {
-                    return pos + delimiter.size() + 2;
+                    return pos + delimiter.size() + kRawStringSuffixLen;
                 }
 
                 ++pos;
@@ -152,110 +166,110 @@ namespace heimdall
             case '%':
                 if (is("%:%:"))
                 {
-                    return 4;
+                    return kFourCharPunctLen;
                 }
 
                 if (is("%=") || is("%>") || is("%:"))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 }
 
                 break;
             case '#':
                 if (is("##"))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case ':':
                 if (is("::") || is(":>"))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '.':
                 if (is("...") || is(".*"))
                 {
-                    return is("...") ? 3 : 2;
+                    return is("...") ? kThreeCharPunctLen : kTwoCharPunctLen;
                 } break;
             case '-':
                 if (is("->*"))
                 {
-                    return 3;
+                    return kThreeCharPunctLen;
                 }
 
                 if (is("->") || is("--") || is("-="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 }
 
                 break;
             case '<':
                 if (is("<=>"))
                 {
-                    return 3;
+                    return kThreeCharPunctLen;
                 }
 
                 if (is("<<="))
                 {
-                    return 3;
+                    return kThreeCharPunctLen;
                 }
 
                 if (is("<<") || is("<=") || is("<:") || is("<%"))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 }
 
                 break;
             case '>':
                 if (is(">>="))
                 {
-                    return 3;
+                    return kThreeCharPunctLen;
                 }
 
                 if (is(">>") || is(">="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 }
 
                 break;
             case '+':
                 if (is("++") || is("+="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '*':
                 if (is("*="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '/':
                 if (is("/="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '&':
                 if (is("&&") || is("&="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '|':
                 if (is("||") || is("|="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '^':
                 if (is("^="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '=':
                 if (is("=="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             case '!':
                 if (is("!="))
                 {
-                    return 2;
+                    return kTwoCharPunctLen;
                 } break;
             default:
                 break;
@@ -271,7 +285,7 @@ namespace heimdall
         std::vector<Token> tokens;
         // ~1 token per 4 source bytes on typical C++ (was size/3: over-reserved
         // ~8 B of Token storage per source byte up front).
-        tokens.reserve(m_source.size() / 4 + 1);
+        tokens.reserve(m_source.size() / kApproxBytesPerToken + 1);
 
         std::size_t i = 0;
         while (i < m_source.size())
@@ -302,7 +316,7 @@ namespace heimdall
             else if (c == '/' && i + 1 < m_source.size() && m_source[i + 1] == '/')
             {
                 kind = TokenKind::LineComment;
-                i += 2;
+                i += kCommentDelimLen;
                 while (i < m_source.size() && m_source[i] != '\n' && m_source[i] != '\r')
                 {
                     ++i;
@@ -311,13 +325,13 @@ namespace heimdall
             else if (c == '/' && i + 1 < m_source.size() && m_source[i + 1] == '*')
             {
                 kind = TokenKind::BlockComment;
-                i += 2;
+                i += kCommentDelimLen;
                 while (i + 1 < m_source.size() && !(m_source[i] == '*' && m_source[i + 1] == '/'))
                 {
                     ++i;
                 }
 
-                i = i + 1 < m_source.size() ? i + 2 : m_source.size();
+                i = i + 1 < m_source.size() ? i + kCommentDelimLen : m_source.size();
             }
             else
             {
@@ -327,15 +341,15 @@ namespace heimdall
                 {
                     raw_quote = i + 1;
                 }
-                else if ((c == 'u' || c == 'U' || c == 'L') && i + 2 < m_source.size() &&
-                    m_source[i + 1] == 'R' && m_source[i + 2] == '"')
+                else if ((c == 'u' || c == 'U' || c == 'L') && i + kPrefixOffset2 < m_source.size() &&
+                    m_source[i + 1] == 'R' && m_source[i + kPrefixOffset2] == '"')
                 {
-                    raw_quote = i + 2;
+                    raw_quote = i + kPrefixOffset2;
                 }
-                else if (c == 'u' && i + 3 < m_source.size() && m_source[i + 1] == '8' &&
-                    m_source[i + 2] == 'R' && m_source[i + 3] == '"')
+                else if (c == 'u' && i + kPrefixOffset3 < m_source.size() && m_source[i + 1] == '8' &&
+                    m_source[i + kPrefixOffset2] == 'R' && m_source[i + kPrefixOffset3] == '"')
                 {
-                    raw_quote = i + 3;
+                    raw_quote = i + kPrefixOffset3;
                 }
 
                 if (raw_quote != std::string_view::npos)
@@ -350,10 +364,10 @@ namespace heimdall
                     kind = m_source[quote] == '"' ? TokenKind::StringLiteral : TokenKind::CharacterLiteral;
                     i = ScanQuoted(m_source, quote, m_source[quote]);
                 }
-                else if (c == 'u' && i + 2 < m_source.size() && m_source[i + 1] == '8' &&
-                    (m_source[i + 2] == '"' || m_source[i + 2] == '\''))
+                else if (c == 'u' && i + kPrefixOffset2 < m_source.size() && m_source[i + 1] == '8' &&
+                    (m_source[i + kPrefixOffset2] == '"' || m_source[i + kPrefixOffset2] == '\''))
                 {
-                    quote = i + 2;
+                    quote = i + kPrefixOffset2;
                     kind = m_source[quote] == '"' ? TokenKind::StringLiteral : TokenKind::CharacterLiteral;
                     i = ScanQuoted(m_source, quote, m_source[quote]);
                 }
@@ -443,7 +457,7 @@ namespace heimdall
         std::size_t hi = tokens.size();
         while (lo < hi)
         {
-            const std::size_t mid = (lo + hi) / 2;
+            const std::size_t mid = (lo + hi) / kHalfDivisor;
             if (static_cast<std::size_t>(tokens[mid].offset) + tokens[mid].length < window)
             {
                 lo = mid + 1;

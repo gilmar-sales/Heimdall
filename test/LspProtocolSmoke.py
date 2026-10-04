@@ -59,7 +59,8 @@ assert initialize["result"]["capabilities"].get("documentRangeFormattingProvider
 assert "completionProvider" in initialize["result"]["capabilities"]
 assert initialize["result"]["capabilities"].get("hoverProvider") is True
 diagnostics = next(item for item in responses if item.get("method") == "textDocument/publishDiagnostics")
-assert diagnostics["params"]["diagnostics"][0]["code"] == "cpp/no-null"
+assert diagnostics["params"]["diagnostics"][0]["code"] == "cpp/modernize-const"
+assert diagnostics["params"]["diagnostics"][1]["code"] == "cpp/no-null"
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
 assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused;\n}\n"
 codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
@@ -70,7 +71,8 @@ broken = next(item for item in responses
 assert any(item["code"] == "syntax/parse-error" and item["severity"] == 1
            for item in broken["params"]["diagnostics"]), broken
 actions = next(item for item in responses if item.get("id") == 3)["result"]
-assert actions[0]["edit"]["changes"][uri][0]["newText"] == "nullptr"
+null_actions = [a for a in actions if a["edit"]["changes"][uri][0]["newText"] == "nullptr"]
+assert null_actions, actions
 # Line 2 is "    int unused;": (2,11) sits after "unu", so "unused" must be
 # offered with a textEdit replacing just the typed prefix.
 completion = next(item for item in responses if item.get("id") == 4)["result"]

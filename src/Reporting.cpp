@@ -29,12 +29,15 @@ namespace heimdall::cli
                 out += "\\t";
                 break;
             default:
-                if (c < 0x20)
+                constexpr unsigned char kControlCharLimit = ' ';
+                constexpr int kHexDigitBits = 4;
+                constexpr unsigned char kLowNibbleMask = 0x0f;
+                if (c < kControlCharLimit)
                 {
                     constexpr char hex[] = "0123456789abcdef";
                     out += "\\u00";
-                    out += hex[c >> 4];
-                    out += hex[c & 0x0f];
+                    out += hex[c >> kHexDigitBits];
+                    out += hex[c & kLowNibbleMask];
                 }
                 else
                 {
@@ -60,6 +63,7 @@ namespace heimdall::cli
 
     int ReportResults(const std::vector<FileResult> & results, const Options &options)
     {
+        constexpr int kExitUsageError = 2;
         bool failed = false;
         bool has_diagnostics = false;
         const auto severity_name =[](heimdall::Severity severity)
@@ -293,7 +297,7 @@ namespace heimdall::cli
 
         if (failed)
         {
-            return 2;
+            return kExitUsageError;
         }
 
         if ((options.command == Command::Check || options.command == Command::Parse) && has_diagnostics)

@@ -19,6 +19,20 @@ namespace heimdall
 
     namespace
     {
+        constexpr int kTwo = 2;
+        constexpr int kThree = 3;
+        constexpr int kFour = 4;
+        constexpr int kFive = 5;
+        constexpr int kSix = 6;
+        constexpr int kSeven = 7;
+        constexpr int kEight = 8;
+        constexpr int kNine = 9;
+        constexpr int kTen = 10;
+        constexpr int kEleven = 11;
+        constexpr int kTwelve = 12;
+        constexpr int kThirteen = 13;
+        constexpr int kFourteen = 14;
+        constexpr int kScratchBytes = 32768;
 
         // Predefined macros that only decorate a declaration (`_GLIBCXX_NOEXCEPT`,
         // `EXPORT`, `[[nodiscard]]` wrappers) or open/close a namespace
@@ -226,7 +240,7 @@ namespace heimdall
     private:
         static constexpr std::uint32_t Invalid = static_cast<std::uint32_t>(-1);
 
-        alignas(alignof(std::max_align_t)) std::array<std::byte, 32 * 1024> m_scratch_buffer;
+        alignas(alignof(std::max_align_t)) std::array<std::byte, kScratchBytes> m_scratch_buffer;
         std::pmr::monotonic_buffer_resource m_scratch{m_scratch_buffer.data(),
             m_scratch_buffer.size()};
         ParseTree &m_tree;
@@ -407,7 +421,7 @@ namespace heimdall
                 }
                 else if (Is(i, ">>") && angle_depth != 0)
                 {
-                    angle_depth = angle_depth > 1 ? angle_depth - 2 : 0;
+                    angle_depth = angle_depth > 1 ? angle_depth - kTwo : 0;
                 }
                 else if (Is(i, ",") && angle_depth == 0)
                 {
@@ -449,12 +463,12 @@ namespace heimdall
                 }
                 else if (Is(i, ">>"))
                 {
-                    if (depth <= 2)
+                    if (depth <= kTwo)
                     {
                         return i;
                     }
 
-                    depth -= 2;
+                    depth -= kTwo;
                 }
                 else if ((Is(i, ";") || Is(i, "=")) && depth == 1)
                 {
@@ -521,9 +535,9 @@ namespace heimdall
         {
             switch (text.size())
             {
-            case 3:
+            case kThree:
                 return text == "int";
-            case 4:
+            case kFour:
                 switch (text[0])
                 {
                 case 'v':
@@ -539,7 +553,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 5:
+            case kFive:
                 switch (text[0])
                 {
                 case 's':
@@ -549,7 +563,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 6:
+            case kSix:
                 switch (text[0])
                 {
                 case 'd':
@@ -559,7 +573,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 7:
+            case kSeven:
                 switch (text[0])
                 {
                 case 'w':
@@ -569,7 +583,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 8:
+            case kEight:
                 switch (text[0])
                 {
                 case 'u':
@@ -595,9 +609,9 @@ namespace heimdall
 
             switch (text.size())
             {
-            case 4:
+            case kFour:
                 return text == "enum";
-            case 5:
+            case kFive:
                 switch (text[0])
                 {
                 case 'c':
@@ -607,7 +621,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 6:
+            case kSix:
                 switch (text[0])
                 {
                 case 's':
@@ -621,7 +635,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 7:
+            case kSeven:
                 switch (text[0])
                 {
                 case 'v':
@@ -633,7 +647,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 8:
+            case kEight:
                 switch (text[0])
                 {
                 case 'v':
@@ -645,7 +659,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 9:
+            case kNine:
                 switch (text[0])
                 {
                 case 'c':
@@ -653,7 +667,7 @@ namespace heimdall
                 default:
                     return false;
                 }
-            case 12:
+            case kTwelve:
                 return text == "thread_local";
             default:
                 return false;
@@ -763,7 +777,7 @@ namespace heimdall
 
                 if (Is(i, ">>") && angle_depth != 0)
                 {
-                    angle_depth = angle_depth > 1 ? angle_depth - 2 : 0;
+                    angle_depth = angle_depth > 1 ? angle_depth - kTwo : 0;
                     ++i;
                     continue;
                 }
@@ -852,7 +866,7 @@ namespace heimdall
                 if (i + 1 < end && IsIdentifierToken(i + 1))
                 {
                     name_pos = i + 1;
-                    return i + 2;
+                    return i + kTwo;
                 }
 
                 return i + 1;
@@ -1185,7 +1199,7 @@ namespace heimdall
             {
                 if (i + 1 < end && IsIdentifierToken(i + 1))
                 {
-                    return i + 2;
+                    return i + kTwo;
                 }
 
                 return i + 1;
@@ -2207,7 +2221,7 @@ namespace heimdall
                 auto i = begin + 1;
                 while (i + 1 < end && Is(i, "::") && m_tree.m_tokens[m_sig[i + 1]].kind == TokenKind::Identifier)
                 {
-                    i += 2;
+                    i += kTwo;
                 }
 
                 if (Is(i, "<"))
@@ -2225,7 +2239,7 @@ namespace heimdall
                         }
                         else if (Is(i, ">>") && depth != 0)
                         {
-                            depth = depth > 1 ? depth - 2 : 0;
+                            depth = depth > 1 ? depth - kTwo : 0;
                         }
 
                         ++i;
@@ -2256,62 +2270,62 @@ namespace heimdall
             if (op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=" ||
                 op == "&=" || op == "|=" || op == "^=" || op == "<<=" || op == ">>=")
             {
-                return 2;
+                return kTwo;
             }
 
             if (op == "?")
             {
-                return 3;
+                return kThree;
             }
 
             if (op == "||")
             {
-                return 4;
+                return kFour;
             }
 
             if (op == "&&")
             {
-                return 5;
+                return kFive;
             }
 
             if (op == "|")
             {
-                return 6;
+                return kSix;
             }
 
             if (op == "^")
             {
-                return 7;
+                return kSeven;
             }
 
             if (op == "&")
             {
-                return 8;
+                return kEight;
             }
 
             if (op == "==" || op == "!=")
             {
-                return 9;
+                return kNine;
             }
 
             if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "<=>")
             {
-                return 10;
+                return kTen;
             }
 
             if (op == "<<" || op == ">>")
             {
-                return 11;
+                return kEleven;
             }
 
             if (op == "+" || op == "-")
             {
-                return 12;
+                return kTwelve;
             }
 
             if (op == "*" || op == "/" || op == "%")
             {
-                return 13;
+                return kThirteen;
             }
 
             return 0;
@@ -2334,7 +2348,7 @@ namespace heimdall
             {
                 root = Add(GrammarKind::UnaryExpression, begin, begin + 1, parent);
                 ++pos;
-                pos = ParseExpression(pos, end, root, 14);
+                pos = ParseExpression(pos, end, root, kFourteen);
                 SetNodeRange(root, begin, pos);
                 prefix_kind = GrammarKind::UnaryExpression;
             }
@@ -2501,14 +2515,14 @@ namespace heimdall
                         break;
                     }
 
-                    const auto node = Add(GrammarKind::MemberExpression, begin, pos + 2, parent);
+                    const auto node = Add(GrammarKind::MemberExpression, begin, pos + kTwo, parent);
                     if (root != Invalid)
                     {
                         m_tree.m_nodes[root].parent = node;
                     }
 
-                    Add(GrammarKind::IdentifierExpression, pos + 1, pos + 2, node);
-                    pos += 2;
+                    Add(GrammarKind::IdentifierExpression, pos + 1, pos + kTwo, node);
+                    pos += kTwo;
                     root = node;
                     continue;
                 }
@@ -2583,7 +2597,7 @@ namespace heimdall
                     continue;
                 }
 
-                if (op == "?" && minimum <= 3)
+                if (op == "?" && minimum <= kThree)
                 {
                     const auto node = Add(GrammarKind::ConditionalExpression, begin, end, parent);
                     if (root != Invalid)
@@ -2598,7 +2612,7 @@ namespace heimdall
                         ++pos;
                     }
 
-                    pos = ParseExpression(pos, end, node, 2);
+                    pos = ParseExpression(pos, end, node, kTwo);
                     SetNodeRange(node, begin, pos);
                     root = node;
                     continue;
@@ -2634,7 +2648,7 @@ namespace heimdall
                     token_kind_here == TokenKind::RawStringLiteral || Is(pos, "::");
                 if ((after_paren || operand_pending) && operand_start)
                 {
-                    const auto operand_end = ParseExpression(pos, end, parent, 14);
+                    const auto operand_end = ParseExpression(pos, end, parent, kFourteen);
                     if (operand_end > pos)
                     {
                         pos = operand_end;
@@ -2661,7 +2675,7 @@ namespace heimdall
                 }
 
                 ++pos;
-                const bool right_associative = precedence == 2;
+                const bool right_associative = precedence == kTwo;
                 pos = ParseExpression(pos, end, node, precedence +(right_associative ? 0 : 1));
                 SetNodeRange(node, begin, pos);
                 root = node;
@@ -3298,8 +3312,8 @@ namespace heimdall
                 if (member_scope && pos + 1 < end && Is(pos + 1, ":") &&
                     (Is(pos, "public") || Is(pos, "private") || Is(pos, "protected")))
                 {
-                    Add(GrammarKind::AccessSpecifier, pos, pos + 2, parent);
-                    pos += 2;
+                    Add(GrammarKind::AccessSpecifier, pos, pos + kTwo, parent);
+                    pos += kTwo;
                     continue;
                 }
 
@@ -3357,7 +3371,7 @@ namespace heimdall
                         }
                         else if (Is(angle, ">>") && depth != 0)
                         {
-                            depth = depth > 1 ? depth - 2 : 0;
+                            depth = depth > 1 ? depth - kTwo : 0;
                             if (depth == 0)
                             {
                                 ++angle;

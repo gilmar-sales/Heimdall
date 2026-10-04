@@ -13,13 +13,14 @@
 
 int main(int argc, char **argv)
 {
+    constexpr int kExitUsageError = 2;
     heimdall::cli::Options options{};
     if (!heimdall::cli::ParseOptions(argc, argv, options))
     {
         std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories-or-globs...>\n";
         std::cerr << "       heimdall init [directory] [--force]\n";
         std::cerr << "       globs support '*', '**', '?' and '[...]': e.g. src/**/*.cpp, src/**.cpp\n";
-        return 2;
+        return kExitUsageError;
     }
 
     if (options.command == heimdall::cli::Command::Init)
@@ -29,7 +30,7 @@ int main(int argc, char **argv)
         if (!heimdall::cli::RunInit(options, error, created))
         {
             std::cerr << error << '\n';
-            return 2;
+            return kExitUsageError;
         }
 
         std::cout << "created " << created.string() << '\n';
@@ -44,7 +45,7 @@ int main(int argc, char **argv)
             if (!loaded)
             {
                 std::cerr << loaded.error() << '\n';
-                return 2;
+                return kExitUsageError;
             }
 
             options.rule_options = std::move(loaded->options);
@@ -55,7 +56,7 @@ int main(int argc, char **argv)
             if (!loaded)
             {
                 std::cerr << loaded.error() << '\n';
-                return 2;
+                return kExitUsageError;
             }
 
             if (*loaded)
@@ -71,7 +72,7 @@ int main(int argc, char **argv)
     std::vector<std::filesystem::path> files;
     if (!heimdall::cli::CollectFiles(options.inputs, files))
     {
-        return 2;
+        return kExitUsageError;
     }
 
     heimdall::CompileDatabase database;
@@ -82,7 +83,7 @@ int main(int argc, char **argv)
         if (!loaded)
         {
             std::cerr << loaded.error() << '\n';
-            return 2;
+            return kExitUsageError;
         }
 
         database = std::move(*loaded);
@@ -92,7 +93,7 @@ int main(int argc, char **argv)
     if (options.command == heimdall::cli::Command::Format && !options.write && files.size() != 1)
     {
         std::cerr << "format without --write requires exactly one file\n";
-        return 2;
+        return kExitUsageError;
     }
 
     std::vector<heimdall::cli::FileResult> results;

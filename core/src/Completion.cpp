@@ -20,16 +20,28 @@ namespace heimdall
     namespace
     {
 
+        constexpr unsigned int kNonAsciiThreshold = 0x80;
+        constexpr int kPriorityMacro = 5;
+        constexpr int kPriorityTypeNamespace = 4;
+        constexpr int kPriorityFunction = 3;
+        constexpr int kPriorityVariableDirective = 2;
+        constexpr std::size_t kMaxParentWalkDepth = 8;
+        constexpr std::size_t kMaxScopeWalkDepth = 32;
+        constexpr std::size_t kMaxDetailLen = 256;
+        constexpr std::size_t kMaxShortDetailLen = 128;
+        constexpr std::size_t kMaxTypeTextLen = 160;
+        constexpr int kDoubleAngleCount = 2;
+
         constexpr bool IsIdentChar(char c)
         {
             return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||(c >= '0' && c <= '9') || c == '_' ||
-                static_cast<unsigned char>(c) >= 0x80;
+                static_cast<unsigned char>(c) >= kNonAsciiThreshold;
         }
 
         constexpr bool IsIdentStart(char c)
         {
             return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_' ||
-                static_cast<unsigned char>(c) >= 0x80;
+                static_cast<unsigned char>(c) >= kNonAsciiThreshold;
         }
 
         constexpr std::string_view kKeywords[] = {
@@ -94,16 +106,16 @@ namespace heimdall
             switch (kind)
             {
             case CompletionKind::Macro:
-                return 5;
+                return kPriorityMacro;
             case CompletionKind::Type:
             case CompletionKind::Namespace:
-                return 4;
+                return kPriorityTypeNamespace;
             case CompletionKind::Function:
-                return 3;
+                return kPriorityFunction;
             case CompletionKind::Variable:
-                return 2;
+                return kPriorityVariableDirective;
             case CompletionKind::Directive:
-                return 2;
+                return kPriorityVariableDirective;
             case CompletionKind::Keyword:
                 return 1;
             }
@@ -318,7 +330,7 @@ namespace heimdall
         CompletionKind ClassifyDeclaredName(const ParseTree &tree, std::size_t node_index)
         {
             std::size_t current = tree.Nodes()[node_index].parent;
-            for (std::size_t depth = 0; depth < 8 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::ParameterDeclaration || kind == GrammarKind::CompoundStatement ||
@@ -364,7 +376,8 @@ namespace heimdall
                     const std::size_t last = std::min<std::size_t>(declaration.first_token + declaration.token_count,
                         tree.Tokens().size());
                     std::size_t seen = 0;
-                    for (std::size_t t = declaration.first_token; t < last && seen < 4; ++t)
+                    constexpr std::size_t kMaxSpecifierTokens = 4;
+                    for (std::size_t t = declaration.first_token; t < last && seen < kMaxSpecifierTokens; ++t)
                     {
                         const TokenKind token_kind = tree.Tokens()[t].kind;
                         if (token_kind == TokenKind::Whitespace || token_kind == TokenKind::LineComment ||
@@ -549,7 +562,7 @@ namespace heimdall
             }
 
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 32 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::LambdaExpression)
@@ -635,7 +648,7 @@ namespace heimdall
             }
 
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 32 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 if (IsTransparentForMembership(tree.Nodes()[current].kind))
                 {
@@ -799,7 +812,7 @@ namespace heimdall
         {
             std::vector<std::string> path;
             std::size_t current = node;
-            for (std::size_t depth = 0; depth < 32 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxScopeWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::TranslationUnit)
@@ -941,7 +954,8 @@ namespace heimdall
         std::vector<CallableInterval> BuildCallableIntervals(const ParseTree &tree)
         {
             std::vector<CallableInterval> intervals;
-            intervals.reserve(tree.Nodes().size() / 8);
+            constexpr std::size_t kReserveDivisor = 8;
+            intervals.reserve(tree.Nodes().size() / kReserveDivisor);
             for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
             {
                 const GrammarKind kind = tree.Nodes()[n].kind;
@@ -986,7 +1000,8 @@ namespace heimdall
             std::size_t hi = intervals.size();
             while (lo < hi)
             {
-                const std::size_t mid = lo +(hi - lo) / 2;
+                constexpr std::size_t kBinaryHalf = 2;
+                const std::size_t mid = lo +(hi - lo) / kBinaryHalf;
                 if (intervals[mid].start <= pos)
                 {
                     lo = mid + 1;
@@ -1144,7 +1159,8 @@ namespace heimdall
         void ScanDefines(std::string_view source, const std::vector<Token> & tokens,
             std::vector<Define> & out)
         {
-            for (std::size_t i = 0; i + 2 < tokens.size(); ++i)
+            constexpr std::size_t kDefineLookahead = 2;
+            for (std::size_t i = 0; i + kDefineLookahead < tokens.size(); ++i)
             {
                 if (tokens[i].kind != TokenKind::Punctuation)
                 {
@@ -1316,7 +1332,7 @@ namespace heimdall
             }
 
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 8 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::Declarator)
@@ -1343,12 +1359,16 @@ namespace heimdall
         {
             const std::size_t declarator = DeclaratorOf(tree, node);
             if (declarator == NoIndex) return {};
+            constexpr std::size_t kMaxParamsTextLen = 200;
+            constexpr std::size_t kMaxTrailingTextLen = 64;
+            constexpr std::size_t kMaxReturnTextLen = 96;
             std::string params;
             const std::size_t suffix = FindInSubtree(tree, declarator, GrammarKind::FunctionSuffix);
             if (suffix != NoIndex)
             {
                 const auto &suffix_node = tree.Nodes()[suffix];
-                params = CompactWs(SliceRange(tree, suffix_node.first_token, suffix_node.token_count), 200);
+                params = CompactWs(SliceRange(tree, suffix_node.first_token, suffix_node.token_count),
+                    kMaxParamsTextLen);
             }
 
             std::string trailing;
@@ -1357,12 +1377,13 @@ namespace heimdall
             if (trailing_node != NoIndex)
             {
                 const auto &trailing_ref = tree.Nodes()[trailing_node];
-                trailing = CompactWs(SliceRange(tree, trailing_ref.first_token, trailing_ref.token_count), 64);
+                trailing = CompactWs(SliceRange(tree, trailing_ref.first_token, trailing_ref.token_count),
+                    kMaxTrailingTextLen);
             }
 
             std::string returns;
             std::size_t function = tree.Nodes()[declarator].parent;
-            for (std::size_t depth = 0; depth < 8 && function < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[function].kind;
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::FunctionDeclaration)
@@ -1386,7 +1407,8 @@ namespace heimdall
                 if (type != NoIndex)
                 {
                     const auto &type_node = tree.Nodes()[type];
-                    returns = CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count), 96);
+                    returns = CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count),
+                        kMaxReturnTextLen);
                 }
             }
 
@@ -1405,9 +1427,9 @@ namespace heimdall
                 signature += trailing;
             }
 
-            if (signature.size() > 256)
+            if (signature.size() > kMaxDetailLen)
             {
-                signature.resize(256);
+                signature.resize(kMaxDetailLen);
             }
 
             return signature;
@@ -1417,7 +1439,7 @@ namespace heimdall
         std::string VariableTypeDetail(const ParseTree &tree, std::size_t node)
         {
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 8 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::Declarator || kind == GrammarKind::PointerOperator ||
@@ -1435,7 +1457,8 @@ namespace heimdall
                     const std::size_t type = FindChild(tree, current, GrammarKind::TypeSpecifier);
                     if (type == NoIndex) return {};
                     const auto &type_node = tree.Nodes()[type];
-                    return CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count), 128);
+                    return CompactWs(SliceRange(tree, type_node.first_token, type_node.token_count),
+                        kMaxShortDetailLen);
                 }
 
                 return {};
@@ -1450,7 +1473,8 @@ namespace heimdall
         {
             if (node >= tree.Nodes().size()) return {};
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 6 && current < tree.Nodes().size(); ++depth)
+            constexpr std::size_t kMaxEnumeratorDepth = 6;
+            for (std::size_t depth = 0; depth < kMaxEnumeratorDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::Enumerator)
@@ -1499,14 +1523,18 @@ namespace heimdall
 
         bool IsDocBlockComment(std::string_view text)
         {
-            return text.size() > 5 && (text.starts_with("/**") || text.starts_with("/*!"));
+            constexpr std::size_t kMinDocBlockLen = 5;
+            return text.size() > kMinDocBlockLen && (text.starts_with("/**") || text.starts_with("/*!"));
         }
 
         std::string CleanBlockComment(std::string_view text)
         {
             // Strip the opening `/**` / `/*!` and closing `*/`, then one leading `*`
             // per line (doxygen style).
-            std::string_view inner = text.substr(2, text.size() > 4 ? text.size() - 4 : 0);
+            constexpr std::size_t kBlockOpenLen = 2;
+            constexpr std::size_t kBlockDelimTotal = 4;
+            std::string_view inner =
+                text.substr(kBlockOpenLen, text.size() > kBlockDelimTotal ? text.size() - kBlockDelimTotal : 0);
             std::string out;
             std::size_t pos = 0;
             while (pos <= inner.size())
@@ -1586,6 +1614,10 @@ namespace heimdall
         {
             if (anchor_token == 0 || anchor_token > tokens.size()) return {};
             constexpr std::size_t kCap = 1000;
+            constexpr int kBlankLineNewlines = 2;
+            constexpr std::size_t kLineCommentPrefixLen = 2;
+            constexpr std::size_t kDocLinePrefixLen = 3;
+            constexpr std::size_t kMinBlockCommentLen = 4;
             std::vector<std::string> lines;
             std::size_t total = 0;
             for (std::size_t j = anchor_token; j > 0;)
@@ -1595,7 +1627,7 @@ namespace heimdall
                 const std::string_view text = TokenText(source, token);
                 if (token.kind == TokenKind::Whitespace)
                 {
-                    if (std::count(text.begin(), text.end(), '\n') >= 2)
+                    if (std::count(text.begin(), text.end(), '\n') >= kBlankLineNewlines)
                     {
                         break;
                     } // blank line
@@ -1610,7 +1642,7 @@ namespace heimdall
                         break;
                     }
 
-                    std::string_view content = text.substr(2);
+                    std::string_view content = text.substr(kLineCommentPrefixLen);
                     if (!content.empty() && content.front() == ' ')
                     {
                         content.remove_prefix(1);
@@ -1633,7 +1665,7 @@ namespace heimdall
 
                 if (token.kind == TokenKind::LineComment && IsDocLineComment(text))
                 {
-                    std::string_view content = text.substr(3);
+                    std::string_view content = text.substr(kDocLinePrefixLen);
                     if (!content.empty() && content.front() == ' ')
                     {
                         content.remove_prefix(1);
@@ -1649,7 +1681,7 @@ namespace heimdall
                     continue;
                 }
 
-                if (token.kind == TokenKind::BlockComment && text.size() > 4 &&
+                if (token.kind == TokenKind::BlockComment && text.size() > kMinBlockCommentLen &&
                     (IsDocBlockComment(text) || CommentStartsLine(source, tokens, j)))
                 {
                     const std::string block = CleanBlockComment(text);
@@ -1701,7 +1733,8 @@ namespace heimdall
             }
 
             std::size_t current = node;
-            for (std::size_t depth = 0; depth < 16; ++depth)
+            constexpr std::size_t kMaxDocAnchorDepth = 16;
+            for (std::size_t depth = 0; depth < kMaxDocAnchorDepth; ++depth)
             {
                 const std::size_t parent = tree.Nodes()[current].parent;
                 if (parent >= tree.Nodes().size() || parent == current)
@@ -1745,13 +1778,14 @@ namespace heimdall
             }
 
             const std::size_t trailing = FindInSubtree(tree, declarator, GrammarKind::TrailingReturnType);
+            constexpr std::size_t kArrowLen = 2;
             if (trailing != NoIndex)
             {
                 std::string text = CompactWs(SliceRange(tree, tree.Nodes()[trailing].first_token,
-                    tree.Nodes()[trailing].token_count), 128);
+                    tree.Nodes()[trailing].token_count), kMaxShortDetailLen);
                 if (text.starts_with("->"))
                 {
-                    text.erase(0, 2);
+                    text.erase(0, kArrowLen);
                 }
 
                 while (!text.empty() && text.front() == ' ')
@@ -1766,7 +1800,7 @@ namespace heimdall
             }
 
             std::size_t function = tree.Nodes()[declarator].parent;
-            for (std::size_t depth = 0; depth < 8 && function < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && function < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[function].kind;
                 if (kind == GrammarKind::FunctionDefinition || kind == GrammarKind::FunctionDeclaration)
@@ -1778,7 +1812,7 @@ namespace heimdall
                     }
 
                     return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
-                        tree.Nodes()[type].token_count), 128);
+                        tree.Nodes()[type].token_count), kMaxShortDetailLen);
                 }
 
                 if (kind == GrammarKind::TranslationUnit || kind == GrammarKind::NamespaceDefinition ||
@@ -1798,7 +1832,7 @@ namespace heimdall
         std::string AliasTargetText(const ParseTree &tree, std::size_t node)
         {
             std::size_t current = tree.Nodes()[node].parent;
-            for (std::size_t depth = 0; depth < 8 && current < tree.Nodes().size(); ++depth)
+            for (std::size_t depth = 0; depth < kMaxParentWalkDepth && current < tree.Nodes().size(); ++depth)
             {
                 const GrammarKind kind = tree.Nodes()[current].kind;
                 if (kind == GrammarKind::UsingDeclaration)
@@ -1811,7 +1845,7 @@ namespace heimdall
                         if (tree.Tokens()[i].kind == TokenKind::Punctuation && tree.Text(tree.Tokens()[i]) == "=")
                         {
                             std::string text = CompactWs(SliceRange(tree, static_cast<std::uint32_t>(i + 1),
-                                last -(i + 1)), 160);
+                                last -(i + 1)), kMaxTypeTextLen);
                             while (!text.empty() && (text.back() == ';' || text.back() == ' '))
                             {
                                 text.pop_back();
@@ -1833,7 +1867,7 @@ namespace heimdall
                     }
 
                     return CompactWs(SliceRange(tree, tree.Nodes()[type].first_token,
-                        tree.Nodes()[type].token_count), 160);
+                        tree.Nodes()[type].token_count), kMaxTypeTextLen);
                 }
 
                 if (kind == GrammarKind::RecordDefinition || kind == GrammarKind::CompoundStatement ||
@@ -1905,7 +1939,7 @@ namespace heimdall
                     }
                     else if (text == ">>")
                     {
-                        angle = std::max(0, angle - 2);
+                        angle = std::max(0, angle - kDoubleAngleCount);
                     }
                     else if (text == "," && angle == 0)
                     {
@@ -1954,6 +1988,7 @@ namespace heimdall
             const std::vector<Token> & tokens, std::size_t node,
             std::string_view name, CompletionKind kind)
         {
+            constexpr std::size_t kMaxDocLen = 1000;
             std::string detail = KindDetail(kind);
             if (kind == CompletionKind::Function)
             {
@@ -1980,15 +2015,15 @@ namespace heimdall
                 }
             }
 
-            if (detail.size() > 256)
+            if (detail.size() > kMaxDetailLen)
             {
-                detail.resize(256);
+                detail.resize(kMaxDetailLen);
             }
 
             std::string documentation = DocCommentFor(source, tokens, DocAnchorToken(tree, node));
-            if (documentation.size() > 1000)
+            if (documentation.size() > kMaxDocLen)
             {
-                documentation.resize(1000);
+                documentation.resize(kMaxDocLen);
             }
 
             CompletionItem item{std::string(name), kind, std::move(detail), std::move(documentation)};
@@ -2058,7 +2093,7 @@ namespace heimdall
             }
             else if (closer == ">>")
             {
-                depth = 2;
+                depth = kDoubleAngleCount;
             }
             else
             {
@@ -2087,7 +2122,7 @@ namespace heimdall
                 }
                 else if (text == ">>")
                 {
-                    depth += 2;
+                    depth += kDoubleAngleCount;
                 }
                 else if (text == "<" || text == "<=" || text == "<=>")
                 {
@@ -2242,9 +2277,9 @@ namespace heimdall
                 }
 
                 std::string detail = define.value.empty() ? "macro" : define.value;
-                if (detail.size() > 128)
+                if (detail.size() > kMaxShortDetailLen)
                 {
-                    detail.resize(128);
+                    detail.resize(kMaxShortDetailLen);
                 }
 
                 InsertItem(best, {std::string(define.name), CompletionKind::Macro, std::move(detail),
@@ -2510,7 +2545,7 @@ namespace heimdall
             }
 
             std::string target = CompactWs(SliceRange(tree, static_cast<std::uint32_t>(equals + 1),
-                last -(equals + 1)), 160);
+                last -(equals + 1)), kMaxTypeTextLen);
             while (!target.empty() && (target.back() == ';' || target.back() == ' '))
             {
                 target.pop_back();
@@ -2639,9 +2674,9 @@ namespace heimdall
                 }
 
                 std::string detail = define.value.empty() ? "macro" : define.value;
-                if (detail.size() > 128)
+                if (detail.size() > kMaxShortDetailLen)
                 {
-                    detail.resize(128);
+                    detail.resize(kMaxShortDetailLen);
                 }
 
                 entry.members.push_back({std::string(define.name), CompletionKind::Macro, std::move(detail),
@@ -2868,9 +2903,9 @@ namespace heimdall
                 }
 
                 std::string detail = value.empty() ? "macro" : value;
-                if (detail.size() > 128)
+                if (detail.size() > kMaxShortDetailLen)
                 {
-                    detail.resize(128);
+                    detail.resize(kMaxShortDetailLen);
                 }
 
                 InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
@@ -3255,13 +3290,14 @@ namespace heimdall
                 }
                 else if (nest == 0 && (p == ">" || p == ">>"))
                 {
-                    angle -= p == ">" ? 1 : 2;
+                    angle -= p == ">" ? 1 : kDoubleAngleCount;
                     if (angle <= 0)
                     {
                         const std::size_t end = toks[k].offset;
                         if (end > arg_start)
                         {
-                            args.push_back(CompactWs(std::string(text.substr(arg_start, end - arg_start)), 160));
+                            args.push_back(CompactWs(std::string(text.substr(arg_start, end - arg_start)),
+                                kMaxTypeTextLen));
                         }
 
                         return k;
@@ -3270,7 +3306,7 @@ namespace heimdall
                 else if (nest == 0 && angle == 1 && p == ",")
                 {
                     args.push_back(CompactWs(std::string(text.substr(arg_start, toks[k].offset - arg_start)),
-                        160));
+                        kMaxTypeTextLen));
                     arg_start = toks[k].offset + toks[k].length;
                 }
             }
@@ -3518,8 +3554,9 @@ namespace heimdall
 
             Resolved ResolveChain(const Chain &chain, int depth = 0) const
             {
+                constexpr int kMaxChainDepth = 6;
                 Resolved current;
-                if (!chain.ok || chain.segments.empty() || depth > 6)
+                if (!chain.ok || chain.segments.empty() || depth > kMaxChainDepth)
                 {
                     return current;
                 }
@@ -3611,7 +3648,7 @@ namespace heimdall
                     }
                     else if (p == ">>")
                     {
-                        depth += 2;
+                        depth += kDoubleAngleCount;
                     }
                     else if (p == "<")
                     {
@@ -3767,7 +3804,8 @@ namespace heimdall
             Found FindDeep(const std::vector<std::string> & path, std::string_view label,
                 CompletionKind kind, std::unordered_set<std::string> & visited, int depth) const
             {
-                if (depth > 16 ||!visited.insert(PathKey(path)).second)
+                constexpr int kMaxLookupDepth = 16;
+                if (depth > kMaxLookupDepth ||!visited.insert(PathKey(path)).second)
                 {
                     return {};
                 }
@@ -3813,7 +3851,8 @@ namespace heimdall
                 std::unordered_map<std::string, CompletionItem> & best,
                 std::unordered_set<std::string> & visited, int depth) const
             {
-                if (depth > 16 ||!visited.insert(PathKey(path)).second)
+                constexpr int kMaxCollectDepth = 16;
+                if (depth > kMaxCollectDepth ||!visited.insert(PathKey(path)).second)
                 {
                     return;
                 }
@@ -3857,8 +3896,9 @@ namespace heimdall
             // Type name -> canonical record path, following alias chains.
             Resolved ResolveType(const TypeName &type, const std::vector<std::string> & hint, int depth) const
             {
+                constexpr int kMaxTypeResolveDepth = 8;
                 Resolved out;
-                if (!type.ok || depth > 8)
+                if (!type.ok || depth > kMaxTypeResolveDepth)
                 {
                     return out;
                 }
@@ -4350,9 +4390,9 @@ namespace heimdall
                 }
 
                 std::string detail = value.empty() ? "macro" : value;
-                if (detail.size() > 128)
+                if (detail.size() > kMaxShortDetailLen)
                 {
-                    detail.resize(128);
+                    detail.resize(kMaxShortDetailLen);
                 }
 
                 InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
@@ -4423,9 +4463,9 @@ namespace heimdall
                 }
 
                 std::string detail = value.empty() ? "macro" : value;
-                if (detail.size() > 128)
+                if (detail.size() > kMaxShortDetailLen)
                 {
-                    detail.resize(128);
+                    detail.resize(kMaxShortDetailLen);
                 }
 
                 InsertItem(best, {name, CompletionKind::Macro, std::move(detail), {}});
