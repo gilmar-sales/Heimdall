@@ -78,6 +78,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         initializationOptions: {
             enableSemantic: configuration.get<boolean>('enableSemantic', false),
             compileCommands,
+            workspaceRoot,
         },
         outputChannel: output,
     };

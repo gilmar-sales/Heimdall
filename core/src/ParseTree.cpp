@@ -21,12 +21,18 @@ namespace heimdall
 
     ParseTree ParseTree::Parse(std::string_view source, const ParserOptions &options)
     {
+        return Parse(source, options, std::stop_token{});
+    }
+
+    ParseTree ParseTree::Parse(std::string_view source, const ParserOptions &options,
+        std::stop_token stop)
+    {
         ParseTree tree;
         tree.m_source = source;
         tree.m_standard = options.standard;
         tree.m_tokens = Lexer(source).Lex();
         auto preprocessing = Preprocessor(options.Macros()).Process(source);
-        detail::ParseWithGrammar(tree, preprocessing);
+        detail::ParseWithGrammar(tree, preprocessing, stop);
         tree.m_directives = std::move(preprocessing.directives);
 
         for (std::size_t n = 0; n < tree.m_nodes.size(); ++n)

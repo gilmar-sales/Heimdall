@@ -7,8 +7,7 @@ Structure mirrors [Freyr](https://github.com/gilmar-sales/Freyr).
 
 - **`heimdall_core` (`core/`, `include/Heimdall/`): standard library only.** No third-party
   code, no exceptions, no RTTI. Enforced by `test/src/CorePolicySpec.cpp`.
-- **Outside core, third parties are allowed**: [Skirnir](https://github.com/gilmar-sales/Skirnir)
-  with its `simdjson` dependency for `compile_commands.json` and LSP JSON-RPC,
+- **Outside core, third parties are allowed**: `simdjson` for `compile_commands.json` and LSP JSON-RPC,
   GoogleTest `v1.17.0` for tests, and Google Benchmark `v1.9.5` for benches — via `FetchContent`.
 
 ## Requirements
@@ -87,7 +86,7 @@ cmake/pch.hpp           # STL-only precompiled header (no third-party, no Heimda
 core/                   # heimdall_core: zero-dependency engine (STL only, no exceptions/RTTI)
   include/Heimdall/     # core public headers (Arena, MappedBuffer, SyntaxTree, Formatter, CppStandard, Lexer, ...)
   src/                  # one TU per stage + ParseTree.cpp entry; detail/ holds private bridges
-semantic/               # heimdall_semantic: compile DB + local oracle (Skirnir/simdjson PRIVATE)
+semantic/               # heimdall_semantic: compile DB + local oracle (simdjson PRIVATE)
   include/Heimdall/     # CompileDatabase.hpp, SemanticAnalyzer.hpp (STL + core only)
   src/
 src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Pipeline/Reporting
@@ -135,8 +134,8 @@ outside the extension) still needs to be closed before relinking.
   runs to `max_empty_lines` (default 1, edges trimmed), preserving CRLF,
   comments, literals, and preprocessor directives. It intentionally does
   not yet reflow lines or normalize operator spacing.
-- **Compilation database / semantic seed**: `heimdall_semantic` uses Skirnir's
-  `JsonFileSource` (backed by `simdjson`) to read `compile_commands.json` (`arguments` or `command`) and
+- **Compilation database / semantic seed**: `heimdall_semantic` uses `simdjson` directly
+  to read `compile_commands.json` (`arguments` or `command`) and
   extracts `-D`, `-U`, and `-I` options. Its local type oracle recognizes built-ins
   and declarations in the current file, so it can distinguish simple `A * b;` forms
   when `A` is known. It does not open include directories or implement full C++ name

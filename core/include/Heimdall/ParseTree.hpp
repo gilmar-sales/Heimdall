@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -70,7 +71,8 @@ namespace heimdall
         RequiresExpression,
         Requirement,
         ErrorExpression,
-        Error
+        Error,
+        AccessSpecifier
     };
 
     struct GrammarNode
@@ -102,7 +104,8 @@ namespace heimdall
     class ParseTree;
     namespace detail
     {
-        void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing);
+        void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
+            std::stop_token stop);
     } // namespace detail
 
     // Initial recursive-descent grammar layer over the lossless lexer. It parses
@@ -115,6 +118,11 @@ namespace heimdall
 
         static ParseTree Parse(std::string_view source, CppStandard standard = CppStandard::Cpp20);
         static ParseTree Parse(std::string_view source, const ParserOptions &options);
+        // Cooperative cancellation: the grammar pass polls `stop` between
+        // top-level items. A cancelled tree is partial; check Cancelled() and
+        // discard it.
+        static ParseTree Parse(std::string_view source, const ParserOptions &options,
+            std::stop_token stop);
 
         std::string_view Source() const noexcept
         {
@@ -140,6 +148,10 @@ namespace heimdall
         {
             return m_directives;
         }
+        bool Cancelled() const noexcept
+        {
+            return m_cancelled;
+        }
         std::string_view Text(const Token &token) const noexcept
         {
             return m_source.substr(token.offset, token.length);
@@ -150,7 +162,8 @@ namespace heimdall
 
     private:
         friend class GrammarParser;
-        friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &);
+        friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult &,
+            std::stop_token);
 
         std::shared_ptr<const std::string> m_owned_source;
         std::string_view m_source;
@@ -159,6 +172,7 @@ namespace heimdall
         std::vector<GrammarNode> m_nodes;
         std::vector<GrammarDiagnostic> m_diagnostics;
         std::vector<PreprocessorDirective> m_directives;
+        bool m_cancelled = false;
     };
 
 } // namespace heimdall

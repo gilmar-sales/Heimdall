@@ -405,3 +405,61 @@ TEST(NavigationSpec, EnumDefinitionPointsAtTheNameInSourceAndHeaders)
         EXPECT_EQ(external[0].length, 4u);
     }
 }
+
+TEST(NavigationSpec, ResolvesMembersDeclaredRightAfterAnAccessSpecifier)
+{
+    constexpr std::string_view source =
+    "class LineIndex\n"
+    "{\n"
+    "public:\n"
+    "    int ToPosition(int offset) const;\n"
+    "private:\n"
+    "    static int Utf16Width(int text, int stop) noexcept;\n"
+    "    int m_text;\n"
+    "};\n"
+    "int LineIndex::Utf16Width(int text, int stop) noexcept { return text + stop; }\n"
+    "int LineIndex::ToPosition(int offset) const { return Utf16Width(offset, 1) + m_text; }\n"
+    "struct S { private: int hidden; void helper(); public: void run() { helper(); hidden = 1; } };\n"
+    "void S::helper() {}\n";
+
+    // Call site -> out-of-line definition.
+    const auto call = DefinitionOf(source, "Utf16Width(offset");
+    ASSERT_EQ(call.size(), 1u);
+    EXPECT_EQ(call[0].offset, Find(source, "Utf16Width(int text, int stop) noexcept {"));
+    EXPECT_TRUE(call[0].is_definition);
+
+    // In-class declaration -> its definition; definition -> its declaration.
+    const auto from_declaration = DefinitionOf(source, "Utf16Width(int text, int stop) noexcept;");
+    ASSERT_EQ(from_declaration.size(), 1u);
+    EXPECT_EQ(from_declaration[0].offset, Find(source, "Utf16Width(int text, int stop) noexcept {"));
+    const auto from_definition = DefinitionOf(source, "Utf16Width(int text, int stop) noexcept {");
+    ASSERT_EQ(from_definition.size(), 1u);
+    EXPECT_EQ(from_definition[0].offset, Find(source, "Utf16Width(int text, int stop) noexcept;"));
+
+    // Same line as the specifier: `private: int hidden;`.
+    const auto hidden = DefinitionOf(source, "hidden = 1");
+    ASSERT_EQ(hidden.size(), 1u);
+    EXPECT_EQ(hidden[0].offset, Find(source, "hidden;"));
+    const auto helper = DefinitionOf(source, "helper();");
+    ASSERT_EQ(helper.size(), 1u);
+    EXPECT_EQ(helper[0].offset, Find(source, "helper() {}"));
+}
+
+TEST(NavigationSpec, ResolvesPrivateMemberDeclaredInAHeaderIndex)
+{
+    constexpr std::string_view header =
+    "class LineIndex\n"
+    "{\n"
+    "public:\n"
+    "    void Build(int text);\n"
+    "private:\n"
+    "    static int Utf16Width(int text, int stop) noexcept;\n"
+    "};\n";
+    heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
+    constexpr std::string_view source =
+    "int LineIndex::Utf16Width(int text, int stop) noexcept { return text + stop; }\n";
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto targets = heimdall::Navigation::Definition(tree, Find(source, "Utf16Width"), &index);
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, Find(header, "Utf16Width"));
+}

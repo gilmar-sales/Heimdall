@@ -1,22 +1,27 @@
 #pragma once
 
 #include "Document.hpp"
+#include "ThreadPool.hpp"
 
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/RuleEngine.hpp>
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <simdjson.h>
 #include <string>
+#include <stop_token>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -45,6 +50,23 @@ namespace heimdall::lsp
             std::int64_t version = 0;
             std::shared_ptr<const LineIndex> lines = std::make_shared<const LineIndex>();
         };
+
+        // A document as it was when a request arrived.
+        struct PinnedDocument
+        {
+            std::string uri;
+            DocumentSnapshot snapshot;
+        };
+
+        // Per-request state, visible to the handler running on a pool thread
+        // (and to the diagnostics worker, which only sets `stop`).
+        struct RequestContext
+        {
+            std::stop_token stop;
+            std::optional<PinnedDocument> pinned;
+        };
+
+        using RequestHandler = std::function<void(simdjson::dom::element, std::string_view)>;
 
         struct HeaderView
         {
@@ -95,12 +117,32 @@ namespace heimdall::lsp
         static bool ApplyContentChange(std::string & current, LineIndex &index,
             simdjson::dom::object change);
         void TouchGlobalIndex(const std::string & key);
-        bool WasCancelled(const std::string & id);
+        // Runs `handler` on the pool against a private copy of the message, so
+        // the I/O thread goes straight back to reading (and to $/cancelRequest).
+        void Dispatch(std::string_view body, simdjson::dom::element request, const std::string & id,
+            RequestHandler handler);
+        // Snapshot of `uri`: the one pinned at arrival for the current request,
+        // otherwise the latest.
+        std::optional<DocumentSnapshot> GetDocument(const std::string & uri);
+        const heimdall::CompileCommand * CommandFor(const std::string & uri);
+        static std::stop_token CurrentStop();
+        static bool RequestCancelled();
+        void RespondCancelled(std::string_view id);
         bool IsCurrentVersion(const std::string & uri, std::int64_t version);
 
-        std::mutex m_mu;
+        static thread_local const RequestContext * t_context;
+
+        // m_docs_mu guards only m_documents (hot: every request and keystroke),
+        // so readers never queue behind cache bookkeeping under m_mu.
+        std::shared_mutex m_docs_mu;
         std::unordered_map<std::string, DocumentSnapshot> m_documents;
+
+        std::mutex m_inflight_mu;
+        std::unordered_map<std::string, std::stop_source> m_inflight;
+
+        std::mutex m_mu;
         std::optional<heimdall::CompileDatabase> m_compile_database;
+        heimdall::RuleOptions m_rule_options;
 
         // Header discovery cache per open document: the fingerprint covers the
         // file's own `#include` block plus search flags, so repeat keystrokes
@@ -148,7 +190,6 @@ namespace heimdall::lsp
             std::shared_ptr<const heimdall::Preprocessor::MacroMap>>
         m_macro_cache;
 
-        std::unordered_set<std::string> m_cancelled;
         std::atomic<bool> m_enable_semantic = false;
         std::string m_initialization_error;
         std::condition_variable_any m_index_cv;
@@ -157,9 +198,13 @@ namespace heimdall::lsp
         std::condition_variable_any m_diag_cv;
         std::deque<DiagJob> m_diag_queue;
         bool m_diag_busy = false;
+        std::string m_diag_running_uri;
+        std::stop_source m_diag_stop;
         std::jthread m_index_worker;
         std::jthread m_diag_worker;
-        std::vector<std::jthread> m_system_threads;
+        // Last member: destroyed (and joined) first, while everything the
+        // handlers touch is still alive.
+        ThreadPool m_pool;
     };
 
 } // namespace heimdall::lsp

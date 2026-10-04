@@ -55,3 +55,37 @@ TEST(RuleEngineSpec, DoesNotFlagEmptyFilesOrFilesAlreadyEndingInNewline)
     EXPECT_TRUE(heimdall::RuleEngine().Analyze("").empty());
     EXPECT_TRUE(heimdall::RuleEngine().Analyze("int value;\n").empty());
 }
+
+TEST(RuleEngineSpec, SupportsPerRuleSeverityAndDisableOverrides)
+{
+    heimdall::RuleOptions options;
+    options.final_newline = false;
+    options.overrides.push_back({"cpp/no-null", true, heimdall::Severity::Error});
+    auto diagnostics = heimdall::RuleEngine(options).Analyze("auto p = NULL;\n");
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+
+    options.overrides[0].enabled = false;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze("auto p = NULL;\n").empty());
+}
+
+TEST(RuleEngineSpec, SupportsInlineAndNextLineRuleSuppressions)
+{
+    constexpr std::string_view source =
+        "auto first = NULL; // heimdall-disable-line cpp/no-null\n"
+        "// heimdall-disable-next-line cpp/no-null\n"
+        "auto second = NULL;\n"
+        "auto third = NULL;\n";
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].line, 4);
+}
+
+TEST(RuleEngineSpec, ApplyFixesRejectsEditsOutsideTheirDiagnosticRange)
+{
+    heimdall::Diagnostic diagnostic{
+        heimdall::RuleId::NullMacro, heimdall::Severity::Warning, "cpp/no-null", "replace null macro",
+        0, 4, 1, 1, true, {5, 1, "x"}
+    };
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("NULL;", {diagnostic}), "NULL;");
+}

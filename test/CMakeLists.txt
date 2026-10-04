@@ -9,6 +9,7 @@ include(GoogleTest)
 
 add_executable(Tests_run
   src/CompileDatabaseSpec.cpp
+  src/RuleConfigSpec.cpp
   src/CorePolicySpec.cpp
   src/SyntaxTreeSpec.cpp
   src/FormatterSpec.cpp
@@ -26,7 +27,7 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic heimdall::config)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
@@ -67,6 +68,16 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspNavigationSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspNavigationSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspRuleConfigSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspRuleConfigSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspCancelSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspCancelSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
 endif ()

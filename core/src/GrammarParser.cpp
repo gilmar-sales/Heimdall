@@ -5,8 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory_resource>
+#include <stop_token>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace heimdall
@@ -15,7 +17,8 @@ namespace heimdall
     class GrammarParser
     {
     public:
-        GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing) : m_tree(tree)
+        GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop)
+        : m_tree(tree), m_stop(std::move(stop))
         {
             for (const auto & diagnostic: preprocessing.diagnostics)
             {
@@ -121,6 +124,7 @@ namespace heimdall
         std::pmr::monotonic_buffer_resource m_scratch{m_scratch_buffer.data(),
             m_scratch_buffer.size()};
         ParseTree &m_tree;
+        std::stop_token m_stop;
         std::pmr::vector<std::uint32_t> m_sig{&m_scratch};
 
         std::pmr::vector<std::string_view> m_sig_text{&m_scratch};
@@ -2897,10 +2901,27 @@ namespace heimdall
             auto pos = begin;
             while (pos < end)
             {
+                if (m_tree.m_cancelled || m_stop.stop_requested())
+                {
+                    m_tree.m_cancelled = true;
+                    return;
+                }
+
                 const auto start = pos;
                 if (IsDirective(pos))
                 {
                     pos = SkipDirective(pos, end, parent);
+                    continue;
+                }
+
+                // `public:` / `private:` / `protected:` is a label, not a
+                // declaration: parsed as one it would swallow the next member
+                // as a bit-field width and hide it from navigation/completion.
+                if (member_scope && pos + 1 < end && Is(pos + 1, ":") &&
+                    (Is(pos, "public") || Is(pos, "private") || Is(pos, "protected")))
+                {
+                    Add(GrammarKind::AccessSpecifier, pos, pos + 2, parent);
+                    pos += 2;
                     continue;
                 }
 
@@ -3196,9 +3217,10 @@ namespace heimdall
     namespace detail
     {
 
-        void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing)
+        void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
+            std::stop_token stop)
         {
-            GrammarParser parser(tree, preprocessing);
+            GrammarParser parser(tree, preprocessing, std::move(stop));
             parser.Run();
         }
 

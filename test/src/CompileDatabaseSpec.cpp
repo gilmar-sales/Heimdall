@@ -127,3 +127,25 @@ TEST(CompileDatabaseSpec, CommandStringKeepsWindowsPathSeparators)
     EXPECT_EQ(command.defines.at("NAME"), "\"x\"");
     std::filesystem::remove(path);
 }
+
+TEST(CompileDatabaseSpec, ReportsMalformedJsonWithoutThrowing)
+{
+    const auto path = std::filesystem::temp_directory_path() / "heimdall_compile_commands_malformed_test.json";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "[{not-json]";
+    }
+    const auto database = heimdall::CompileDatabase::Load(path);
+    EXPECT_FALSE(database);
+    EXPECT_NE(database.error().find(path.string()), std::string::npos);
+    std::filesystem::remove(path);
+}
+
+TEST(CompileDatabaseSpec, ReportsUnreadableDatabase)
+{
+    const auto path = std::filesystem::temp_directory_path() / "heimdall_missing_compile_commands.json";
+    std::filesystem::remove(path);
+    const auto database = heimdall::CompileDatabase::Load(path);
+    EXPECT_FALSE(database);
+    EXPECT_NE(database.error().find("cannot parse compile database"), std::string::npos);
+}

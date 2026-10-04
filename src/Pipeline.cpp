@@ -9,6 +9,7 @@
 #include <optional>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 
 namespace heimdall::cli
 {
@@ -294,8 +295,8 @@ namespace heimdall::cli
         }
         else
         {
-            result.diagnostics =
-                tree ? heimdall::RuleEngine().Analyze(*tree) : heimdall::RuleEngine().Analyze(source);
+            const heimdall::RuleEngine rule_engine(options.rule_options);
+            result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
             if (options.fix && !result.diagnostics.empty())
             {
                 result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics);

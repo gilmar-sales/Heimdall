@@ -32,6 +32,76 @@ namespace heimdall
                 position.line, position.column, true, std::move(fix)};
         }
 
+        struct Suppression
+        {
+            std::uint32_t line;
+            std::string_view codes;
+        };
+
+        bool Suppresses(std::string_view codes, std::string_view code)
+        {
+            while (!codes.empty())
+            {
+                while (!codes.empty() && (codes.front() == ' ' || codes.front() == '\t' || codes.front() == ','))
+                {
+                    codes.remove_prefix(1);
+                }
+                const auto end = codes.find_first_of(" ,\t");
+                const auto item = codes.substr(0, end);
+                if (item == code || item == "*")
+                {
+                    return true;
+                }
+                if (end == std::string_view::npos)
+                {
+                    break;
+                }
+                codes.remove_prefix(end + 1);
+            }
+            return false;
+        }
+
+        std::vector<Suppression> FindSuppressions(std::string_view source, const std::vector<Token> &tokens,
+            const LineTable &lines)
+        {
+            constexpr std::string_view line_marker = "heimdall-disable-line";
+            constexpr std::string_view next_marker = "heimdall-disable-next-line";
+            std::vector<Suppression> result;
+            for (const auto &token: tokens)
+            {
+                if (token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
+                {
+                    continue;
+                }
+                const auto text = source.substr(token.offset, token.length);
+                auto marker = text.find(next_marker);
+                std::uint32_t target = lines.Lookup(token.offset).line + 1;
+                std::size_t marker_length = next_marker.size();
+                if (marker == std::string_view::npos)
+                {
+                    marker = text.find(line_marker);
+                    target = lines.Lookup(token.offset).line;
+                    marker_length = line_marker.size();
+                }
+                if (marker == std::string_view::npos)
+                {
+                    continue;
+                }
+                std::size_t begin = marker + marker_length;
+                while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\t' || text[begin] == ':' ))
+                {
+                    ++begin;
+                }
+                auto end = text.find("*/", begin);
+                if (end == std::string_view::npos)
+                {
+                    end = text.size();
+                }
+                result.push_back({target, text.substr(begin, end - begin)});
+            }
+            return result;
+        }
+
     } // namespace
 
     std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
@@ -123,6 +193,41 @@ namespace heimdall
             {
                 return a.offset < b.offset;
         });
+
+        for (auto &diagnostic: diagnostics)
+        {
+            for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+            {
+                if (override->code == diagnostic.code)
+                {
+                    diagnostic.severity = override->severity;
+                    break;
+                }
+            }
+        }
+        std::erase_if(diagnostics, [this](const Diagnostic &diagnostic)
+            {
+                for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+                {
+                    if (override->code == diagnostic.code)
+                    {
+                        return !override->enabled;
+                    }
+                }
+                return false;
+            });
+        if (m_options.honor_suppressions && !diagnostics.empty())
+        {
+            const auto suppressions = FindSuppressions(source, tokens, lines);
+            std::erase_if(diagnostics, [&suppressions](const Diagnostic &diagnostic)
+                {
+                    return std::any_of(suppressions.begin(), suppressions.end(), [&diagnostic](const Suppression &s)
+                        {
+                            return s.line == diagnostic.line &&
+                                (s.codes.empty() || Suppresses(s.codes, diagnostic.code));
+                        });
+                });
+        }
         return diagnostics;
     }
 
@@ -148,7 +253,14 @@ namespace heimdall
         std::size_t previous_start = source.size();
         for (const TextEdit * edit: edits)
         {
-            if (edit->offset > source.size() || edit->length > source.size() - edit->offset ||
+            const auto owner = std::find_if(diagnostics.begin(), diagnostics.end(), [edit](const Diagnostic &d)
+                {
+                    return d.has_fix && &d.fix == edit;
+                });
+            if (owner == diagnostics.end() || edit->offset < owner->offset ||
+                edit->offset - owner->offset > owner->length ||
+                edit->length > owner->length - (edit->offset - owner->offset) ||
+                edit->offset > source.size() || edit->length > source.size() - edit->offset ||
                 edit->offset + edit->length > previous_start)
             {
                 continue;

@@ -1,5 +1,5 @@
 # heimdall_semantic: compile database + local type oracle.
-# Depends on heimdall::core. Third-party (Skirnir/simdjson) is PRIVATE:
+# Depends on heimdall::core. simdjson is PRIVATE:
 # it must not leak through public headers (CompileDatabase.hpp and
 # SemanticAnalyzer.hpp are STL + Heimdall only).
 
@@ -19,7 +19,7 @@ target_compile_features(heimdall_semantic PUBLIC cxx_std_26)
 
 target_link_libraries(heimdall_semantic
   PUBLIC heimdall::core
-  PRIVATE skirnir::skirnir simdjson::simdjson
+  PRIVATE simdjson::simdjson
 )
 
 target_precompile_headers(heimdall_semantic PRIVATE

@@ -411,3 +411,44 @@ TEST(ParseTreeSpec, ParsesUsingInsideBodiesAsUsingDeclarationNotAVariable)
     // Only `value` is a declared name: neither `namespace` nor `b` is.
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 2); // `f` and `value`
 }
+
+TEST(ParseTreeSpec, AccessSpecifierIsALabelNotADeclaration)
+{
+    // `private:` used to parse as a declaration whose bit-field width swallowed
+    // the next member, hiding it from navigation and completion.
+    constexpr std::string_view source =
+    "class A {\n"
+    "public:\n"
+    "    void run();\n"
+    "private:\n"
+    "    static int helper(int a) noexcept;\n"
+    "protected:\n"
+    "    int value;\n"
+    "};\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::AccessSpecifier), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::BitfieldSuffix), 0);
+    // Every member is its own declaration with its own declared name.
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 2);
+    std::size_t names = 0;
+    for (const auto& node : tree.Nodes())
+    {
+        if (node.kind != heimdall::GrammarKind::DeclaredName) continue;
+        const auto text = tree.Text(tree.Tokens()[node.first_token]);
+        names += text == "run" || text == "helper" || text == "value";
+    }
+    EXPECT_EQ(names, 3u);
+}
+
+TEST(ParseTreeSpec, ScopeQualifierAndBitfieldAreNotAccessSpecifiers)
+{
+    constexpr std::string_view source =
+    "struct S {\n"
+    "    unsigned flag : 1;\n"
+    "    int x = ns::value;\n"
+    "};\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::AccessSpecifier), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::BitfieldSuffix), 1);
+}

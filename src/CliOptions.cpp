@@ -6,6 +6,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 namespace heimdall::cli
 {
@@ -88,6 +89,42 @@ namespace heimdall::cli
             {
                 options.compile_commands = argv[++i];
             }
+            else if (arg == "--config" && i + 1 < argc)
+            {
+                options.rule_config = argv[++i];
+                options.rule_config_explicit = true;
+            }
+            else if (arg == "--rule" && i + 1 < argc)
+            {
+                const std::string_view value = argv[++i];
+                const auto equal = value.find('=');
+                if (equal == std::string_view::npos || equal == 0)
+                {
+                    std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
+                    return false;
+                }
+                heimdall::RuleOverride override;
+                override.code = value.substr(0, equal);
+                const auto setting = value.substr(equal + 1);
+                if (setting == "off")
+                {
+                    override.enabled = false;
+                }
+                else if (setting == "warning")
+                {
+                    override.severity = heimdall::Severity::Warning;
+                }
+                else if (setting == "error")
+                {
+                    override.severity = heimdall::Severity::Error;
+                }
+                else
+                {
+                    std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
+                    return false;
+                }
+                options.rule_overrides.push_back(std::move(override));
+            }
             else if ((arg == "--std" && i + 1 < argc) ||
                 (arg.starts_with("--std=") && arg.size() > 6))
             {
@@ -160,6 +197,28 @@ namespace heimdall::cli
         {
             std::cerr << "--semantic requires --compile-commands <path>\n";
             return false;
+        }
+
+        if (!options.rule_overrides.empty() && options.command != Command::Lint && options.command != Command::Check)
+        {
+            std::cerr << "--rule is only supported by lint/check\n";
+            return false;
+        }
+
+        if (options.rule_config_explicit && options.command != Command::Lint && options.command != Command::Check)
+        {
+            std::cerr << "--config is only supported by lint/check\n";
+            return false;
+        }
+
+        for (const auto &override: options.rule_overrides)
+        {
+            if (override.code != "cpp/no-null" && override.code != "format/no-trailing-whitespace" &&
+                override.code != "format/require-final-newline")
+            {
+                std::cerr << "unknown rule code: " << override.code << '\n';
+                return false;
+            }
         }
 
         return true;

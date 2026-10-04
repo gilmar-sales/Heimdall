@@ -161,3 +161,21 @@ Detecção confiável de data race e deadlock exige mais que análise local. A R
 - Testar positivos, negativos, código incompleto, macros/diretivas e preservação de CRLF/comentários em autofixes.
 - Permitir configuração, exclusões e supressões locais com validação do código da regra.
 - Preferir nenhum diagnóstico a um diagnóstico sem evidência suficiente; não implementar regras semânticas como buscas textuais frágeis.
+
+## Infraestrutura disponível
+
+A Rule Engine agora também oferece:
+
+- **Overrides por código** via `RuleOptions::overrides`, com habilitação/desabilitação e severidade (`Warning`/`Error`). O último override para o mesmo código prevalece.
+- **CLI**: `heimdall lint --rule cpp/no-null=off arquivo.cpp` desabilita uma regra; `--rule cpp/no-null=error` eleva sua severidade. Os valores aceitos são `off`, `warning` e `error`; códigos desconhecidos são rejeitados. A opção está disponível em `lint` e `check`.
+- **Supressão por comentário**: `// heimdall-disable-line cpp/no-null` suprime o código na linha do comentário; `// heimdall-disable-next-line cpp/no-null` suprime na linha seguinte. Pode-se listar códigos separados por espaço/vírgula ou omitir a lista/usar `*` para suprimir todos os diagnósticos naquela linha.
+- **Validação de autofix**: `ApplyFixes` ignora edições cuja faixa não esteja contida na faixa do diagnóstico, além de rejeitar edições fora do arquivo ou sobrepostas. Não muda a política de quais regras oferecem correções.
+
+Exemplos:
+
+```sh
+heimdall lint --rule cpp/no-null=error src
+heimdall check --rule format/no-trailing-whitespace=off src
+```
+
+Esses mecanismos são infraestrutura; não adicionam regras de lint além das listadas como implementadas acima. Supressões de bloco (`disable`/`enable`) e configuração via arquivo ainda não estão disponíveis.

@@ -1,9 +1,7 @@
 #include <Heimdall/CompileDatabase.hpp>
 
 #include <simdjson.h>
-#include <Skirnir/Configuration/JsonFileSource.hpp>
 
-#include <exception>
 #include <system_error>
 #include <algorithm>
 #include <cctype>
@@ -268,15 +266,13 @@ namespace heimdall
     std::expected<CompileDatabase,
         std::string> CompileDatabase::Load(const std::filesystem::path & path)
     {
-        skr::JsonFileSource json_source(path, -1);
+        simdjson::dom::parser parser;
         simdjson::dom::element document;
-        try
+        const auto parse_error = parser.load(path.string()).get(document);
+        if (parse_error)
         {
-            document = json_source.Load();
-        }
-        catch (const std::exception & error)
-        {
-            return std::unexpected("cannot parse compile database '" + path.string() + "': " + error.what());
+            return std::unexpected("cannot parse compile database '" + path.string() + "': " +
+                std::string(simdjson::error_message(parse_error)));
         }
 
         simdjson::dom::array entries;

@@ -24,6 +24,13 @@ namespace heimdall
         MissingFinalNewline
     };
 
+    struct RuleOverride
+    {
+        std::string code;
+        bool enabled = true;
+        Severity severity = Severity::Warning;
+    };
+
     struct TextEdit
     {
         std::size_t offset;
@@ -50,6 +57,8 @@ namespace heimdall
         bool null_macro = true;
         bool trailing_whitespace = true;
         bool final_newline = true;
+        bool honor_suppressions = true;
+        std::vector<RuleOverride> overrides;
     };
 
     class RuleEngine

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Heimdall/CppStandard.hpp>
+#include <Heimdall/RuleConfig.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -28,6 +29,10 @@ namespace heimdall::cli
         bool std_override = false;
         heimdall::CppStandard standard = heimdall::CppStandard::Cpp20;
         std::filesystem::path compile_commands;
+        std::filesystem::path rule_config;
+        bool rule_config_explicit = false;
+        heimdall::RuleOptions rule_options;
+        std::vector<heimdall::RuleOverride> rule_overrides;
         std::vector<std::filesystem::path> inputs;
     };
 

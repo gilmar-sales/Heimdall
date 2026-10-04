@@ -8,9 +8,12 @@
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
 
+#include <stop_token>
+
 namespace heimdall::detail
 {
 
-    void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing);
+    void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
+        std::stop_token stop);
 
 } // namespace heimdall::detail

@@ -157,7 +157,8 @@ namespace heimdall::cli
 
                     first = false;
                     std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
-                    << ",\"column\":" << diagnostic.column << ",\"severity\":\"warning\",\"code\":\""
+                    << ",\"column\":" << diagnostic.column << ",\"severity\":\""
+                    << severity_name(diagnostic.severity) << "\",\"code\":\""
                     << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
                     << "\"}";
                     has_diagnostics = true;
