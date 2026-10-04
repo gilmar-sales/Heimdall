@@ -1100,6 +1100,37 @@ namespace heimdall
                     ++pos;
                 }
 
+                // `class [[nodiscard]] name`, `struct alignas(8) name`, `__attribute__((...))`.
+                const auto count_of = [&](std::string_view piece, char bracket)
+                {
+                    return !piece.empty() && piece.find_first_not_of(bracket) == std::string_view::npos
+                        ? static_cast<int>(piece.size())
+                        : 0;
+                };
+                while (pos < significant.size())
+                {
+                    const std::string_view lead = text(significant[pos]);
+                    const bool call = (lead == "alignas" || lead == "__attribute__" || lead == "__declspec") &&
+                        pos + 1 < significant.size() && text(significant[pos + 1]) == "(";
+                    if (!call && count_of(lead, '[') == 0)
+                    {
+                        break;
+                    }
+
+                    int depth = 0;
+                    for (; pos < significant.size(); ++pos)
+                    {
+                        const std::string_view piece = text(significant[pos]);
+                        depth += call ? (piece == "(" ? 1 : piece == ")" ? -1 : 0)
+                                      : count_of(piece, '[') - count_of(piece, ']');
+                        if (depth <= 0 && (call ? piece == ")" : count_of(piece, ']') > 0))
+                        {
+                            ++pos;
+                            break;
+                        }
+                    }
+                }
+
                 if (pos < significant.size() && is_identifier(significant[pos]))
                 {
                     return {std::string(text(significant[pos]))};
@@ -2234,6 +2265,84 @@ namespace heimdall
             return {};
         }
 
+        // `template <class T, int N = 3, typename... Ts> struct R {...}`: T, N, Ts.
+        // Empty when the record is not directly wrapped in a template declaration.
+        std::vector<std::string> TemplateParamNames(const ParseTree &tree, std::size_t record)
+        {
+            std::vector<std::string> names;
+            const auto &nodes = tree.NodesSoA();
+            const std::size_t wrapper = nodes.Parent(record);
+            if (wrapper >= nodes.size() || nodes.Kind(wrapper) != GrammarKind::TemplateDeclaration)
+            {
+                return names;
+            }
+
+            const auto &tokens = tree.Tokens();
+            const std::size_t end = std::min<std::size_t>(nodes.FirstToken(wrapper) + nodes.TokenCount(wrapper), tokens.size());
+            const auto text = [&](std::size_t i)
+            {
+                return tree.Text(tokens[i]);
+            };
+            std::size_t i = nodes.FirstToken(wrapper);
+            while (i < end && text(i) != "<")
+            {
+                ++i;
+            }
+
+            int depth = 0;
+            bool defaulted = false;
+            std::string last;
+            for (; i < end; ++i)
+            {
+                const TokenKind kind = tokens[i].kind;
+                if (kind == TokenKind::Whitespace || kind == TokenKind::LineComment || kind == TokenKind::BlockComment)
+                {
+                    continue;
+                }
+
+                const std::string_view piece = text(i);
+                if (piece == "<" || piece == "(" || piece == "[" || piece == "{")
+                {
+                    ++depth;
+                    continue;
+                }
+
+                const bool closing = piece == ">" || piece == ")" || piece == "]" || piece == "}";
+                if (closing && --depth > 0)
+                {
+                    continue;
+                }
+
+                if (piece == "," && depth == 1 || (closing && depth == 0))
+                {
+                    if (!last.empty())
+                    {
+                        names.push_back(std::move(last));
+                    }
+
+                    last.clear();
+                    defaulted = false;
+                    if (closing)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
+                if (piece == "=" && depth == 1)
+                {
+                    defaulted = true;
+                }
+                else if (depth == 1 && !defaulted && kind == TokenKind::Identifier)
+                {
+                    last = std::string(piece);
+                }
+            }
+
+            return names;
+        }
+
         // Base classes of a record node as written (`ns::Base`, args dropped).
         std::vector<std::string> RecordBases(const ParseTree &tree, std::size_t node)
         {
@@ -2950,12 +3059,18 @@ namespace heimdall
             }
 
             auto bases = RecordBases(tree, n);
-            if (bases.empty())
+            auto params = TemplateParamNames(tree, n);
+            if (bases.empty() && params.empty())
             {
                 continue;
             }
 
             IndexedScope &entry = entry_for(scope_paths[n], CompletionKind::Type);
+            if (entry.template_params.empty())
+            {
+                entry.template_params = std::move(params);
+            }
+
             for (auto & base: bases)
             {
                 if (std::find(entry.bases.begin(), entry.bases.end(), base) == entry.bases.end())
@@ -3771,7 +3886,7 @@ namespace heimdall
         // Wrappers whose `->` reaches the first template argument.
         bool IsPointerLike(std::string_view name)
         {
-            static constexpr std::string_view names[] = {"unique_ptr", "shared_ptr", "optional",
+            static constexpr std::string_view names[] = {"unique_ptr", "shared_ptr", "optional", "expected",
                 "auto_ptr", "scoped_ptr", "intrusive_ptr", "weak_ptr_lock", "reference_wrapper"};
             return std::find(std::begin(names), std::end(names), name) != std::end(names);
         }
@@ -3803,6 +3918,10 @@ namespace heimdall
         {
             std::vector<std::string> path;
             std::vector<std::string> args;
+            // Scope the type was written in: `args` are spelled relative to it.
+            std::vector<std::string> hint;
+            // The type as written, when it came from a declaration (`const T&`).
+            std::string text;
             bool ok = false;
         };
 
@@ -3844,10 +3963,16 @@ namespace heimdall
                 std::vector<ChainSegment> reversed;
                 std::vector<std::string> ops_reversed{op_text};
                 std::size_t pos = PreviousSignificant(m_tokens, op, m_source);
+                // `(expr).m` / `(*p)->m`: the receiver starts with a parenthesized
+                // group, parsed as a chain of its own and spliced in front.
+                Chain group;
+                bool grouped = false;
                 while (true)
                 {
                     ChainSegment segment;
                     std::string post_reversed;
+                    std::size_t group_open = m_tokens.size();
+                    std::size_t group_close = m_tokens.size();
                     while (pos < m_tokens.size() && m_tokens[pos].kind == TokenKind::Punctuation)
                     {
                         const std::string_view p = TokenText(m_source, m_tokens[pos]);
@@ -3863,6 +3988,8 @@ namespace heimdall
                         }
 
                         post_reversed += p == "]" ? '[' : '(';
+                        group_open = open;
+                        group_close = pos;
                         pos = PreviousSignificant(m_tokens, open, m_source);
                         // `f<T>(...)`: keep the template arguments.
                         if (post_reversed.back() == '(' && pos < m_tokens.size() &&
@@ -3883,7 +4010,39 @@ namespace heimdall
 
                     if (pos >= m_tokens.size() || m_tokens[pos].kind != TokenKind::Identifier)
                     {
-                        return chain;
+                        if (post_reversed != "(" || group_open >= m_tokens.size() ||
+                            !IsPunct(group_close, ")"))
+                        {
+                            return chain;
+                        }
+
+                        group = ParseReceiver(group_close);
+                        if (!group.ok || group.segments.empty())
+                        {
+                            return chain;
+                        }
+
+                        // The group must be exactly `(` [`*`] chain `)`.
+                        std::size_t head = PreviousSignificant(m_tokens, group.head_token, m_source);
+                        const bool star = head < m_tokens.size() && IsPunct(head, "*");
+                        if (star)
+                        {
+                            head = PreviousSignificant(m_tokens, head, m_source);
+                        }
+
+                        if (head != group_open)
+                        {
+                            return chain;
+                        }
+
+                        if (star)
+                        {
+                            group.ops.back() = "->"; // `(*p)`: through the pointer-like
+                        }
+
+                        chain.head_token = group_open;
+                        grouped = true;
+                        break;
                     }
 
                     segment.name = std::string(TokenText(m_source, m_tokens[pos]));
@@ -3924,132 +4083,55 @@ namespace heimdall
 
                 chain.segments.assign(reversed.rbegin(), reversed.rend());
                 chain.ops.assign(ops_reversed.rbegin(), ops_reversed.rend());
+                if (grouped)
+                {
+                    // The group's last segment is followed by the operator that follows
+                    // the group, unless a `*` already forced a dereference.
+                    const std::string following = chain.ops.front();
+                    group.ops.back() = group.ops.back() == "->" ? "->" : following;
+                    chain.segments.insert(chain.segments.begin(), group.segments.begin(), group.segments.end());
+                    chain.ops.erase(chain.ops.begin());
+                    chain.ops.insert(chain.ops.begin(), group.ops.begin(), group.ops.end());
+                }
+
                 chain.ok = true;
                 return chain;
             }
 
-            // Type written for the initializer of the `auto` variable named at token
-            // `name`, when the initializer is a lone call: `= ns::f(...)` or
-            // `{ns::f(...)}`. A function found in this file or its includes yields its
-            // return type; a type yields its own name. Empty when unknown.
+            // Type spelled for the `auto` variable named at token `name`: the declared
+            // type of the last call or member of its initializer chain
+            // (`= a.b().c()`), or the name of a type it constructs. Empty when unknown.
             std::string DeducedTypeText(std::size_t name) const
             {
-                const auto next = [&](std::size_t i)
+                const Resolved value = ResolveInitializerAfter(name, 0);
+                if (!value.text.empty())
                 {
-                    ++i;
-                    while (i < m_tokens.size() && IsTrivia(m_tokens[i].kind))
-                    {
-                        ++i;
-                    }
+                    return value.text;
+                }
 
-                    return i;
-                };
-                const auto text = [&](std::size_t i)
-                {
-                    return i < m_tokens.size() ? TokenText(m_source, m_tokens[i]) : std::string_view {};
-                };
-
-                std::size_t t = next(name);
-                const std::string_view open = text(t);
-                if (open != "=" && open != "{")
+                if (!value.ok)
                 {
                     return {};
                 }
 
-                t = next(t);
-                if (text(t) == "::")
+                std::string written;
+                for (const auto & part: value.path)
                 {
-                    t = next(t);
+                    written += written.empty() ? part : "::" + part;
                 }
 
-                std::vector<std::string> qualifier;
-                std::string function;
-                while (t < m_tokens.size() && m_tokens[t].kind == TokenKind::Identifier)
+                if (!value.args.empty())
                 {
-                    std::string word(text(t));
-                    t = next(t);
-                    if (text(t) == "::")
+                    written += "<";
+                    for (std::size_t i = 0; i < value.args.size(); ++i)
                     {
-                        qualifier.push_back(std::move(word));
-                        t = next(t);
-                        continue;
+                        written += (i == 0 ? "" : ", ") + value.args[i];
                     }
 
-                    function = std::move(word);
-                    break;
+                    written += ">";
                 }
 
-                if (function.empty() || text(t) != "(")
-                {
-                    return {};
-                }
-
-                int depth = 0;
-                for (; t < m_tokens.size(); t = next(t))
-                {
-                    const std::string_view p = text(t);
-                    if (p == "(")
-                    {
-                        ++depth;
-                    }
-                    else if (p == ")" && --depth == 0)
-                    {
-                        break;
-                    }
-                }
-
-                t = next(t); // past `)`
-                if (open == "{")
-                {
-                    if (text(t) != "}")
-                    {
-                        return {};
-                    }
-
-                    t = next(t);
-                }
-
-                if (t >= m_tokens.size() || text(t) != ";")
-                {
-                    return {};
-                }
-
-                std::vector<std::vector<std::string>> scopes;
-                for (const auto & record: m_records)
-                {
-                    scopes.push_back(record);
-                }
-
-                for (const auto & prefix: Prefixes(m_hint))
-                {
-                    scopes.push_back(Join(prefix, qualifier));
-                }
-
-                for (const auto & scope: scopes)
-                {
-                    std::unordered_set<std::string> visited;
-                    const Found found = FindDeep(scope, function, CompletionKind::Function, visited, 0);
-                    if (found.item != nullptr && !found.item->type_text.empty())
-                    {
-                        return found.item->type_text;
-                    }
-                }
-
-                TypeName type;
-                type.path = Join(qualifier, {function});
-                type.ok = true;
-                if (ResolveType(type, m_hint, 0).ok)
-                {
-                    std::string written;
-                    for (const auto & part: qualifier)
-                    {
-                        written += part + "::";
-                    }
-
-                    return written + function;
-                }
-
-                return {};
+                return written;
             }
 
             Resolved ResolveChain(const Chain &chain, int depth = 0) const
@@ -4068,7 +4150,10 @@ namespace heimdall
                     : ResolveMember(current, segment, depth);
                     if (!next.ok)
                     {
-                        return {};
+                        // The last member may be a type the index does not hold
+                        // (`std::expected<...>` without its header): keep its spelling
+                        // for hover; `ok` stays false, so nothing is completed from it.
+                        return i + 1 == chain.segments.size() && !next.text.empty() ? next : Resolved {};
                     }
 
                     current = std::move(next);
@@ -4398,6 +4483,7 @@ namespace heimdall
             {
                 constexpr int kMaxTypeResolveDepth = 8;
                 Resolved out;
+                out.hint = hint;
                 if (!type.ok || depth > kMaxTypeResolveDepth)
                 {
                     return out;
@@ -4425,6 +4511,7 @@ namespace heimdall
                             if (via.args.empty())
                             {
                                 via.args = type.args;
+                                via.hint = hint;
                             }
 
                             return via;
@@ -4454,7 +4541,9 @@ namespace heimdall
 
             Resolved FromText(std::string_view text, const std::vector<std::string> & hint, int depth) const
             {
-                return ResolveType(ParseTypeName(text), hint, depth);
+                Resolved resolved = ResolveType(ParseTypeName(text), hint, depth);
+                resolved.text = std::string(text);
+                return resolved;
             }
 
             Resolved Dereference(Resolved value, const std::string & op) const
@@ -4464,7 +4553,7 @@ namespace heimdall
                     return value;
                 }
 
-                return FromText(value.args.front(), m_hint, 0);
+                return FromText(value.args.front(), value.hint.empty() ? m_hint : value.hint, 0);
             }
 
             // Declared type of the variable `name` as visible at the cursor.
@@ -4550,8 +4639,14 @@ namespace heimdall
                     return ResolveType(type, m_hint, 0);
                 }
 
-                // `auto x = <chain>;` / `auto x{<chain>}`: type the initializer.
-                std::size_t t = m_tree.NodesSoA().FirstToken(node) + 1;
+                return ResolveInitializerAfter(m_tree.NodesSoA().FirstToken(node), depth);
+            }
+
+            // `auto x = <chain>;` / `auto x{<chain>}`: type the initializer that
+            // follows the declared name at token `name`.
+            Resolved ResolveInitializerAfter(std::size_t name, int depth) const
+            {
+                std::size_t t = name + 1;
                 while (t < m_tokens.size() && (IsTrivia(m_tokens[t].kind)))
                 {
                     ++t;
@@ -4704,6 +4799,14 @@ namespace heimdall
                     return pointer;
                 }
 
+                // `static_cast<T>(x)` and friends are a `T`.
+                if ((segment.name == "static_cast" || segment.name == "dynamic_cast" ||
+                        segment.name == "const_cast" || segment.name == "reinterpret_cast") &&
+                    segment.qualifier.empty() && segment.targs.size() == 1)
+                {
+                    return FromText(segment.targs.front(), m_hint, 0);
+                }
+
                 // Construction: `Type(...)`, `ns::Type{...}`.
                 TypeName type;
                 type.path = Join(segment.qualifier, {segment.name});
@@ -4754,6 +4857,33 @@ namespace heimdall
                     return {};
                 }
 
+                // `T& value()` of `expected<Item, E>`: the member is the argument written
+                // for `T` (only a bare parameter, with its `const`, `&` and `*`).
+                if (found.owner == owner.path)
+                {
+                    std::string_view bare = found.item->type_text;
+                    while (!bare.empty() && (bare.back() == '&' || bare.back() == '*' || bare.back() == ' '))
+                    {
+                        bare.remove_suffix(1);
+                    }
+
+                    if (bare.starts_with("const "))
+                    {
+                        bare.remove_prefix(6);
+                    }
+
+                    for (const IndexedScope * scope: ScopesAt(found.owner))
+                    {
+                        const auto param = std::find(scope->template_params.begin(), scope->template_params.end(), bare);
+                        const auto index = static_cast<std::size_t>(param - scope->template_params.begin());
+                        if (param != scope->template_params.end() && index < owner.args.size())
+                        {
+                            return ApplyPostfix(
+                                FromText(owner.args[index], owner.hint.empty() ? m_hint : owner.hint, 0), rest);
+                        }
+                    }
+                }
+
                 return ApplyPostfix(FromText(found.item->type_text, found.owner, 0), rest);
             }
 
@@ -4779,7 +4909,7 @@ namespace heimdall
                         return {};
                     }
 
-                    value = FromText(value.args[which], m_hint, 0);
+                    value = FromText(value.args[which], value.hint.empty() ? m_hint : value.hint, 0);
                 }
 
                 return value;

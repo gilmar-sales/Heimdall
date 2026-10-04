@@ -162,6 +162,7 @@ namespace heimdall::lsp
         static std::stop_token CurrentStop();
         static bool RequestCancelled();
         void RespondCancelled(std::string_view id);
+        void RespondInternalError(std::string_view id);
         bool IsCurrentVersion(const std::string & uri, std::int64_t version);
 
         static thread_local const RequestContext * t_context;
@@ -223,7 +224,7 @@ namespace heimdall::lsp
 
         struct ParseSlot
         {
-            std::once_flag once;
+            std::mutex mu;
             std::shared_ptr<const heimdall::ParseTree> tree;
             // Set (release) once `tree` is filled, so other threads can peek without call_once.
             std::atomic<bool> ready{false};

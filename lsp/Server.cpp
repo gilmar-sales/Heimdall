@@ -113,6 +113,10 @@ namespace heimdall::lsp
             const bool has_id =!object["id"].get(id);
             std::string id_json = has_id ? simdjson::minify(id) : "null";
 
+            // A handler that throws on the I/O thread (bad_alloc, filesystem_error,
+            // ...) must not unwind out of Run and end the session.
+            try
+            {
             if (method == "initialize")
             {
                 LoadInitializationOptions(request);
@@ -222,6 +226,14 @@ namespace heimdall::lsp
             {
                 Respond(id_json, "null");
             }
+            }
+            catch (...)
+            {
+                if (has_id)
+                {
+                    RespondInternalError(id_json);
+                }
+            }
         }
 
         stop_workers();
@@ -284,7 +296,16 @@ namespace heimdall::lsp
             }
 
                 t_context = context.get();
-                handler(element, id);
+                try
+                {
+                    handler(element, id);
+                }
+                catch (...)
+                {
+                    // Answer anyway: a request that never gets a response leaves
+                    // the client waiting on a server that looks hung.
+                    RespondInternalError(id);
+                }
         }));
     }
 
@@ -335,6 +356,12 @@ namespace heimdall::lsp
         // LSP RequestCancelled.
         Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
             ",\"error\":{\"code\":-32800,\"message\":\"Request cancelled\"}}");
+    }
+
+    void LanguageServer::RespondInternalError(std::string_view id)
+    {
+        Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
+            ",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}");
     }
 
     void LanguageServer::LoadInitializationOptions(simdjson::dom::element request)
@@ -1665,26 +1692,30 @@ namespace heimdall::lsp
                     lexed = found->second.tokens;
                 }
             }
-            std::call_once(slot->once,[&]
+            // A plain mutex instead of std::call_once: call_once's behaviour when
+            // the initializer throws (a cancelled parse) is unreliable on some
+            // standard libraries and can leave later callers stuck forever.
+            const std::lock_guard<std::mutex> slot_lock(slot->mu);
+            if (!slot->ready.load(std::memory_order_acquire))
+            {
+                heimdall::ParseReuse reuse;
+                if (base)
                 {
-                    heimdall::ParseReuse reuse;
-                    if (base)
-                    {
-                        reuse = {base.get(), base_edit.offset, base_edit.old_length, base_edit.new_length};
+                    reuse = {base.get(), base_edit.offset, base_edit.old_length, base_edit.new_length};
                 }
 
-                    auto tree = std::make_shared<heimdall::ParseTree>(
+                auto tree = std::make_shared<heimdall::ParseTree>(
                     heimdall::ParseTree::Parse(*text, options, stop, lexed.get(),
                     base ? &reuse : nullptr));
-                    if (tree->Cancelled())
-                    {
-                        throw ParseCancelled{};
+                if (tree->Cancelled())
+                {
+                    throw ParseCancelled{};
                 }
 
-                    tree->HoldSource(text);
-                    slot->tree = std::move(tree);
-                    slot->ready.store(true, std::memory_order_release);
-            });
+                tree->HoldSource(text);
+                slot->tree = std::move(tree);
+                slot->ready.store(true, std::memory_order_release);
+            }
         }
         catch (const ParseCancelled &)
         {
@@ -1907,12 +1938,26 @@ namespace heimdall::lsp
                 job = std::move(m_index_queue.front());
                 m_index_queue.pop_front();
             }
-            auto built =
-                std::make_shared<const heimdall::IncludeIndex>(heimdall::IncludeIndex::Build(job.headers,
-                job.command));
+            std::shared_ptr<const heimdall::IncludeIndex> built;
+            try
+            {
+                built = std::make_shared<const heimdall::IncludeIndex>(
+                    heimdall::IncludeIndex::Build(job.headers, job.command));
+            }
+            catch (...)
+            {
+                // An exception escaping a jthread is std::terminate: it would kill
+                // the whole server. Drop the job but release the pending mark, or
+                // this key would stay "building" forever.
+            }
             {
                 const std::lock_guard<std::mutex> lock(m_index_cache_mu);
                 m_index_pending.erase(job.key);
+                if (!built)
+                {
+                    continue;
+                }
+
                 // LRU eviction: the global index used to grow without bounds.
                 if (!m_global_indices.contains(job.key) && m_global_indices.size() >= kMaxGlobalIndices &&
                     !m_lru.empty())
@@ -2080,7 +2125,16 @@ namespace heimdall::lsp
                             t_context = nullptr;
                         }
                     } scope(job_stop);
-                    PublishDiagnostics(job.uri, std::move(text), version);
+                    try
+                    {
+                        PublishDiagnostics(job.uri, std::move(text), version);
+                    }
+                    catch (...)
+                    {
+                        // Must not escape the jthread (std::terminate), and the
+                        // busy flag below must be cleared or FlushDiagnostics
+                        // (shutdown) waits forever.
+                    }
                 }
 
                 const std::lock_guard<std::mutex> lock(m_diag_mu);

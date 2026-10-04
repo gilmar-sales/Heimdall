@@ -61,6 +61,8 @@ namespace heimdall
         // Base classes of a record scope as written (`ns::Base`, template
         // arguments dropped); member access walks them for inherited members.
         std::vector<std::string> bases;
+        // Template parameter names of a record template (`T`, `E` for `expected<T, E>`).
+        std::vector<std::string> template_params;
     };
 
     using ScopeIndex = std::vector<IndexedScope>;

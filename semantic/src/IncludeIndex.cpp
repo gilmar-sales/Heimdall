@@ -1152,7 +1152,15 @@ namespace heimdall
                                     continue;
                             }
 
-                                per_header[h] = CompletionEngine::IndexScopes(content, options);
+                                // An exception escaping a worker thread is std::terminate.
+                                try
+                                {
+                                    per_header[h] = CompletionEngine::IndexScopes(content, options);
+                                }
+                                catch (...)
+                                {
+                                    per_header[h] = {};
+                                }
                         }
                     });
                 }

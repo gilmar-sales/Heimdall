@@ -29,6 +29,7 @@ add_executable(Tests_run
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
   src/DocumentSpec.cpp
+  src/ThreadPoolSpec.cpp
   src/IncludeIndexSpec.cpp
   src/IncludeAnalyzerSpec.cpp
   src/ProjectRulesSpec.cpp
@@ -81,6 +82,11 @@ if (Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspProtocolSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>" "${PROJECT_BINARY_DIR}/compile_commands.json"
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
+  )
+  add_test(
+    NAME LspStressSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspStressSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
     NAME LspNavigationSmoke

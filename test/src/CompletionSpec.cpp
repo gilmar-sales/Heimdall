@@ -917,3 +917,151 @@ TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
     EXPECT_EQ(detail("made"), "lib::Config");
     EXPECT_EQ(detail("unknown"), "auto");
 }
+
+TEST(CompletionSpec, MemberAccessOnAutoFromAHeaderFunctionReturningAStdType)
+{
+    const heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(
+        "namespace std {\n"
+        "template<class T, class E> class expected { public: bool has_value() const; T& value(); E& error(); T* operator->(); };\n"
+        "class string {};\n"
+        "}\n"
+        "namespace heimdall {\n"
+        "struct RuleConfiguration { bool root; };\n"
+        "std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const char *path);\n"
+        "}\n", {});
+    const std::string body = "void run() {\n    auto loaded = heimdall::LoadRuleConfiguration(\"x\");\n    loaded.|\n}\n";
+    const auto dot = MemberLabels(body, &index);
+    EXPECT_TRUE(Has(dot, "has_value"));
+    EXPECT_TRUE(Has(dot, "value"));
+    const auto inside = MemberLabels("namespace heimdall {\n" + body + "}\n", &index);
+    EXPECT_TRUE(Has(inside, "has_value"));
+    // `->` reaches the held value.
+    EXPECT_TRUE(Has(MemberLabels("void run() {\n    auto loaded = heimdall::LoadRuleConfiguration(\"x\");\n    loaded->|\n}\n", &index), "root"));
+}
+
+TEST(CompletionSpec, IndexesRecordsWithAttributesBetweenKeywordAndName)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace std {\n"
+        "template<class T, class E> class expected;\n"
+        "template<class T, class E>\n"
+        "  class [[nodiscard]] expected { public: bool has_value() const; };\n"
+        "struct [[deprecated(\"x\")]] Old { int a; };\n"
+        "class alignas(8) Aligned { public: int b; };\n"
+        "}\n", {});
+    const auto members = [&](const std::vector<std::string> &path)
+    {
+        std::vector<std::string> labels;
+        for (const auto &scope: index)
+        {
+            if (scope.path == path)
+            {
+                for (const auto &member: scope.members)
+                {
+                    labels.push_back(member.label);
+                }
+            }
+        }
+
+        return labels;
+    };
+    EXPECT_TRUE(Has(members({"std", "expected"}), "has_value"));
+    EXPECT_TRUE(Has(members({"std", "Old"}), "a"));
+    EXPECT_TRUE(Has(members({"std", "Aligned"}), "b"));
+}
+
+namespace
+{
+
+    const heimdall::ScopeIndex &ChainIndex()
+    {
+        static const heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(
+            "namespace std {\n"
+            "template<class T, class E> class expected { public: bool has_value() const; T& value(); E& error(); T* operator->(); };\n"
+            "template<class T> class vector { public: T& front(); unsigned size() const; };\n"
+            "class string { public: unsigned length() const; };\n"
+            "}\n"
+            "namespace lib {\n"
+            "struct Item { int id; std::string name() const; };\n"
+            "struct Repo { std::vector<Item> items(); Item& first(); static Repo& instance();\n"
+            "              std::expected<Item, std::string> find(int); };\n"
+            "Repo& GetRepo();\n"
+            "Repo MakeRepo(int);\n"
+            "}\n", {});
+        return index;
+    }
+
+    // `statement` declares `a` inside a function; returns what `a.` completes to and how `a` hovers.
+    std::pair<std::vector<std::string>, std::string> AutoChain(const std::string &statement)
+    {
+        const std::string source = "void run() {\n    " + statement + "\n    a.\n}\n";
+        const auto cursor = source.find("a.\n}") + 2;
+        std::vector<std::string> labels;
+        for (const auto &item: heimdall::CompletionEngine::Complete(source, {}, cursor, &ChainIndex()))
+        {
+            labels.push_back(item.label);
+        }
+
+        const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find("a =") , &ChainIndex());
+        return {labels, hover.has_value() ? hover->detail : std::string("<none>")};
+    }
+
+} // namespace
+
+TEST(CompletionSpec, AutoFollowsChainedCallsForCompletionAndHover)
+{
+    const auto first = AutoChain("auto a = lib::GetRepo().first();");
+    EXPECT_TRUE(Has(first.first, "name"));
+    EXPECT_EQ(first.second, "Item");
+
+    const auto nested = AutoChain("auto a = lib::MakeRepo(2).first().name();");
+    EXPECT_TRUE(Has(nested.first, "length"));
+    EXPECT_EQ(nested.second, "std::string");
+
+    const auto statics = AutoChain("auto a = lib::Repo::instance().first();");
+    EXPECT_TRUE(Has(statics.first, "id"));
+    EXPECT_EQ(statics.second, "Item");
+
+    const auto variable = AutoChain("lib::Repo r; auto a = r.find(1)->name();");
+    EXPECT_TRUE(Has(variable.first, "length"));
+    EXPECT_EQ(variable.second, "std::string");
+
+    const auto through_auto = AutoChain("auto r = lib::GetRepo(); auto b = r.first(); auto a = b.name();");
+    EXPECT_TRUE(Has(through_auto.first, "length"));
+    EXPECT_EQ(through_auto.second, "std::string");
+}
+
+TEST(CompletionSpec, AutoChainsSubstituteTheTemplateArgumentsOfTheReceiver)
+{
+    const auto value = AutoChain("auto a = lib::GetRepo().find(1).value();");
+    EXPECT_TRUE(Has(value.first, "id"));
+    EXPECT_EQ(value.second, "Item");
+
+    const auto front = AutoChain("lib::Repo r; auto a = r.items().front();");
+    EXPECT_TRUE(Has(front.first, "name"));
+    EXPECT_EQ(front.second, "Item");
+
+    const auto expected = AutoChain("auto a = lib::GetRepo().find(1);");
+    EXPECT_TRUE(Has(expected.first, "has_value"));
+    EXPECT_EQ(expected.second, "std::expected<Item, std::string>");
+}
+
+TEST(CompletionSpec, AutoChainsThroughParenthesesDereferencesAndNamedCasts)
+{
+    EXPECT_TRUE(Has(AutoChain("auto a = (lib::GetRepo()).first();").first, "name"));
+    EXPECT_EQ(AutoChain("auto a = (lib::GetRepo()).first();").second, "Item");
+    EXPECT_TRUE(Has(AutoChain("auto a = ((lib::GetRepo())).first();").first, "name"));
+    EXPECT_TRUE(Has(AutoChain("auto a = (lib::GetRepo().first()).name();").first, "length"));
+    EXPECT_TRUE(Has(AutoChain("std::vector<lib::Item> v; auto a = (v.front()).name();").first, "length"));
+    // `(*p)` goes through a pointer-like; `(p)->` too.
+    EXPECT_TRUE(Has(AutoChain("std::expected<lib::Item, std::string> p = lib::GetRepo().find(1);"
+        " auto a = (*p).name();").first, "length"));
+    EXPECT_TRUE(Has(AutoChain("std::expected<lib::Item, std::string> p = lib::GetRepo().find(1);"
+        " auto a = (p)->name();").first, "length"));
+    EXPECT_TRUE(Has(AutoChain("lib::Repo* r; auto a = (*r).first();").first, "name"));
+    EXPECT_TRUE(Has(AutoChain("auto a = static_cast<lib::Repo&>(lib::GetRepo()).first();").first, "name"));
+    EXPECT_EQ(AutoChain("auto a = static_cast<lib::Repo&>(lib::GetRepo()).first();").second, "Item");
+    EXPECT_TRUE(Has(AutoChain("void* v; auto a = reinterpret_cast<lib::Item*>(v)->name();").first, "length"));
+    // Not a plain receiver: stays unresolved rather than guessing.
+    EXPECT_TRUE(AutoChain("int x; auto a = (x + 1).first();").first.empty());
+}
