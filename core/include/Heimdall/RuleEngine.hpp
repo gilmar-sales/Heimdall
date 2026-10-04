@@ -40,7 +40,9 @@ namespace heimdall
         ModernizeRangeLoop,
         ModernizeLoopConvert,
         IncludeWhatYouUse,
-        ModernizeFinal
+        ModernizeFinal,
+        ModernizeConst,
+        ModernizeConstexpr
     };
 
     struct RuleOverride

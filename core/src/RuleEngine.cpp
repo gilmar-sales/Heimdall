@@ -580,6 +580,10 @@ namespace heimdall
                 "semântica", false, "name used from a header that is only included transitively"},
             {RuleId::ModernizeFinal, "cpp/modernize-final", "cpp", Severity::Warning,
                 "semântica", true, "class or virtual function that nothing can derive from or override"},
+            {RuleId::ModernizeConst, "cpp/modernize-const", "cpp", Severity::Warning,
+                "semântica", true, "local variable that is never modified and could be const"},
+            {RuleId::ModernizeConstexpr, "cpp/modernize-constexpr", "cpp", Severity::Warning,
+                "semântica", true, "variable or function that could be constexpr"},
         };
         return catalog;
     }

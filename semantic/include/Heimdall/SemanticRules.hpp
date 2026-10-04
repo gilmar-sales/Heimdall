@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/FlowModel.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticModel.hpp>
@@ -67,6 +68,25 @@ namespace heimdall
         // over a standard container whose body only uses `*it` and `it->`. The fix
         // (quick fix only) writes the range-based for.
         static std::vector<Diagnostic> AnalyzeLoopConvert(const TypeModel &types);
+
+        // cpp/modernize-const: a local variable declared with an initializer that
+        // nothing ever writes, modifies or lets escape (F4 def-use). Reports values
+        // and class objects of known type; references, pointers, parameters, loop
+        // variables and anything with a constant initializer (which is
+        // cpp/modernize-constexpr's) stay out. A class object is only counted as
+        // untouched when every use is a read or a call to a member known to be const,
+        // and returning it by name counts as a use that `const` would pessimize.
+        // The fix (quick fix only) writes `const` before the type.
+        static std::vector<Diagnostic> AnalyzeConst(const FlowModel &flow);
+
+        // cpp/modernize-constexpr: `const T x = c;` whose initializer is a constant
+        // expression (replace `const`), a local `T x = c;` that nothing modifies (add
+        // `constexpr`), and a function that is internal (static, anonymous namespace),
+        // inline or a static member, takes and returns literal types and whose body
+        // only does things a constant evaluator accepts (F4 CFG). Everything the
+        // engine cannot see (a callee, a global, a macro) keeps the rule silent. The fix
+        // is a quick fix only.
+        static std::vector<Diagnostic> AnalyzeConstexpr(const FlowModel &flow);
 
         // cpp/include-what-you-use: a name the file uses whose declaration comes
         // from a header the file only reaches through another include (a project

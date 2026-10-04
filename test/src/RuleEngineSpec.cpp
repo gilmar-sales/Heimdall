@@ -429,7 +429,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto & catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 21);
+    ASSERT_EQ(catalog.size(), 23);
     for (const auto & info: catalog)
     {
         EXPECT_FALSE(info.code.empty());

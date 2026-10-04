@@ -17,6 +17,9 @@ add_library(heimdall_semantic STATIC
   src/ProjectIndex.cpp
   src/IncludeWhatYouUse.cpp
   src/ModernizeFinal.cpp
+  src/Flow.cpp
+  src/ConstantAnalysis.cpp
+  src/ModernizeConst.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
 

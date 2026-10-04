@@ -127,6 +127,20 @@
             "error"
           ]
         },
+        "cpp/modernize-const": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-constexpr": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "cpp/no-unused-include": {
           "enum": [
             "off",
