@@ -1,265 +1,188 @@
-name: release
-
-# Builds heimdall + heimdall-lsp for every supported platform, zips the
-# binaries, and publishes them as a GitHub Release that the VS Code extension
-# downloads from at runtime (see vscode-extension/src/serverInstall.ts).
-#
-# Asset naming (must stay in sync with serverInstall.ts:getServerAssetName):
-#   heimdall-win32-x64.zip
-#   heimdall-linux-x64.zip
-#   heimdall-darwin-arm64.zip
-#   heimdall-darwin-x64.zip
-#
-# How to cut a release:
-#   1. Bump "version" in vscode-extension/package.json (single source of truth).
-#   2. Commit, then tag:  git tag v<version> && git push origin v<version>
-#   3. This workflow builds, attaches the zips + checksums + .vsix to the
-#      release, and optionally publishes to the Marketplace when the VSCE_PAT
-#      secret is configured.
-#
-# The build matrix also runs on pull requests (without publishing) so broken
-# platform builds are caught before merging.
+name: Release Build
 
 on:
   push:
     tags:
-      - "v*.*.*"
-  pull_request:
+      - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version label for manually packaged zips (e.g. 0.3.1)"
-        required: false
-        default: ""
-
-permissions:
-  contents: write
 
 jobs:
   build:
-    name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
+
       matrix:
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
         include:
-          - target: win32-x64
-            os: windows-latest
-            exe: .exe
-          - target: linux-x64
-            os: ubuntu-24.04
-            exe: ""
-          - target: darwin-arm64
-            os: macos-latest
-            exe: ""
-          - target: darwin-x64
-            os: macos-latest
-            exe: ""
-            osx_arch: x86_64
-    env:
-      HEIMDALL_VERSION: ${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && github.ref_name || inputs.version }}
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            cc: gcc
+            cxx: g++
+          - os: windows-latest
+            c_compiler: 'C:/mingw64-gcc16/bin/gcc.exe'
+            cpp_compiler: 'C:/mingw64-gcc16/bin/g++.exe'
+            cc: 'C:/mingw64-gcc16/bin/gcc.exe'
+            cxx: 'C:/mingw64-gcc16/bin/g++.exe'
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Resolve version
-        id: version
-        shell: bash
-        run: |
-          VERSION="${HEIMDALL_VERSION#v}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION="0.0.0-dev"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Packaging version: $VERSION"
+    # cache-apt-pkgs-action's add-repository runs too late for package
+    # resolution, so register the PPA (and refresh indexes) first.
+    - name: Add ubuntu-toolchain-r PPA on Linux
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
 
-      - name: Check tag matches extension version
-        if: github.ref_type == 'tag'
-        shell: bash
-        run: |
-          PKG_VERSION="$(node -p "require('./vscode-extension/package.json').version")"
-          if [[ "$PKG_VERSION" != "${{ steps.version.outputs.version }}" ]]; then
-            echo "::error::Tag v${{ steps.version.outputs.version }} does not match vscode-extension/package.json version ($PKG_VERSION). Bump package.json first."
-            exit 1
-          fi
+    - name: Cache and install gcc-16 on Linux
+      if: matrix.os == 'ubuntu-latest'
+      uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: gcc-16 g++-16
+        version: gcc16-1.0
 
-      - name: Setup MSVC (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+    - name: Switch default gcc/g++ to 16 on Linux
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-16 100 --slave /usr/bin/g++ g++ /usr/bin/g++-16 --slave /usr/bin/gcov gcov /usr/bin/gcov-16
+        sudo update-alternatives --set gcc /usr/bin/gcc-16
+        gcc --version
+        g++ --version
 
-      - name: Install toolchain (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
-          sudo apt-get install -y g++-16 ninja-build
+    - name: Cache MinGW-w64 GCC 16 on Windows
+      if: matrix.os == 'windows-latest'
+      id: cache-mingw
+      uses: actions/cache@v4
+      with:
+        path: C:\mingw64-gcc16
+        key: mingw64-gcc16-16.1.0-rt_v14-rev1-posix-seh-ucrt
 
-      - name: Install toolchain (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew install llvm ninja
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+    - name: Install MinGW-w64 GCC 16 (niXman mingw-builds) on Windows
+      if: matrix.os == 'windows-latest' && steps.cache-mingw.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $url = 'https://github.com/niXman/mingw-builds-binaries/releases/download/16.1.0-rt_v14-rev1/x86_64-16.1.0-release-posix-seh-ucrt-rt_v14-rev1.7z'
+        $zip = "$env:TEMP\mingw64.7z"
+        $scratch = 'C:\mingw64-scratch'
+        $toolchain = 'C:\mingw64-gcc16'
+        Write-Host "Downloading $url"
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Write-Host "Extracting toolchain to $scratch"
+        if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
+        New-Item -ItemType Directory -Path $scratch | Out-Null
+        # Use forward-slash style output path; 7z requires the trailing slash to
+        # treat it as a directory rather than a prefix.
+        & 7z.exe x $zip "-o${scratch}\" -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7z extraction failed with exit code $LASTEXITCODE" }
+        Write-Host 'Contents of scratch directory:'
+        Get-ChildItem -Path $scratch -Force | Select-Object Name, FullName | Format-Table -AutoSize | Out-String | Write-Host
+        # The archive's top-level folder is the build name; rename it to a stable path.
+        $extracted = Get-ChildItem -Path $scratch -Directory |
+          Select-Object -First 1
+        if (-not $extracted) { throw "No directory found under $scratch after 7z extraction" }
+        if (Test-Path $toolchain) { Remove-Item -Recurse -Force $toolchain }
+        Rename-Item -Path $extracted.FullName -NewName 'mingw64-gcc16'
+        # `Rename-Item` moves into the parent (i.e. $scratch), so move it up to C:\.
+        Move-Item -Path (Join-Path $scratch 'mingw64-gcc16') -Destination $toolchain -Force
+        Remove-Item -Recurse -Force $scratch
+        $gcc = Join-Path $toolchain 'bin\gcc.exe'
+        if (-not (Test-Path $gcc)) { throw "gcc.exe not found at $gcc" }
+        & $gcc --version
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          cmake -G Ninja -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DHEIMDALL_BUILD_TESTS=OFF \
-            -DHEIMDALL_BUILD_BENCHMARKS=OFF
+    - name: Prepend MinGW GCC 16 to PATH on Windows
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $toolchain = 'C:\mingw64-gcc16'
+        $gcc = Join-Path $toolchain 'bin\gcc.exe'
+        if (-not (Test-Path $gcc)) { throw "gcc.exe not found at $gcc" }
+        # Strip any preinstalled mingw64/msys64 entries from machine PATH so our
+        # GCC 16 wins, and prepend our toolchain.
+        $sysPath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $newSysPath = ($sysPath -split ';' | Where-Object { $_ -and ($_ -notmatch 'mingw64') -and ($_ -notmatch 'msys64') }) -join ';'
+        $newSysPath = "$toolchain\bin;$newSysPath"
+        [Environment]::SetEnvironmentVariable('Path', $newSysPath, 'Machine')
+        $env:Path = $newSysPath
+        & $gcc --version
+        & (Join-Path $toolchain 'bin\g++.exe') --version
 
-      - name: Configure (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          CC: gcc-16
-          CXX: g++-16
-        run: |
-          cmake -G Ninja -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DHEIMDALL_BUILD_TESTS=OFF \
-            -DHEIMDALL_BUILD_BENCHMARKS=OFF \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+    - name: Cache CMake build directory
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: ${{ runner.os }}-${{ matrix.c_compiler }}-${{ matrix.build_type }}-Ninja-${{ hashFiles('CMakeLists.txt', '**/CMakeLists.txt', 'src/**', 'core/**', 'config/**', 'semantic/**', 'lsp/**', 'test/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.c_compiler }}-${{ matrix.build_type }}-Ninja-
 
-      - name: Configure (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          CC: clang
-          CXX: clang++
-        run: |
-          ARCH_FLAGS=""
-          if [[ -n "${{ matrix.osx_arch }}" ]]; then
-            ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_arch }}"
-          fi
-          cmake -G Ninja -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DHEIMDALL_BUILD_TESTS=OFF \
-            -DHEIMDALL_BUILD_BENCHMARKS=OFF \
-            $ARCH_FLAGS
+    - name: Configure CMake
+      shell: bash
+      run: >
+        cmake -B "build"
+        -G "Ninja"
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DHEIMDALL_BUILD_TESTS=ON
+        -S "${{ github.workspace }}"
 
-      - name: Build
-        shell: bash
-        run: cmake --build build --target heimdall heimdall-lsp
+    - name: Build
+      shell: bash
+      run: |
+        export PATH="/c/mingw64-gcc16/bin:$PATH"
+        cmake --build "build" --config ${{ matrix.build_type }}
 
-      - name: Smoke test
-        shell: bash
-        run: |
-          printf 'int main() { return 0; }\n' > smoke_tmp.cpp
-          ./build/src/heimdall${{ matrix.exe }} parse smoke_tmp.cpp
-          test -f ./build/lsp/heimdall-lsp${{ matrix.exe }}
-          rm smoke_tmp.cpp
+    - name: Test
+      shell: bash
+      working-directory: build
+      run: |
+        export PATH="/c/mingw64-gcc16/bin:$PATH"
+        ctest --rerun-failed --output-on-failure --build-config ${{ matrix.build_type }}
 
-      - name: Stage package
-        shell: bash
-        run: |
-          STAGE="dist/heimdall-${{ matrix.target }}"
-          mkdir -p "$STAGE"
-          cp "build/src/heimdall${{ matrix.exe }}" "$STAGE/"
-          cp "build/lsp/heimdall-lsp${{ matrix.exe }}" "$STAGE/"
-          cp LICENSE "$STAGE/"
-          cp schemas/heimdall.schema.json "$STAGE/"
-          echo "${{ steps.version.outputs.version }}" > "$STAGE/version.txt"
+    - name: Package Windows Release
+      if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $version = "${{ github.ref_name }}"
+        $version = $version.TrimStart('v')
+        $outputDir = "release-windows-${version}"
+        New-Item -ItemType Directory -Path $outputDir | Out-Null
+        # Copy the built executables
+        Copy-Item -Path "build\heimdall.exe" -Destination $outputDir -Force
+        Copy-Item -Path "build\heimdall-lsp.exe" -Destination $outputDir -Force
+        # Create zip archive
+        Compress-Archive -Path "$outputDir\*" -DestinationPath "heimdall-windows-${version}.zip" -Force
+        Write-Host "Created heimdall-windows-${version}.zip"
 
-      - name: Zip package
-        shell: bash
-        working-directory: dist/heimdall-${{ matrix.target }}
-        run: |
-          cmake -E tar "cf" "../heimdall-${{ matrix.target }}.zip" --format=zip -- \
-            "heimdall${{ matrix.exe }}" \
-            "heimdall-lsp${{ matrix.exe }}" \
-            LICENSE \
-            heimdall.schema.json \
-            version.txt
+    - name: Package Linux Release
+      if: matrix.os == 'ubuntu-latest' && startsWith(github.ref, 'refs/tags/v')
+      run: |
+        version="${{ github.ref_name }}"
+        version="${version#v}"
+        output_dir="release-linux-${version}"
+        mkdir -p "$output_dir"
+        # Copy the built executables
+        cp "build/heimdall" "$output_dir/"
+        cp "build/heimdall-lsp" "$output_dir/"
+        # Create tar.gz archive
+        tar -czf "heimdall-linux-${version}.tar.gz" -C "$output_dir" .
+        echo "Created heimdall-linux-${version}.tar.gz"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: heimdall-${{ matrix.target }}
-          path: dist/heimdall-${{ matrix.target }}.zip
-          if-no-files-found: error
-
-  extension:
-    name: extension (.vsix)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: vscode-extension/package-lock.json
-
-      - name: Install dependencies
-        working-directory: vscode-extension
-        run: npm ci
-
-      - name: Compile
-        working-directory: vscode-extension
-        run: npm run compile
-
-      - name: Package
-        working-directory: vscode-extension
-        run: npx --no-install vsce package --allow-missing-repository
-
-      - name: Upload artifact
-        if: github.ref_type == 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: heimdall-vsix
-          path: vscode-extension/*.vsix
-          if-no-files-found: error
-
-  release:
-    name: publish release
-    needs: [build, extension]
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Checksums
-        shell: bash
-        working-directory: dist
-        run: |
-          ls -la
-          sha256sum heimdall-*.zip > checksums.txt
-          cat checksums.txt
-
-      - name: Create GitHub Release
-        shell: bash
-        working-directory: dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Heimdall ${{ github.ref_name }}" \
-            --generate-notes \
-            heimdall-*.zip checksums.txt *.vsix
-
-      - name: Setup Node (Marketplace publish)
-        if: env.VSCE_PAT != ''
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
-      - name: Publish to Marketplace
-        if: env.VSCE_PAT != ''
-        working-directory: dist
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath ./*.vsix -p "$VSCE_PAT"
+    - name: Upload Release Assets
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          heimdall-windows-${{ github.ref_name }}.zip
+          heimdall-linux-${{ github.ref_name }}.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
