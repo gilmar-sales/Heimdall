@@ -69,7 +69,7 @@ namespace heimdall::lsp
             std::optional<PinnedDocument> pinned;
         };
 
-        using RequestHandler = std::function<void(simdjson::dom::element, std::string_view)>;
+        using RequestHandler = std::move_only_function<void(simdjson::dom::element, std::string_view)>;
 
         struct HeaderView
         {
@@ -110,9 +110,12 @@ namespace heimdall::lsp
             const heimdall::CompileCommand * command);
         void HoverDocument(simdjson::dom::element request, std::string_view id);
         void GotoDocument(simdjson::dom::element request, std::string_view id, bool implementation);
-        // HeaderScopes, but waits (bounded, cancellable) for a background index
-        // build that is still running: hover and go-to answer once, so they must
-        // not report "nothing found" just because the first request beat the index.
+        // Non-blocking variant of HeaderScopes for the interactive path.
+        // Never sleeps: on a fingerprint miss it enqueues the build and returns
+        // the last good (or empty) index with complete=false, so hover/goto
+        // answer in microseconds and the client re-requests once indexing lands.
+        // Kept as a separate name so call sites cannot accidentally reintroduce
+        // the old 25ms-poll loop on pool threads.
         HeaderView AwaitHeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
             const heimdall::CompileCommand * command);
         HeaderView HeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
@@ -146,6 +149,7 @@ namespace heimdall::lsp
 
         static bool ApplyContentChange(std::string & current, LineIndex &index,
             std::vector<heimdall::Token> &tokens, EditHull &hull, simdjson::dom::object change);
+        // Requires m_index_cache_mu to be held by the caller.
         void TouchGlobalIndex(const std::string & key);
         // Runs `handler` on the pool against a private copy of the message, so
         // the I/O thread goes straight back to reading (and to $/cancelRequest).
@@ -163,14 +167,28 @@ namespace heimdall::lsp
         static thread_local const RequestContext * t_context;
 
         // m_docs_mu guards only m_documents (hot: every request and keystroke),
-        // so readers never queue behind cache bookkeeping under m_mu.
+        // so readers never queue behind cache bookkeeping under the sharded
+        // parse/index/macro/profile locks below.
         std::shared_mutex m_docs_mu;
         std::unordered_map<std::string, DocumentSnapshot> m_documents;
 
         std::mutex m_inflight_mu;
         std::unordered_map<std::string, std::stop_source> m_inflight;
 
-        std::mutex m_mu;
+        // Sharded cache locks (latency fix for <50ms p95):
+        // - m_parse_mu guards only m_parse_cache (hot: every completion/hover/diag).
+        // - m_index_cache_mu guards m_include_cache + m_global_indices + m_lru +
+        //   m_index_pending. TouchGlobalIndex requires it to be held.
+        // - m_macro_mu guards m_macro_cache (grows rarely, read often).
+        // - m_profile_mu guards m_include_profiles.
+        // - m_init_mu guards m_compile_database + m_rule_options +
+        //   m_initialization_error.
+        // The previous single m_mu serialized all of these against each other.
+        std::mutex m_parse_mu;
+        std::mutex m_index_cache_mu;
+        std::mutex m_macro_mu;
+        std::mutex m_profile_mu;
+        std::mutex m_init_mu;
         std::optional<heimdall::CompileDatabase> m_compile_database;
         heimdall::RuleOptions m_rule_options;
 

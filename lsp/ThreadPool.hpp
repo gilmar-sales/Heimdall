@@ -18,6 +18,13 @@ namespace heimdall::lsp
     // (completion, hover, goto, format) always run before background work
     // (compiler probing), so a slow background task can delay but never starve
     // a keystroke-driven request.
+    //
+    // Latency notes (<50ms goal):
+    // - Tasks are move-only (`move_only_function`), so Dispatch can move the
+    //   request body into the worker without an extra copy or a copyable
+    //   `std::function` allocation on the submit path.
+    // - A single mutex guards both queues; submit is O(1) and never does I/O
+    //   or parsing while holding it. Workers pop interactives first.
     class ThreadPool
     {
     public:
@@ -26,6 +33,8 @@ namespace heimdall::lsp
             Interactive,
             Background
         };
+
+        using Task = std::move_only_function<void()>;
 
         explicit ThreadPool(std::size_t threads)
         {
@@ -47,7 +56,7 @@ namespace heimdall::lsp
             Shutdown();
         }
 
-        void Submit(std::function<void()> task, Priority priority = Priority::Interactive)
+        void Submit(Task task, Priority priority = Priority::Interactive)
         {
             {
                 const std::lock_guard<std::mutex> lock(m_mu);
@@ -98,7 +107,7 @@ namespace heimdall::lsp
         {
             while (true)
             {
-                std::function<void()> task;
+                Task task;
                 {
                     std::unique_lock<std::mutex> lock(m_mu);
                     m_cv.wait(lock,[&]
@@ -138,8 +147,8 @@ namespace heimdall::lsp
         std::mutex m_mu;
         std::condition_variable m_cv;
         std::condition_variable m_idle_cv;
-        std::deque<std::function<void()>> m_interactive;
-        std::deque<std::function<void()>> m_background;
+        std::deque<Task> m_interactive;
+        std::deque<Task> m_background;
         std::size_t m_active = 0;
         bool m_stopping = false;
         std::vector<std::thread> m_threads;
