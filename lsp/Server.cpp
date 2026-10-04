@@ -729,7 +729,10 @@ namespace heimdall::lsp
             end_offset = start_offset;
         }
 
-        const heimdall::Lexer::TextEdit edit{start_offset, end_offset - start_offset, text.size()};
+        const heimdall::Lexer::TextEdit edit
+        {
+            start_offset, end_offset - start_offset, text.size()
+        };
         current.replace(edit.offset, edit.old_length, text);
         index.Update(current, edit.offset, edit.old_length, edit.new_length);
         heimdall::Lexer(current).Relex(tokens, edit);
@@ -767,7 +770,7 @@ namespace heimdall::lsp
 
         // Which text the parse cache entry has to describe for its tree to be a
         // usable base, and which document version that is.
-        const std::string *current_text = nullptr;
+        const std::string * current_text = nullptr;
         std::int64_t current_version = 0;
         {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
@@ -830,11 +833,11 @@ namespace heimdall::lsp
 
             auto &snapshot = found->second;
             std::shared_ptr<std::string> text = snapshot.text.use_count() == 1
-                ? std::const_pointer_cast<std::string>(snapshot.text)
-                : std::make_shared<std::string>(*snapshot.text);
+            ? std::const_pointer_cast<std::string>(snapshot.text)
+            : std::make_shared<std::string>(*snapshot.text);
             std::shared_ptr<LineIndex> lines = snapshot.lines.use_count() == 1
-                ? std::const_pointer_cast<LineIndex>(snapshot.lines)
-                : std::make_shared<LineIndex>(*snapshot.lines);
+            ? std::const_pointer_cast<LineIndex>(snapshot.lines)
+            : std::make_shared<LineIndex>(*snapshot.lines);
             std::shared_ptr<std::vector<heimdall::Token>> tokens;
             if (!snapshot.tokens)
             {
@@ -1013,13 +1016,16 @@ namespace heimdall::lsp
 
         {
             const auto model = heimdall::Binder::Bind(tree);
-            const heimdall::ProjectContext context{file_path, profile.get(), command};
+            const heimdall::ProjectContext context
+            {
+                file_path, profile.get(), command
+            };
             auto bound = engine.ApplyPolicy(
                 heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context), tree);
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
                 std::make_move_iterator(bound.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),
-                [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+                [](const heimdall::Diagnostic & a, const heimdall::Diagnostic & b)
                 {
                     return a.offset < b.offset;
             });
@@ -1631,11 +1637,11 @@ namespace heimdall::lsp
                     if (base)
                     {
                         reuse = {base.get(), base_edit.offset, base_edit.old_length, base_edit.new_length};
-                    }
+                }
 
                     auto tree = std::make_shared<heimdall::ParseTree>(
                     heimdall::ParseTree::Parse(*text, options, stop, lexed.get(),
-                        base ? &reuse : nullptr));
+                    base ? &reuse : nullptr));
                     if (tree->Cancelled())
                     {
                         throw ParseCancelled{};
@@ -1794,8 +1800,8 @@ namespace heimdall::lsp
             return;
         }
 
-        std::size_t start_line = static_cast<std::size_t>(PositionNumber(start_object, "line"));
-        std::size_t end_line = static_cast<std::size_t>(PositionNumber(end_object, "line"));
+        auto start_line = static_cast<std::size_t>(PositionNumber(start_object, "line"));
+        auto end_line = static_cast<std::size_t>(PositionNumber(end_object, "line"));
         if (PositionNumber(end_object, "character") == 0 && end_line > start_line)
         {
             --end_line;

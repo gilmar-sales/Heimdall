@@ -358,6 +358,40 @@ TEST(ParseTreeSpec, ReportsMissingSemicolonBetweenExpressionStatements)
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("stop"));
 }
 
+TEST(ParseTreeSpec, AcceptsLocalStructDefinitionWithDirectInitDeclarator)
+{
+    constexpr std::string_view source =
+    "void run(Token job_stop)\n"
+    "{\n"
+    "    struct Scope\n"
+    "    {\n"
+    "        RequestContext context;\n"
+    "        Scope(std::stop_token stop)\n"
+    "        {\n"
+    "            context.stop = std::move(stop);\n"
+    "            t_context = &context;\n"
+    "        }\n"
+    "        ~Scope()\n"
+    "        {\n"
+    "            t_context = nullptr;\n"
+    "        }\n"
+    "    } scope(job_stop);\n"
+    "}\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, AcceptsLocalStructWithBaseClauseAndDeclarator)
+{
+    constexpr std::string_view source =
+    "void run()\n"
+    "{\n"
+    "    struct Local final : Base { int x; } value{};\n"
+    "}\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}
+
 TEST(ParseTreeSpec, ReportsMissingCommaBetweenParameters)
 {
     constexpr std::string_view source = "int sum(int left int right);\n";

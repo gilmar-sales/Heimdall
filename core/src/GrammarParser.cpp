@@ -936,6 +936,28 @@ namespace heimdall
                     std::size_t dummy = Invalid;
                     i = ParseQualifiedName(i, end, parent, dummy);
                     saw_type = true;
+
+                    // Inline definition `struct S [final] [: Base] { ... } name(args);`:
+                    // the body belongs to the type specifier, not to the declarator.
+                    auto body = i;
+                    if (body < end && Is(body, "final"))
+                    {
+                        ++body;
+                    }
+
+                    if (body < end && Is(body, ":"))
+                    {
+                        while (body < end && !Is(body, "{") && !Is(body, ";"))
+                        {
+                            ++body;
+                        }
+                    }
+
+                    if (body < end && Is(body, "{") && m_match[body] != Invalid && m_match[body] < end)
+                    {
+                        i = m_match[body] + 1;
+                    }
+
                     continue;
                 }
 
