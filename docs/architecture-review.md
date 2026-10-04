@@ -330,6 +330,13 @@ formatter, completion e rule engine, mas não medem o que importa para o orçame
 3. Fuzzing do parser com truncamento em todo offset de um arquivo válido (digitação incompleta): o
    parser nunca deve travar, nunca deve levar mais de `k x` o tempo do arquivo completo, e a
    contagem de nós `Error` deve ser limitada. Isso valida a robustez de §4 de forma mensurável.
+> **Implementado** (itens 1-3), com o corpus formado pelos headers stb em `bench/` (`bench/src/StbCorpus.hpp`):
+> `LspLatencyBench` (latência `didChange`+`completion` com p50/p95/p99 e memória do servidor por documento,
+> `--enforce` falha se p95 > orçamento), `DocumentMemoryBench` (bytes/linha e bytes/token da árvore) e
+> `ParserTruncationFuzz` (todo prefixo: sem travar, tempo <= k x arquivo completo, nós `Error` limitados).
+> Os documentos têm ~0,9k, ~5,1k e ~18k linhas (arquivos stb inteiros, para manter o código balanceado).
+> Regressões em `test/src/ParserTruncationSpec.cpp`.
+
 4. ThreadSanitizer sobre `LspProtocolSmoke.py` (rodar o servidor com `-fsanitize=thread`); o
    data race do §3.2 deveria aparecer imediatamente.
 

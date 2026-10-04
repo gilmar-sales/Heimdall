@@ -28,3 +28,41 @@ target_compile_features(CoreBench PRIVATE cxx_std_26)
 target_precompile_headers(CoreBench PRIVATE
   ${PROJECT_SOURCE_DIR}/cmake/pch.hpp
 )
+
+# Review section 7 validation tools. Plain executables (not Google Benchmark): they
+# report percentiles / pass-fail limits, which the micro-benchmark harness does not.
+# Corpus: the stb single headers next to this file (src/StbCorpus.hpp).
+set(HEIMDALL_STB_DEFINITION HEIMDALL_STB_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+# End-to-end LSP latency (didChange + completion) and server memory per document.
+# Drives the real heimdall-lsp binary over stdio.
+add_executable(LspLatencyBench src/LspLatencyBench.cpp)
+add_dependencies(LspLatencyBench heimdall-lsp)
+target_compile_definitions(LspLatencyBench PRIVATE ${HEIMDALL_STB_DEFINITION}
+  HEIMDALL_LSP_EXE="$<TARGET_FILE:heimdall-lsp>")
+target_compile_features(LspLatencyBench PRIVATE cxx_std_26)
+if (WIN32)
+  target_link_libraries(LspLatencyBench PRIVATE psapi)
+else ()
+  find_package(Threads REQUIRED)
+  target_link_libraries(LspLatencyBench PRIVATE Threads::Threads)
+endif ()
+
+# In-process parse tree footprint (bytes/line, bytes/token).
+add_executable(DocumentMemoryBench src/DocumentMemoryBench.cpp)
+target_link_libraries(DocumentMemoryBench PRIVATE heimdall::core)
+target_compile_definitions(DocumentMemoryBench PRIVATE ${HEIMDALL_STB_DEFINITION})
+target_compile_features(DocumentMemoryBench PRIVATE cxx_std_26)
+if (WIN32)
+  target_link_libraries(DocumentMemoryBench PRIVATE psapi)
+endif ()
+
+# Parser robustness under truncation (incomplete typing): hang / time / error bounds.
+add_executable(ParserTruncationFuzz src/ParserTruncationFuzz.cpp)
+target_link_libraries(ParserTruncationFuzz PRIVATE heimdall::core)
+target_compile_definitions(ParserTruncationFuzz PRIVATE ${HEIMDALL_STB_DEFINITION})
+target_compile_features(ParserTruncationFuzz PRIVATE cxx_std_26)
+if (NOT WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(ParserTruncationFuzz PRIVATE Threads::Threads)
+endif ()

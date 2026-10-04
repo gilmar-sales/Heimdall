@@ -23,10 +23,11 @@ add_executable(Tests_run
   src/DocumentSpec.cpp
   src/IncludeIndexSpec.cpp
   src/IncludeAnalyzerSpec.cpp
+  src/ParserTruncationSpec.cpp
   ../../lsp/Document.cpp
 )
 
-target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp)
+target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src)
 
 target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic heimdall::config)
 
