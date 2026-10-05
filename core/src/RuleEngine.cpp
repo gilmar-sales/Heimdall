@@ -611,6 +611,10 @@ namespace heimdall
                 "semântica", true, "designated initializers out of member declaration order"},
             {RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer", "cpp", Severity::Error,
                 "semântica", false, "non-zero integer constant used as a pointer"},
+            {RuleId::DocRequireComment, "doc/require-comment", "doc", Severity::Warning,
+                "semântica", false, "public class, enum or function without a documentation comment (opt-in)"},
+            {RuleId::DocDoxygenStyle, "doc/doxygen-style", "doc", Severity::Warning,
+                "semântica", false, "Doxygen comment that breaks good practice: brief, @param, @tparam, @return, @throws, style (opt-in)"},
         };
         return catalog;
     }

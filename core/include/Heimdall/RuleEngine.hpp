@@ -48,7 +48,20 @@ namespace heimdall
         ApiOverloadHiding,
         ApiVirtualCallInConstructor,
         DesignatedInitOrder,
-        NoIntegerToPointer
+        NoIntegerToPointer,
+        DocRequireComment,
+        DocDoxygenStyle
+    };
+
+    // Which declarations the doc/* rules look at. Public: what other code can
+    // use (public and protected members, namespace-scope entities with external
+    // linkage). Private: private members and internal-linkage entities
+    // (`static`, anonymous namespace). All: both.
+    enum class DocScope : std::uint8_t
+    {
+        Public,
+        Private,
+        All
     };
 
     struct RuleOverride
@@ -109,6 +122,7 @@ namespace heimdall
         std::vector<IncludeGroup> include_order = {IncludeGroup::Angle,
             IncludeGroup::Quote};
         bool include_case_insensitive = true;
+        DocScope doc_scope = DocScope::Public;
     };
 
     // Stable metadata for every rule the engine can emit. The catalog is the
@@ -147,6 +161,17 @@ namespace heimdall
         std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, const ParseTree &tree) const
         {
             return ApplyPolicy(std::move(diagnostics), tree.Source(), tree.Tokens());
+        }
+
+        // Whether an opt-in rule (one that is off unless a config file or --rule
+        // enables it) was switched on. For rules emitted outside core.
+        bool OptInEnabled(std::string_view code) const
+        {
+            return RuleEnabled(code, false);
+        }
+        DocScope DocumentationScope() const
+        {
+            return m_options.doc_scope;
         }
 
         // Applies the non-overlapping fixes. Fixes marked unsafe (editor quick fixes)

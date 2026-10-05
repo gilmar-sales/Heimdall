@@ -126,6 +126,7 @@ namespace heimdall
         // here because SpacingGap consults them per token pair.
         bool IsTrailingReturnArrow(const std::vector<Sig>& sigs, std::size_t k);
         bool IsBlockOpenBrace(const std::vector<Sig>& sigs, std::size_t brace);
+        bool IsConstevalIfHead(const std::vector<Sig>& sigs, std::size_t consteval_index);
         constexpr std::size_t kNoSig = static_cast<std::size_t>(-1);
 
         // File-local named constants for the `cpp/no-magic-numbers` rule
@@ -157,7 +158,8 @@ namespace heimdall
             }
 
             return text == "if" || text == "for" || text == "while" || text == "switch" ||
-                text == "catch" || text == "return" || text == "new" || text == "delete";
+                text == "catch" || text == "return" || text == "new" || text == "delete" ||
+                text == "constexpr" || text == "consteval"; // `if constexpr (`
         }
 
         bool IsBinaryOperator(std::string_view text)
@@ -260,6 +262,20 @@ namespace heimdall
             if (sigs[k].in_condition)
             {
                 return false;
+            }
+
+            // Abstract declarator of a type-id (`sizeof(void*)`, `f(char*, int)`,
+            // `static_cast<T*>(p)`): no binary operator can be followed by `)`, `,` or `>`.
+            if (k + 1 < sigs.size() && sigs[k + 1].line == sigs[k].line &&
+                sigs[k + 1].kind == TokenKind::Punctuation &&
+                (sigs[k + 1].text == ")" || sigs[k + 1].text == "," || sigs[k + 1].text == ">"))
+            {
+                const std::string_view before = sigs[k - 1].text;
+                if (sigs[k - 1].kind == TokenKind::Identifier || before == "*" || before == "&" ||
+                    ((before == ">" || before == ">>") && ClosesTemplateId(sigs, k - 1)))
+                {
+                    return true;
+                }
             }
 
             // Stacked declarators (`char **p`, `T *&r`, `*const *p`): look past the
@@ -642,6 +658,12 @@ namespace heimdall
                 return 1; // `} else`, `) {`, `) const`, `] noexcept`
             }
 
+            if ((left == "*" || left == "&" || left == "&&") && (right == ">" || right == ">>") &&
+                left_kind == TokenKind::Punctuation && IsDeclaratorStar(sigs, prev))
+            {
+                return 0;
+            } // `static_cast<void*>(p)`
+
             // `char **argv`, `T *&r`: stacked declarator operators stay together;
             // `*const` / `*volatile` follow the pointer alignment (`*` can't be binary
             // before a cv-qualifier).
@@ -757,6 +779,11 @@ namespace heimdall
             {
                 return -1;
             }
+
+            if (right == "!" && left == "if")
+            {
+                return 1;
+            } // `if !consteval {`
 
             if (right == "!" || right == "~" || right == "++" || right == "--")
             {
@@ -1830,7 +1857,8 @@ namespace heimdall
             const Sig& before = sigs[open - 1];
             if (before.kind == TokenKind::Identifier)
             {
-                return before.text == "else" || before.text == "do" || before.text == "try";
+                return before.text == "else" || before.text == "do" || before.text == "try" ||
+                    IsConstevalIfHead(sigs, open - 1);
             }
 
             if (before.text != ")" || before.match == kNoSig || before.match == 0)
@@ -1894,8 +1922,26 @@ namespace heimdall
         // initializer/expression. Covers declarator suffixes the old
         // previous-token check missed: `const`, `noexcept`, `override`, `-> Type`,
         // `requires`-clauses, `&`/`&&` qualifiers, `new`/`delete` guards.
+        // `if consteval {` and `if !consteval {` have no parentheses to recognize.
+        bool IsConstevalIfHead(const std::vector<Sig>& sigs, std::size_t consteval_index)
+        {
+            if (consteval_index == 0 || sigs[consteval_index].text != "consteval")
+            {
+                return false;
+            }
+
+            const std::size_t before = consteval_index - 1;
+            return sigs[before].text == "if" ||
+                (sigs[before].text == "!" && before > 0 && sigs[before - 1].text == "if");
+        }
+
         bool IsBlockOpenBrace(const std::vector<Sig>& sigs, std::size_t brace)
         {
+            if (brace > 0 && IsConstevalIfHead(sigs, brace - 1))
+            {
+                return true;
+            }
+
             // Member/variable brace-initializer `Type name{...}` (`Command command{};`):
             // a declared name right after a type, with no record/enum/namespace
             // header or base-clause colon earlier in the statement.

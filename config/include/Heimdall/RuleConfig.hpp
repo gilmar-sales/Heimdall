@@ -20,6 +20,7 @@ namespace heimdall
         bool root = false;
         bool has_suppressions = false;
         bool has_include_order = false;
+        bool has_doc_scope = false;
         bool has_pointer_alignment = false;
         bool has_reference_alignment = false;
     };

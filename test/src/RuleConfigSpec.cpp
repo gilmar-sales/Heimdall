@@ -132,6 +132,60 @@ TEST(RuleConfigSpec, LoadsIncludeOrderSettings)
     std::filesystem::remove_all(directory);
 }
 
+TEST(RuleConfigSpec, LoadsDocScopeAndAcceptsDocRules)
+{
+    const auto directory = MakeConfigDir("doc-scope");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    WriteConfig(directory, R"({"rules":{"doc/require-comment":"warning","doc/doxygen-style":"error"},"doc":{"scope":"all"}})");
+
+    auto loaded = heimdall::LoadRuleConfiguration(path);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    EXPECT_TRUE(loaded->has_doc_scope);
+    EXPECT_EQ(loaded->options.doc_scope, heimdall::DocScope::All);
+    EXPECT_TRUE(heimdall::RuleEngine(loaded->options).OptInEnabled("doc/require-comment"));
+    EXPECT_TRUE(heimdall::RuleEngine(loaded->options).OptInEnabled("doc/doxygen-style"));
+    EXPECT_FALSE(heimdall::RuleEngine().OptInEnabled("doc/doxygen-style"));
+
+    for (const auto [text, expected]: {std::pair<const char *, heimdall::DocScope> {"public", heimdall::DocScope::Public},
+             {"private", heimdall::DocScope::Private}})
+    {
+        WriteConfig(directory, std::string(R"({"doc":{"scope":")") + text + R"("}})");
+        loaded = heimdall::LoadRuleConfiguration(path);
+        ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+        EXPECT_EQ(loaded->options.doc_scope, expected);
+    }
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, RejectsInvalidDocScope)
+{
+    const auto directory = MakeConfigDir("doc-scope-invalid");
+    const auto path = directory / heimdall::RuleConfigFileName;
+    for (const char *contents: {R"({"doc":{"scope":"protected"}})", R"({"doc":{"scope":3}})", R"({"doc":true})"})
+    {
+        WriteConfig(directory, contents);
+        EXPECT_FALSE(heimdall::LoadRuleConfiguration(path)) << contents;
+    }
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, NearestDocScopeWins)
+{
+    const auto directory = MakeConfigDir("doc-scope-merge");
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(directory, R"({"doc":{"scope":"all"}})");
+    WriteConfig(child, R"({"rules":{"doc/doxygen-style":"warning"}})");
+
+    auto loaded = heimdall::FindRuleOptions(child);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_TRUE(*loaded);
+    EXPECT_EQ((**loaded).doc_scope, heimdall::DocScope::All);
+    std::filesystem::remove_all(directory);
+}
+
 TEST(RuleConfigSpec, RejectsInvalidIncludeOrderSettings)
 {
     const auto directory = MakeConfigDir("include-order-invalid");

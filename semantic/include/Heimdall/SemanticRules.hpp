@@ -151,6 +151,37 @@ namespace heimdall
         // (`reinterpret_cast<T*>(20)`) or the intended member is for the author to say.
         static std::vector<Diagnostic> AnalyzeIntegerToPointer(const SemanticModel &model);
 
+        // doc/require-comment (opt-in): a class, enum or function inside `scope` (see
+        // DocScope) with no Doxygen comment: `///`, `//!`, `/** */` or `/*! */` right
+        // before it, or `///<` after a declaration that ends in `;`. Declarations local
+        // to a function, out-of-class definitions, `= default`/`= delete`, overrides,
+        // friends, forward declarations, `main` and explicit specializations are left
+        // alone: their documentation lives elsewhere. No fix: the text is the author's.
+        static std::vector<Diagnostic> AnalyzeRequireDocComment(const SemanticModel &model,
+            DocScope scope = DocScope::Public);
+
+        // doc/doxygen-style (opt-in): a function, class or enum inside `scope` whose
+        // Doxygen comment breaks good practice:
+        //  - no `@brief` (or, without it, a first paragraph), a brief of more than one
+        //    sentence or line, or a brief not separated from the details by a blank line;
+        //  - a function with an `@param` missing for a named parameter, an `@tparam`
+        //    missing for a named template parameter, no `@return` (`@returns`, `@result`
+        //    or `@retval`) when it returns a value, or no `@throws` (`@throw`,
+        //    `@exception`) when its body has a `throw`;
+        //  - an `@param`/`@tparam` that names nothing in the signature or is repeated;
+        //  - a tag with no description;
+        //  - the Qt styles `//!` and `/*! */` (Javadoc `///` and `/** */` is the
+        //    convention), or `@` and `\` command spellings mixed in one comment.
+        // Comments with `@copydoc`, `@inheritdoc` or `@overload` are skipped. No fix.
+        static std::vector<Diagnostic> AnalyzeDoxygenStyle(const SemanticModel &model,
+            DocScope scope = DocScope::Public);
+
+        // The two rules above, for those the engine has enabled, with the engine's
+        // DocScope. They are not part of Analyze: every undocumented declaration would
+        // trip them, so the CLI and the language server add them only when a config
+        // file or --rule asks for them.
+        static std::vector<Diagnostic> AnalyzeDocumentation(const SemanticModel &model, const RuleEngine &engine);
+
         // Every rule above except the project-level ones, sorted by offset. The
         // overload without a TypeModel runs the Typer itself.
         static std::vector<Diagnostic> Analyze(const SemanticModel &model);

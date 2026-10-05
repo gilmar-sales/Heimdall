@@ -2898,6 +2898,19 @@ namespace heimdall
                 const auto node = Add(kind, start, start + 1, parent);
                 m_block_starts.push_back(m_block_names.size()); // `for (int i...)` is visible to the body only
                 ++pos;
+                if (keyword == "if")
+                {
+                    // `if constexpr (c)`, `if consteval {}` and `if !consteval {}`.
+                    if (Is(pos, "constexpr") || Is(pos, "consteval"))
+                    {
+                        ++pos;
+                    }
+                    else if (Is(pos, "!") && Is(pos + 1, "consteval"))
+                    {
+                        pos += 2;
+                    }
+                }
+
                 if (Is(pos, "(") && m_match[pos] != Invalid)
                 {
                     const auto close = m_match[pos];

@@ -826,3 +826,18 @@ TEST(ParseTreeSpec, FileLocalDecorationMacroDoesNotBreakDeclarations)
     const auto tree = heimdall::ParseTree::Parse(source);
     EXPECT_TRUE(tree.Diagnostics().empty());
 }
+
+TEST(ParseTreeSpec, IfConstexprAndIfConstevalParseWithoutDiagnostics)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "int f()\n{\n"
+        "    if constexpr (sizeof(void*) == 8)\n    {\n        return 1;\n    }\n    else\n    {\n        return 2;\n    }\n"
+        "}\n"
+        "int g()\n{\n"
+        "    if consteval { return 1; }\n"
+        "    if !consteval { return 2; }\n"
+        "    if constexpr (sizeof(int) == 4) return 3;\n"
+        "    return 0;\n"
+        "}\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}

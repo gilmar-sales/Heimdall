@@ -1,10 +1,13 @@
+#include <cstddef>
+
 struct Node
 {
     Node* next;
     int value;
 };
 
-auto test = sizeof(Node);
+auto sizeOfNode = sizeof(Node);
+auto alignOfNode = alignof(Node);
 
 int main()
 {

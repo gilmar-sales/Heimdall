@@ -169,6 +169,22 @@
             "error"
           ]
         },
+        "doc/require-comment": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ],
+          "description": "Opt-in. Public classes, enums and functions need a Doxygen comment. See 'doc.scope'."
+        },
+        "doc/doxygen-style": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ],
+          "description": "Opt-in. Doxygen comments need @brief, @param, @tparam, @return and @throws, one-sentence briefs and Javadoc style. See 'doc.scope'."
+        },
         "cpp/no-integer-to-pointer": {
           "enum": [
             "off",
@@ -260,6 +276,22 @@
       "required": [
         "groups"
       ],
+      "additionalProperties": false
+    },
+    "doc": {
+      "type": "object",
+      "description": "Options of the doc/* rules.",
+      "properties": {
+        "scope": {
+          "enum": [
+            "public",
+            "private",
+            "all"
+          ],
+          "default": "public",
+          "description": "Which declarations are checked: 'public' (public and protected members, namespace-scope entities with external linkage), 'private' (private members, static and anonymous-namespace entities) or 'all'."
+        }
+      },
       "additionalProperties": false
     },
     "format": {

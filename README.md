@@ -161,7 +161,15 @@ outside the extension) still needs to be closed before relinking.
   than `0`/`1` (any base or suffix spelling) outside comments, literals and
   directives (no autofix); `cpp/sort-includes` (opt-in) flags include blocks out of the
   configured order (`include-order` in `.heimdall.json`) and safely
-  reorders each block in batch. Diagnostics
+  reorders each block in batch; `doc/require-comment` and `doc/doxygen-style`
+  (both opt-in, `--semantic`) require a Doxygen comment on classes, enums and
+  functions, and check it against good practice: a one-sentence `@brief` apart from
+  the details, an `@param` per named parameter, `@tparam` per template parameter,
+  `@return` for non-void functions, `@throws` when the body throws, no stale or
+  repeated tags, Javadoc style (`///`, `/** */`). `"doc": {"scope": "public" |
+  "private" | "all"}` picks which declarations they cover (default `public`: public
+  and protected members and external linkage; `private`: private members, `static`
+  and anonymous-namespace entities). Diagnostics
   carry byte ranges and 1-based line/column, with non-overlapping text edits applied
   from right to left. Rules can be enabled independently.
 - **Local semantic rule**: `semantic/no-unused-local` reports unused simple local variables when

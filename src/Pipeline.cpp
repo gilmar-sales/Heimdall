@@ -328,6 +328,9 @@ namespace heimdall::cli
                 auto overrides = heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context);
                 semantic.insert(semantic.end(), std::make_move_iterator(overrides.begin()),
                     std::make_move_iterator(overrides.end()));
+                auto documentation = heimdall::SemanticRules::AnalyzeDocumentation(model, rule_engine);
+                semantic.insert(semantic.end(), std::make_move_iterator(documentation.begin()),
+                    std::make_move_iterator(documentation.end()));
                 semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);
                 result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(semantic.begin()),
                     std::make_move_iterator(semantic.end()));

@@ -1289,8 +1289,11 @@ namespace heimdall::lsp
             {
                 file_path, profile.get(), command
             };
-            auto bound = engine.ApplyPolicy(
-                heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context), tree);
+            auto analyzed = heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context);
+            auto documentation = heimdall::SemanticRules::AnalyzeDocumentation(model, engine);
+            analyzed.insert(analyzed.end(), std::make_move_iterator(documentation.begin()),
+                std::make_move_iterator(documentation.end()));
+            auto bound = engine.ApplyPolicy(std::move(analyzed), tree);
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
                 std::make_move_iterator(bound.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),

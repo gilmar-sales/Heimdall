@@ -195,6 +195,32 @@ namespace heimdall
             }
         }
 
+        simdjson::dom::element doc_element;
+        if (!root["doc"].get(doc_element))
+        {
+            simdjson::dom::object doc;
+            if (const auto error = doc_element.get_object().get(doc); error)
+            {
+                return std::unexpected("'doc' in Heimdall config must be an object: " + path.string());
+            }
+
+            simdjson::dom::element scope_element;
+            if (!doc["scope"].get(scope_element))
+            {
+                std::string_view scope;
+                if (const auto error = scope_element.get_string().get(scope); error ||
+                    (scope != "public" && scope != "private" && scope != "all"))
+                {
+                    return std::unexpected("'scope' in 'doc' must be 'public', 'private' or 'all': " + path.string());
+                }
+
+                configuration.options.doc_scope = scope == "public" ? DocScope::Public
+                    : scope == "private" ? DocScope::Private
+                                         : DocScope::All;
+                configuration.has_doc_scope = true;
+            }
+        }
+
         simdjson::dom::element format_element;
         if (!root["format"].get(format_element))
         {
@@ -331,6 +357,10 @@ namespace heimdall
             {
                 merged.include_order = it->options.include_order;
                 merged.include_case_insensitive = it->options.include_case_insensitive;
+            }
+            if (it->has_doc_scope)
+            {
+                merged.doc_scope = it->options.doc_scope;
             }
         }
         return std::optional<RuleOptions>{std::move(merged)};

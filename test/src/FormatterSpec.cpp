@@ -1051,3 +1051,40 @@ TEST(FormatterSpec, LeavesBackslashContinuedMacroDefinitionsVerbatim)
     EXPECT_EQ(formatted.substr(0, formatted.find("int")), source.substr(0, source.find("int")));
     EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
 }
+
+TEST(FormatterSpec, IfConstexprKeepsTheSpaceBeforeTheCondition)
+{
+    const auto formatted = heimdall::Formatter().Format(
+        "int f()\n{\n    if constexpr(sizeof(void*) == 8) { return 1; } else { return 2; }\n}\n");
+    EXPECT_EQ(formatted,
+        "int f()\n"
+        "{\n"
+        "    if constexpr (sizeof(void*) == 8)\n"
+        "    {\n"
+        "        return 1;\n"
+        "    }\n"
+        "    else\n"
+        "    {\n"
+        "        return 2;\n"
+        "    }\n"
+        "}\n");
+    EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, IfConstevalGetsABlockAndASpaceAfterTheBang)
+{
+    const auto formatted = heimdall::Formatter().Format("void f()\n{\n    if consteval { a(); }\n    if !consteval { b(); }\n}\n");
+    EXPECT_NE(formatted.find("if consteval\n"), std::string::npos) << formatted;
+    EXPECT_NE(formatted.find("if !consteval\n"), std::string::npos) << formatted;
+    EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, UnnamedPointerTypesFollowThePointerAlignment)
+{
+    constexpr std::string_view source = "auto n = sizeof(void*);\nauto k = static_cast<void*>(p);\nvoid f(char*, int&);\n";
+    EXPECT_EQ(heimdall::Formatter().Format(source), source);
+    const auto right = heimdall::Formatter({.pointer_alignment = heimdall::PointerAlignment::Right,
+        .reference_alignment = heimdall::ReferenceAlignment::Right}).Format(source);
+    EXPECT_NE(right.find("sizeof(void *)"), std::string::npos) << right;
+    EXPECT_NE(right.find("static_cast<void *>(p)"), std::string::npos) << right;
+}
