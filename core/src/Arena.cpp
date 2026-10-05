@@ -9,6 +9,7 @@ namespace heimdall
     {
         void *mem = m_resource.allocate(size, alignment);
         m_used +=(size + alignment - 1) & ~(alignment - 1);
+        ++m_allocations;
 
         return mem;
     }
@@ -17,6 +18,7 @@ namespace heimdall
     {
         m_resource.release();
         m_used = 0;
+        m_allocations = 0;
     }
 
 } // namespace heimdall

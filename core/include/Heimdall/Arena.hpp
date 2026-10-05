@@ -43,6 +43,7 @@ namespace heimdall
         {
             return m_used;
         }
+        std::size_t AllocationCount() const noexcept { return m_allocations; }
 
     private:
         class Adapter final : public std::pmr::memory_resource
@@ -68,6 +69,7 @@ namespace heimdall
 
         std::pmr::monotonic_buffer_resource m_resource;
         std::size_t m_used = 0;
+        std::size_t m_allocations = 0;
         Adapter m_adapter {*this};
     };
 

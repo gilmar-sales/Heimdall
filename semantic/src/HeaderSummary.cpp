@@ -320,13 +320,24 @@ namespace heimdall
     std::shared_ptr<const HeaderSummary> HeaderSummary::FromSource(std::string_view source,
         std::filesystem::path path)
     {
+        const ParseTree tree = ParseTree::Parse(source, ParserOptions{});
+        const SemanticModel model = Binder::Bind(tree);
+        return FromModel(model, std::move(path));
+    }
+
+    std::shared_ptr<const HeaderSummary> HeaderSummary::FromModel(const SemanticModel &model,
+        std::filesystem::path path)
+    {
+        const auto &tree = model.Tree();
+        const auto source = tree.Source();
         auto summary = std::make_shared<HeaderSummary>();
         summary->m_path = std::move(path);
         summary->m_readable = true;
         summary->m_private = source.find("IWYU pragma: private") != std::string_view::npos;
         summary->m_textual = IsTextualExtension(summary->m_path);
-        const ParseTree tree = ParseTree::Parse(source, ParserOptions{});
-        const SemanticModel model = Binder::Bind(tree);
+        summary->m_fingerprint = 14695981039346656037ull;
+        for (unsigned char c : source)
+            summary->m_fingerprint = (summary->m_fingerprint ^ c) * 1099511628211ull;
         HeaderSummaryBuilder(*summary, tree, model).Run();
         return summary;
     }

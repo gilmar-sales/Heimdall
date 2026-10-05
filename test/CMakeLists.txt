@@ -8,10 +8,14 @@ FetchContent_MakeAvailable(gtest)
 include(GoogleTest)
 
 add_executable(Tests_run
+  src/WorkspaceSpec.cpp
+  src/RuleSchedulerSpec.cpp
+  src/PluginHostSpec.cpp
   src/CompileDatabaseSpec.cpp
   src/RuleConfigSpec.cpp
   src/CliInitSpec.cpp
   src/CorePolicySpec.cpp
+  src/ArchitecturePolicySpec.cpp
   src/SyntaxTreeSpec.cpp
   src/FormatterSpec.cpp
   src/LexerSpec.cpp
@@ -47,7 +51,7 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic heimdall::config)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::analysis heimdall::config)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}")

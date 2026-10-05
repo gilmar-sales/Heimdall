@@ -50,7 +50,9 @@ namespace heimdall
         DesignatedInitOrder,
         NoIntegerToPointer,
         DocRequireComment,
-        DocDoxygenStyle
+        DocDoxygenStyle,
+        // Experimental external rules use their string code as identity.
+        External
     };
 
     // Which declarations the doc/* rules look at. Public: what other code can
@@ -168,6 +170,10 @@ namespace heimdall
         bool OptInEnabled(std::string_view code) const
         {
             return RuleEnabled(code, false);
+        }
+        bool Enabled(std::string_view code, bool default_enabled = true) const
+        {
+            return RuleEnabled(code, default_enabled);
         }
         DocScope DocumentationScope() const
         {

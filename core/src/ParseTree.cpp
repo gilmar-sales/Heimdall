@@ -92,6 +92,21 @@ namespace heimdall
 
     }
 
+    std::size_t ParseTree::StorageBytes() const noexcept
+    {
+        std::size_t bytes = m_nodes_soa.kind.capacity() + sizeof(std::uint32_t) *
+            (m_nodes_soa.first_token.capacity() + m_nodes_soa.token_count.capacity() +
+                m_nodes_soa.parent.capacity() + m_nodes_soa.subtree_end.capacity());
+        bytes += Tokens().capacity() * sizeof(Token) + m_items.capacity() * sizeof(TopLevelItem)
+            + m_directives.capacity() * sizeof(PreprocessorDirective)
+            + m_diagnostics.capacity() * sizeof(GrammarDiagnostic)
+            + m_token_kind_mask.capacity() + sizeof(std::uint32_t) *
+                (m_identifier_tokens.capacity() + m_directive_tokens.capacity())
+            + (m_decoration.capacity() + 7) / 8;
+        for (const auto &diagnostic : m_diagnostics) bytes += diagnostic.message.capacity();
+        return bytes;
+    }
+
     void ParseTree::HoldSource(std::shared_ptr<const std::string> owned)
     {
         m_owned_source = std::move(owned);

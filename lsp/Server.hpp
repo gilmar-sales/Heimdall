@@ -4,6 +4,7 @@
 #include "ThreadPool.hpp"
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -47,6 +48,7 @@ namespace heimdall::lsp
         // invalidates a tree being analyzed concurrently.
         struct DocumentSnapshot
         {
+            heimdall::DocumentId document = heimdall::InvalidDocument;
             std::shared_ptr<const std::string> text = std::make_shared<const std::string>();
             std::int64_t version = 0;
             std::shared_ptr<const LineIndex> lines = std::make_shared<const LineIndex>();
@@ -66,6 +68,7 @@ namespace heimdall::lsp
         // (and to the diagnostics worker, which only sets `stop`).
         struct RequestContext
         {
+            heimdall::AnalysisSnapshot analysis;
             std::stop_token stop;
             std::optional<PinnedDocument> pinned;
             // Pins absence too: a later didOpen must not change an earlier request.
@@ -141,7 +144,10 @@ namespace heimdall::lsp
 
         // Rule-engine diagnostics plus, when semantic analysis is on and the file
         // has a compile command, cpp/no-unused-include (policy already applied).
-        std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string & uri, const heimdall::ParseTree & tree,
+        heimdall::AnalysisContext AnalysisFor(const std::string &uri,
+            std::shared_ptr<const heimdall::ParseTree> tree, heimdall::ParserOptions options);
+        std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string & uri,
+            std::shared_ptr<const heimdall::ParseTree> tree,
             const heimdall::CompileCommand * command);
 
         // Workspace-wide linting: after `initialized`, a background pass publishes
@@ -195,6 +201,7 @@ namespace heimdall::lsp
         // so readers never queue behind cache bookkeeping under the sharded
         // parse/index/macro/profile locks below.
         std::shared_mutex m_docs_mu;
+        heimdall::Workspace m_workspace;
         std::unordered_map<std::string, DocumentSnapshot> m_documents;
 
         std::mutex m_inflight_mu;
@@ -214,7 +221,7 @@ namespace heimdall::lsp
         std::mutex m_macro_mu;
         std::mutex m_profile_mu;
         std::mutex m_init_mu;
-        std::optional<heimdall::CompileDatabase> m_compile_database;
+        std::shared_ptr<const heimdall::CompileDatabase> m_compile_database;
         heimdall::RuleOptions m_rule_options;
 
         // Header discovery cache per open document: the fingerprint covers the

@@ -5,6 +5,7 @@
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/SemanticRules.hpp>
+#include <Heimdall/AnalysisFeatures.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -353,7 +354,8 @@ namespace heimdall::cli
             }
 
             const heimdall::RuleEngine rule_engine(rule_options);
-            result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
+            if (!(tree && options.semantic && database != nullptr))
+                result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
             if (tree && options.semantic && database != nullptr)
             {
                 // cpp/no-unused-include needs the headers on disk, so like the
@@ -372,14 +374,15 @@ namespace heimdall::cli
                 // Rules on the bound semantic model need no compile command; the
                 // project-level ones (include-what-you-use, modernize-final) see the
                 // included headers only when there is a profile.
-                const auto model = heimdall::Binder::Bind(*tree);
                 const heimdall::ProjectContext context{path, profile.get(), command};
-                auto overrides = heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context);
-                semantic.insert(semantic.end(), std::make_move_iterator(overrides.begin()),
-                    std::make_move_iterator(overrides.end()));
-                auto documentation = heimdall::SemanticRules::AnalyzeDocumentation(model, rule_engine);
-                semantic.insert(semantic.end(), std::make_move_iterator(documentation.begin()),
-                    std::make_move_iterator(documentation.end()));
+                // Batch analysis borrows the mapped buffer and tree for this
+                // scope only; it does not allocate a project Workspace or copy
+                // the source just to use the same analysis entry point as LSP.
+                const auto borrowed = std::shared_ptr<const heimdall::ParseTree>(&*tree,
+                    [](const heimdall::ParseTree *) {});
+                const heimdall::AnalysisContext analysis(heimdall::AnalysisSnapshot::FromSyntax(
+                    borrowed, ParserOptionsForFile(path, options, database), path), 0);
+                result.diagnostics = heimdall::AnalysisFeatures::Diagnostics(analysis, rule_engine, true, context);
                 semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);
                 result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(semantic.begin()),
                     std::make_move_iterator(semantic.end()));

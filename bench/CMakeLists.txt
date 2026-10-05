@@ -34,6 +34,10 @@ target_link_libraries(SemanticBench PRIVATE heimdall::core heimdall::semantic be
 target_compile_definitions(SemanticBench PRIVATE HEIMDALL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
 target_compile_features(SemanticBench PRIVATE cxx_std_26)
 
+add_executable(WorkspaceBench src/WorkspaceBench.cpp)
+target_link_libraries(WorkspaceBench PRIVATE heimdall::analysis benchmark::benchmark benchmark::benchmark_main)
+target_compile_features(WorkspaceBench PRIVATE cxx_std_26)
+
 # Review section 7 validation tools. Plain executables (not Google Benchmark): they
 # report percentiles / pass-fail limits, which the micro-benchmark harness does not.
 # Corpus: the stb single headers next to this file (src/StbCorpus.hpp).

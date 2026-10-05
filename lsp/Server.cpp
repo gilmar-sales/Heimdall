@@ -339,6 +339,7 @@ namespace heimdall::lsp
                 if (auto snapshot = GetDocument(job->context.document_uri))
                     job->context.pinned = PinnedDocument{job->context.document_uri, std::move(*snapshot)};
             }
+            job->context.analysis = m_workspace.Snapshot();
             m_pool.Submit([this, job] { ExecuteRequest(job); });
         });
     }
@@ -426,7 +427,7 @@ namespace heimdall::lsp
         // Guard the read with m_init_mu so workers never race the write; the
         // lock is uncontended after initialization.
         const std::lock_guard<std::mutex> lock(m_init_mu);
-        if (m_compile_database == std::nullopt)
+        if (!m_compile_database)
         {
             return nullptr;
         }
@@ -586,7 +587,8 @@ namespace heimdall::lsp
         std::unordered_set<std::string> drivers = {"c++"};
         {
             const std::lock_guard<std::mutex> lock(m_init_mu);
-            m_compile_database = std::move(*database);
+            m_compile_database = std::make_shared<const heimdall::CompileDatabase>(std::move(*database));
+            m_workspace.SetCompilationDatabase(m_compile_database);
             for (const auto & command: m_compile_database->Commands())
             {
                 if (!command.arguments.empty() && !command.arguments.front().empty())
@@ -624,7 +626,7 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto diagnostics = RuleDiagnostics(uri, *tree, command);
+        const auto diagnostics = RuleDiagnostics(uri, tree, command);
         if (!IsCurrentVersion(uri, version))
         {
             return;
@@ -809,6 +811,12 @@ namespace heimdall::lsp
             heimdall::Lexer(*snapshot.text).Lex());
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
+            if (const auto old = m_documents.find(uri_string); old != m_documents.end())
+                (void)m_workspace.Close(old->second.document);
+            auto opened = m_workspace.Open(PathFromUri(uri_string), snapshot.text, version,
+                ParserOptionsFor(CommandFor(uri_string)));
+            if (!opened) return;
+            snapshot.document = *opened;
             m_documents[uri_string] = std::move(snapshot);
         }
         {
@@ -939,6 +947,8 @@ namespace heimdall::lsp
             current_version = found->second.version;
         }
 
+        if (new_version <= current_version) return;
+
         // Take the previous parse out of the cache as the base for the next one.
         // Dropping the cache entry releases obsolete buffers. Keep just the
         // tokens/nodes needed for reuse when no other consumer owns the tree.
@@ -1002,6 +1012,7 @@ namespace heimdall::lsp
         snapshot.tokens = std::move(tokens);
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
+            if (!m_workspace.Update(snapshot.document, snapshot.text, snapshot.version)) return;
             m_documents[uri_string] = std::move(snapshot);
         }
         const std::int64_t version = new_version;
@@ -1046,6 +1057,8 @@ namespace heimdall::lsp
 
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
+            if (const auto old = m_documents.find(std::string(uri)); old != m_documents.end())
+                (void)m_workspace.Close(old->second.document);
             m_documents.erase(std::string(uri));
         }
         {
@@ -1125,13 +1138,13 @@ namespace heimdall::lsp
         }
 
         const heimdall::CompileCommand * command = CommandFor(uri);
-        auto tree = heimdall::ParseTree::Parse(*text, ParserOptionsFor(command), stop);
-        if (tree.Cancelled())
+        auto tree = std::make_shared<const heimdall::ParseTree>(
+            heimdall::ParseTree::ParseSnapshot(text, ParserOptionsFor(command), stop));
+        if (tree->Cancelled())
         {
             return -1;
         }
 
-        tree.HoldSource(text);
         auto diagnostics = RuleDiagnostics(uri, tree, command);
         {
             // RuleDiagnostics caches a per-document include profile; a one-shot scan must not keep it.
@@ -1142,7 +1155,7 @@ namespace heimdall::lsp
         std::vector<heimdall::SemanticDiagnostic> semantic;
         if (m_enable_semantic.load(std::memory_order_relaxed) && command != nullptr)
         {
-            semantic = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(tree, command);
+            semantic = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(*tree, command);
         }
 
         LineIndex lines;
@@ -1179,7 +1192,7 @@ namespace heimdall::lsp
             append(diagnostic.offset, diagnostic.length, 2, diagnostic.code, diagnostic.message);
         }
 
-        for (const auto & diagnostic: tree.Diagnostics())
+        for (const auto & diagnostic: tree->Diagnostics())
         {
             append(diagnostic.offset, 0, 1, "syntax/parse-error", diagnostic.message);
         }
@@ -1320,9 +1333,24 @@ namespace heimdall::lsp
         Respond(id, response);
     }
 
-    std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(const std::string& uri,
-        const heimdall::ParseTree& tree, const heimdall::CompileCommand* command)
+    heimdall::AnalysisContext LanguageServer::AnalysisFor(const std::string &uri,
+        std::shared_ptr<const heimdall::ParseTree> tree, heimdall::ParserOptions options)
     {
+        auto snapshot = t_context && t_context->interactive ? t_context->analysis : m_workspace.Snapshot();
+        const auto document = snapshot.Find(PathFromUri(uri));
+        if (document != heimdall::InvalidDocument)
+        {
+            if (auto derived = snapshot.WithSyntax(document, tree, options))
+                return heimdall::AnalysisContext(std::move(*derived), document);
+        }
+        return heimdall::AnalysisContext(heimdall::AnalysisSnapshot::FromSyntax(
+            std::move(tree), std::move(options), PathFromUri(uri)), 0);
+    }
+
+    std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(const std::string& uri,
+        std::shared_ptr<const heimdall::ParseTree> parsed, const heimdall::CompileCommand* command)
+    {
+        const auto &tree = *parsed;
         heimdall::RuleOptions rule_options;
         {
             const std::lock_guard<std::mutex> lock(m_init_mu);
@@ -1344,10 +1372,10 @@ namespace heimdall::lsp
             m_initialization_error = per_file.error();
         }
         const heimdall::RuleEngine engine(rule_options);
-        auto diagnostics = engine.Analyze(tree);
+        std::vector<heimdall::Diagnostic> diagnostics;
         if (!m_enable_semantic.load(std::memory_order_relaxed))
         {
-            return diagnostics;
+            return engine.Analyze(tree);
         }
 
         // The model is built from the tree already parsed for this version of the
@@ -1377,23 +1405,12 @@ namespace heimdall::lsp
         }
 
         {
-            const auto model = heimdall::Binder::Bind(tree);
             const heimdall::ProjectContext context
             {
                 file_path, profile.get(), command
             };
-            auto analyzed = heimdall::SemanticRules::Analyze(model, heimdall::Typer::Type(model), context);
-            auto documentation = heimdall::SemanticRules::AnalyzeDocumentation(model, engine);
-            analyzed.insert(analyzed.end(), std::make_move_iterator(documentation.begin()),
-                std::make_move_iterator(documentation.end()));
-            auto bound = engine.ApplyPolicy(std::move(analyzed), tree);
-            diagnostics.insert(diagnostics.end(), std::make_move_iterator(bound.begin()),
-                std::make_move_iterator(bound.end()));
-            std::stable_sort(diagnostics.begin(), diagnostics.end(),
-                [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
-                {
-                    return a.offset < b.offset;
-            });
+            diagnostics = heimdall::AnalysisFeatures::Diagnostics(
+                AnalysisFor(uri, parsed, ParserOptionsFor(command)), engine, true, context);
         }
 
         if (profile == nullptr)
@@ -1445,7 +1462,7 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto diagnostics = RuleDiagnostics(uri_string, *tree, command);
+        const auto diagnostics = RuleDiagnostics(uri_string, tree, command);
         std::string response = "[";
         bool first = true;
         for (const auto & diagnostic: diagnostics)
@@ -1689,8 +1706,8 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto items = heimdall::CompletionEngine::Complete(
-            *tree, parser_options, offset, headers.index ? &headers.index->Scopes() : nullptr);
+        const auto items = heimdall::AnalysisFeatures::Complete(
+            AnalysisFor(uri_string, tree, parser_options), offset, headers.index ? &headers.index->Scopes() : nullptr);
         const std::string prefix = heimdall::CompletionEngine::PrefixAt(*text, offset);
         const Position start = lines->ToPosition(offset - prefix.size());
         const Position end = lines->ToPosition(offset);
@@ -2118,8 +2135,8 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto hovered = heimdall::CompletionEngine::Hover(
-            *tree, parser_options, offset, headers.index ? &headers.index->Scopes() : nullptr);
+        const auto hovered = heimdall::AnalysisFeatures::Hover(
+            AnalysisFor(uri_string, tree, parser_options), offset, headers.index ? &headers.index->Scopes() : nullptr);
         if (!hovered.has_value())
         {
             Respond(id, "null");
@@ -2623,9 +2640,10 @@ namespace heimdall::lsp
         }
 
         const heimdall::ScopeIndex* scopes = headers.index ? &headers.index->Scopes() : nullptr;
+        const auto analysis = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
         std::vector<heimdall::NavTarget> targets = implementation
-        ? heimdall::Navigation::Implementation(*tree, offset, scopes)
-        : heimdall::Navigation::Definition(*tree, offset, scopes);
+        ? heimdall::AnalysisFeatures::Implementation(analysis, offset, scopes)
+        : heimdall::AnalysisFeatures::Definition(analysis, offset, scopes);
 
         // File table: this document, header-index files (read on demand) and the
         // source files searched below, each loaded once per request.
@@ -2751,7 +2769,7 @@ namespace heimdall::lsp
                 std::vector<std::filesystem::path> db_matches;
                 {
                     const std::lock_guard<std::mutex> lock(m_init_mu);
-                    if (m_compile_database != std::nullopt)
+                    if (m_compile_database)
                     {
                         for (const auto & entry: m_compile_database->Commands())
                         {

@@ -119,6 +119,7 @@ core/                   # heimdall_core: zero-dependency engine (STL only, no ex
 semantic/               # heimdall_semantic: compile DB + local oracle (simdjson PRIVATE)
   include/Heimdall/     # CompileDatabase.hpp, SemanticAnalyzer.hpp (STL + core only)
   src/
+analysis/               # shared Workspace, AnalysisSnapshot/Context, features, scheduler and experimental Plugin API
 src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Init/Pipeline/Reporting
 lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modules (simdjson PRIVATE)
 schemas/                # heimdall.schema.json: JSON Schema for .heimdall.json (used by init docs)
@@ -127,6 +128,9 @@ test/                   # GoogleTest suite, incl. core dependency-policy guard (
 bench/                  # Google Benchmark suite (explicit sources) + corpus
 docs/                   # design notes: linter/formatter architecture, completion limits, mmap I/O
 ```
+
+See [architectural evolution](docs/architectural-evolution.md) for snapshot lifetime,
+incremental invalidation, experimental plugins, benchmarks and remaining roadmap gates.
 
 Binaries land in `build/src/heimdall` and `build/lsp/heimdall-lsp`
 (`build/test/Tests_run`, `build/bench/CoreBench`). The VS Code extension

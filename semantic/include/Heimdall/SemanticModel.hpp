@@ -196,6 +196,7 @@ namespace heimdall
         {
             return m_arena->Used();
         }
+        std::size_t ArenaAllocations() const noexcept { return m_arena->AllocationCount(); }
 
         // First symbol named `name` declared directly in `scope`; further
         // overloads follow through Symbols().next_same_name.

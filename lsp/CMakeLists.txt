@@ -6,7 +6,7 @@ add_executable(heimdall-lsp
   Server.cpp
 )
 
-target_link_libraries(heimdall-lsp PRIVATE heimdall::core heimdall::semantic heimdall::config simdjson::simdjson)
+target_link_libraries(heimdall-lsp PRIVATE heimdall::analysis heimdall::config simdjson::simdjson)
 target_compile_features(heimdall-lsp PRIVATE cxx_std_26)
 
 target_precompile_headers(heimdall-lsp PRIVATE

@@ -10,6 +10,7 @@
 
 namespace heimdall
 {
+    class SemanticModel;
 
     enum class ExportKind : std::uint8_t
     {
@@ -39,6 +40,12 @@ namespace heimdall
         // Uncached summary of `source`, for tests and for headers not on disk.
         static std::shared_ptr<const HeaderSummary> FromSource(std::string_view source,
             std::filesystem::path path = {});
+        // Reuses an already-bound model instead of parsing/binding a second AST.
+        static std::shared_ptr<const HeaderSummary> FromModel(const SemanticModel &model,
+            std::filesystem::path path = {});
+        // Conservative semantic fingerprint: all source bytes participate, since
+        // inline bodies, macros and __LINE__ can change the exported meaning.
+        std::uint64_t SemanticFingerprint() const noexcept { return m_fingerprint; }
 
         const std::filesystem::path & Path() const noexcept
         {
@@ -154,6 +161,7 @@ namespace heimdall
         bool m_readable = false;
         bool m_private = false;
         bool m_textual = false;
+        std::uint64_t m_fingerprint = 0;
 
         std::string m_pool;
         std::vector<std::uint32_t> m_span_begin;

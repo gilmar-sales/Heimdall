@@ -205,6 +205,7 @@ namespace heimdall
         {
             return m_arena->Used();
         }
+        std::size_t ArenaAllocations() const noexcept { return m_arena->AllocationCount(); }
 
     private:
         friend class Typer;

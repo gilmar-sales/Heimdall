@@ -339,6 +339,13 @@ namespace heimdall
         ChildRange DirectChildren(std::size_t node_index) const noexcept;
         bool IsDescendant(std::size_t node_index, std::size_t candidate) const noexcept;
         void HoldSource(std::shared_ptr<const std::string> owned);
+        std::shared_ptr<const std::string> SharedSource() const noexcept
+        {
+            return m_owned_source;
+        }
+        // Backing container estimate, excluding source and the lazy AoS adapter.
+        // Does not construct or read mutable compatibility storage.
+        std::size_t StorageBytes() const noexcept;
         // Drops the tree's claim on the source text and the view of it. Afterwards
         // only the tokens, nodes, items and diagnostics may be used (that is all a
         // parse reusing this tree reads); call it only on a tree nobody else holds.
