@@ -130,6 +130,33 @@ TEST(IncrementalParseSpec, ComposeCoversBothEdits)
     }
 }
 
+TEST(IncrementalParseSpec, SharedSnapshotReuseMatchesFullParseAfterOldSourceIsReleased)
+{
+    auto source = std::make_shared<const std::string>(
+        "int a() { return 1; }\nint b() { return 2; }\nint c() { return 3; }\n");
+    auto tokens = std::make_shared<const std::vector<heimdall::Token>>(Lexer(*source).Lex());
+    auto previous = ParseTree::ParseSnapshot(source, {}, {}, tokens);
+    std::string edited = *source;
+    const auto offset = edited.find("return 2") + 7;
+    edited.replace(offset, 1, "200");
+    auto next_source = std::make_shared<const std::string>(edited);
+    auto next_tokens = std::make_shared<const std::vector<heimdall::Token>>(Lexer(*next_source).Lex());
+    const auto *data = next_tokens->data();
+    previous.ReleaseSource();
+    source.reset();
+    tokens.reset();
+    const ParseReuse reuse{&previous, offset, 1, 3};
+    auto reused = ParseTree::ParseSnapshot(next_source, {}, {}, next_tokens, &reuse);
+    next_source.reset();
+    next_tokens.reset();
+    EXPECT_EQ(reused.Tokens().data(), data);
+    EXPECT_GT(reused.ReusedItems(), 0u);
+    const auto full = ParseTree::Parse(edited);
+    EXPECT_EQ(Describe(reused), Describe(full));
+    EXPECT_TRUE(SameItems(reused, full));
+    EXPECT_EQ(reused.Source(), edited);
+}
+
 TEST(IncrementalParseSpec, ReusedParseEqualsFullParseForRandomEdits)
 {
     Rng rng{2024};

@@ -51,8 +51,28 @@ namespace heimdall::lsp
 
     thread_local const LanguageServer::RequestContext * LanguageServer::t_context = nullptr;
 
-    LanguageServer::LanguageServer() : m_pool(PoolSize()) {}
-    LanguageServer::~LanguageServer() = default;
+    LanguageServer::LanguageServer() : m_pool(PoolSize()), m_parse_pool(2), m_document_pool(1) {}
+    LanguageServer::~LanguageServer()
+    {
+        // Producers must finish before the pools they submit continuations to.
+        m_document_pool.WaitIdle();
+        m_document_pool.Shutdown();
+        m_index_worker.request_stop();
+        m_scan_worker.request_stop();
+        m_index_cv.notify_all();
+        m_diag_worker.request_stop();
+        {
+            const std::lock_guard<std::mutex> lock(m_diag_mu);
+            m_diag_stop.request_stop();
+        }
+        m_diag_cv.notify_all();
+        if (m_diag_worker.joinable()) m_diag_worker.join();
+        if (m_index_worker.joinable()) m_index_worker.join();
+        if (m_scan_worker.joinable()) m_scan_worker.join();
+        DrainRequests();
+        m_parse_pool.Shutdown();
+        m_pool.Shutdown();
+    }
 
     bool LanguageServer::Run()
     {
@@ -79,12 +99,23 @@ namespace heimdall::lsp
                     source.request_stop();
                 }
             }
-            m_pool.Shutdown();
+            m_document_pool.WaitIdle();
+            m_document_pool.Shutdown();
             m_index_worker.request_stop();
             m_diag_worker.request_stop();
+            {
+                const std::lock_guard<std::mutex> lock(m_diag_mu);
+                m_diag_stop.request_stop();
+            }
             m_scan_worker.request_stop();
             m_index_cv.notify_all();
             m_diag_cv.notify_all();
+            if (m_diag_worker.joinable()) m_diag_worker.join();
+            if (m_index_worker.joinable()) m_index_worker.join();
+            if (m_scan_worker.joinable()) m_scan_worker.join();
+            DrainRequests();
+            m_parse_pool.Shutdown();
+            m_pool.Shutdown();
         };
 
         std::string body;
@@ -143,8 +174,9 @@ namespace heimdall::lsp
             else if (method == "shutdown")
             {
                 // Answer every request received so far before acknowledging.
-                m_pool.WaitIdle();
+                m_document_pool.WaitIdle();
                 FlushDiagnostics();
+                DrainRequests();
                 Respond(id_json, "null");
             }
             else if (method == "exit")
@@ -154,15 +186,15 @@ namespace heimdall::lsp
             }
             else if (method == "textDocument/didOpen")
             {
-                OpenDocument(request);
+                QueueDocument(body);
             }
             else if (method == "textDocument/didChange")
             {
-                ChangeDocument(request);
+                QueueDocument(body);
             }
             else if (method == "textDocument/didClose")
             {
-                CloseDocument(request);
+                QueueDocument(body);
             }
             else if (method == "textDocument/formatting")
             {
@@ -250,80 +282,133 @@ namespace heimdall::lsp
         return false;
     }
 
+    void LanguageServer::DrainRequests()
+    {
+        // Handlers can produce parse jobs, which produce handler continuations.
+        // A single pool-idle observation cannot cover both directions.
+        for (;;)
+        {
+            m_pool.WaitIdle();
+            m_parse_pool.WaitIdle();
+            m_pool.WaitIdle();
+            const std::lock_guard<std::mutex> lock(m_inflight_mu);
+            if (m_inflight.empty()) break;
+        }
+    }
+
+    void LanguageServer::QueueDocument(std::string_view body)
+    {
+        // All document notifications and snapshot pins use the same FIFO lane.
+        // No text editing, lexing or line-index rebuilding runs on transport I/O.
+        m_document_pool.Submit([this, body = std::string(body)]
+        {
+            simdjson::dom::parser parser;
+            simdjson::dom::element request;
+            if (parser.parse(body).get(request)) return;
+            std::string_view method;
+            if (request["method"].get_string().get(method)) return;
+            if (method == "textDocument/didOpen") OpenDocument(request);
+            else if (method == "textDocument/didChange") ChangeDocument(request);
+            else if (method == "textDocument/didClose") CloseDocument(request);
+        });
+    }
+
     void LanguageServer::Dispatch(std::string_view body, simdjson::dom::element request,
         const std::string& id, RequestHandler handler)
     {
-        auto context = std::make_shared<RequestContext>();
+        auto job = std::make_shared<RequestJob>();
+        job->body = body;
+        job->id = id;
+        job->handler = std::move(handler);
+        job->context.interactive = true;
         std::stop_source source;
-        context->stop = source.get_token();
-
-        // Pin the document as of arrival: a didChange received after this
-        // request must not change the text its position refers to.
+        job->context.stop = source.get_token();
         std::string_view uri;
-        simdjson::dom::object text_document;
-        if (DocumentParams(request, uri, text_document))
-        {
-            std::string uri_string(uri);
-            if (auto snapshot = GetDocument(uri_string))
-            {
-                context->pinned = PinnedDocument{std::move(uri_string), std::move(*snapshot)};
-            }
-        }
-
+        simdjson::dom::object document;
+        if (DocumentParams(request, uri, document)) job->context.document_uri = uri;
         {
             const std::lock_guard<std::mutex> lock(m_inflight_mu);
             m_inflight[id] = source;
         }
-
-        // `request` points into the I/O thread's parser buffer, which the next
-        // message overwrites: the worker re-parses its own copy of the body.
-        // The task is move-only (no std::function copy) and reuses a
-        // thread-local dom parser so bursty requests don't reallocate it.
-        m_pool.Submit(ThreadPool::Task([this, body = std::string(body), id, context,
-            handler = std::move(handler)]() mutable
+        // Pin after prior notifications, before later ones. Cancellation was
+        // registered above, so transport can cancel even while this pin is queued.
+        m_document_pool.Submit([this, job]
+        {
+            if (!job->context.document_uri.empty())
             {
-                struct Finish
-                {
-                    LanguageServer& server;
-                    const std::string& id;
-                    ~Finish()
-                    {
-                        t_context = nullptr;
-                        const std::lock_guard<std::mutex> lock(server.m_inflight_mu);
-                        server.m_inflight.erase(id);
-                }
-                } finish
-                {
-                    *this, id
-            };
-
-                thread_local simdjson::dom::parser parser;
-                simdjson::dom::element element;
-                if (parser.parse(body).get(element))
-                {
-                    Respond(id, "null");
-                    return;
+                if (auto snapshot = GetDocument(job->context.document_uri))
+                    job->context.pinned = PinnedDocument{job->context.document_uri, std::move(*snapshot)};
             }
-
-                t_context = context.get();
-                try
-                {
-                    handler(element, id);
-                }
-                catch (...)
-                {
-                    // Answer anyway: a request that never gets a response leaves
-                    // the client waiting on a server that looks hung.
-                    RespondInternalError(id);
-                }
-        }));
+            m_pool.Submit([this, job] { ExecuteRequest(job); });
+        });
     }
 
+    void LanguageServer::ExecuteRequest(const std::shared_ptr<RequestJob> &job)
+    {
+        struct ContextScope
+        {
+            ~ContextScope() { t_context = nullptr; }
+        } scope;
+        t_context = &job->context;
+        bool suspended = false;
+        try
+        {
+            if (RequestCancelled()) RespondCancelled(job->id);
+            else
+            {
+                if (job->context.parse_failure) std::rethrow_exception(job->context.parse_failure);
+                thread_local simdjson::dom::parser parser;
+                simdjson::dom::element element;
+                if (parser.parse(job->body).get(element)) Respond(job->id, "null");
+                else job->handler(element, job->id);
+            }
+        }
+        catch (const ParsePending &pending)
+        {
+            auto waiter = std::make_shared<ParseSlot::Waiter>();
+            waiter->resume = [this, job, slot = pending.slot]
+            {
+                // Keep the finished result with this request even if didChange
+                // or another version has meanwhile evicted the document cache.
+                m_pool.Submit([this, job, slot]
+                {
+                    {
+                        const std::lock_guard<std::mutex> lock(slot->mu);
+                        job->context.parsed = slot->tree;
+                        job->context.parse_failure = slot->failure;
+                    }
+                    ExecuteRequest(job);
+                });
+            };
+            std::weak_ptr<ParseSlot::Waiter> weak = waiter;
+            waiter->cancellation.emplace(job->context.stop, std::function<void()>([weak]
+            {
+                if (auto waiting = weak.lock()) waiting->Wake();
+            }));
+            bool completed;
+            {
+                const std::lock_guard<std::mutex> lock(pending.slot->mu);
+                completed = pending.slot->ready.load(std::memory_order_acquire) || pending.slot->failure;
+                if (!completed) pending.slot->waiters.push_back(waiter);
+            }
+            suspended = true;
+            if (completed) waiter->Wake();
+        }
+        catch (...)
+        {
+            RespondInternalError(job->id);
+        }
+        if (!suspended)
+        {
+            const std::lock_guard<std::mutex> lock(m_inflight_mu);
+            m_inflight.erase(job->id);
+        }
+    }
     std::optional<LanguageServer::DocumentSnapshot> LanguageServer::GetDocument(const std::string& uri)
     {
-        if (t_context != nullptr && t_context->pinned && t_context->pinned->uri == uri)
+        if (t_context != nullptr && t_context->interactive && t_context->document_uri == uri)
         {
-            return t_context->pinned->snapshot;
+            return t_context->pinned ? std::optional(t_context->pinned->snapshot) : std::nullopt;
         }
 
         const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
@@ -855,9 +940,8 @@ namespace heimdall::lsp
         }
 
         // Take the previous parse out of the cache as the base for the next one.
-        // Dropping the cache entry (and, when nothing else uses the tree, the
-        // tree's hold on the text) is also what lets the text below be edited in
-        // place instead of copied.
+        // Dropping the cache entry releases obsolete buffers. Keep just the
+        // tokens/nodes needed for reuse when no other consumer owns the tree.
         std::shared_ptr<const heimdall::ParseTree> base;
         heimdall::ParserOptions base_options;
         EditHull pending;
@@ -890,57 +974,37 @@ namespace heimdall::lsp
         }
 
         EditHull hull;
-        std::int64_t version = new_version;
+        DocumentSnapshot snapshot;
         {
-            // Edits run under the exclusive lock so a snapshot that nothing else
-            // references can be changed in place: O(edit) instead of O(document).
-            const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
+            const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
             const auto found = m_documents.find(uri_string);
-            if (found == m_documents.end())
-            {
-                return;
-            }
-
-            auto& snapshot = found->second;
-            std::shared_ptr<std::string> text = snapshot.text.use_count() == 1
-            ? std::const_pointer_cast<std::string>(snapshot.text)
-            : std::make_shared<std::string>(*snapshot.text);
-            std::shared_ptr<LineIndex> lines = snapshot.lines.use_count() == 1
-            ? std::const_pointer_cast<LineIndex>(snapshot.lines)
-            : std::make_shared<LineIndex>(*snapshot.lines);
-            std::shared_ptr<std::vector<heimdall::Token>> tokens;
-            if (!snapshot.tokens)
-            {
-                tokens = std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*text).Lex());
-            }
-            else if (snapshot.tokens.use_count() == 1)
-            {
-                tokens = std::const_pointer_cast<std::vector<heimdall::Token>>(snapshot.tokens);
-            }
-            else
-            {
-                tokens = std::make_shared<std::vector<heimdall::Token>>(*snapshot.tokens);
-            }
-
-            lines->Rebind(*text);
-            for (simdjson::dom::element change: changes)
-            {
-                simdjson::dom::object change_object;
-                if (change.get_object().get(change_object))
-                {
-                    continue;
-                }
-
-                ApplyContentChange(*text, *lines, *tokens, hull, change_object);
-            }
-
-            lines->Rebind(*text);
-            snapshot.version = new_version;
-            snapshot.text = std::move(text);
-            snapshot.lines = std::move(lines);
-            snapshot.tokens = std::move(tokens);
-            version = snapshot.version;
+            if (found == m_documents.end()) return;
+            snapshot = found->second;
         }
+        // Published snapshots are always immutable. Build the next version
+        // outside m_docs_mu; readers continue using the previous one meanwhile.
+        auto text = std::make_shared<std::string>(*snapshot.text);
+        auto lines = std::make_shared<LineIndex>(*snapshot.lines);
+        auto tokens = snapshot.tokens
+            ? std::make_shared<std::vector<heimdall::Token>>(*snapshot.tokens)
+            : std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*text).Lex());
+        lines->Rebind(*text);
+        for (simdjson::dom::element change : changes)
+        {
+            simdjson::dom::object change_object;
+            if (!change.get_object().get(change_object))
+                ApplyContentChange(*text, *lines, *tokens, hull, change_object);
+        }
+        lines->Rebind(*text);
+        snapshot.version = new_version;
+        snapshot.text = std::move(text);
+        snapshot.lines = std::move(lines);
+        snapshot.tokens = std::move(tokens);
+        {
+            const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
+            m_documents[uri_string] = std::move(snapshot);
+        }
+        const std::int64_t version = new_version;
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
             if (base)
@@ -1890,6 +1954,9 @@ namespace heimdall::lsp
         const std::string& uri, const std::shared_ptr<const std::string>& text, std::int64_t version,
         const heimdall::CompileCommand* command)
     {
+        if (t_context && t_context->parsed && t_context->pinned &&
+            t_context->pinned->uri == uri && t_context->pinned->snapshot.text.get() == text.get())
+            return t_context->parsed;
         heimdall::ParserOptions options = ParserOptionsFor(command);
         std::shared_ptr<ParseSlot> slot;
         std::shared_ptr<const heimdall::ParseTree> base;
@@ -1931,69 +1998,58 @@ namespace heimdall::lsp
                 entry.slot = slot;
             }
         }
-        // Always go through call_once: its return synchronizes with the thread
-        // that filled the slot. (Peeking at slot->tree first was a data race
-        // with the worker still inside the initializer.) A cancelled parse
-        // throws out of the initializer, which leaves the flag unset so the next
-        // caller retries with its own token instead of inheriting a partial tree.
-        struct ParseCancelled {};
-
-        try
+        std::shared_ptr<const std::vector<heimdall::Token>> lexed;
+        if (const auto document = GetDocument(uri); document && document->text.get() == text.get())
+            lexed = document->tokens;
+        bool start = false;
         {
-            const std::stop_token stop = CurrentStop();
-            std::shared_ptr<const std::vector<heimdall::Token>> lexed;
-            {
-                const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
-                if (const auto found = m_documents.find(uri);
-                    found != m_documents.end() && found->second.text.get() == text.get())
-                {
-                    lexed = found->second.tokens;
-                }
-            }
-            // A plain mutex instead of std::call_once: call_once's behaviour when
-            // the initializer throws (a cancelled parse) is unreliable on some
-            // standard libraries and can leave later callers stuck forever.
-            const std::lock_guard<std::mutex> slot_lock(slot->mu);
-            if (!slot->ready.load(std::memory_order_acquire))
-            {
-                heimdall::ParseReuse reuse;
-                if (base)
-                {
-                    reuse = {base.get(), base_edit.offset, base_edit.old_length, base_edit.new_length};
-                }
-
-                auto tree = std::make_shared<heimdall::ParseTree>(
-                    heimdall::ParseTree::Parse(*text, options, stop, lexed.get(),
-                    base ? &reuse : nullptr));
-                if (tree->Cancelled())
-                {
-                    throw ParseCancelled{};
-                }
-
-                tree->HoldSource(text);
-                slot->tree = std::move(tree);
-                slot->ready.store(true, std::memory_order_release);
-            }
+            const std::lock_guard<std::mutex> lock(slot->mu);
+            if (!slot->started) { slot->started = true; start = true; }
         }
-        catch (const ParseCancelled &)
+        if (start)
         {
-            return nullptr;
-        }
-
-        if (base)
-        {
-            // The base has served its purpose; free the old tree.
-            const std::lock_guard<std::mutex> lock(m_parse_mu);
-            if (const auto found = m_parse_cache.find(uri);
-                found != m_parse_cache.end() && found->second.slot == slot)
+            // The parse belongs to the version, not to whichever request won
+            // the race. Cancelling one consumer cannot invalidate other users.
+            m_parse_pool.Submit([this, slot, uri, text, options = std::move(options), lexed,
+                base = std::move(base), base_edit]
             {
-                found->second.base.reset();
-            }
+                std::shared_ptr<const heimdall::ParseTree> tree;
+                std::exception_ptr failure;
+                try
+                {
+                    const heimdall::ParseReuse reuse{base.get(), base_edit.offset,
+                        base_edit.old_length, base_edit.new_length};
+                    tree = std::make_shared<heimdall::ParseTree>(heimdall::ParseTree::ParseSnapshot(
+                        text, options, {}, lexed, base ? &reuse : nullptr));
+                }
+                catch (...) { failure = std::current_exception(); }
+                std::vector<std::shared_ptr<ParseSlot::Waiter>> waiters;
+                {
+                    const std::lock_guard<std::mutex> lock(slot->mu);
+                    slot->tree = std::move(tree);
+                    slot->failure = failure;
+                    slot->ready.store(slot->tree != nullptr, std::memory_order_release);
+                    waiters.swap(slot->waiters);
+                }
+                slot->cv.notify_all();
+                for (auto &waiter : waiters) waiter->Wake();
+                const std::lock_guard<std::mutex> lock(m_parse_mu);
+                if (const auto found = m_parse_cache.find(uri);
+                    found != m_parse_cache.end() && found->second.slot == slot)
+                    found->second.base.reset();
+            });
         }
-
+        std::unique_lock<std::mutex> lock(slot->mu);
+        if (!slot->ready.load(std::memory_order_acquire) && !slot->failure)
+        {
+            if (t_context && t_context->interactive) throw ParsePending{slot};
+            // Dedicated diagnostics may wait, but remain immediately cancelable.
+            if (!slot->cv.wait(lock, CurrentStop(), [&]
+                { return slot->ready.load(std::memory_order_acquire) || slot->failure; })) return nullptr;
+        }
+        if (slot->failure) std::rethrow_exception(slot->failure);
         return slot->tree;
     }
-
     bool LanguageServer::IsCurrentVersion(const std::string& uri, std::int64_t version)
     {
         const std::shared_lock<std::shared_mutex> lock(m_docs_mu);

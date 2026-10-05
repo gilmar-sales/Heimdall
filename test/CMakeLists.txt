@@ -126,6 +126,11 @@ if (Python3_Interpreter_FOUND)
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
+    NAME LspSnapshotConcurrencySmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspSnapshotConcurrencySmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
     NAME LspIncrementalSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncrementalSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"

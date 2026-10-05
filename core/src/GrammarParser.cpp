@@ -126,9 +126,9 @@ namespace heimdall
 
             std::size_t active_cursor = 0;
             std::size_t directive_cursor = 0;
-            for (std::size_t i = 0; i < tree.m_tokens.size(); ++i)
+            for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
             {
-                const auto &token = tree.m_tokens[i];
+                const auto &token = tree.Tokens()[i];
                 while (active_cursor < preprocessing.active_ranges.size() &&
                     preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <= token.offset)
                 {
@@ -167,7 +167,7 @@ namespace heimdall
                         {
                             if (tree.m_decoration.empty())
                             {
-                                tree.m_decoration.assign(tree.m_tokens.size(), false);
+                                tree.m_decoration.assign(tree.Tokens().size(), false);
                             }
 
                             tree.m_decoration[i] = true;
@@ -182,7 +182,7 @@ namespace heimdall
             m_sig_tok.reserve(m_sig.size());
             for (const std::size_t token_index: m_sig)
             {
-                m_sig_tok.push_back(tree.m_tokens[token_index].tok);
+                m_sig_tok.push_back(tree.Tokens()[token_index].tok);
             }
 
             m_match.resize(m_sig.size(), Invalid);
@@ -221,7 +221,7 @@ namespace heimdall
                             {
                                 const std::uint32_t open_tok = m_sig[stack[k]];
                                 tree.m_diagnostics.push_back(
-                                    {tree.m_tokens[open_tok].offset, "unclosed delimiter"});
+                                    {tree.Tokens()[open_tok].offset, "unclosed delimiter"});
                             }
 
                             m_match[i] = stack[found];
@@ -239,7 +239,7 @@ namespace heimdall
             m_tree.m_nodes_soa.push_back(
                 static_cast<std::uint8_t>(GrammarKind::TranslationUnit),
                 0,
-                static_cast<std::uint32_t>(m_tree.m_tokens.size()),
+                static_cast<std::uint32_t>(m_tree.Tokens().size()),
                 static_cast<std::uint32_t>(ParseTree::RootNode),
                 1);
             m_tree.m_nodes_aos_dirty = true;
@@ -292,7 +292,7 @@ namespace heimdall
         std::string_view Text(std::size_t sig) const
         {
             if (sig >= m_sig.size()) return {};
-            const auto &token = m_tree.m_tokens[m_sig[sig]];
+            const auto &token = m_tree.Tokens()[m_sig[sig]];
             return m_tree.m_source.substr(token.offset, token.length);
         }
 
@@ -305,7 +305,7 @@ namespace heimdall
 
         std::size_t Add(GrammarKind kind, std::size_t begin, std::size_t end, std::size_t parent)
         {
-            const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
+            const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
             const std::size_t past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
             const std::uint32_t index = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
             m_tree.m_nodes_soa.push_back(
@@ -350,7 +350,7 @@ namespace heimdall
 
         void SetNodeRange(std::size_t node, std::size_t begin, std::size_t end)
         {
-            m_tree.m_nodes_soa.first_token[node] = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
+            m_tree.m_nodes_soa.first_token[node] = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
             const auto past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
             m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
             m_tree.m_nodes_aos_dirty = true;
@@ -363,7 +363,7 @@ namespace heimdall
                 return false;
             }
 
-            const auto offset = m_tree.m_tokens[m_sig[sig]].offset;
+            const auto offset = m_tree.Tokens()[m_sig[sig]].offset;
 
             const auto nl = offset == 0 ? std::string_view::npos : m_tree.m_source.rfind('\n', offset - 1);
             const auto line_start = nl == std::string_view::npos ? 0 : nl + 1;
@@ -380,7 +380,7 @@ namespace heimdall
         std::size_t SkipDirective(std::size_t sig, std::size_t end, std::size_t parent)
         {
             const auto start = sig;
-            const auto offset = m_tree.m_tokens[m_sig[sig]].offset;
+            const auto offset = m_tree.Tokens()[m_sig[sig]].offset;
             auto line_end = m_tree.m_source.find('\n', offset);
             if (line_end == std::string_view::npos)
             {
@@ -416,7 +416,7 @@ namespace heimdall
                 line_end = next == std::string_view::npos ? m_tree.m_source.size() : next + 1;
             }
 
-            while (sig < end && m_tree.m_tokens[m_sig[sig]].offset < line_end)
+            while (sig < end && m_tree.Tokens()[m_sig[sig]].offset < line_end)
             {
                 ++sig;
             }
@@ -447,7 +447,7 @@ namespace heimdall
                 }
 
                 if (Is(i, "<") && i > begin &&
-                    (m_tree.m_tokens[m_sig[i - 1]].kind == TokenKind::Identifier || Is(i - 1, ">") || Is(i - 1, ">>")))
+                    (m_tree.Tokens()[m_sig[i - 1]].kind == TokenKind::Identifier || Is(i - 1, ">") || Is(i - 1, ">>")))
                 {
                     ++angle_depth;
                 }
@@ -564,7 +564,7 @@ namespace heimdall
         bool IsIdentifierToken(std::size_t sig) const
         {
             return sig < m_sig.size() &&
-                m_tree.m_tokens[m_sig[sig]].kind == TokenKind::Identifier;
+                m_tree.Tokens()[m_sig[sig]].kind == TokenKind::Identifier;
         }
 
         static bool IsBuiltinType(std::string_view text)
@@ -1267,10 +1267,10 @@ namespace heimdall
 
             if (i < end && (IsIdentifierToken(i) || Is(i, "decltype") || Is(i, "sizeof") || Is(i, "alignof") ||
                 Is(i, "noexcept") || Is(i, "true") || Is(i, "false") || Is(i, "nullptr") ||
-                m_tree.m_tokens[m_sig[i]].kind == TokenKind::Number ||
-                m_tree.m_tokens[m_sig[i]].kind == TokenKind::StringLiteral ||
-                m_tree.m_tokens[m_sig[i]].kind == TokenKind::CharacterLiteral ||
-                m_tree.m_tokens[m_sig[i]].kind == TokenKind::RawStringLiteral))
+                m_tree.Tokens()[m_sig[i]].kind == TokenKind::Number ||
+                m_tree.Tokens()[m_sig[i]].kind == TokenKind::StringLiteral ||
+                m_tree.Tokens()[m_sig[i]].kind == TokenKind::CharacterLiteral ||
+                m_tree.Tokens()[m_sig[i]].kind == TokenKind::RawStringLiteral))
             {
                 ++i;
                 if (i < end && Is(i, "<"))
@@ -1603,7 +1603,7 @@ namespace heimdall
                             // means the separating comma was forgotten.
                             if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
                             {
-                                m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[consumed]].offset,
+                                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
                                         std::string("expected ',' before '") +
                                         std::string(Text(consumed)) + "'"});
                                 SetNodeRange(parameter, part, consumed);
@@ -2154,7 +2154,7 @@ namespace heimdall
                 // (two missing semicolons in a row) are all surfaced.
                 if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[consumed]].offset,
+                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
                             std::string("expected ';' before '") +
                             std::string(Text(consumed)) + "'"});
                     SetNodeRange(declarator, part, consumed);
@@ -2277,10 +2277,10 @@ namespace heimdall
                     return GrammarKind::DeclarationStatement;
             }}
 
-            if (m_tree.m_tokens[m_sig[begin]].kind == TokenKind::Identifier)
+            if (m_tree.Tokens()[m_sig[begin]].kind == TokenKind::Identifier)
             {
                 auto i = begin + 1;
-                while (i + 1 < end && Is(i, "::") && m_tree.m_tokens[m_sig[i + 1]].kind == TokenKind::Identifier)
+                while (i + 1 < end && Is(i, "::") && m_tree.Tokens()[m_sig[i + 1]].kind == TokenKind::Identifier)
                 {
                     i += kTwo;
                 }
@@ -2312,7 +2312,7 @@ namespace heimdall
                     ++i;
                 }
 
-                if (i < end && m_tree.m_tokens[m_sig[i]].kind == TokenKind::Identifier)
+                if (i < end && m_tree.Tokens()[m_sig[i]].kind == TokenKind::Identifier)
                 {
                     // `a * b;` with `a` a variable in scope is a product, whatever it looks like.
                     if (!Is(begin + 1, "::") && ClassOf(Text(begin)) == kNameValue)
@@ -2516,16 +2516,16 @@ namespace heimdall
                     prefix_kind = GrammarKind::ErrorExpression;
                 }
             }
-            else if (m_tree.m_tokens[m_sig[pos]].kind == TokenKind::Identifier)
+            else if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Identifier)
             {
                 root = Add(GrammarKind::IdentifierExpression, pos, pos + 1, parent);
                 ++pos;
                 prefix_kind = GrammarKind::IdentifierExpression;
             }
-            else if (m_tree.m_tokens[m_sig[pos]].kind == TokenKind::Number ||
-                m_tree.m_tokens[m_sig[pos]].kind == TokenKind::StringLiteral ||
-                m_tree.m_tokens[m_sig[pos]].kind == TokenKind::CharacterLiteral ||
-                m_tree.m_tokens[m_sig[pos]].kind == TokenKind::RawStringLiteral || first == "true" || first == "false" ||
+            else if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Number ||
+                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::StringLiteral ||
+                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::CharacterLiteral ||
+                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::RawStringLiteral || first == "true" || first == "false" ||
                 first == "nullptr")
             {
                 root = Add(GrammarKind::LiteralExpression, pos, pos + 1, parent);
@@ -2540,7 +2540,7 @@ namespace heimdall
             }
             else
             {
-                m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[pos]].offset, "expected expression"});
+                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset, "expected expression"});
                 root = Add(GrammarKind::ErrorExpression, pos, pos + 1, parent);
                 m_last_expression_node = root;
                 return pos + 1;
@@ -2627,7 +2627,7 @@ namespace heimdall
                         Is(after_template, "+") || Is(after_template, "-") || Is(after_template, "*") ||
                         Is(after_template, "/") || Is(after_template, "%") || Is(after_template, "++") ||
                         Is(after_template, "--") ||
-                        m_tree.m_tokens[m_sig[after_template]].kind == TokenKind::Identifier;
+                        m_tree.Tokens()[m_sig[after_template]].kind == TokenKind::Identifier;
                     if (close != Invalid && follows_template)
                     {
                         const auto node = Add(GrammarKind::TemplateIdExpression, begin, close + 1, parent);
@@ -2639,7 +2639,7 @@ namespace heimdall
                             const auto comma = FindComma(arg, close);
                             if (comma == arg)
                             {
-                                m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[arg]].offset,
+                                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[arg]].offset,
                                         "expected template argument"});
                                 ++arg;
                                 continue;
@@ -2704,14 +2704,14 @@ namespace heimdall
                 // A user-defined literal suffix (`"abc"s`, `1_km`) only counts when it
                 // directly touches the literal; otherwise an identifier here cannot
                 // continue the expression and signals a missing ';'.
-                if (m_tree.m_tokens[m_sig[pos]].kind == TokenKind::Identifier && pos > begin &&
-                    (m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::Number ||
-                    m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::StringLiteral ||
-                    m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
-                    m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
+                if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Identifier && pos > begin &&
+                    (m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::Number ||
+                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::StringLiteral ||
+                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
+                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
                 {
-                    const auto &previous = m_tree.m_tokens[m_sig[pos - 1]];
-                    const auto &current = m_tree.m_tokens[m_sig[pos]];
+                    const auto &previous = m_tree.Tokens()[m_sig[pos - 1]];
+                    const auto &current = m_tree.Tokens()[m_sig[pos]];
                     if (current.offset == previous.offset + previous.length)
                     {
                         ++pos;
@@ -2724,7 +2724,7 @@ namespace heimdall
                 // expression rather than starting a new declaration.
                 const bool after_paren =
                     root != Invalid && static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::ParenthesizedExpression;
-                const auto token_kind_here = m_tree.m_tokens[m_sig[pos]].kind;
+                const auto token_kind_here = m_tree.Tokens()[m_sig[pos]].kind;
                 const bool operand_start =
                     token_kind_here == TokenKind::Identifier || token_kind_here == TokenKind::Number ||
                     token_kind_here == TokenKind::StringLiteral || token_kind_here == TokenKind::CharacterLiteral ||
@@ -2812,7 +2812,7 @@ namespace heimdall
                 }
                 else
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[pos]].offset,
+                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset,
                             "expected ':' after case label"});
                 }
 
@@ -2845,7 +2845,7 @@ namespace heimdall
                 }
                 else
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
+                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
                             "expected while after do statement"});
                 }
 
@@ -2878,7 +2878,7 @@ namespace heimdall
                     }
                     else
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[catch_start]].offset,
+                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[catch_start]].offset,
                                 "expected compound statement after catch clause"});
                     }
                 }
@@ -3016,7 +3016,7 @@ namespace heimdall
 
                         if (Is(i, "return") || Is(i, "co_return"))
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[i]].offset,
+                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[i]].offset,
                                     "expected ';' before return statement"});
                             Add(GrammarKind::Error, start, i, parent);
                             pos = i;
@@ -3044,7 +3044,7 @@ namespace heimdall
                     if (expr_end > expression_begin && expr_end < semicolon &&
                         LooksLikeDeclarationStart(expr_end, semicolon))
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[expr_end]].offset,
+                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[expr_end]].offset,
                                 std::string("expected ';' before '") +
                                 std::string(Text(expr_end)) + "'"});
                         SetNodeRange(node, start, expr_end);
@@ -3065,7 +3065,7 @@ namespace heimdall
                 return;
             }
 
-            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
+            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
                     "expected ';' before end of compound statement"});
             while (pos < end && !Is(pos, "}") && !Is(pos, ";"))
             {
@@ -3131,7 +3131,7 @@ namespace heimdall
             }
             else
             {
-                m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
+                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
                         "expected '}' to close compound statement"});
             }
 
@@ -3202,7 +3202,7 @@ namespace heimdall
                     // and re-parse the remainder as its own enumerator.
                     if (rest > pos && rest < stop && IsIdentifierToken(rest))
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[rest]].offset,
+                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[rest]].offset,
                                 std::string("expected ',' before '") +
                                 std::string(Text(rest)) + "'"});
                         SetNodeRange(enumerator, pos, rest);
@@ -3369,7 +3369,7 @@ namespace heimdall
 
         std::string_view RawText(std::uint32_t token) const
         {
-            const auto &t = m_tree.m_tokens[token];
+            const auto &t = m_tree.Tokens()[token];
             return m_tree.m_source.substr(t.offset, t.length);
         }
 
@@ -3503,7 +3503,7 @@ namespace heimdall
                     }
 
                     // One token: unqualified. `A::f` is a member defined out of line, already known.
-                    if (nodes.token_count[n] != 1 || m_tree.m_tokens[first].kind != TokenKind::Identifier)
+                    if (nodes.token_count[n] != 1 || m_tree.Tokens()[first].kind != TokenKind::Identifier)
                     {
                         break;
                     }
@@ -3685,7 +3685,7 @@ namespace heimdall
                 return false;
             }
 
-            const auto &token = m_tree.m_tokens[m_sig[pos]];
+            const auto &token = m_tree.Tokens()[m_sig[pos]];
             switch (token.kind)
             {
             case TokenKind::Number:
@@ -3777,7 +3777,7 @@ namespace heimdall
             const std::ptrdiff_t shift = static_cast<std::ptrdiff_t>(m_reuse->new_length) -
                 static_cast<std::ptrdiff_t>(m_reuse->old_length);
             const std::uint32_t token = m_sig[pos];
-            const std::size_t offset = m_tree.m_tokens[token].offset;
+            const std::size_t offset = m_tree.Tokens()[token].offset;
             bool after = false;
             std::size_t old_offset = offset;
             if (offset >= new_end)
@@ -3793,9 +3793,9 @@ namespace heimdall
             const auto found = std::lower_bound(items.begin(), items.end(), old_offset,
                 [&prev](const TopLevelItem &item, std::size_t value)
                 {
-                    return prev.m_tokens[item.first_token].offset < value;
+                    return prev.Tokens()[item.first_token].offset < value;
                 });
-            if (found == items.end() || prev.m_tokens[found->first_token].offset != old_offset ||
+            if (found == items.end() || prev.Tokens()[found->first_token].offset != old_offset ||
                 !found->reusable)
             {
                 return false;
@@ -3819,10 +3819,10 @@ namespace heimdall
             {
                 // The item must end before the edit, and so must the token after it:
                 // the parser may peek one token past an item to decide where it ends.
-                const auto &last = prev.m_tokens[item.token_end - 1];
+                const auto &last = prev.Tokens()[item.token_end - 1];
                 const auto next = found + 1;
                 if (static_cast<std::size_t>(last.offset) + last.length >= edit || next == items.end() ||
-                    prev.m_tokens[next->first_token].offset >= edit)
+                    prev.Tokens()[next->first_token].offset >= edit)
                 {
                     return false;
                 }
@@ -3830,7 +3830,7 @@ namespace heimdall
 
             const std::size_t token_count = item.token_end - item.first_token;
             const std::size_t after_sig = pos + item.sig_count;
-            if (after_sig > end || token + token_count > m_tree.m_tokens.size() ||
+            if (after_sig > end || token + token_count > m_tree.Tokens().size() ||
                 m_sig[after_sig - 1] != token + (item.token_end - 1 - item.first_token) ||
                 (after_sig < m_sig.size() && m_sig[after_sig] < token + token_count) ||
                 !BracketsClosedWithin(pos, after_sig))
@@ -3841,8 +3841,8 @@ namespace heimdall
             const std::ptrdiff_t byte_shift = after ? shift : 0;
             const std::ptrdiff_t token_shift = static_cast<std::ptrdiff_t>(token) -
                 static_cast<std::ptrdiff_t>(item.first_token);
-            const auto &last_new = m_tree.m_tokens[token + token_count - 1];
-            const auto &last_old = prev.m_tokens[item.token_end - 1];
+            const auto &last_new = m_tree.Tokens()[token + token_count - 1];
+            const auto &last_old = prev.Tokens()[item.token_end - 1];
             if (static_cast<std::ptrdiff_t>(last_new.offset) !=
                 static_cast<std::ptrdiff_t>(last_old.offset) + byte_shift ||
                 last_new.length != last_old.length)
@@ -3851,11 +3851,18 @@ namespace heimdall
             }
 
             const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
+            auto &nodes = m_tree.m_nodes_soa;
+            const auto &old_nodes = prev.m_nodes_soa;
+            const std::size_t node_count = item.node_end - item.node_begin;
+            // Copy unchanged columns in contiguous batches, then remap only the
+            // version-dependent indices. One resize replaces five push_backs per node.
+            nodes.resize(node_base + node_count);
+            std::copy_n(old_nodes.kind.begin() + item.node_begin, node_count, nodes.kind.begin() + node_base);
+            std::copy_n(old_nodes.token_count.begin() + item.node_begin, node_count,
+                nodes.token_count.begin() + node_base);
             for (auto n = item.node_begin; n < item.node_end; ++n)
             {
-                const GrammarKind kind = static_cast<GrammarKind>(prev.m_nodes_soa.kind[n]);
                 const std::uint32_t first_token = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(prev.m_nodes_soa.first_token[n]) + token_shift);
-                const std::uint32_t token_count = prev.m_nodes_soa.token_count[n];
                 std::uint32_t parent = prev.m_nodes_soa.parent[n];
                 if (parent != ParseTree::RootNode)
                 {
@@ -3863,12 +3870,10 @@ namespace heimdall
                 }
                 const std::uint32_t subtree_end = prev.m_nodes_soa.subtree_end[n] - item.node_begin + node_base;
 
-                m_tree.m_nodes_soa.push_back(
-                    static_cast<std::uint8_t>(kind),
-                    first_token,
-                    token_count,
-                    parent,
-                    subtree_end);
+                const auto target = node_base + n - item.node_begin;
+                nodes.first_token[target] = first_token;
+                nodes.parent[target] = parent;
+                nodes.subtree_end[target] = subtree_end;
             }
             m_tree.m_nodes_aos_dirty = true;
             // The copied nodes declare what a fresh parse of them would have declared.
@@ -3969,7 +3974,7 @@ namespace heimdall
 
                     if (angle == end)
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[pos]].offset,
+                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset,
                                 "expected template parameter list"});
                         Add(GrammarKind::Error, pos, end, parent);
                         break;
@@ -4004,7 +4009,7 @@ namespace heimdall
                     declaration_start = angle;
                     if (declaration_start >= end)
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
+                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
                                 "expected declaration after template parameter list"});
                         Add(GrammarKind::Error, start, end, parent);
                         break;
@@ -4029,7 +4034,7 @@ namespace heimdall
                 if (Is(declaration_start, "extern") && declaration_start + 1 < end)
                 {
                     const auto next = declaration_start + 1;
-                    if (m_tree.m_tokens[m_sig[next]].kind == TokenKind::StringLiteral)
+                    if (m_tree.Tokens()[m_sig[next]].kind == TokenKind::StringLiteral)
                     {
                         // extern "C" or extern "C++" etc.
                         if (next + 1 < end && Is(next + 1, "{"))
@@ -4151,7 +4156,7 @@ namespace heimdall
 
                         if (!closed)
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[brace]].offset,
+                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[brace]].offset,
                                     "expected '}' to close language linkage specification"});
                         }
                     }
@@ -4168,7 +4173,7 @@ namespace heimdall
 
                         if (!closed)
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[brace]].offset,
+                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[brace]].offset,
                                     "expected '}' to close definition"});
                         }
                     }
@@ -4215,7 +4220,7 @@ namespace heimdall
                         if (consumed > declaration_start && consumed < semi &&
                             LooksLikeDeclarationStart(consumed, semi))
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[consumed]].offset,
+                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
                                     std::string("expected ';' before '") +
                                     std::string(Text(consumed)) + "'"});
                         }
@@ -4245,7 +4250,7 @@ namespace heimdall
                     continue;
                 }
 
-                m_tree.m_diagnostics.push_back({m_tree.m_tokens[m_sig[start]].offset,
+                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
                         "expected ';' or definition body before end of scope"});
                 Add(GrammarKind::Error, start, end, parent);
                 break;

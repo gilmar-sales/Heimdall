@@ -4,11 +4,12 @@
 #include "Pipeline.hpp"
 #include "Reporting.hpp"
 
-#include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/CompileDatabase.hpp>
 
 #include <filesystem>
 #include <iostream>
+
 #include <vector>
 
 int main(int argc, char**argv)

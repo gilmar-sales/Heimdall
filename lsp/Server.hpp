@@ -41,7 +41,7 @@ namespace heimdall::lsp
         bool Run();
 
     private:
-        // Immutable per-version snapshot: published by the I/O thread, consumed by
+        // Immutable per-version snapshot: published by the document worker, consumed by
         // workers without locking or copying. The ParseTree borrows this buffer
         // through shared ownership (see CachedParse), so replacing the text never
         // invalidates a tree being analyzed concurrently.
@@ -61,15 +61,28 @@ namespace heimdall::lsp
             DocumentSnapshot snapshot;
         };
 
+        struct RequestJob;
         // Per-request state, visible to the handler running on a pool thread
         // (and to the diagnostics worker, which only sets `stop`).
         struct RequestContext
         {
             std::stop_token stop;
             std::optional<PinnedDocument> pinned;
+            // Pins absence too: a later didOpen must not change an earlier request.
+            std::string document_uri;
+            bool interactive = false;
+            std::shared_ptr<const heimdall::ParseTree> parsed;
+            std::exception_ptr parse_failure;
         };
 
         using RequestHandler = std::move_only_function<void(simdjson::dom::element, std::string_view)>;
+        struct RequestJob
+        {
+            std::string body;
+            std::string id;
+            RequestContext context;
+            RequestHandler handler;
+        };
 
         struct HeaderView
         {
@@ -163,6 +176,9 @@ namespace heimdall::lsp
         // the I/O thread goes straight back to reading (and to $/cancelRequest).
         void Dispatch(std::string_view body, simdjson::dom::element request, const std::string & id,
             RequestHandler handler);
+        void ExecuteRequest(const std::shared_ptr<RequestJob> &job);
+        void QueueDocument(std::string_view body);
+        void DrainRequests();
         // Snapshot of `uri`: the one pinned at arrival for the current request,
         // otherwise the latest.
         std::optional<DocumentSnapshot> GetDocument(const std::string & uri);
@@ -232,11 +248,33 @@ namespace heimdall::lsp
 
         struct ParseSlot
         {
+            struct Waiter
+            {
+                std::atomic<bool> resumed{false};
+                std::function<void()> resume;
+                std::optional<std::stop_callback<std::function<void()>>> cancellation;
+                void Wake()
+                {
+                    if (!resumed.exchange(true, std::memory_order_acq_rel))
+                    {
+                        // A cancelled consumer must release its pinned snapshot
+                        // even when the common parse is still running.
+                        auto continuation = std::move(resume);
+                        continuation();
+                    }
+                }
+            };
             std::mutex mu;
+            std::condition_variable_any cv;
             std::shared_ptr<const heimdall::ParseTree> tree;
-            // Set (release) once `tree` is filled, so other threads can peek without call_once.
+            std::exception_ptr failure;
+            std::vector<std::shared_ptr<Waiter>> waiters;
+            bool started = false;
+            // Set (release) only after a successful parse is published.
             std::atomic<bool> ready{false};
         };
+        // Internal suspension, caught before a request has produced a response.
+        struct ParsePending { std::shared_ptr<ParseSlot> slot; };
 
         struct ParseCacheEntry
         {
@@ -278,9 +316,10 @@ namespace heimdall::lsp
         std::stop_source m_diag_stop;
         std::jthread m_index_worker;
         std::jthread m_diag_worker;
-        // Last member: destroyed (and joined) first, while everything the
-        // handlers touch is still alive.
+        // Shutdown drains document jobs, parse jobs/continuations, then handlers.
         ThreadPool m_pool;
+        ThreadPool m_parse_pool;
+        ThreadPool m_document_pool;
     };
 
 } // namespace heimdall::lsp

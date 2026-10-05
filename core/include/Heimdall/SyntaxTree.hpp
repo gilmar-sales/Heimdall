@@ -46,7 +46,8 @@ namespace heimdall
         static constexpr std::size_t RootNode = 0;
         static constexpr std::size_t kDefaultMaxNestingDepth = 512;
 
-        static SyntaxTree Parse(std::string_view source, std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
+        static SyntaxTree Parse(std::string_view source,
+            std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
         static SyntaxTree Parse(std::string_view source, CppStandard standard,
             std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
 
@@ -54,27 +55,33 @@ namespace heimdall
         {
             return m_source;
         }
+
         CppStandard Standard() const noexcept
         {
             return m_standard;
         }
-        const std::vector<Token> & Tokens() const noexcept
+
+        const std::vector<Token>& Tokens() const noexcept
         {
             return m_tokens;
         }
-        const std::vector<GreenNode> & Nodes() const noexcept
+
+        const std::vector<GreenNode>& Nodes() const noexcept
         {
             return m_nodes;
         }
-        const std::vector<std::size_t> & TokenParents() const noexcept
+
+        const std::vector<std::size_t>& TokenParents() const noexcept
         {
             return m_token_parents;
         }
-        const std::vector<ParseDiagnostic> & Diagnostics() const noexcept
+
+        const std::vector<ParseDiagnostic>& Diagnostics() const noexcept
         {
             return m_diagnostics;
         }
-        std::string_view Text(const Token &token) const noexcept
+
+        std::string_view Text(const Token& token) const noexcept
         {
             return m_source.substr(token.offset, token.length);
         }

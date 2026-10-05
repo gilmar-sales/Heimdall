@@ -20,6 +20,54 @@ namespace
 
 } // namespace
 
+TEST(ParseTreeSpec, SnapshotRetainsAndSharesSourceAndTokensAcrossMoves)
+{
+    auto source = std::make_shared<const std::string>("int f() { return 2 + 3; }\n");
+    auto tokens = std::make_shared<const std::vector<heimdall::Token>>(heimdall::Lexer(*source).Lex());
+    const auto *data = tokens->data();
+    const auto *text = source->data();
+    auto parsed = heimdall::ParseTree::ParseSnapshot(source, {}, {}, tokens);
+    EXPECT_EQ(parsed.Tokens().data(), data);
+    EXPECT_EQ(parsed.Source().data(), text);
+    source.reset();
+    tokens.reset();
+    auto moved = std::move(parsed);
+    EXPECT_EQ(moved.Tokens().data(), data);
+    EXPECT_EQ(moved.Source(), "int f() { return 2 + 3; }\n");
+    EXPECT_TRUE(moved.Diagnostics().empty());
+    EXPECT_EQ(moved.Text(moved.Tokens().front()), "int");
+}
+
+TEST(ParseTreeSpec, DirectChildRangeMatchesParentRelationshipsForEveryNode)
+{
+    // Expressions rewrite parents; nested templates, scopes and invalid input
+    // exercise the actual ordering invariant rather than a synthetic SoA.
+    const std::string_view cases[] = {
+        "", "int x;", "namespace N { struct S { int x; void f(int a); }; int y; }",
+        "int f() { int a = 1 + 2 * 3; if (a) { a = f() + 1; } else return 0; return a; }",
+        "template<class T> T f(T t) { return t.x[0](1, 2) + T{}; }",
+        "auto f = [](int x) { return x ? x + 1 : x * 2; };",
+        "void broken( { int a; namespace N { int b; }",
+    };
+    for (const auto source : cases)
+    {
+        const auto tree = heimdall::ParseTree::Parse(source);
+        const auto &soa = tree.NodesSoA();
+        for (std::size_t node = 0; node < soa.size(); ++node)
+        {
+            std::vector<std::size_t> expected;
+            for (std::size_t other = node + 1; other < soa.size(); ++other)
+                if (soa.Parent(other) == node) expected.push_back(other);
+            std::vector<std::size_t> actual;
+            for (auto child : tree.DirectChildren(node)) actual.push_back(child);
+            EXPECT_EQ(actual, expected) << source << " node " << node;
+            EXPECT_EQ(tree.Children(node), expected);
+        }
+        EXPECT_TRUE(tree.Children(soa.size()).empty());
+        EXPECT_EQ(tree.DirectChildren(soa.size()).begin(), tree.DirectChildren(soa.size()).end());
+    }
+}
+
 TEST(ParseTreeSpec, ParsesTranslationUnitDefinitionsAndCompoundStatements)
 {
     constexpr std::string_view source =

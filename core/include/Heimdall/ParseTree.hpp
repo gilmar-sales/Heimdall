@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <stop_token>
 #include <string>
@@ -102,6 +103,15 @@ namespace heimdall
 
         // Convenience: total node count
         std::size_t size() const noexcept { return kind.size(); }
+
+        void reserve(std::size_t n)
+        {
+            kind.reserve(n);
+            first_token.reserve(n);
+            token_count.reserve(n);
+            parent.reserve(n);
+            subtree_end.reserve(n);
+        }
 
         // Resize all columns together
         void resize(std::size_t n)
@@ -226,6 +236,13 @@ namespace heimdall
             std::stop_token stop, const std::vector<Token> * lexed = nullptr,
             const ParseReuse *reuse = nullptr);
 
+        // Immutable document buffers are retained, not copied. `lexed` must
+        // describe this exact source version; a null buffer lexes it once.
+        static ParseTree ParseSnapshot(std::shared_ptr<const std::string> source,
+            const ParserOptions &options, std::stop_token stop = {},
+            std::shared_ptr<const std::vector<Token>> lexed = {},
+            const ParseReuse *reuse = nullptr);
+
         std::string_view Source() const noexcept
         {
             return m_source;
@@ -236,7 +253,7 @@ namespace heimdall
         }
         const std::vector<Token> & Tokens() const noexcept
         {
-            return m_tokens;
+            return m_shared_tokens ? *m_shared_tokens : m_tokens;
         }
         // SoA nodes - primary access
         const GrammarNodeSoA & NodesSoA() const noexcept
@@ -283,6 +300,43 @@ namespace heimdall
             return m_source.substr(token.offset, token.length);
         }
         std::vector<std::size_t> Children(std::size_t node_index) const;
+        // Allocation-free direct-child traversal. The tree must outlive the range.
+        class ChildRange
+        {
+        public:
+            class Iterator
+            {
+            public:
+                using value_type = std::size_t;
+                using difference_type = std::ptrdiff_t;
+                using iterator_category = std::forward_iterator_tag;
+                Iterator() = default;
+                std::size_t operator*() const noexcept { return m_index; }
+                Iterator &operator++() noexcept;
+                Iterator operator++(int) noexcept { auto old = *this; ++*this; return old; }
+                bool operator==(const Iterator &other) const noexcept = default;
+            private:
+                friend class ChildRange;
+                Iterator(const GrammarNodeSoA *soa, std::size_t index, std::size_t end, std::size_t parent)
+                    : m_soa(soa), m_index(index), m_end(end), m_parent(parent) { Seek(); }
+                void Seek() noexcept;
+                const GrammarNodeSoA *m_soa = nullptr;
+                std::size_t m_index = 0;
+                std::size_t m_end = 0;
+                std::size_t m_parent = 0;
+            };
+            Iterator begin() const noexcept { return {m_soa, m_begin, m_end, m_parent}; }
+            Iterator end() const noexcept { return {m_soa, m_end, m_end, m_parent}; }
+        private:
+            friend class ParseTree;
+            ChildRange(const GrammarNodeSoA *soa, std::size_t begin, std::size_t end, std::size_t parent)
+                : m_soa(soa), m_begin(begin), m_end(end), m_parent(parent) {}
+            const GrammarNodeSoA *m_soa;
+            std::size_t m_begin;
+            std::size_t m_end;
+            std::size_t m_parent;
+        };
+        ChildRange DirectChildren(std::size_t node_index) const noexcept;
         bool IsDescendant(std::size_t node_index, std::size_t candidate) const noexcept;
         void HoldSource(std::shared_ptr<const std::string> owned);
         // Drops the tree's claim on the source text and the view of it. Afterwards
@@ -316,6 +370,7 @@ namespace heimdall
 
         // Called by GrammarParser after parsing to build auxiliary structures
         void BuildAuxiliary();
+        void Build(const ParserOptions &options, std::stop_token stop, const ParseReuse *reuse);
 
         // Lazy construction of AoS view for backward compatibility
         mutable std::vector<GrammarNode> m_nodes_aos;
@@ -326,6 +381,7 @@ namespace heimdall
         std::string_view m_source;
         CppStandard m_standard = CppStandard::Cpp20;
         std::vector<Token> m_tokens;
+        std::shared_ptr<const std::vector<Token>> m_shared_tokens;
         GrammarNodeSoA m_nodes_soa;              // SoA layout (primary)
         std::vector<GrammarDiagnostic> m_diagnostics;
         std::vector<PreprocessorDirective> m_directives;

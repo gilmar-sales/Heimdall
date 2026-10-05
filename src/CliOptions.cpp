@@ -11,7 +11,7 @@
 namespace heimdall::cli
 {
 
-    bool ParseStandardValue(std::string_view value, heimdall::CppStandard & standard)
+    bool ParseStandardValue(std::string_view value, heimdall::CppStandard& standard)
     {
         if (value == "c++20" || value == "gnu++20" || value == "c++2a" || value == "gnu++2a")
         {
@@ -35,7 +35,7 @@ namespace heimdall::cli
         return false;
     }
 
-    bool ParsePointerAlignment(std::string_view value, heimdall::PointerAlignment & alignment)
+    bool ParsePointerAlignment(std::string_view value, heimdall::PointerAlignment& alignment)
     {
         if (value == "left")
         {
@@ -52,7 +52,7 @@ namespace heimdall::cli
         return false;
     }
 
-    bool ParseReferenceAlignment(std::string_view value, heimdall::ReferenceAlignment & alignment)
+    bool ParseReferenceAlignment(std::string_view value, heimdall::ReferenceAlignment& alignment)
     {
         if (value == "left")
         {
@@ -69,7 +69,7 @@ namespace heimdall::cli
         return false;
     }
 
-    bool ParseOptions(int argc, char **argv, Options &options)
+    bool ParseOptions(int argc, char**argv, Options& options)
     {
         constexpr int kMinArgcForCommand = 2;
         constexpr int kFirstOptionIndex = 2;
@@ -209,7 +209,7 @@ namespace heimdall::cli
             {
                 const std::string_view value =
                     arg.starts_with(kStdPrefix) ? std::string_view(arg).substr(kStdPrefix.size()) :
-                                                  std::string_view(argv[++i]);
+                std::string_view(argv[++i]);
                 if (!ParseStandardValue(value, options.standard))
                 {
                     std::cerr << "invalid --std value: " << value << " (expected c++20, c++23 or c++26)\n";
@@ -222,8 +222,8 @@ namespace heimdall::cli
                 (arg.starts_with("--pointer-alignment=") && arg.size() > kPointerAlignmentPrefix.size()))
             {
                 const std::string_view value = arg.starts_with(kPointerAlignmentPrefix)
-                    ? std::string_view(arg).substr(kPointerAlignmentPrefix.size())
-                    : std::string_view(argv[++i]);
+                ? std::string_view(arg).substr(kPointerAlignmentPrefix.size())
+                : std::string_view(argv[++i]);
                 if (!ParsePointerAlignment(value, options.pointer_alignment))
                 {
                     std::cerr << "invalid --pointer-alignment value: " << value << " (expected left or right)\n";
@@ -236,8 +236,8 @@ namespace heimdall::cli
                 (arg.starts_with("--reference-alignment=") && arg.size() > kReferenceAlignmentPrefix.size()))
             {
                 const std::string_view value = arg.starts_with(kReferenceAlignmentPrefix)
-                    ? std::string_view(arg).substr(kReferenceAlignmentPrefix.size())
-                    : std::string_view(argv[++i]);
+                ? std::string_view(arg).substr(kReferenceAlignmentPrefix.size())
+                : std::string_view(argv[++i]);
                 if (!ParseReferenceAlignment(value, options.reference_alignment))
                 {
                     std::cerr << "invalid --reference-alignment value: " << value << " (expected left or right)\n";

@@ -32,9 +32,40 @@ namespace heimdall
         tree.m_source = source;
         tree.m_standard = options.standard;
         tree.m_tokens = lexed != nullptr ? *lexed : Lexer(source).Lex();
-        auto preprocessing = Preprocessor(options.Macros()).Process(source);
+        tree.Build(options, stop, reuse);
+        return tree;
+    }
+
+    ParseTree ParseTree::ParseSnapshot(std::shared_ptr<const std::string> source,
+        const ParserOptions &options, std::stop_token stop,
+        std::shared_ptr<const std::vector<Token>> lexed, const ParseReuse *reuse)
+    {
+        ParseTree tree;
+        tree.m_owned_source = std::move(source);
+        tree.m_source = tree.m_owned_source ? std::string_view(*tree.m_owned_source) : std::string_view{};
+        tree.m_standard = options.standard;
+        tree.m_shared_tokens = std::move(lexed);
+        if (!tree.m_shared_tokens) tree.m_tokens = Lexer(tree.m_source).Lex();
+        tree.Build(options, stop, reuse);
+        return tree;
+    }
+
+    void ParseTree::Build(const ParserOptions &options, std::stop_token stop, const ParseReuse *reuse)
+    {
+        auto &tree = *this;
+        if (stop.stop_requested()) { m_cancelled = true; return; }
+        if (reuse && reuse->previous)
+        {
+            // Reusing a similarly sized document avoids five independent growth
+            // chains. Cap the hint when a large portion of the source was deleted.
+            tree.m_nodes_soa.reserve(std::min(reuse->previous->NodesSoA().size(),
+                tree.Tokens().size() * 2 + 1));
+        }
+        auto preprocessing = Preprocessor(options.Macros()).Process(tree.m_source);
+        if (stop.stop_requested()) { m_cancelled = true; return; }
         detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse, options.type_names.get());
         tree.m_directives = std::move(preprocessing.directives);
+        if (m_cancelled || stop.stop_requested()) { m_cancelled = true; return; }
 
         // Build subtree_end for each node (pre-order traversal property)
         const std::size_t node_count = tree.m_nodes_soa.size();
@@ -59,7 +90,6 @@ namespace heimdall
         // Build auxiliary structures for fast queries
         tree.BuildAuxiliary();
 
-        return tree;
     }
 
     void ParseTree::HoldSource(std::shared_ptr<const std::string> owned)
@@ -84,27 +114,35 @@ namespace heimdall
     std::vector<std::size_t> ParseTree::Children(std::size_t node_index) const
     {
         std::vector<std::size_t> children;
-        if (node_index >= m_nodes_soa.size())
-        {
-            return children;
-        }
-
-        const std::size_t end = m_nodes_soa.subtree_end[node_index] < m_nodes_soa.size()
-            ? m_nodes_soa.subtree_end[node_index]
-            : m_nodes_soa.size();
-        for (std::size_t i = node_index + 1; i < end; ++i)
-        {
-            if (m_nodes_soa.parent[i] == node_index)
-            {
-                children.push_back(i);
-            }
-        }
-
+        for (const auto child : DirectChildren(node_index)) children.push_back(child);
         return children;
+    }
+
+    ParseTree::ChildRange ParseTree::DirectChildren(std::size_t node_index) const noexcept
+    {
+        if (node_index >= m_nodes_soa.size()) return {&m_nodes_soa, 0, 0, node_index};
+        const auto end = std::min<std::size_t>(m_nodes_soa.SubtreeEnd(node_index), m_nodes_soa.size());
+        return {&m_nodes_soa, std::min(node_index + 1, end), end, node_index};
+    }
+
+    void ParseTree::ChildRange::Iterator::Seek() noexcept
+    {
+        // Expression parsing can reparent an earlier operand to a later node.
+        // Such nodes are not strict pre-order: retain the parent filter instead
+        // of treating every index at a subtree boundary as a direct child.
+        while (m_index < m_end && m_soa->Parent(m_index) != m_parent) ++m_index;
+    }
+
+    ParseTree::ChildRange::Iterator &ParseTree::ChildRange::Iterator::operator++() noexcept
+    {
+        m_index = std::min<std::size_t>(m_soa->SubtreeEnd(m_index), m_end);
+        Seek();
+        return *this;
     }
 
     void ParseTree::BuildAuxiliary()
     {
+        const auto &m_tokens = Tokens();
         // Token kind mask: 1 = trivia (whitespace/comment), 0 = significant
         m_token_kind_mask.resize(m_tokens.size());
         m_identifier_tokens.clear();

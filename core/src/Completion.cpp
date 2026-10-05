@@ -2643,7 +2643,7 @@ namespace heimdall
                     const std::size_t suffix = FindInSubtree(tree, declarator, GrammarKind::FunctionSuffix);
                     if (suffix != NoIndex)
                     {
-                        for (const std::size_t child: tree.Children(suffix))
+                        for (const std::size_t child: tree.DirectChildren(suffix))
                         {
                             if (tree.NodesSoA().Kind(child) == GrammarKind::ParameterDeclaration)
                             {
