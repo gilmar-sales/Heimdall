@@ -276,3 +276,44 @@ TEST(RuleConfigSpec, NearestFormatAlignmentWinsPerKey)
     EXPECT_EQ((*found)->reference_alignment, heimdall::ReferenceAlignment::Left);
     std::filesystem::remove_all(directory);
 }
+
+TEST(RuleConfigSpec, StopsAtGitRootDirectoryMarker)
+{
+    const auto outer = MakeConfigDir("git-stop-outer");
+    const auto repo = outer / "repo";
+    const auto child = repo / "sub";
+    std::filesystem::create_directories(child);
+    std::filesystem::create_directories(repo / ".git");
+    WriteConfig(outer, R"({"rules":{"cpp/no-null":"off"}})");
+    WriteConfig(repo, R"({"rules":{"cpp/no-null":"error"}})");
+
+    auto loaded = heimdall::FindRuleOptions(child);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_TRUE(*loaded);
+    // Only the repo config is seen; the parent outside the git root is ignored.
+    ASSERT_EQ((**loaded).overrides.size(), 1);
+    EXPECT_EQ((**loaded).overrides[0].severity, heimdall::Severity::Error);
+    std::filesystem::remove_all(outer);
+}
+
+TEST(RuleConfigSpec, StopsAtGitRootFileMarker)
+{
+    const auto outer = MakeConfigDir("git-stop-file-outer");
+    const auto repo = outer / "repo";
+    const auto child = repo / "sub";
+    std::filesystem::create_directories(child);
+    // Worktrees and submodules record the gitdir in a `.git` file.
+    {
+        std::ofstream gitlink(repo / ".git", std::ios::binary | std::ios::trunc);
+        gitlink << "gitdir: /elsewhere/repo.git";
+    }
+    WriteConfig(outer, R"({"rules":{"cpp/no-null":"off"}})");
+    WriteConfig(repo, R"({"rules":{"cpp/no-null":"error"}})");
+
+    auto loaded = heimdall::FindRuleOptions(child);
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
+    ASSERT_TRUE(*loaded);
+    ASSERT_EQ((**loaded).overrides.size(), 1);
+    EXPECT_EQ((**loaded).overrides[0].severity, heimdall::Severity::Error);
+    std::filesystem::remove_all(outer);
+}

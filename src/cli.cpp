@@ -40,6 +40,10 @@ int main(int argc, char**argv)
 
     if (options.command == heimdall::cli::Command::Lint || options.command == heimdall::cli::Command::Check)
     {
+        // An explicit --config applies to every file. Otherwise each file
+        // resolves its own `.heimdall.json` chain (file dir up to the git
+        // root) in ProcessFile, so `heimdall lint subdir` honors
+        // `subdir/.heimdall.json`.
         if (options.rule_config_explicit)
         {
             auto loaded = heimdall::LoadRuleConfiguration(options.rule_config);
@@ -50,24 +54,9 @@ int main(int argc, char**argv)
             }
 
             options.rule_options = std::move(loaded->options);
+            options.rule_options.overrides.insert(options.rule_options.overrides.end(),
+                options.rule_overrides.begin(), options.rule_overrides.end());
         }
-        else
-        {
-            auto loaded = heimdall::FindRuleOptions(std::filesystem::current_path());
-            if (!loaded)
-            {
-                std::cerr << loaded.error() << '\n';
-                return kExitUsageError;
-            }
-
-            if (*loaded)
-            {
-                options.rule_options = std::move(* *loaded);
-            }
-        }
-
-        options.rule_options.overrides.insert(options.rule_options.overrides.end(),
-            options.rule_overrides.begin(), options.rule_overrides.end());
     }
 
     if (options.command == heimdall::cli::Command::Format)
@@ -82,31 +71,16 @@ int main(int argc, char**argv)
             }
 
             options.format_options = loaded->format_options;
-        }
-        else
-        {
-            auto loaded = heimdall::FindFormatOptions(std::filesystem::current_path());
-            if (!loaded)
+            // Explicit flags win over the config file.
+            if (options.pointer_alignment_override)
             {
-                std::cerr << loaded.error() << '\n';
-                return kExitUsageError;
+                options.format_options.pointer_alignment = options.pointer_alignment;
             }
 
-            if (*loaded)
+            if (options.reference_alignment_override)
             {
-                options.format_options = * *loaded;
+                options.format_options.reference_alignment = options.reference_alignment;
             }
-        }
-
-        // Explicit flags win over the config file.
-        if (options.pointer_alignment_override)
-        {
-            options.format_options.pointer_alignment = options.pointer_alignment;
-        }
-
-        if (options.reference_alignment_override)
-        {
-            options.format_options.reference_alignment = options.reference_alignment;
         }
     }
 

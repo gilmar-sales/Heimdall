@@ -16,6 +16,14 @@ namespace heimdall
             return heimdall::IsKnownRuleCode(code);
         }
 
+        bool IsGitRoot(const std::filesystem::path & directory)
+        {
+            // A `.git` entry marks the repository root: a directory for a
+            // normal checkout, or a file (gitfile) for worktrees/submodules.
+            std::error_code ec;
+            return std::filesystem::exists(directory / ".git", ec) && !ec;
+        }
+
         std::string ErrorFor(const std::filesystem::path & path, simdjson::error_code error)
         {
             return "cannot parse Heimdall config '" + path.string() + "': " +
@@ -316,6 +324,14 @@ namespace heimdall
                 {
                     break;
                 }
+            }
+
+            // Never cross the repository boundary: a `.git` entry marks the
+            // top of the project, so configs in parent directories (home,
+            // /tmp, other checkouts) are ignored.
+            if (IsGitRoot(current))
+            {
+                break;
             }
 
             const auto parent = current.parent_path();

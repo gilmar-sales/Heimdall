@@ -1227,7 +1227,21 @@ namespace heimdall::lsp
             return;
         }
 
-        const std::string formatted = heimdall::Formatter().Format(*tree);
+        heimdall::FormatOptions format_options;
+        if (auto found = heimdall::FindFormatOptions(PathFromUri(uri_string)))
+        {
+            if (*found)
+            {
+                format_options = * *found;
+            }
+        }
+        else
+        {
+            const std::lock_guard<std::mutex> lock(m_init_mu);
+            m_initialization_error = found.error();
+        }
+
+        const std::string formatted = heimdall::Formatter(format_options).Format(*tree);
         if (formatted == *text)
         {
             Respond(id, "[]");
@@ -1249,6 +1263,21 @@ namespace heimdall::lsp
         {
             const std::lock_guard<std::mutex> lock(m_init_mu);
             rule_options = m_rule_options;
+        }
+        // Per-file chain: <file dir> -> ... -> git root. A config inside the
+        // file's subdirectory wins over the workspace-root one loaded at
+        // initialize (which remains the fallback for files without one).
+        if (auto per_file = heimdall::FindRuleOptions(PathFromUri(uri)))
+        {
+            if (*per_file)
+            {
+                rule_options = std::move(* *per_file);
+            }
+        }
+        else
+        {
+            const std::lock_guard<std::mutex> lock(m_init_mu);
+            m_initialization_error = per_file.error();
         }
         const heimdall::RuleEngine engine(rule_options);
         auto diagnostics = engine.Analyze(tree);
@@ -2121,10 +2150,23 @@ namespace heimdall::lsp
 
         const std::shared_ptr<const std::string> text = document->text;
         const std::shared_ptr<const LineIndex> lines = document->lines;
+        heimdall::FormatOptions format_options;
+        if (auto found = heimdall::FindFormatOptions(PathFromUri(uri_string)))
+        {
+            if (*found)
+            {
+                format_options = * *found;
+            }
+        }
+        else
+        {
+            const std::lock_guard<std::mutex> lock(m_init_mu);
+            m_initialization_error = found.error();
+        }
         // Diff the fully formatted buffer, then keep only hunks overlapping
         // the requested lines: context outside the range still informs the
         // formatting (brace depth, continuation) but is never rewritten.
-        const auto edits = heimdall::Formatter().FormatEdits(*text);
+        const auto edits = heimdall::Formatter(format_options).FormatEdits(*text);
         std::string response = "[";
         bool first = true;
         for (const auto & edit: edits)

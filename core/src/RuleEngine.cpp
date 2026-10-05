@@ -614,7 +614,8 @@ namespace heimdall
             {RuleId::DocRequireComment, "doc/require-comment", "doc", Severity::Warning,
                 "semântica", false, "public class, enum or function without a documentation comment (opt-in)"},
             {RuleId::DocDoxygenStyle, "doc/doxygen-style", "doc", Severity::Warning,
-                "semântica", false, "Doxygen comment that breaks good practice: brief, @param, @tparam, @return, @throws, style (opt-in)"},
+                "semântica", false,
+                "Doxygen comment that breaks good practice: brief, @param, @tparam, @return, @throws, style (opt-in)"},
         };
         return catalog;
     }
@@ -1286,7 +1287,7 @@ namespace heimdall
     std::string RuleEngine::ApplyFixes(std::string_view source,
         const std::vector<Diagnostic>& diagnostics, bool include_unsafe)
     {
-        std::vector<const TextEdit * > edits;
+        std::vector<const TextEdit*> edits;
         edits.reserve(diagnostics.size());
         for (const auto & diagnostic: diagnostics)
         {

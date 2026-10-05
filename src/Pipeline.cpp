@@ -297,13 +297,62 @@ namespace heimdall::cli
 
         if (options.command == Command::Format)
         {
-            result.output = tree ? heimdall::Formatter(options.format_options).Format(*tree) :
-                                   heimdall::Formatter(options.format_options).Format(source);
+            heimdall::FormatOptions format_options = options.format_options;
+            if (!options.rule_config_explicit)
+            {
+                // Per-file chain: <file dir> -> ... -> git root, so a config
+                // inside the target subdirectory is honored even when the
+                // command runs from elsewhere.
+                auto found = heimdall::FindFormatOptions(path);
+                if (!found)
+                {
+                    result.error = found.error();
+                    return;
+                }
+
+                if (*found)
+                {
+                    format_options = * *found;
+                }
+
+                if (options.pointer_alignment_override)
+                {
+                    format_options.pointer_alignment = options.pointer_alignment;
+                }
+
+                if (options.reference_alignment_override)
+                {
+                    format_options.reference_alignment = options.reference_alignment;
+                }
+            }
+
+            result.output = tree ? heimdall::Formatter(format_options).Format(*tree) :
+                                   heimdall::Formatter(format_options).Format(source);
             result.changed = result.output != source;
         }
         else
         {
-            const heimdall::RuleEngine rule_engine(options.rule_options);
+            heimdall::RuleOptions rule_options = options.rule_options;
+            if (!options.rule_config_explicit &&
+                (options.command == Command::Lint || options.command == Command::Check))
+            {
+                auto found = heimdall::FindRuleOptions(path);
+                if (!found)
+                {
+                    result.error = found.error();
+                    return;
+                }
+
+                if (*found)
+                {
+                    rule_options = std::move(* *found);
+                }
+
+                rule_options.overrides.insert(rule_options.overrides.end(),
+                    options.rule_overrides.begin(), options.rule_overrides.end());
+            }
+
+            const heimdall::RuleEngine rule_engine(rule_options);
             result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
             if (tree && options.semantic && database != nullptr)
             {

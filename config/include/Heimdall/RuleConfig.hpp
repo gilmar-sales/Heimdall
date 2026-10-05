@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace heimdall
 {
@@ -26,6 +27,8 @@ namespace heimdall
     };
 
     std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const std::filesystem::path & path);
+    std::expected<std::vector<RuleConfiguration>, std::string> FindConfigurations(
+        const std::filesystem::path & directory);
     std::expected<std::optional<RuleOptions>, std::string> FindRuleOptions(
         const std::filesystem::path & directory);
     std::expected<std::optional<FormatOptions>, std::string> FindFormatOptions(
