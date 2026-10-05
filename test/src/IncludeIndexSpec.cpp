@@ -2,6 +2,8 @@
 
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/TypeLayout.hpp>
+#include "CliOptions.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -53,6 +55,38 @@ TEST(IncludeIndexSpec, ResolvesTransitiveQuotedHeaders)
     ASSERT_EQ(headers.size(), 2);
     EXPECT_EQ(headers.front().filename(), "extra.hpp");
     EXPECT_EQ(headers.back().filename(), "core.hpp");
+}
+
+TEST(IncludeIndexSpec, RealCliOptionsAndFilesystemPathHaveCompilerLayouts)
+{
+    const std::filesystem::path root = HEIMDALL_SOURCE_DIR;
+    heimdall::CompileCommand command;
+    command.arguments = {HEIMDALL_TEST_CXX_COMPILER};
+    if (heimdall::IncludeIndex::SystemIncludes(HEIMDALL_TEST_CXX_COMPILER).empty())
+    {
+        GTEST_SKIP() << "Compiler does not expose standard library include directories";
+    }
+    command.standard = heimdall::CppStandard::Cpp26;
+    command.include_directories = {root / "core/include", root / "semantic/include", root / "config/include"};
+    for (const auto &dir: command.include_directories)
+    {
+        command.arguments.push_back("-I" + dir.generic_string());
+    }
+    constexpr std::string_view source =
+        "#include \"CliOptions.hpp\"\nheimdall::cli::Options options;\nstd::filesystem::path file;";
+    const auto index = heimdall::IncludeIndex::Build(root / "src", source, &command);
+    const auto options = heimdall::CompletionEngine::Hover(source, {}, source.rfind("Options") + 1, &index.Scopes());
+    ASSERT_TRUE(options.has_value());
+    EXPECT_EQ(options->detail, "struct heimdall::cli::Options");
+    ASSERT_TRUE(options->has_layout);
+    EXPECT_EQ(options->size_bytes, sizeof(heimdall::cli::Options));
+    EXPECT_EQ(options->align_bytes, alignof(heimdall::cli::Options));
+    const auto path = heimdall::CompletionEngine::Hover(source, {}, source.find("path file") + 1, &index.Scopes());
+    ASSERT_TRUE(path.has_value());
+    EXPECT_EQ(path->detail, "class std::filesystem::path");
+    EXPECT_TRUE(path->has_layout);
+    EXPECT_EQ(path->size_bytes, sizeof(std::filesystem::path));
+    EXPECT_EQ(path->align_bytes, alignof(std::filesystem::path));
 }
 
 TEST(IncludeIndexSpec, SkipsMissingHeaders)

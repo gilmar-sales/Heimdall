@@ -91,6 +91,20 @@ locations = reply["result"]
 assert locations, reply
 assert any(location["uri"].endswith("mylib/shapes.hpp") for location in locations), locations
 
+# 3. Hover renders alias origin and layout, and accepts builtin type tokens.
+hover_user = workspace / "hover_user.cpp"
+hover_text = "struct Point { double x; double y; };\nusing Coord = Point;\nCoord position;\nbool json = false;\n"
+open_document(hover_user, hover_text)
+reply = request(600, "textDocument/hover", {
+    "textDocument": {"uri": hover_user.as_uri()}, "position": {"line": 2, "character": 2}})
+value = reply["result"]["contents"]["value"]
+assert "`<Point>`" in value, value
+assert "**Size:** 16 bytes" in value and "**Align:** 8 bytes" in value, value
+reply = request(601, "textDocument/hover", {
+    "textDocument": {"uri": hover_user.as_uri()}, "position": {"line": 3, "character": 1}})
+value = reply["result"]["contents"]["value"]
+assert "**Size:** 1 bytes" in value and "**Align:** 1 bytes" in value, value
+
 request(900, "shutdown", {})
 send({"jsonrpc": "2.0", "method": "exit"})
 process.wait(timeout=20)

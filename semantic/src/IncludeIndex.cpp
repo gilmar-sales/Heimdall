@@ -1208,6 +1208,7 @@ namespace heimdall
                 filtered.members = std::move(scope.members);
                 filtered.bases = std::move(scope.bases);
                 filtered.template_params = std::move(scope.template_params);
+                filtered.layout_unknown = scope.layout_unknown;
                 std::erase_if(filtered.members,
                     [](const CompletionItem &member)
                     {
@@ -1219,6 +1220,7 @@ namespace heimdall
                     if (const auto found = positions.find(key); found != positions.end())
                     {
                         auto &entry = index.m_scopes[found->second];
+                        entry.layout_unknown = entry.layout_unknown || filtered.layout_unknown;
                         if (entry.template_params.empty())
                         {
                             entry.template_params = std::move(filtered.template_params);

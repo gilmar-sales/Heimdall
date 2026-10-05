@@ -58,13 +58,12 @@ assert initialize["result"]["capabilities"]["documentFormattingProvider"] is Tru
 assert initialize["result"]["capabilities"].get("documentRangeFormattingProvider") is True
 assert "completionProvider" in initialize["result"]["capabilities"]
 assert initialize["result"]["capabilities"].get("hoverProvider") is True
-diagnostics = next(item for item in responses if item.get("method") == "textDocument/publishDiagnostics")
-assert diagnostics["params"]["diagnostics"][0]["code"] == "cpp/modernize-const"
-assert diagnostics["params"]["diagnostics"][1]["code"] == "cpp/no-null"
+diagnostics = next(item for item in responses
+                   if item.get("method") == "textDocument/publishDiagnostics" and item["params"]["uri"] == uri)
+codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
+assert {"cpp/modernize-const", "cpp/no-null", "semantic/no-unused-local"} <= codes, diagnostics
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
 assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused;\n}\n"
-codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
-assert "semantic/no-unused-local" in codes
 broken = next(item for item in responses
               if item.get("method") == "textDocument/publishDiagnostics"
               and item["params"]["uri"] == broken_uri)

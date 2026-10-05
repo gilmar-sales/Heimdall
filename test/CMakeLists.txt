@@ -50,6 +50,7 @@ target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT
 target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic heimdall::config)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(Tests_run PRIVATE HEIMDALL_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}")
 
 target_precompile_headers(Tests_run PRIVATE
   ${PROJECT_SOURCE_DIR}/cmake/pch.hpp

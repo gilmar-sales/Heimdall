@@ -60,6 +60,8 @@ namespace heimdall
         // Data members: byte offset inside the owning record (`offsetof`).
         bool has_field_offset = false;
         std::uint64_t field_offset = 0;
+        // Hover on an alias: resolved underlying type, displayed as <type>.
+        std::string type_origin;
     };
 
     // One named scope and its direct members. `path` is the qualified path from

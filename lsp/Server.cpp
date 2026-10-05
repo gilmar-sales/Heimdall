@@ -2135,6 +2135,10 @@ namespace heimdall::lsp
         }
 
         std::string value = "```cpp\n" + line + "\n```";
+        if (!hovered->type_origin.empty())
+        {
+            value += "\n\n`<" + hovered->type_origin + ">`";
+        }
         if (hovered->has_layout)
         {
             value += "\n\n**Size:** " + std::to_string(hovered->size_bytes) + " bytes · **Align:** " +

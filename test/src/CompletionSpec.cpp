@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/TypeLayout.hpp>
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
@@ -516,6 +518,24 @@ TEST(CompletionSpec, NamespaceDetailAndDocs)
     EXPECT_EQ(item->documentation, "Helpful tools.");
 }
 
+TEST(CompletionSpec, CompoundHeaderNamespaceKeepsNamespaceKind)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace heimdall::cli { struct Options {}; int Run(); }", {});
+    constexpr std::string_view source = "heimdall::cli::Options options;";
+    for (const auto &scope : index)
+    {
+        if (scope.path == std::vector<std::string>{"heimdall", "cli"})
+        {
+            EXPECT_EQ(scope.kind, heimdall::CompletionKind::Namespace);
+        }
+    }
+    const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find("cli") + 1, &index);
+    ASSERT_TRUE(hover.has_value());
+    EXPECT_EQ(hover->kind, heimdall::CompletionKind::Namespace);
+    EXPECT_EQ(hover->detail, "namespace heimdall::cli");
+}
+
 TEST(CompletionSpec, StructTagDetailAndDocs)
 {
     constexpr std::string_view source =
@@ -559,9 +579,9 @@ TEST(CompletionSpec, HoverReturnsSignatureAndDocs)
 TEST(CompletionSpec, HoverReturnsNullOffSymbol)
 {
     constexpr std::string_view source = "int value = 1;\n";
-    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{}, 3).has_value());
-    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{}, 0).has_value());
-    // Keywords carry no useful popup.
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{}, 10).has_value());
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions{}, 11).has_value());
+    // Control-flow keywords carry no useful popup.
     constexpr std::string_view keyword = "int f() { return 0; }\n";
     EXPECT_FALSE(
         heimdall::CompletionEngine::Hover(keyword, heimdall::ParserOptions{}, 12).has_value());
@@ -1269,6 +1289,130 @@ TEST(CompletionSpec, HoverReportsSizeAndAlignmentOfFundamentalVariables)
     const auto wide = LayoutAtHover("long long big = 0;\n", "big");
     ASSERT_TRUE(wide.known);
     EXPECT_EQ(wide.size, 8u);
+}
+
+TEST(CompletionSpec, HoverReportsLayoutOnBuiltinTypeTokens)
+{
+    constexpr std::string_view source = "bool json = false; int count = 0; double ratio = 0;";
+    const auto tree = heimdall::ParseTree::Parse(source, {});
+    for (const auto name: {"bool", "int", "double"})
+    {
+        const auto offset = source.find(name) + 1;
+        const auto text_hover = heimdall::CompletionEngine::Hover(source, {}, offset);
+        const auto tree_hover = heimdall::CompletionEngine::Hover(tree, {}, offset);
+        ASSERT_TRUE(text_hover.has_value());
+        ASSERT_TRUE(tree_hover.has_value());
+        EXPECT_TRUE(text_hover->has_layout);
+        EXPECT_TRUE(tree_hover->has_layout);
+        EXPECT_EQ(text_hover->size_bytes, tree_hover->size_bytes);
+    }
+    const auto boolean = LayoutAtHover(source, "bool");
+    ASSERT_TRUE(boolean.known);
+    EXPECT_EQ(boolean.size, sizeof(bool));
+    EXPECT_EQ(boolean.align, alignof(bool));
+}
+
+TEST(CompletionSpec, HoverAliasesCarryOriginDocumentationAndLayout)
+{
+    constexpr std::string_view source =
+        "namespace geo { /// Coordinates.\n"
+        "struct Point { double x; double y; }; using Coord = Point; using Position = Coord; }\n"
+        "using Flag = bool; geo::Position position; Flag flag;";
+    const auto index = heimdall::CompletionEngine::IndexScopes(source, {});
+    for (const auto *external: {static_cast<const heimdall::ScopeIndex *>(nullptr), &index})
+    {
+        const auto position = heimdall::CompletionEngine::Hover(source, {}, source.rfind("Position") + 1, external);
+        ASSERT_TRUE(position.has_value());
+        ASSERT_TRUE(position->has_layout);
+        EXPECT_EQ(position->size_bytes, 16u);
+        EXPECT_EQ(position->align_bytes, 8u);
+        EXPECT_EQ(position->type_origin, "geo::Point");
+        EXPECT_EQ(position->documentation, "Coordinates.");
+        const auto flag = heimdall::CompletionEngine::Hover(source, {}, source.rfind("Flag") + 1, external);
+        ASSERT_TRUE(flag.has_value());
+        EXPECT_EQ(flag->type_origin, "bool");
+        EXPECT_TRUE(flag->has_layout);
+    }
+}
+
+TEST(CompletionSpec, OutOfLineNestedRecordDoesNotReplaceItsOwner)
+{
+    constexpr std::string_view header =
+        "namespace std::filesystem { class path { public: class iterator; int storage; };\n"
+        "class path::iterator { double cursor; }; }";
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
+    constexpr std::string_view source = "std::filesystem::path file;";
+    const auto hovered = heimdall::CompletionEngine::Hover(source, {}, source.find("path") + 1, &index);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->detail, "class std::filesystem::path");
+    EXPECT_TRUE(hovered->has_layout);
+    EXPECT_EQ(hovered->size_bytes, sizeof(std::filesystem::path));
+    EXPECT_EQ(hovered->align_bytes, alignof(std::filesystem::path));
+    bool saw_iterator = false;
+    for (const auto &scope: index)
+    {
+        saw_iterator = saw_iterator || scope.path == std::vector<std::string>{"std", "filesystem", "path", "iterator"};
+    }
+    EXPECT_TRUE(saw_iterator);
+}
+
+TEST(CompletionSpec, HoverTypedefPreservesPointerAndArrayDeclarators)
+{
+    constexpr std::string_view source =
+        "typedef int *Pointer; typedef short Samples[5]; Pointer pointer; Samples samples;";
+    const auto pointer = LayoutAtHover(source, "Pointer");
+    ASSERT_TRUE(pointer.known);
+    EXPECT_EQ(pointer.size, sizeof(int *));
+    const auto samples = LayoutAtHover(source, "Samples");
+    ASSERT_TRUE(samples.known);
+    EXPECT_EQ(samples.size, sizeof(short[5]));
+}
+
+TEST(CompletionSpec, HoverAliasUsesItsDeclarationScope)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace a { struct Value { char data; }; using Alias = Value; }\n"
+        "namespace b { struct Value { double data; }; using Alias = Value; }", {});
+    constexpr std::string_view source = "b::Alias value;";
+    const auto hover = heimdall::CompletionEngine::Hover(source, {}, 4, &index);
+    ASSERT_TRUE(hover.has_value());
+    EXPECT_EQ(hover->type_origin, "b::Value");
+    EXPECT_TRUE(hover->has_layout);
+    EXPECT_EQ(hover->size_bytes, sizeof(double));
+}
+
+TEST(CompletionSpec, HoverBuiltinUsesTheWholeSpecifierAndSkipsComments)
+{
+    constexpr std::string_view source = "unsigned char byte; long long wide; long double precise;";
+    const auto byte = LayoutAtHover(source, "unsigned");
+    EXPECT_TRUE(byte.known);
+    EXPECT_EQ(byte.size, sizeof(unsigned char));
+    const auto wide = LayoutAtHover(source, "long wide");
+    EXPECT_TRUE(wide.known);
+    EXPECT_EQ(wide.size, sizeof(long long));
+    const auto precise = LayoutAtHover(source, "double");
+    EXPECT_TRUE(precise.known);
+    EXPECT_EQ(precise.size, sizeof(long double));
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover("// bool flag", {}, 4).has_value());
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover("const char *text = \"bool\";", {}, 21).has_value());
+}
+
+TEST(CompletionSpec, HoverAliasCyclesAndUnknownTargetsHaveNoLayout)
+{
+    EXPECT_FALSE(LayoutAtHover("using A = B; using B = A; A value;", "A value").known);
+    EXPECT_FALSE(LayoutAtHover("using Alias = Missing; Alias value;", "Alias value").known);
+}
+
+TEST(CompletionSpec, FilesystemLayoutDoesNotAssumeAnotherDataModelOrLibrary)
+{
+    auto target = heimdall::LayoutTarget::FromMacros({});
+    target.native_standard_library = false;
+    const heimdall::TypeLayoutResolver foreign(nullptr, nullptr, target);
+    EXPECT_FALSE(foreign.OfType("std::filesystem::path").has_value());
+    target.native_standard_library = true;
+    target.pointer_size = sizeof(void *) == 8 ? 4 : 8;
+    const heimdall::TypeLayoutResolver cross(nullptr, nullptr, target);
+    EXPECT_FALSE(cross.OfType("std::filesystem::path").has_value());
 }
 
 TEST(CompletionSpec, HoverLayoutFollowsPointersAndArrays)

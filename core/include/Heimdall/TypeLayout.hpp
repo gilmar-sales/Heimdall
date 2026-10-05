@@ -21,6 +21,12 @@ namespace heimdall
         bool empty = false;
     };
 
+    struct AliasOrigin
+    {
+        std::string type;
+        std::string documentation;
+    };
+
     // Data-model knobs that change the answer between platforms.
     struct LayoutTarget
     {
@@ -29,6 +35,8 @@ namespace heimdall
         bool long_is_32 = false;
         // `long double` is a plain double (MSVC) instead of x87 80-bit padded to 16.
         bool long_double_is_double = false;
+        // False when macros explicitly select another STL or string ABI.
+        bool native_standard_library = true;
 
         static LayoutTarget FromMacros(const Preprocessor::MacroMap &macros);
     };
@@ -52,6 +60,9 @@ namespace heimdall
 
         // A record, enum or alias declared by `name` (qualified or not).
         std::optional<TypeLayout> OfNamed(std::string_view name) const;
+        // Resolve the declaration selected by hover, preserving its owning scope.
+        std::optional<TypeLayout> OfItem(const CompletionItem &item) const;
+        std::optional<AliasOrigin> OriginOf(const CompletionItem &item) const;
 
         // `offsetof(record, member)`: `record` as written (aliases followed), `member`
         // a direct, non-static data member of it.
@@ -79,8 +90,11 @@ namespace heimdall
         std::optional<TypeLayout> OfTemplate(std::string_view base, std::string_view args,
             const std::vector<std::string> &context, int depth) const;
         const TypeEntry *Find(std::string_view name, const std::vector<std::string> &context) const;
+        const TypeEntry *FindItem(const CompletionItem &item) const;
 
         LayoutTarget m_target;
+        const ScopeIndex *m_local;
+        const ScopeIndex *m_external;
         std::unordered_map<std::string, TypeEntry> m_types;
     };
 

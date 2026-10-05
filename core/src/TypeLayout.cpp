@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 
 namespace heimdall
 {
@@ -377,11 +378,23 @@ namespace heimdall
 #endif
         }
 
+#if defined(__GLIBCXX__)
+        target.native_standard_library = !has("_LIBCPP_VERSION") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
+        if (const auto abi = macros.find("_GLIBCXX_USE_CXX11_ABI"); abi != macros.end())
+        {
+            target.native_standard_library = target.native_standard_library &&
+                (Trim(abi->second) == (_GLIBCXX_USE_CXX11_ABI ? "1" : "0"));
+        }
+#elif defined(_LIBCPP_VERSION)
+        target.native_standard_library = !has("__GLIBCXX__") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
+#elif defined(_MSVC_STL_VERSION)
+        target.native_standard_library = !has("__GLIBCXX__") && !has("_LIBCPP_VERSION");
+#endif
         return target;
     }
 
     TypeLayoutResolver::TypeLayoutResolver(const ScopeIndex *local, const ScopeIndex *external, LayoutTarget target)
-        : m_target(target)
+        : m_target(target), m_local(local), m_external(external)
     {
         const ScopeIndex *indexes[] = {local, external};
         for (const ScopeIndex *index: indexes)
@@ -492,8 +505,73 @@ namespace heimdall
 
     std::optional<TypeLayout> TypeLayoutResolver::OfNamed(std::string_view name) const
     {
-        const TypeEntry *entry = Find(name, {});
-        return entry != nullptr ? OfEntry(*entry, 0) : std::nullopt;
+        return OfType(name);
+    }
+
+    const TypeLayoutResolver::TypeEntry *TypeLayoutResolver::FindItem(const CompletionItem &item) const
+    {
+        if (item.has_location)
+        {
+            const ScopeIndex *indexes[] = {m_local, m_external};
+            for (const auto *index: indexes)
+            {
+                if (index == nullptr) continue;
+                for (const auto &scope: *index)
+                {
+                    for (const auto &member: scope.members)
+                    {
+                        if (member.has_location && member.file == item.file && member.offset == item.offset &&
+                            member.label == item.label)
+                        {
+                            std::string name = JoinPath(scope.path, scope.path.size());
+                            if (!name.empty()) name += "::";
+                            name += item.label;
+                            if (const auto found = m_types.find(name); found != m_types.end()) return &found->second;
+                        }
+                    }
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    std::optional<TypeLayout> TypeLayoutResolver::OfItem(const CompletionItem &item) const
+    {
+        if (const auto *entry = FindItem(item))
+        {
+            // Standard library types also have known layouts independent of
+            // implementation-private fields that header indexing omits.
+            std::string name = JoinPath(entry->path, entry->path.size());
+            if (!name.empty()) name += "::";
+            name += item.label;
+            return OfType(name);
+        }
+        return item.type_text.empty() ? OfNamed(item.label) : OfType(item.type_text);
+    }
+
+    std::optional<AliasOrigin> TypeLayoutResolver::OriginOf(const CompletionItem &item) const
+    {
+        if (item.kind != CompletionKind::Type || item.type_text.empty()) return std::nullopt;
+        const auto *entry = FindItem(item);
+        std::vector<std::string> context = entry != nullptr ? entry->path : std::vector<std::string>{};
+        std::string text = item.type_text;
+        std::string documentation;
+        for (int depth = 0; depth < kMaxDepth; ++depth)
+        {
+            const auto *target = Find(StripQualifiers(text), context);
+            if (target == nullptr) return AliasOrigin{std::move(text), std::move(documentation)};
+            if (!target->item->documentation.empty()) documentation = target->item->documentation;
+            if (target->item->type_text.empty())
+            {
+                std::string name = JoinPath(target->path, target->path.size());
+                if (!name.empty()) name += "::";
+                name += target->item->label;
+                return AliasOrigin{std::move(name), std::move(documentation)};
+            }
+            text = target->item->type_text;
+            context = target->path;
+        }
+        return std::nullopt;
     }
 
     std::optional<TypeLayout> TypeLayoutResolver::OfTypeImpl(std::string_view text,
@@ -591,6 +669,14 @@ namespace heimdall
             {
                 return TypeLayout{2 * m_target.pointer_size, m_target.pointer_size, false};
             }
+
+            // path's representation belongs to the standard library used to
+            // build the server. Only use it for the matching native data model.
+            if (bare == "filesystem::path" && m_target.native_standard_library && m_target.pointer_size == sizeof(void *) &&
+                m_target.long_is_32 == (sizeof(long) == 4))
+            {
+                return TypeLayout{sizeof(std::filesystem::path), alignof(std::filesystem::path), false};
+            }
         }
 
         if ((is_std || name.find("::") == std::string_view::npos) && (is_std || bare != "byte"))
@@ -607,11 +693,6 @@ namespace heimdall
             {
                 return fundamental;
             }
-        }
-
-        if (is_std)
-        {
-            return std::nullopt;
         }
 
         const TypeEntry *entry = Find(name, context);
