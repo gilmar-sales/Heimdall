@@ -22,7 +22,7 @@ endif ()
 project(Heimdall VERSION 0.1.0 LANGUAGES C CXX)
 
 if (MINGW)
-  string(APPEND CMAKE_EXE_LINKER_FLAGS " -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -static -static-libgcc -static-libstdc++")
 endif ()
 
 include(FetchContent)
