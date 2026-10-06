@@ -20,6 +20,26 @@ namespace
 
 } // namespace
 
+TEST(ParseTreeSpec, ConstructorParametersUseFunctionSuffixWithoutLosingPointerReturnTypes)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "struct S { S(int a, int b, int c, int d); explicit S(int a, int b, int c, int d, int e) {} };", {});
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::FunctionSuffix), 2);
+    EXPECT_EQ(Count(tree, GrammarKind::ParameterDeclaration), 9);
+    const auto pointer = heimdall::ParseTree::Parse("struct Widget {}; Widget (*factory)(int, int);", {});
+    EXPECT_TRUE(pointer.Diagnostics().empty());
+    EXPECT_EQ(Count(pointer, GrammarKind::FunctionSuffix), 1);
+    EXPECT_EQ(Count(pointer, GrammarKind::ParameterDeclaration), 2);
+    const auto &soa = pointer.NodesSoA();
+    bool widget_type = false;
+    for (std::size_t i = 0; i < soa.size(); ++i)
+        if (soa.Kind(i) == GrammarKind::TypeSpecifier &&
+            pointer.Text(pointer.Tokens()[soa.FirstToken(i)]) == "Widget") widget_type = true;
+    EXPECT_TRUE(widget_type);
+}
+
 TEST(ParseTreeSpec, SnapshotRetainsAndSharesSourceAndTokensAcrossMoves)
 {
     auto source = std::make_shared<const std::string>("int f() { return 2 + 3; }\n");
@@ -266,7 +286,9 @@ TEST(ParseTreeSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 3);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
-    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 5);
+    // Includes the constructor's name, which must remain a declarator rather
+    // than being consumed as a return-type specifier.
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 6);
 }
 
 TEST(ParseTreeSpec, ParsesModuleUnitsConceptsAndRequiresClauses)

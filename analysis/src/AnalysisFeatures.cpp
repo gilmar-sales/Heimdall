@@ -1,5 +1,7 @@
 #include <Heimdall/AnalysisFeatures.hpp>
 
+#include "SemanticRuleDispatch.hpp"
+
 #include <algorithm>
 #include <iterator>
 
@@ -38,10 +40,7 @@ namespace heimdall
         auto diagnostics = engine.Analyze(context.Syntax());
         if (semantic)
         {
-            auto analyzed = SemanticRules::Analyze(context.Semantic(), context.Types(), project);
-            auto documentation = SemanticRules::AnalyzeDocumentation(context.Semantic(), engine);
-            analyzed.insert(analyzed.end(), std::make_move_iterator(documentation.begin()),
-                std::make_move_iterator(documentation.end()));
+            auto analyzed = detail::AnalyzeSelectedSemantic(context, engine, project);
             analyzed = engine.ApplyPolicy(std::move(analyzed), context.Syntax());
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(analyzed.begin()),
                 std::make_move_iterator(analyzed.end()));

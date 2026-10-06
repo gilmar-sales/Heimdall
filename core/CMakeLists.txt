@@ -12,6 +12,7 @@ add_library(heimdall_core STATIC
   src/MappedBuffer.cpp
   src/SyntaxTree.cpp
   src/Formatter.cpp
+  src/FormatterDeclarations.cpp
   src/Lexer.cpp
   src/LineTable.cpp
   src/GrammarParser.cpp

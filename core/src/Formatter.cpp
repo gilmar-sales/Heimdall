@@ -785,6 +785,11 @@ namespace heimdall
                 return 1;
             } // `if !consteval {`
 
+            if (right == "~" && left == "=")
+            {
+                return 1; // `value = ~mask`, not `value =~mask`
+            }
+
             if (right == "!" || right == "~" || right == "++" || right == "--")
             {
                 return 0;
@@ -2236,6 +2241,10 @@ namespace heimdall
 
     std::string Formatter::Format(std::string_view source) const
     {
+        if (m_options.blank_line_between_methods || m_options.max_parameters_per_line != 0)
+        {
+            return Format(ParseTree::Parse(source, {}));
+        }
         const auto tokens = Lexer(source).Lex();
         const auto directives = Preprocessor().Process(source).directives;
         return FormatImpl(source, tokens, directives);
@@ -2243,6 +2252,13 @@ namespace heimdall
 
     std::string Formatter::Format(const ParseTree& tree) const
     {
+        const auto layout = DeclarationLayout(tree);
+        if (layout != tree.Source())
+        {
+            const auto tokens = Lexer(layout).Lex();
+            const auto directives = Preprocessor().Process(layout).directives;
+            return FormatImpl(layout, tokens, directives);
+        }
         return FormatImpl(tree.Source(), tree.Tokens(), tree.Directives());
     }
 

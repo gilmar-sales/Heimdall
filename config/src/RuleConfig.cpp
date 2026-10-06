@@ -3,6 +3,7 @@
 #include <simdjson.h>
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace heimdall
@@ -241,6 +242,24 @@ namespace heimdall
             for (const auto field: format)
             {
                 const std::string_view key = field.key;
+                if (key == "blank-line-between-methods")
+                {
+                    bool setting;
+                    if (field.value.get_bool().get(setting))
+                        return std::unexpected("'blank-line-between-methods' in 'format' must be a boolean: " + path.string());
+                    configuration.format_options.blank_line_between_methods = setting;
+                    configuration.has_blank_line_between_methods = true;
+                    continue;
+                }
+                if (key == "max-parameters-per-line")
+                {
+                    std::uint64_t setting;
+                    if (field.value.get_uint64().get(setting) || setting > std::numeric_limits<std::size_t>::max())
+                        return std::unexpected("'max-parameters-per-line' in 'format' must be a non-negative integer: " + path.string());
+                    configuration.format_options.max_parameters_per_line = static_cast<std::size_t>(setting);
+                    configuration.has_max_parameters_per_line = true;
+                    continue;
+                }
                 std::string_view setting;
                 if (const auto error = field.value.get_string().get(setting); error)
                 {
@@ -408,6 +427,10 @@ namespace heimdall
             {
                 merged.reference_alignment = it->format_options.reference_alignment;
             }
+            if (it->has_blank_line_between_methods)
+                merged.blank_line_between_methods = it->format_options.blank_line_between_methods;
+            if (it->has_max_parameters_per_line)
+                merged.max_parameters_per_line = it->format_options.max_parameters_per_line;
         }
         return std::optional<FormatOptions>{std::move(merged)};
     }

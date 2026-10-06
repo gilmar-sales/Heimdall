@@ -9,6 +9,7 @@ include(GoogleTest)
 
 add_executable(Tests_run
   src/WorkspaceSpec.cpp
+  src/SemanticDispatchSpec.cpp
   src/RuleSchedulerSpec.cpp
   src/PluginHostSpec.cpp
   src/CompileDatabaseSpec.cpp

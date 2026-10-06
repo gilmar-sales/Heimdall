@@ -112,6 +112,23 @@ As regras legadas conservam suas passagens especializadas sobre tokens/modelos.
 Sua migração para callbacks por interesse permanece gradual; não foram forçadas
 à interface pública de plugins nem reescritas indiscriminadamente.
 
+O adaptador interno `analysis/src/SemanticRuleDispatch.cpp` seleciona as 19 regras
+de `SemanticRules` antes de solicitar modelos. Os domínios dos callbacks declaram
+os requisitos: binding, typing, fluxo, projeto ou documentação. Códigos e
+severidades continuam vindo do catálogo; defaults/overrides e opt-in são resolvidos
+pelo `RuleEngine`. Sem regras selecionadas, não há bind/type; regras só de símbolos
+não solicitam typing. Fluxo é unit-local, construído uma vez por análise somente
+para `modernize-const`/`modernize-constexpr`, sem novo cache permanente no snapshot.
+CLI/LSP usam esse dispatch via `AnalysisFeatures::Diagnostics`; as APIs agregadas
+anteriores permanecem disponíveis, mas não são executadas em paralelo no caminho
+normal. O carregamento de profiles e as três regras de `IncludeAnalyzer` ainda
+permanecem nos frontends.
+
+O [plano dedicado de migração das regras](rule-migration-plan.md) define etapas,
+requisitos, estratégias por família, critérios de equivalência e validação de
+desempenho. A seleção antecipada das regras semânticas está implementada; a
+migração de traversals para o scheduler continua condicionada a profiling.
+
 ## Métricas e validação
 
 - `AnalysisSnapshot::Metrics`: contagens/tempo de parse, bind, type, cache hits,
@@ -132,6 +149,7 @@ Sua migração para callbacks por interesse permanece gradual; não foram força
 cmake --build build
 ctest --test-dir build --output-on-failure
 build/bench/WorkspaceBench --benchmark_min_time=0.1s --benchmark_repetitions=3
+build/bench/WorkspaceBench --benchmark_filter=SemanticDispatch --benchmark_min_time=0.1s --benchmark_repetitions=3 --benchmark_report_aggregates_only=true
 build/bench/LspLatencyBench --lines 1000,5000,20000 --iterations 50 --warmup 5 --budget-ms 50 --enforce
 ```
 
@@ -150,11 +168,52 @@ O LSP medido na validação final com 50 amostras teve P95 de 1,97 / 7,27 / 24,1
 50 ms. Esses números não demonstram, sozinhos, ausência de regressão contra uma
 build anterior; os benchmarks devem ser repetidos em hardware/corpus comparáveis.
 
-Validação final: build completa e **848 testes passando**, incluindo 25 novos
+Validação da base: build completa e **848 testes passando**, incluindo 25 novos
 testes de workspace, scheduler, plugins e fronteiras arquiteturais, além dos
-smoke tests CLI/LSP existentes.
+smoke tests CLI/LSP existentes. Após a seleção antecipada: **854 testes passando**,
+incluindo seis testes novos de requisitos, equivalência de diagnósticos/fixes,
+modo syntax-only e configuração. Nova medição LSP (50 amostras, cinco warmups):
+P95 de **2,17 / 7,39 / 24,55 ms**, todos abaixo de 50 ms.
+
+O benchmark A/B `SemanticDispatch` usa a mesma árvore de 1000 funções e a mesma
+política nos caminhos anterior e selecionado. Medianas wall time locais (ms):
+
+| Configuração | Cold anterior → selecionado | Warm anterior → selecionado |
+|---|---:|---:|
+| Todas desabilitadas | 4,445 → 0,628 | 2,350 → 0,623 |
+| Apenas modernize-override (binding) | 4,438 → 1,790 | 2,331 → 0,633 |
+| Apenas implicit-bool (typing) | 4,097 → 2,768 | 2,357 → 1,212 |
+| Apenas modernize-constexpr (fluxo) | 4,115 → 3,145 | 2,341 → 1,531 |
+| Defaults shipped | 4,099 → 4,124 | 2,506 → 2,458 |
+
+Windows/GCC 16.2.0 Release, Intel Xeon E5-2697 v3 @ 2,60 GHz, 28 CPUs lógicas;
+base `50ded35` com as alterações desta entrega, medição de 06/10/2026 UTC
+(05/10 local); três repetições, mínimo de 0,1 s.
+Cold recria o snapshot/modelos, mas exclui parsing; warm reutiliza
+os caches disponíveis. O corpus é sintético e não emite diagnósticos para esses
+checks; não substitui profiling por regra em corpus real. Defaults cold variaram
+~0,6%, sem ganho demonstrado nessa configuração. Os contadores confirmam zero
+bind/type com tudo desabilitado e zero type no caso binding-only. Não houve medição
+nova de RSS/alocações heap nem instrumentação de cancelamento nos passes legados.
 
 ## Roadmap: o que ainda não está concluído
+
+### Próximos passos para ABI/WASM
+
+A sequência acordada está detalhada nas seções 18.1 e 18.2 do
+[plano de evolução](../Heimdall%20%E2%80%94%20Plano%20de%20Evolu%C3%A7%C3%A3o%20Arquitetural.md):
+
+1. Validar a API experimental com plugins sintáticos e semânticos reais na build.
+2. Medir execução, queries/crossings, P95/P99, memória, inicialização e cancelamento.
+3. Introduzir C ABI apenas para plugins confiáveis, se carregamento independente
+   for necessário, após validação do contrato e dos benchmarks.
+4. Priorizar WASM antes de permitir plugins nativos de terceiros sem revisão,
+   quando execução de código não confiável for um requisito concreto.
+5. Compartilhar o modelo de regras entre adaptadores, preservando o caminho
+   direto das regras nativas e mantendo runtimes/carregadores fora do core.
+
+Esses passos são planejamento, não funcionalidades já implementadas. A ABI não
+será estabilizada enquanto o contrato de queries ainda estiver sendo validado.
 
 | Fase do plano | Estado desta implementação |
 |---|---|

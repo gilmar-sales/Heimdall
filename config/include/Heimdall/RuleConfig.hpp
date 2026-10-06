@@ -24,6 +24,8 @@ namespace heimdall
         bool has_doc_scope = false;
         bool has_pointer_alignment = false;
         bool has_reference_alignment = false;
+        bool has_blank_line_between_methods = false;
+        bool has_max_parameters_per_line = false;
     };
 
     std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const std::filesystem::path & path);

@@ -4,6 +4,7 @@ add_library(heimdall_analysis STATIC
   src/Workspace.cpp
   src/AnalysisContext.cpp
   src/AnalysisFeatures.cpp
+  src/SemanticRuleDispatch.cpp
   src/RuleScheduler.cpp
   src/PluginHost.cpp
 )

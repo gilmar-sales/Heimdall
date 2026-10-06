@@ -225,6 +225,43 @@ TEST(RuleConfigSpec, NearestIncludeOrderWins)
     std::filesystem::remove_all(directory);
 }
 
+TEST(RuleConfigSpec, LoadsAndMergesDeclarationLayoutSettings)
+{
+    const auto directory = MakeConfigDir("layout");
+    WriteConfig(directory, R"({"root":true,"format":{"blank-line-between-methods":false,"max-parameters-per-line":0}})");
+    auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->has_blank_line_between_methods);
+    EXPECT_TRUE(loaded->has_max_parameters_per_line);
+    EXPECT_FALSE(loaded->format_options.blank_line_between_methods);
+    EXPECT_EQ(loaded->format_options.max_parameters_per_line, 0);
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(child, R"({"format":{"max-parameters-per-line":5}})");
+    auto merged = heimdall::FindFormatOptions(child);
+    ASSERT_TRUE(merged && *merged);
+    EXPECT_FALSE((**merged).blank_line_between_methods);
+    EXPECT_EQ((**merged).max_parameters_per_line, 5);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, RejectsInvalidDeclarationLayoutSettings)
+{
+    const auto directory = MakeConfigDir("invalid_layout");
+    for (const auto json : {
+        R"({"format":{"blank-line-between-methods":"true"}})",
+        R"({"format":{"max-parameters-per-line":-1}})",
+        R"({"format":{"max-parameters-per-line":3.5}})",
+        R"({"format":{"max-parameters-per-line":true}})",
+        R"({"format":{"max-parameters-per-line":"3"}})"})
+    {
+        SCOPED_TRACE(json);
+        WriteConfig(directory, json);
+        EXPECT_FALSE(heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName));
+    }
+    std::filesystem::remove_all(directory);
+}
+
 TEST(RuleConfigSpec, LoadsFormatAlignments)
 {
     const auto directory = MakeConfigDir("format");

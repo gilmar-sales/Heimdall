@@ -1022,6 +1022,11 @@ namespace heimdall
 
                 if (IsDeclSpecifierKeyword(text))
                 {
+                    if (text == "explicit" && i + 1 < end && Is(i + 1, "(") && m_match[i + 1] != Invalid)
+                    {
+                        i = m_match[i + 1] + 1;
+                        continue;
+                    }
                     // `signed long`, `unsigned long long`, `long double` etc. all stay in specifiers.
                     ++i;
                     saw_type |= IsBuiltinType(text) || text == "struct" || text == "class" ||
@@ -1081,7 +1086,13 @@ namespace heimdall
                         ++look;
                     }
 
-                    if (look < end && (IsIdentifierToken(look) || Is(look, "(") || Is(look, "~") ||
+                    // A name immediately followed by its parameter list is a
+                    // constructor declarator, not a user-defined return type.
+                    // A parenthesized pointer/reference declarator still needs
+                    // the preceding name as its type: `Widget (*factory)(int)`.
+                    const bool grouped_declarator = Is(look, "(") && look + 1 < end &&
+                        (Is(look + 1, "*") || Is(look + 1, "&") || Is(look + 1, "&&") || Is(look + 1, "("));
+                    if (look < end && (IsIdentifierToken(look) || grouped_declarator || Is(look, "~") ||
                         Is(look, "operator") || Is(look, "::")))
                     {
                         i = after;
@@ -1120,7 +1131,9 @@ namespace heimdall
                 Add(GrammarKind::TypeSpecifier, spec_start, i, parent);
             }
 
-            return saw_type ? i : begin;
+            // Qualifiers such as explicit/constexpr decorate a constructor even
+            // though it has no return type. Leave its name as the declarator.
+            return i;
         }
 
         bool LooksLikeDeclarationStart(std::size_t pos, std::size_t end) const

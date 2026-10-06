@@ -53,8 +53,27 @@ to `.heimdall.json` for completion and validation.
 
 Files are analyzed concurrently with a standard-library `std::jthread` worker
 set and an atomic work index; results are emitted in sorted path order. The
-current formatter only normalizes brace-depth indentation. `check` exits 1 if
+formatter normalizes indentation and spacing, separates function/method declarations
+and definitions (including constructors), groups consecutive fields and separates
+them from methods and access sections,
+and puts declared parameters on individual lines when there are more than three.
+`check` exits 1 if
 lint diagnostics are found; I/O or CLI errors exit 2.
+
+These declaration layout defaults can be configured in `.heimdall.json`:
+
+```json
+{
+  "format": {
+    "blank-line-between-methods": true,
+    "max-parameters-per-line": 3
+  }
+}
+```
+
+Set the first option to `false` or the second to `0` to disable it. Parameter
+wrapping applies to declarations/definitions, including constructors, not calls. Unary complement stays
+attached to its operand, with assignment spacing preserved: `kNone = ~0u;`.
 
 `parse` dumps the grammar tree (node kinds with byte offsets) and reports
 syntax errors as `syntax/parse-error` diagnostics; it exits 1 when syntax errors are

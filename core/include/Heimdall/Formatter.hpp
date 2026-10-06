@@ -84,6 +84,11 @@ namespace heimdall
         bool space_before_inheritance_colon = true;
         // Pad trailing `//` comments of adjacent lines to one column.
         bool align_trailing_comments = true;
+        // Separate function/method declarations and definitions; in records,
+        // also separate methods from fields and access sections. Fields stay grouped.
+        bool blank_line_between_methods = true;
+        // More than this many parameters: one per line after `(`. 0 disables it.
+        std::size_t max_parameters_per_line = 3;
     };
 
     // One replacement hunk over the source buffer, line-oriented: lines
@@ -115,6 +120,7 @@ namespace heimdall
             std::size_t end_line) const;
 
     private:
+        std::string DeclarationLayout(const ParseTree &tree) const;
         std::string FormatImpl(std::string_view source, const std::vector<Token> & tokens,
             const std::vector<PreprocessorDirective> & directives) const;
         std::string FormatShaped(std::string_view source, const std::vector<Token> & tokens,

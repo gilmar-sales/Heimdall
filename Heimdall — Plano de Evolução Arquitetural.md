@@ -1028,6 +1028,60 @@ WASM pode oferecer:
 
 A adoção de WASM deve ser baseada em benchmarks e necessidades reais.
 
+## 18.1. Sequência recomendada para ABI e WASM
+
+A decisão inicial é manter a Plugin API experimental, sem estabilizar uma ABI
+prematuramente. C ABI fornece interoperabilidade binária; WASM fornece uma
+fronteira de execução mais controlável. São objetivos diferentes.
+
+1. **Validar o contrato de queries com plugins reais compilados na build.**
+   Exercitar regras sintáticas e semânticas, handles, lifetime dos snapshots,
+   configuração, suppressions, diagnósticos e operações em lote. Ajustar a API
+   enquanto não houver compromisso de compatibilidade binária.
+2. **Medir antes de escolher o mecanismo externo.**
+   Comparar execução nativa e experimental, número de queries/crossings, latências
+   P95/P99 e memória. Incluir o custo de inicialização, atualizações incrementais
+   e cancelamento, além do tempo de execução da regra. Registrar hardware,
+   corpus e orçamento de desempenho para permitir comparações reproduzíveis.
+3. **Introduzir C ABI para plugins confiáveis, se houver necessidade de
+   carregamento independente.**
+   Só avançar após validar o contrato e os benchmarks. Usar tabela de funções
+   versionada, tamanhos explícitos de estruturas, tipos de largura fixa, handles,
+   ranges, strings UTF-8 com comprimento e códigos de erro. Documentar ownership,
+   lifetime e convenção de chamada. Não expor STL, classes virtuais, allocators
+   ou representações internas; nenhuma exception pode atravessar a fronteira.
+4. **Introduzir WASM quando houver necessidade concreta de executar código não
+   confiável.**
+   Se plugins de terceiros sem revisão fizerem parte do produto, priorizar WASM
+   antes de permitir seu carregamento nativo. Escolher o runtime por benchmarks
+   e requisitos de isolamento. Definir limites de memória e execução,
+   capabilities explícitas, validação de handles/resultados e cancelamento
+   apoiado pelo runtime. Não conceder filesystem, rede ou processos implicitamente.
+5. **Manter os adaptadores sobre o mesmo modelo de análise e regras.**
+   C ABI e WASM, caso ambos sejam necessários, compartilham configuração,
+   scheduling, severidade, suppressions, diagnósticos e métricas. Regras nativas
+   continuam usando a API interna diretamente. O runtime WASM e o carregador
+   externo ficam fora do core STL-only, em targets separados.
+
+## 18.2. Consequências das escolhas
+
+| Escolha | Benefícios | Custos e riscos |
+|---|---|---|
+| Plugins compilados na build | Simplicidade, desempenho nativo e liberdade para alterar a API | Exigem recompilação; não oferecem isolamento |
+| C ABI (`.dll`/`.so`) | Carregamento independente, interoperabilidade entre linguagens e baixo overhead potencial | Binários por plataforma/arquitetura; compromisso de compatibilidade; código nativo pode bloquear, comprometer memória ou derrubar o servidor |
+| WASM | Artefato mais portátil, isolamento de memória e controle de capabilities/recursos | Runtime, memória e inicialização adicionais; queries cruzam a fronteira de execução; desempenho precisa ser medido |
+| C ABI + WASM | Caminhos distintos para plugins confiáveis e terceiros | Dois mecanismos para manter, testar e documentar; adotar apenas com necessidade demonstrada |
+
+`extern "C"` sozinho não garante uma ABI estável. Capturar exceptions de plugins
+nativos também não os transforma em um sandbox. Execução nativa em processo
+separado é uma alternativa de isolamento, mas acrescenta IPC e gerenciamento de
+processos e deve ser avaliada se necessária.
+
+WASM não elimina todos os riscos: imports do host também precisam respeitar
+limites e não bloquear indefinidamente. A API deve favorecer queries em lote e
+copiar somente os resultados necessários para a memória do plugin, sem criar
+uma segunda AST completa.
+
 ---
 
 # 19. Features

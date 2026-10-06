@@ -296,7 +296,7 @@
     },
     "format": {
       "type": "object",
-      "description": "Formatter alignment. CLI flags (--pointer-alignment, --reference-alignment) override these values.",
+      "description": "Formatter settings. CLI alignment flags override the corresponding values.",
       "properties": {
         "pointer-alignment": {
           "enum": [
@@ -313,6 +313,17 @@
           ],
           "default": "left",
           "description": "Attachment of declarator `&`/`&&`: 'left' formats `int& x`, 'right' formats `int &x`."
+        },
+        "blank-line-between-methods": {
+          "type": "boolean",
+          "default": true,
+          "description": "Separate function/method declarations and definitions with blank lines. In records, also separate fields, methods and access sections; consecutive fields stay grouped. Documentation stays attached."
+        },
+        "max-parameters-per-line": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "More than this many declared parameters: put one parameter per line after '('. Zero disables this rule."
         }
       },
       "additionalProperties": false
