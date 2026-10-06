@@ -18,8 +18,10 @@ namespace heimdall
     class TypeNameOracle
     {
     public:
-        virtual ~TypeNameOracle() = default;
+        virtual~TypeNameOracle() = default;
+
         virtual bool IsType(std::string_view name) const noexcept = 0;
+
         // Changes whenever the answers may change: incremental reuse of a previous
         // parse is only valid under the same fingerprint.
         virtual std::uint64_t Fingerprint() const noexcept = 0;

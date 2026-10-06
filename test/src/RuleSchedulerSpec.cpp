@@ -18,7 +18,7 @@ namespace
         ScheduledRule rule;
         rule.metadata.code = std::move(code);
         rule.interests = {GrammarKind::ReturnStatement, GrammarKind::ReturnStatement};
-        rule.on_node = [](const AnalysisContext &context, NodeId node, DiagnosticSink &sink)
+        rule.on_node =[](const AnalysisContext& context, NodeId node, DiagnosticSink& sink)
         {
             sink.Emit(context.NodeRange(node), "return observed");
         };
@@ -34,7 +34,7 @@ namespace
         auto result = scheduler.Analyze(context, RuleEngine(), true);
         ASSERT_EQ(result.diagnostics.size(), 4);
         ASSERT_EQ(result.metrics.size(), 2);
-        for (const auto &metrics : result.metrics)
+        for (const auto& metrics : result.metrics)
         {
             EXPECT_EQ(metrics.execution_count, 2);
             EXPECT_EQ(metrics.diagnostics_emitted, 2);
@@ -42,6 +42,7 @@ namespace
             EXPECT_GT(metrics.p95_ns, 0);
             EXPECT_GT(metrics.AverageNs(), 0);
         }
+
         EXPECT_FALSE(scheduler.Register(Returns("test/returns")));
     }
 
@@ -70,7 +71,7 @@ namespace
         auto context = Context("int x;");
         ScheduledRule rule;
         rule.metadata.code = "test/bounds";
-        rule.on_document = [](const AnalysisContext &, DiagnosticSink &sink)
+        rule.on_document =[](const AnalysisContext&, DiagnosticSink& sink)
         {
             sink.Emit({999, 1}, "out of bounds");
             Diagnostic bad{};
@@ -107,10 +108,13 @@ namespace
         RuleScheduler scheduler;
         auto rule = Returns("test/failing");
         rule.external = true;
-        rule.on_node = [count = 0](const AnalysisContext &ctx, NodeId node, DiagnosticSink &sink) mutable
+        rule.on_node =[count = 0](const AnalysisContext& ctx, NodeId node, DiagnosticSink& sink) mutable
         {
             sink.Emit(ctx.NodeRange(node), "partial result");
-            if (++count == 2) throw std::runtime_error("failed later");
+            if (++count == 2)
+            {
+                throw std::runtime_error("failed later");
+            }
         };
         ASSERT_TRUE(scheduler.Register(std::move(rule)));
         auto result = scheduler.Analyze(context, RuleEngine());

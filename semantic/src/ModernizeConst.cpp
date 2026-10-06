@@ -21,11 +21,11 @@ namespace heimdall
 
         // Where the written type of a declaration begins: the first of its
         // qualifier (`std::`) and type specifier, so `const` goes before both.
-        std::uint32_t TypeStart(const SemanticModel &model, std::uint32_t decl_node)
+        std::uint32_t TypeStart(const SemanticModel& model, std::uint32_t decl_node)
         {
-            const auto &nodes = model.Tree().NodesSoA();
+            const auto& nodes = model.Tree().NodesSoA();
             std::uint32_t first = kNone;
-            for (const auto child: model.ChildrenOf(decl_node))
+            for (const auto child : model.ChildrenOf(decl_node))
             {
                 if ((nodes.Kind(child) == GrammarKind::TypeSpecifier || nodes.Kind(child) == GrammarKind::NestedNameSpecifier) &&
                     (first == kNone || nodes.FirstToken(child) < first))
@@ -36,7 +36,7 @@ namespace heimdall
 
             // The grammar folds storage keywords into the type: `const` and `constexpr`
             // read better after them (`static const int`).
-            const auto &tokens = model.Tree().Tokens();
+            const auto& tokens = model.Tree().Tokens();
             while (first != kNone && first < tokens.size())
             {
                 const Tok tok = tokens[first].tok;
@@ -56,8 +56,11 @@ namespace heimdall
         }
 
         // Replacement for the type-start insertion: `text` right before the type.
-        bool InsertBeforeType(const SemanticModel &model, std::uint32_t decl_node, std::string_view text,
-            TextEdit &edit)
+        bool InsertBeforeType(
+            const SemanticModel& model,
+            std::uint32_t decl_node,
+            std::string_view text,
+            TextEdit& edit)
         {
             const auto token = TypeStart(model, decl_node);
             if (token == kNone)
@@ -69,29 +72,35 @@ namespace heimdall
             return true;
         }
 
-        std::string NameOf(const SemanticModel &model, SymbolId symbol)
+        std::string NameOf(const SemanticModel& model, SymbolId symbol)
         {
             return std::string(model.Names().Text(model.Symbols().name[symbol]));
         }
 
-        Diagnostic Report(Reporter &reporter, const SemanticModel &model, SymbolId symbol, RuleId rule,
+        Diagnostic Report(
+            Reporter& reporter,
+            const SemanticModel& model,
+            SymbolId symbol,
+            RuleId rule,
             std::string_view code,
-            std::string message, TextEdit fix, std::string title)
+            std::string message,
+            TextEdit fix,
+            std::string title)
         {
-            const auto &token = model.Tree().Tokens()[model.Symbols().decl_token[symbol]];
+            const auto& token = model.Tree().Tokens()[model.Symbols().decl_token[symbol]];
             return reporter.Make(rule, code, std::move(message), token.offset, token.length, std::move(fix),
                 std::move(title));
         }
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeConst(const FlowModel &flow)
+    std::vector<Diagnostic> SemanticRules::AnalyzeConst(const FlowModel& flow)
     {
-        const auto &model = flow.Model();
-        const auto &types = flow.Types();
-        const auto &table = types.Types();
-        const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().NodesSoA();
+        const auto& model = flow.Model();
+        const auto& types = flow.Types();
+        const auto& table = types.Types();
+        const auto& symbols = model.Symbols();
+        const auto& nodes = model.Tree().NodesSoA();
         ConstantAnalysis constants(flow);
         Reporter reporter(model.Tree());
         std::vector<Diagnostic> diagnostics;
@@ -162,11 +171,11 @@ namespace heimdall
         return diagnostics;
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeConstexpr(const FlowModel &flow)
+    std::vector<Diagnostic> SemanticRules::AnalyzeConstexpr(const FlowModel& flow)
     {
-        const auto &model = flow.Model();
-        const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().NodesSoA();
+        const auto& model = flow.Model();
+        const auto& symbols = model.Symbols();
+        const auto& nodes = model.Tree().NodesSoA();
         ConstantAnalysis constants(flow);
         Reporter reporter(model.Tree());
         std::vector<Diagnostic> diagnostics;
@@ -204,7 +213,7 @@ namespace heimdall
             case ConstantAnalysis::Candidate::ReplaceConst:
             {
                 const auto spec = constants.SpecifiersOf(decl, symbols.decl_token[symbol]);
-                const auto &keyword = model.Tree().Tokens()[model.Significant()[spec.const_position]];
+                const auto& keyword = model.Tree().Tokens()[model.Significant()[spec.const_position]];
                 diagnostics.push_back(Report(reporter, model, symbol, RuleId::ModernizeConstexpr,
                     "cpp/modernize-constexpr",
                     "'" + name + "' has a constant initializer; declare it 'constexpr' instead of 'const'",

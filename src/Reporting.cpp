@@ -9,7 +9,7 @@ namespace heimdall::cli
     std::string JsonEscape(std::string_view text)
     {
         std::string out;
-        for (const unsigned char c: text)
+        for (const unsigned char c : text)
         {
             switch (c)
             {
@@ -74,7 +74,7 @@ namespace heimdall::cli
         {
             std::cout << '[';
             bool first_file = true;
-            for (const auto & result: results)
+            for (const auto& result : results)
             {
                 if (!result.error.empty())
                 {
@@ -92,7 +92,7 @@ namespace heimdall::cli
                 std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"standard\":\""
                 << JsonEscape(result.standard_name) << "\",\"nodes\":[";
                 bool first_node = true;
-                for (const auto & node: result.nodes)
+                for (const auto& node : result.nodes)
                 {
                     if (!first_node)
                     {
@@ -106,7 +106,7 @@ namespace heimdall::cli
 
                 std::cout << "],\"diagnostics\":[";
                 bool first_diag = true;
-                for (const auto & diagnostic: result.syntax_diagnostics)
+                for (const auto& diagnostic : result.syntax_diagnostics)
                 {
                     if (!first_diag)
                     {
@@ -129,7 +129,7 @@ namespace heimdall::cli
         {
             std::cout << '[';
             bool first = true;
-            for (const auto & result: results)
+            for (const auto& result : results)
             {
                 if (!result.error.empty())
                 {
@@ -152,7 +152,7 @@ namespace heimdall::cli
                     }
                 }
 
-                for (const auto & diagnostic: result.diagnostics)
+                for (const auto& diagnostic : result.diagnostics)
                 {
                     if (!first)
                     {
@@ -168,7 +168,7 @@ namespace heimdall::cli
                     has_diagnostics = true;
                 }
 
-                for (const auto & diagnostic: result.semantic_diagnostics)
+                for (const auto& diagnostic : result.semantic_diagnostics)
                 {
                     if (!first)
                     {
@@ -183,7 +183,7 @@ namespace heimdall::cli
                     has_diagnostics = true;
                 }
 
-                for (const auto & diagnostic: result.syntax_diagnostics)
+                for (const auto& diagnostic : result.syntax_diagnostics)
                 {
                     if (!first)
                     {
@@ -203,7 +203,7 @@ namespace heimdall::cli
         }
         else if (options.command == Command::Parse)
         {
-            for (const auto & result: results)
+            for (const auto& result : results)
             {
                 if (!result.error.empty())
                 {
@@ -212,7 +212,7 @@ namespace heimdall::cli
                     continue;
                 }
 
-                for (const auto & diagnostic: result.syntax_diagnostics)
+                for (const auto& diagnostic : result.syntax_diagnostics)
                 {
                     std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
                     << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';
@@ -225,7 +225,7 @@ namespace heimdall::cli
         }
         else
         {
-            for (const auto & result: results)
+            for (const auto& result : results)
             {
                 if (!result.error.empty())
                 {
@@ -267,20 +267,20 @@ namespace heimdall::cli
                 }
 
                 has_diagnostics |=!result.diagnostics.empty();
-                for (const auto & diagnostic: result.diagnostics)
+                for (const auto& diagnostic : result.diagnostics)
                 {
                     std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column << ": "
                     << severity_name(diagnostic.severity) << ' ' << diagnostic.code << ": "
                     << diagnostic.message << '\n';
                 }
 
-                for (const auto & diagnostic: result.semantic_diagnostics)
+                for (const auto& diagnostic : result.semantic_diagnostics)
                 {
                     std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
                     << ": warning " << diagnostic.code << ": " << diagnostic.message << '\n';
                 }
 
-                for (const auto & diagnostic: result.syntax_diagnostics)
+                for (const auto& diagnostic : result.syntax_diagnostics)
                 {
                     std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
                     << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';

@@ -89,7 +89,9 @@ namespace heimdall
             Unknown,
             Exported, // namespace chain only: usable
             Hidden    // anonymous namespace, class, function or block on the way up
-        };
+        }
+
+        ;
 
         std::uint32_t Intern(std::string_view text)
         {
@@ -150,7 +152,7 @@ namespace heimdall
         void ScanIncludes()
         {
             const std::string_view source = m_tree.Source();
-            for (const auto & directive: m_tree.Directives())
+            for (const auto& directive : m_tree.Directives())
             {
                 if (directive.kind != DirectiveKind::Include)
                 {
@@ -325,10 +327,10 @@ namespace heimdall
         return FromModel(model, std::move(path));
     }
 
-    std::shared_ptr<const HeaderSummary> HeaderSummary::FromModel(const SemanticModel &model,
+    std::shared_ptr<const HeaderSummary> HeaderSummary::FromModel(const SemanticModel& model,
         std::filesystem::path path)
     {
-        const auto &tree = model.Tree();
+        const auto& tree = model.Tree();
         const auto source = tree.Source();
         auto summary = std::make_shared<HeaderSummary>();
         summary->m_path = std::move(path);
@@ -337,7 +339,10 @@ namespace heimdall
         summary->m_textual = IsTextualExtension(summary->m_path);
         summary->m_fingerprint = 14695981039346656037ull;
         for (unsigned char c : source)
+        {
             summary->m_fingerprint = (summary->m_fingerprint ^ c) * 1099511628211ull;
+        }
+
         HeaderSummaryBuilder(*summary, tree, model).Run();
         return summary;
     }

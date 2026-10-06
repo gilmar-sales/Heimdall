@@ -38,7 +38,9 @@ namespace heimdall::lsp
     {
     public:
         LanguageServer();
+
         ~LanguageServer();
+
         bool Run();
 
     private:
@@ -78,7 +80,7 @@ namespace heimdall::lsp
             std::exception_ptr parse_failure;
         };
 
-        using RequestHandler = std::move_only_function<void(simdjson::dom::element, std::string_view)>;
+        using RequestHandler = std::move_only_function<void(simdjson::dom::element, std::string_view) >;
         struct RequestJob
         {
             std::string body;
@@ -97,105 +99,160 @@ namespace heimdall::lsp
         {
             std::string key;
             std::vector<std::filesystem::path> headers;
-            const heimdall::CompileCommand * command = nullptr;
+            const heimdall::CompileCommand* command = nullptr;
         };
 
         struct DiagJob
         {
             std::string uri;
             std::int64_t version = 0;
-        };
+        }
+
+        ;
 
         void LoadInitializationOptions(simdjson::dom::element request);
+
         void Respond(std::string_view id, std::string_view result);
-        void PublishDiagnostics(const std::string & uri, std::shared_ptr<const std::string> text,
+
+        void PublishDiagnostics(const std::string& uri, std::shared_ptr<const std::string> text,
             std::int64_t version);
-        bool DocumentParams(simdjson::dom::element request, std::string_view & uri,
-            simdjson::dom::object & document);
+
+        bool DocumentParams(simdjson::dom::element request, std::string_view& uri,
+            simdjson::dom::object& document);
+
         void OpenDocument(simdjson::dom::element request);
+
         void ChangeDocument(simdjson::dom::element request);
+
         void CloseDocument(simdjson::dom::element request);
+
         void FormatDocument(simdjson::dom::element request, std::string_view id);
+
         void RangeFormatDocument(simdjson::dom::element request, std::string_view id);
+
         void CodeActions(simdjson::dom::element request, std::string_view id);
+
         void CompleteDocument(simdjson::dom::element request, std::string_view id);
+
         // `#include "` / `#include <` path completion; quoted and angled
         // includes search different directories.
-        void RespondIncludeCompletion(std::string_view id, const std::string & uri, const std::string & text,
-            const LineIndex & lines, std::size_t offset, const heimdall::IncludeContext & context,
-            const heimdall::CompileCommand * command);
+        void RespondIncludeCompletion(
+            std::string_view id,
+            const std::string& uri,
+            const std::string& text,
+            const LineIndex& lines,
+            std::size_t offset,
+            const heimdall::IncludeContext& context,
+            const heimdall::CompileCommand* command);
+
         void HoverDocument(simdjson::dom::element request, std::string_view id);
+
         void GotoDocument(simdjson::dom::element request, std::string_view id, bool implementation);
+
         // Non-blocking variant of HeaderScopes for the interactive path.
         // Never sleeps: on a fingerprint miss it enqueues the build and returns
         // the last good (or empty) index with complete=false, so hover/goto
         // answer in microseconds and the client re-requests once indexing lands.
         // Kept as a separate name so call sites cannot accidentally reintroduce
         // the old 25ms-poll loop on pool threads.
-        HeaderView AwaitHeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
-            const heimdall::CompileCommand * command);
-        HeaderView HeaderScopes(const std::string & uri, const std::shared_ptr<const std::string> & text,
-            const heimdall::CompileCommand * command);
-        std::shared_ptr<const heimdall::ParseTree> CachedParse(const std::string & uri,
-            const std::shared_ptr<const std::string> & text,
+        HeaderView AwaitHeaderScopes(const std::string& uri, const std::shared_ptr<const std::string>& text,
+            const heimdall::CompileCommand* command);
+
+        HeaderView HeaderScopes(const std::string& uri, const std::shared_ptr<const std::string>& text,
+            const heimdall::CompileCommand* command);
+
+        std::shared_ptr<const heimdall::ParseTree> CachedParse(
+            const std::string& uri,
+            const std::shared_ptr<const std::string>& text,
             std::int64_t version,
-            const heimdall::CompileCommand * command);
-        heimdall::ParserOptions ParserOptionsFor(const heimdall::CompileCommand * command);
+            const heimdall::CompileCommand* command);
+
+        heimdall::ParserOptions ParserOptionsFor(const heimdall::CompileCommand* command);
 
         // Rule-engine diagnostics plus, when semantic analysis is on and the file
         // has a compile command, cpp/no-unused-include (policy already applied).
-        heimdall::AnalysisContext AnalysisFor(const std::string &uri,
+        heimdall::AnalysisContext AnalysisFor(const std::string& uri,
             std::shared_ptr<const heimdall::ParseTree> tree, heimdall::ParserOptions options);
-        std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string & uri,
+
+        std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string& uri,
             std::shared_ptr<const heimdall::ParseTree> tree,
-            const heimdall::CompileCommand * command);
+            const heimdall::CompileCommand* command);
 
         // Workspace-wide linting: after `initialized`, a background pass publishes
         // diagnostics for every C++ source under the workspace root that is not
         // open in the editor, so the Problems panel shows the project total.
         void WorkspaceScanMain(std::stop_token stop);
+
         // Returns the number of diagnostics published, or -1 when the file was
         // skipped (open in the editor, unreadable, cancelled).
-        int PublishWorkspaceFile(const std::filesystem::path & file, std::stop_token stop);
-        static bool IsWorkspaceSource(const std::filesystem::path & file);
+        int PublishWorkspaceFile(const std::filesystem::path& file, std::stop_token stop);
+
+        static bool IsWorkspaceSource(const std::filesystem::path& file);
+
         void IndexWorkerMain(std::stop_token stop);
+
         void DiagWorkerMain(std::stop_token stop);
-        void EnqueueDiagnostics(const std::string & uri, std::int64_t version);
+
+        void EnqueueDiagnostics(const std::string& uri, std::int64_t version);
+
         void FlushDiagnostics();
+
         // The smallest single edit covering every change applied so far.
         struct EditHull
         {
             bool valid = false;
             heimdall::Lexer::TextEdit edit;
-            void Add(const heimdall::Lexer::TextEdit &next) noexcept
+
+            void Add(const heimdall::Lexer::TextEdit& next) noexcept
             {
                 edit = valid ? heimdall::Lexer::Compose(edit, next) : next;
                 valid = true;
             }
-        };
+        }
 
-        static bool ApplyContentChange(std::string & current, LineIndex &index,
-            std::vector<heimdall::Token> &tokens, EditHull &hull, simdjson::dom::object change);
+        ;
+
+        static bool ApplyContentChange(
+            std::string& current,
+            LineIndex& index,
+            std::vector<heimdall::Token>& tokens,
+            EditHull& hull,
+            simdjson::dom::object change);
+
         // Requires m_index_cache_mu to be held by the caller.
-        void TouchGlobalIndex(const std::string & key);
+        void TouchGlobalIndex(const std::string& key);
+
         // Runs `handler` on the pool against a private copy of the message, so
         // the I/O thread goes straight back to reading (and to $/cancelRequest).
-        void Dispatch(std::string_view body, simdjson::dom::element request, const std::string & id,
+        void Dispatch(
+            std::string_view body,
+            simdjson::dom::element request,
+            const std::string& id,
             RequestHandler handler);
-        void ExecuteRequest(const std::shared_ptr<RequestJob> &job);
+
+        void ExecuteRequest(const std::shared_ptr<RequestJob>& job);
+
         void QueueDocument(std::string_view body);
+
         void DrainRequests();
+
         // Snapshot of `uri`: the one pinned at arrival for the current request,
         // otherwise the latest.
-        std::optional<DocumentSnapshot> GetDocument(const std::string & uri);
-        const heimdall::CompileCommand * CommandFor(const std::string & uri);
-        static std::stop_token CurrentStop();
-        static bool RequestCancelled();
-        void RespondCancelled(std::string_view id);
-        void RespondInternalError(std::string_view id);
-        bool IsCurrentVersion(const std::string & uri, std::int64_t version);
+        std::optional<DocumentSnapshot> GetDocument(const std::string& uri);
 
-        static thread_local const RequestContext * t_context;
+        const heimdall::CompileCommand* CommandFor(const std::string& uri);
+
+        static std::stop_token CurrentStop();
+
+        static bool RequestCancelled();
+
+        void RespondCancelled(std::string_view id);
+
+        void RespondInternalError(std::string_view id);
+
+        bool IsCurrentVersion(const std::string& uri, std::int64_t version);
+
+        static thread_local const RequestContext* t_context;
 
         // m_docs_mu guards only m_documents (hot: every request and keystroke),
         // so readers never queue behind cache bookkeeping under the sharded
@@ -258,8 +315,9 @@ namespace heimdall::lsp
             struct Waiter
             {
                 std::atomic<bool> resumed{false};
-                std::function<void()> resume;
-                std::optional<std::stop_callback<std::function<void()>>> cancellation;
+                std::function<void() > resume;
+                std::optional<std::stop_callback<std::function<void() >>> cancellation;
+
                 void Wake()
                 {
                     if (!resumed.exchange(true, std::memory_order_acq_rel))
@@ -271,6 +329,7 @@ namespace heimdall::lsp
                     }
                 }
             };
+
             std::mutex mu;
             std::condition_variable_any cv;
             std::shared_ptr<const heimdall::ParseTree> tree;
@@ -280,8 +339,12 @@ namespace heimdall::lsp
             // Set (release) only after a successful parse is published.
             std::atomic<bool> ready{false};
         };
+
         // Internal suspension, caught before a request has produced a response.
-        struct ParsePending { std::shared_ptr<ParseSlot> slot; };
+        struct ParsePending
+        {
+            std::shared_ptr<ParseSlot> slot;
+        };
 
         struct ParseCacheEntry
         {
@@ -304,7 +367,7 @@ namespace heimdall::lsp
         // new set invalidates the cached parse, so the next request re-reads the file with it.
         std::unordered_map<std::string, std::shared_ptr<const heimdall::TypeNameOracle>> m_type_names;
 
-        std::unordered_map<const heimdall::CompileCommand *,
+        std::unordered_map<const heimdall::CompileCommand*,
             std::shared_ptr<const heimdall::Preprocessor::MacroMap>>
         m_macro_cache;
 

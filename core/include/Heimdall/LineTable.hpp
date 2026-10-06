@@ -17,10 +17,14 @@ namespace heimdall
         {
             std::uint32_t line = 1;
             std::uint32_t column = 1;
-        };
+        }
+
+        ;
 
         void Build(std::string_view text);
+
         Position Lookup(std::size_t offset) const;
+
         std::size_t LineCount() const noexcept
         {
             return m_line_starts.size();

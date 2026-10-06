@@ -51,10 +51,11 @@ namespace heimdall
         std::size_t type_arena_bytes = 0;
         std::size_t project_string_bytes = 0;
         std::size_t retained_base_bytes = 0;
+
         std::size_t Total() const noexcept
         {
             return source_bytes + syntax_bytes + semantic_arena_bytes + type_arena_bytes
-                + project_string_bytes + retained_base_bytes;
+            + project_string_bytes + retained_base_bytes;
         }
     };
 
@@ -65,28 +66,46 @@ namespace heimdall
     {
     public:
         AnalysisSnapshot() = default;
+
         std::uint64_t Revision() const noexcept;
+
         std::vector<DocumentId> Documents() const;
-        DocumentId Find(const std::filesystem::path &path) const;
+
+        DocumentId Find(const std::filesystem::path& path) const;
+
         bool Contains(DocumentId document) const noexcept;
+
         std::int64_t Version(DocumentId document) const noexcept;
+
         std::shared_ptr<const std::string> Source(DocumentId document) const;
-        const std::filesystem::path &Path(DocumentId document) const;
-        const ParserOptions &Options(DocumentId document) const;
-        const CompileCommand *Command(DocumentId document) const;
+
+        const std::filesystem::path& Path(DocumentId document) const;
+
+        const ParserOptions& Options(DocumentId document) const;
+
+        const CompileCommand* Command(DocumentId document) const;
+
         std::span<const DocumentId> Dependencies(DocumentId document) const;
+
         std::shared_ptr<const ParseTree> Syntax(DocumentId document) const;
+
         std::shared_ptr<const SemanticModel> Semantic(DocumentId document) const;
+
         std::shared_ptr<const TypeModel> Types(DocumentId document) const;
+
         std::shared_ptr<const HeaderSummary> Summary(DocumentId document) const;
+
         std::shared_ptr<const ProjectIndex> Project() const;
+
         AnalysisMetrics Metrics() const;
+
         MemoryBudget Memory() const;
 
         // Bridge for frontends with an existing incremental/asynchronous parser.
         // The derived view pins exactly this tree without mutating any old view.
         std::expected<AnalysisSnapshot, WorkspaceError> WithSyntax(DocumentId document,
             std::shared_ptr<const ParseTree> tree, ParserOptions options) const;
+
         // A borrowed tree's source must outlive the view. Source() is null for
         // such a view; Syntax().Source() remains available without a buffer copy.
         static AnalysisSnapshot FromSyntax(std::shared_ptr<const ParseTree> tree,
@@ -94,8 +113,11 @@ namespace heimdall
 
     private:
         friend class Workspace;
+
         explicit AnalysisSnapshot(std::shared_ptr<const detail::WorkspaceState> state);
+
         std::shared_ptr<const detail::DocumentAnalysis> Document(DocumentId document) const;
+
         std::shared_ptr<const detail::WorkspaceState> m_state;
     };
 
@@ -105,17 +127,27 @@ namespace heimdall
     {
     public:
         Workspace();
+
         AnalysisSnapshot Snapshot() const;
-        std::expected<DocumentId, WorkspaceError> Open(std::filesystem::path path,
-            std::shared_ptr<const std::string> source, std::int64_t version = 0,
+
+        std::expected<DocumentId, WorkspaceError> Open(
+            std::filesystem::path path,
+            std::shared_ptr<const std::string> source,
+            std::int64_t version = 0,
             ParserOptions options = {});
+
         std::expected<void, WorkspaceError> Update(DocumentId document,
             std::shared_ptr<const std::string> source, std::int64_t version);
+
         std::expected<void, WorkspaceError> Close(DocumentId document);
+
         std::expected<void, WorkspaceError> SetDependencies(DocumentId document,
             std::span<const DocumentId> dependencies);
+
         std::expected<void, WorkspaceError> SetOptions(DocumentId document, ParserOptions options);
+
         void SetCompilationDatabase(std::shared_ptr<const CompileDatabase> database);
+
         void SetProjectIndex(std::shared_ptr<const ProjectIndex> index);
 
     private:

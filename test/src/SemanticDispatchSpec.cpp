@@ -12,33 +12,42 @@ namespace
     RuleOptions DisabledRules()
     {
         RuleOptions options;
-        for (const auto &rule : RuleCatalog())
+        for (const auto& rule : RuleCatalog())
+        {
             options.overrides.push_back({std::string(rule.code), false, rule.default_severity});
+        }
+
         return options;
     }
 
-    std::vector<Diagnostic> Legacy(const AnalysisContext &context, const RuleEngine &engine,
-        const ProjectContext &project = {})
+    std::vector<Diagnostic> Legacy(const AnalysisContext& context, const RuleEngine& engine,
+        const ProjectContext& project = {})
     {
         auto all = engine.Analyze(context.Syntax());
         auto semantic = SemanticRules::Analyze(context.Semantic(), context.Types(), project);
         auto doc = SemanticRules::AnalyzeDocumentation(context.Semantic(), engine);
-        semantic.insert(semantic.end(), std::make_move_iterator(doc.begin()), std::make_move_iterator(doc.end()));
+        semantic.insert(semantic.end(), std::make_move_iterator(doc.begin()),
+            std::make_move_iterator(doc.end()));
         semantic = engine.ApplyPolicy(std::move(semantic), context.Syntax());
-        all.insert(all.end(), std::make_move_iterator(semantic.begin()), std::make_move_iterator(semantic.end()));
+        all.insert(all.end(), std::make_move_iterator(semantic.begin()),
+            std::make_move_iterator(semantic.end()));
         std::stable_sort(all.begin(), all.end(),
-            [](const Diagnostic &a, const Diagnostic &b) { return a.offset < b.offset; });
+            [](const Diagnostic& a, const Diagnostic& b)
+            {
+                return a.offset < b.offset;
+        });
         return all;
     }
 
-    void ExpectEquivalent(const std::vector<Diagnostic> &actual, const std::vector<Diagnostic> &expected)
+    void ExpectEquivalent(const std::vector<Diagnostic>& actual,
+        const std::vector<Diagnostic>& expected)
     {
         ASSERT_EQ(actual.size(), expected.size());
         for (std::size_t i = 0; i < actual.size(); ++i)
         {
             SCOPED_TRACE(i);
-            const auto &a = actual[i];
-            const auto &b = expected[i];
+            const auto& a = actual[i];
+            const auto& b = expected[i];
             EXPECT_EQ(a.rule, b.rule);
             EXPECT_EQ(a.code, b.code);
             EXPECT_EQ(a.message, b.message);
@@ -70,18 +79,23 @@ namespace
 
     TEST(SemanticDispatchSpec, EachNativeRuleRequestsOnlyItsModelDomain)
     {
-        for (const auto &rule : RuleCatalog())
+        for (const auto& rule : RuleCatalog())
         {
             // IncludeAnalyzer's rules are dispatched separately by CLI/LSP.
-            if (rule.id < RuleId::ModernizeOverride) continue;
+            if (rule.id < RuleId::ModernizeOverride)
+            {
+                continue;
+            }
+
             SCOPED_TRACE(rule.code);
             Workspace workspace;
-            auto id = workspace.Open("requirements.cpp", std::make_shared<const std::string>("int f(int x) { return x; }\n"));
+            auto id = workspace.Open("requirements.cpp",
+                std::make_shared<const std::string>("int f(int x) { return x; }\n"));
             ASSERT_TRUE(id);
             auto options = DisabledRules();
             options.overrides.push_back({std::string(rule.code), true, rule.default_severity});
             AnalysisContext context(workspace.Snapshot(), *id);
-            (void)AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+            (void) AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
             const bool typed = rule.id == RuleId::NoImplicitBoolConversion ||
                 rule.id == RuleId::ModernizeRangeLoop || rule.id == RuleId::ModernizeLoopConvert ||
                 rule.id == RuleId::ModernizeConst || rule.id == RuleId::ModernizeConstexpr;
@@ -98,7 +112,8 @@ namespace
         ASSERT_TRUE(id);
         AnalysisContext context(workspace.Snapshot(), *id);
         RuleEngine engine;
-        ExpectEquivalent(AnalysisFeatures::Diagnostics(context, engine, false), engine.Analyze(context.Syntax()));
+        ExpectEquivalent(AnalysisFeatures::Diagnostics(context, engine, false),
+            engine.Analyze(context.Syntax()));
         EXPECT_EQ(context.Snapshot().Metrics().bind_count, 0);
         EXPECT_EQ(context.Snapshot().Metrics().type_count, 0);
     }
@@ -132,7 +147,7 @@ int undocumented(int argument) { return argument; }
 )cpp",
             "#define NIL 0\nint *p = NIL;\nint incomplete(int x) { if (x)\n"
         };
-        for (const auto &source : sources)
+        for (const auto& source : sources)
         {
             Workspace workspace;
             auto id = workspace.Open("equivalence.cpp", std::make_shared<const std::string>(source));
@@ -141,10 +156,15 @@ int undocumented(int argument) { return argument; }
             ProjectContext project;
             project.file = "equivalence.cpp";
             RuleEngine defaults;
-            ExpectEquivalent(AnalysisFeatures::Diagnostics(context, defaults, true, project), Legacy(context, defaults, project));
-            for (const auto &rule : RuleCatalog())
+            ExpectEquivalent(AnalysisFeatures::Diagnostics(context, defaults, true, project),
+                Legacy(context, defaults, project));
+            for (const auto& rule : RuleCatalog())
             {
-                if (rule.id < RuleId::ModernizeOverride) continue;
+                if (rule.id < RuleId::ModernizeOverride)
+                {
+                    continue;
+                }
+
                 SCOPED_TRACE(rule.code);
                 auto options = DisabledRules();
                 options.doc_scope = DocScope::All;
@@ -154,7 +174,8 @@ int undocumented(int argument) { return argument; }
                 auto expected = Legacy(context, engine, project);
                 ExpectEquivalent(actual, expected);
                 EXPECT_EQ(RuleEngine::ApplyFixes(source, actual), RuleEngine::ApplyFixes(source, expected));
-                EXPECT_EQ(RuleEngine::ApplyFixes(source, actual, true), RuleEngine::ApplyFixes(source, expected, true));
+                EXPECT_EQ(RuleEngine::ApplyFixes(source, actual, true),
+                    RuleEngine::ApplyFixes(source, expected, true));
             }
         }
     }
@@ -179,10 +200,13 @@ int undocumented(int argument) { return argument; }
     {
         std::string source;
         for (int i = 0; i < 30; ++i)
+        {
             source += "struct Type" + std::to_string(i) +
                 " { Type" + std::to_string(i) + "(int); virtual void run(); };\n"
-                "/// @brief Example.\n/// @param unknown invalid\n"
-                "int function" + std::to_string(i) + "(int value) { return value; }\n";
+            "/// @brief Example.\n/// @param unknown invalid\n"
+            "int function" + std::to_string(i) + "(int value) { return value; }\n";
+        }
+
         Workspace workspace;
         auto id = workspace.Open("ties.cpp", std::make_shared<const std::string>(source));
         ASSERT_TRUE(id);
@@ -195,7 +219,10 @@ int undocumented(int argument) { return argument; }
         auto expected = Legacy(context, engine);
         ASSERT_GT(expected.size(), 30);
         ASSERT_TRUE(std::adjacent_find(expected.begin(), expected.end(),
-            [](const Diagnostic &a, const Diagnostic &b) { return a.offset == b.offset; }) != expected.end());
+            [](const Diagnostic& a, const Diagnostic& b)
+            {
+                return a.offset == b.offset;
+            }) != expected.end());
         ExpectEquivalent(AnalysisFeatures::Diagnostics(context, engine, true), expected);
     }
 }

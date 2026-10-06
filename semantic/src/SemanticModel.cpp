@@ -7,7 +7,7 @@
 namespace heimdall
 {
 
-    InternPool::InternPool(std::pmr::memory_resource * resource)
+    InternPool::InternPool(std::pmr::memory_resource* resource)
     : m_resource(resource), m_text(resource), m_ids(resource) {}
 
     NameId InternPool::Intern(std::string_view text)
@@ -30,7 +30,7 @@ namespace heimdall
             return found->second;
         }
 
-        auto *storage = static_cast<char * >(m_resource->allocate(text.size() == 0 ? 1 : text.size(), 1));
+        auto* storage = static_cast<char*>(m_resource->allocate(text.size() == 0 ? 1 : text.size(), 1));
         if (!text.empty())
         {
             std::memcpy(storage, text.data(), text.size());
@@ -45,25 +45,25 @@ namespace heimdall
         return found == m_ids.end() ? kNone : found->second;
     }
 
-    SymbolTable::SymbolTable(std::pmr::memory_resource * resource)
+    SymbolTable::SymbolTable(std::pmr::memory_resource* resource)
     : name(resource), scope(resource), kind(resource), flags(resource), decl_token(resource),
         decl_node(resource), member_scope(resource), signature(resource), first_base(resource),
         base_count(resource), next_same_name(resource) {}
 
-    ScopeTable::ScopeTable(std::pmr::memory_resource * resource)
+    ScopeTable::ScopeTable(std::pmr::memory_resource* resource)
     : parent(resource), kind(resource), owner(resource), node(resource) {}
 
-    BaseTable::BaseTable(std::pmr::memory_resource * resource)
+    BaseTable::BaseTable(std::pmr::memory_resource* resource)
     : derived(resource), name(resource), token(resource), target(resource) {}
 
-    RefTable::RefTable(std::pmr::memory_resource * resource) : token(resource), target(resource) {}
+    RefTable::RefTable(std::pmr::memory_resource* resource) : token(resource), target(resource) {}
 
-    SemanticModel::SemanticModel(const ParseTree &tree, std::size_t arena_hint)
+    SemanticModel::SemanticModel(const ParseTree& tree, std::size_t arena_hint)
     : m_arena(std::make_unique<Arena>(arena_hint)), m_tree(&tree), m_names(m_arena->Resource()),
         m_symbols(m_arena->Resource()), m_scopes(m_arena->Resource()), m_bases(m_arena->Resource()),
         m_refs(m_arena->Resource()), m_declared(m_arena->Resource()), m_sig(m_arena->Resource()),
-      m_node_scope(m_arena->Resource()), m_code(m_arena->Resource()), m_child_begin(m_arena->Resource()),
-      m_child_list(m_arena->Resource()) {}
+        m_node_scope(m_arena->Resource()), m_code(m_arena->Resource()), m_child_begin(m_arena->Resource()),
+        m_child_list(m_arena->Resource()) {}
 
     SymbolId SemanticModel::LookupLocal(ScopeId scope, NameId name) const
     {
@@ -145,7 +145,7 @@ namespace heimdall
 
     SymbolId SemanticModel::ResolveToken(std::uint32_t token) const
     {
-        const auto &tokens = m_refs.token;
+        const auto& tokens = m_refs.token;
         const auto it = std::lower_bound(tokens.begin(), tokens.end(), token);
         if (it == tokens.end() || *it != token)
         {

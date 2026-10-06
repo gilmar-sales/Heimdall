@@ -50,8 +50,8 @@ TEST(NavigationSpec, CollectsUsingDirectivesWithTheirScope)
 {
     constexpr std::string_view source =
         "namespace a { int x; }\n"
-        "using namespace a;\n"
-        "namespace n { using namespace ::a; void f() { using namespace a; } }\n";
+    "using namespace a;\n"
+    "namespace n { using namespace ::a; void f() { using namespace a; } }\n";
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
     const auto directives = heimdall::Navigation::UsingDirectives(tree);
     ASSERT_EQ(directives.size(), 3u);
@@ -65,10 +65,10 @@ TEST(NavigationSpec, DefinitionOfLocalsParametersAndGlobals)
 {
     constexpr std::string_view source =
         "int global_value = 1;\n"
-        "int f(int param) {\n"
-        "    int local = param;\n"
-        "    return local + global_value;\n"
-        "}\n";
+    "int f(int param) {\n"
+    "    int local = param;\n"
+    "    return local + global_value;\n"
+    "}\n";
     const auto local = DefinitionOf(source, "local + global_value");
     ASSERT_EQ(local.size(), 1u);
     EXPECT_EQ(local[0].offset, Find(source, "local = param"));
@@ -84,11 +84,11 @@ TEST(NavigationSpec, InnerScopeShadowsOuterDeclaration)
 {
     constexpr std::string_view source =
         "int v = 0;\n"
-        "void f() {\n"
-        "    int v = 1;\n"
-        "    { int v = 2; use(v); }\n"
-        "    use(v);\n"
-        "}\n";
+    "void f() {\n"
+    "    int v = 1;\n"
+    "    { int v = 2; use(v); }\n"
+    "    use(v);\n"
+    "}\n";
     const auto inner = DefinitionOf(source, "v); }");
     ASSERT_EQ(inner.size(), 1u);
     EXPECT_EQ(inner[0].offset, Find(source, "v = 2"));
@@ -101,7 +101,7 @@ TEST(NavigationSpec, QualifiedNamesResolveThroughNamespaces)
 {
     constexpr std::string_view source =
         "namespace a { namespace b { int value; void run(); } }\n"
-        "void g() { a::b::value = 1; a::b::run(); }\n";
+    "void g() { a::b::value = 1; a::b::run(); }\n";
     const auto value = DefinitionOf(source, "value = 1");
     ASSERT_EQ(value.size(), 1u);
     EXPECT_EQ(value[0].offset, Find(source, "value;"));
@@ -118,8 +118,8 @@ TEST(NavigationSpec, UsingNamespaceMakesNamesVisible)
 {
     constexpr std::string_view source =
         "namespace lib { int answer; void greet(); }\n"
-        "using namespace lib;\n"
-        "int f() { greet(); return answer; }\n";
+    "using namespace lib;\n"
+    "int f() { greet(); return answer; }\n";
     const auto answer = DefinitionOf(source, "answer; }");
     ASSERT_EQ(answer.size(), 1u);
     EXPECT_EQ(answer[0].offset, Find(source, "answer;"));
@@ -136,8 +136,8 @@ TEST(NavigationSpec, UsingDirectiveIsScopedToItsBlock)
 {
     constexpr std::string_view source =
         "namespace lib { int answer; }\n"
-        "int f() { using namespace lib; return answer; }\n"
-        "int g() { return answer; }\n";
+    "int f() { using namespace lib; return answer; }\n"
+    "int g() { return answer; }\n";
     EXPECT_EQ(DefinitionOf(source, "answer; }", 1).size(), 1u);
     EXPECT_TRUE(DefinitionOf(source, "answer; }", 2).empty());
 }
@@ -146,9 +146,9 @@ TEST(NavigationSpec, TransitiveDirectivesAreFollowed)
 {
     constexpr std::string_view source =
         "namespace inner { int deep; }\n"
-        "namespace outer { using namespace inner; }\n"
-        "using namespace outer;\n"
-        "int f() { return deep; }\n";
+    "namespace outer { using namespace inner; }\n"
+    "using namespace outer;\n"
+    "int f() { return deep; }\n";
     const auto deep = DefinitionOf(source, "deep; }");
     ASSERT_EQ(deep.size(), 1u);
     EXPECT_EQ(deep[0].offset, Find(source, "deep;"));
@@ -158,10 +158,10 @@ TEST(NavigationSpec, ReportsAmbiguousNameFromTwoDirectives)
 {
     constexpr std::string_view source =
         "namespace a { int x; }\n"
-        "namespace b { int x; }\n"
-        "using namespace a;\n"
-        "using namespace b;\n"
-        "int f() { return x; }\n";
+    "namespace b { int x; }\n"
+    "using namespace a;\n"
+    "using namespace b;\n"
+    "int f() { return x; }\n";
     const auto ambiguities = AmbiguitiesIn(source);
     ASSERT_EQ(ambiguities.size(), 1u);
     EXPECT_EQ(ambiguities[0].name, "x");
@@ -175,11 +175,11 @@ TEST(NavigationSpec, QualifiedOrLocalUseIsNotAmbiguous)
 {
     constexpr std::string_view source =
         "namespace a { int x; }\n"
-        "namespace b { int x; }\n"
-        "using namespace a;\n"
-        "using namespace b;\n"
-        "int f() { return a::x + b::x; }\n"
-        "int g() { int x = 1; return x; }\n";
+    "namespace b { int x; }\n"
+    "using namespace a;\n"
+    "using namespace b;\n"
+    "int f() { return a::x + b::x; }\n"
+    "int g() { int x = 1; return x; }\n";
     EXPECT_TRUE(AmbiguitiesIn(source).empty());
 }
 
@@ -187,10 +187,10 @@ TEST(NavigationSpec, OverloadsFromDifferentNamespacesAreNotAmbiguous)
 {
     constexpr std::string_view source =
         "namespace a { void show(int); }\n"
-        "namespace b { void show(double); }\n"
-        "using namespace a;\n"
-        "using namespace b;\n"
-        "void f() { show(1); }\n";
+    "namespace b { void show(double); }\n"
+    "using namespace a;\n"
+    "using namespace b;\n"
+    "void f() { show(1); }\n";
     EXPECT_TRUE(AmbiguitiesIn(source).empty());
 }
 
@@ -199,9 +199,9 @@ TEST(NavigationSpec, DirectiveVersusGlobalDeclaration)
     // A directive at global scope competes with a global declaration.
     constexpr std::string_view source =
         "namespace a { int x; }\n"
-        "int x;\n"
-        "using namespace a;\n"
-        "int f() { return x; }\n";
+    "int x;\n"
+    "using namespace a;\n"
+    "int f() { return x; }\n";
     const auto ambiguities = AmbiguitiesIn(source);
     ASSERT_EQ(ambiguities.size(), 1u);
     EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string>{"a::x", "x"}));
@@ -214,11 +214,11 @@ TEST(NavigationSpec, DirectiveInsideNamespaceNominatesAtCommonAncestor)
     // global `x` competes with `lib::x`.
     constexpr std::string_view source =
         "int x;\n"
-        "namespace lib { int x; }\n"
-        "namespace n {\n"
-        "    using namespace lib;\n"
-        "    int f() { return x; }\n"
-        "}\n";
+    "namespace lib { int x; }\n"
+    "namespace n {\n"
+    "    using namespace lib;\n"
+    "    int f() { return x; }\n"
+    "}\n";
     EXPECT_EQ(AmbiguitiesIn(source).size(), 1u);
 }
 
@@ -226,7 +226,7 @@ TEST(NavigationSpec, MemberAccessFindsRecordMembers)
 {
     constexpr std::string_view source =
         "struct S { int field; void method(); };\n"
-        "void f(S s) { s.field = 1; s.method(); }\n";
+    "void f(S s) { s.field = 1; s.method(); }\n";
     const auto field = DefinitionOf(source, "field = 1");
     ASSERT_EQ(field.size(), 1u);
     EXPECT_EQ(field[0].offset, Find(source, "field;"));
@@ -239,8 +239,8 @@ TEST(NavigationSpec, DefinitionPrefersFunctionBodyOverDeclaration)
 {
     constexpr std::string_view source =
         "namespace a { void run(int); }\n"
-        "void a::run(int value) {}\n"
-        "void g() { a::run(1); }\n";
+    "void a::run(int value) {}\n"
+    "void g() { a::run(1); }\n";
     const auto run = DefinitionOf(source, "run(1)");
     ASSERT_EQ(run.size(), 1u);
     EXPECT_TRUE(run[0].is_definition);
@@ -251,7 +251,7 @@ TEST(NavigationSpec, OutOfLineMemberBodiesSeeClassMembers)
 {
     constexpr std::string_view source =
         "namespace a { struct S { int count; void bump(); }; }\n"
-        "void a::S::bump() { count = count + 1; }\n";
+    "void a::S::bump() { count = count + 1; }\n";
     const auto count = DefinitionOf(source, "count + 1");
     ASSERT_EQ(count.size(), 1u);
     EXPECT_EQ(count[0].offset, Find(source, "count;"));
@@ -261,9 +261,9 @@ TEST(NavigationSpec, ImplementationFindsOverridersAndOutOfLineBodies)
 {
     constexpr std::string_view source =
         "struct Base { virtual void run() = 0; void plain(); };\n"
-        "struct Left : Base { void run() override {} };\n"
-        "struct Right : public Base { void run() override {} };\n"
-        "void Base::plain() {}\n";
+    "struct Left : Base { void run() override {} };\n"
+    "struct Right : public Base { void run() override {} };\n"
+    "void Base::plain() {}\n";
     const auto overriders = ImplementationOf(source, "run() = 0");
     ASSERT_EQ(overriders.size(), 2u);
     EXPECT_EQ(overriders[0].offset, Find(source, "run() override"));
@@ -277,9 +277,9 @@ TEST(NavigationSpec, ImplementationOfInterfaceTypeListsDerivedTypes)
 {
     constexpr std::string_view source =
         "struct Shape { virtual void draw() = 0; };\n"
-        "struct Circle : Shape { void draw() override {} };\n"
-        "struct Square : Shape { void draw() override {} };\n"
-        "void render(Shape &shape) {}\n";
+    "struct Circle : Shape { void draw() override {} };\n"
+    "struct Square : Shape { void draw() override {} };\n"
+    "void render(Shape &shape) {}\n";
     const auto derived = ImplementationOf(source, "Shape &shape");
     ASSERT_EQ(derived.size(), 2u);
     EXPECT_EQ(derived[0].name, "Circle");
@@ -290,7 +290,7 @@ TEST(NavigationSpec, InheritedMembersResolveThroughBaseClasses)
 {
     constexpr std::string_view source =
         "struct Base { int shared; };\n"
-        "struct Derived : Base { int use() { return shared; } };\n";
+    "struct Derived : Base { int use() { return shared; } };\n";
     const auto shared = DefinitionOf(source, "shared; }");
     ASSERT_EQ(shared.size(), 1u);
     EXPECT_EQ(shared[0].offset, Find(source, "shared;"));
@@ -313,9 +313,9 @@ TEST(NavigationSpec, ExternalIndexSuppliesHeaderDeclarationsWithFiles)
 {
     constexpr std::string_view header = "namespace lib { int answer; void greet(); }\n";
     heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
-    for (auto &scope: index)
+    for (auto& scope : index)
     {
-        for (auto &member: scope.members)
+        for (auto& member : scope.members)
         {
             member.file = 7;
         }
@@ -345,8 +345,8 @@ TEST(NavigationSpec, DefinitionSiteJumpsBackToItsDeclaration)
 {
     constexpr std::string_view source =
         "namespace lib { struct Widget { void run(int); void run(); }; }\n"
-        "void lib::Widget::run(int times) {}\n"
-        "void lib::Widget::run() {}\n";
+    "void lib::Widget::run(int times) {}\n"
+    "void lib::Widget::run() {}\n";
     const auto one = DefinitionOf(source, "run(int times)");
     ASSERT_EQ(one.size(), 1u);
     EXPECT_FALSE(one[0].is_definition);
@@ -364,7 +364,7 @@ TEST(NavigationSpec, ImplementationOfDeclarationExcludesTheDeclaration)
 {
     constexpr std::string_view source =
         "struct Widget { void run(); };\n"
-        "void Widget::run() {}\n";
+    "void Widget::run() {}\n";
     const auto targets = ImplementationOf(source, "run();");
     ASSERT_EQ(targets.size(), 1u);
     EXPECT_EQ(targets[0].offset, Find(source, "run() {}"));
@@ -374,11 +374,11 @@ TEST(NavigationSpec, EnumDefinitionPointsAtTheNameInSourceAndHeaders)
 {
     constexpr std::string_view source =
         "namespace n {\n"
-        "    enum class Mode { Fast, Slow };\n"
-        "    enum Plain { One };\n"
-        "}\n"
-        "n::Mode a = n::Mode::Fast;\n"
-        "n::Plain b = n::One;\n";
+    "    enum class Mode { Fast, Slow };\n"
+    "    enum Plain { One };\n"
+    "}\n"
+    "n::Mode a = n::Mode::Fast;\n"
+    "n::Plain b = n::One;\n";
     const auto mode = DefinitionOf(source, "Mode a");
     ASSERT_EQ(mode.size(), 1u);
     EXPECT_EQ(mode[0].offset, Find(source, "Mode {"));
@@ -397,7 +397,10 @@ TEST(NavigationSpec, EnumDefinitionPointsAtTheNameInSourceAndHeaders)
     heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
     constexpr std::string_view user = "using namespace n;\nMode value;\nauto x = Mode::Fast;\n";
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(user);
-    for (const std::size_t at: {Find(user, "Mode value"), Find(user, "Mode::Fast")})
+    for (const std::size_t at :
+        {
+            Find(user, "Mode value"), Find(user, "Mode::Fast")
+    })
     {
         const auto external = heimdall::Navigation::Definition(tree, at, &index);
         ASSERT_EQ(external.size(), 1u);
@@ -409,7 +412,7 @@ TEST(NavigationSpec, EnumDefinitionPointsAtTheNameInSourceAndHeaders)
 TEST(NavigationSpec, ResolvesMembersDeclaredRightAfterAnAccessSpecifier)
 {
     constexpr std::string_view source =
-    "class LineIndex\n"
+        "class LineIndex\n"
     "{\n"
     "public:\n"
     "    int ToPosition(int offset) const;\n"
@@ -448,7 +451,7 @@ TEST(NavigationSpec, ResolvesMembersDeclaredRightAfterAnAccessSpecifier)
 TEST(NavigationSpec, ResolvesPrivateMemberDeclaredInAHeaderIndex)
 {
     constexpr std::string_view header =
-    "class LineIndex\n"
+        "class LineIndex\n"
     "{\n"
     "public:\n"
     "    void Build(int text);\n"
@@ -457,7 +460,7 @@ TEST(NavigationSpec, ResolvesPrivateMemberDeclaredInAHeaderIndex)
     "};\n";
     heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
     constexpr std::string_view source =
-    "int LineIndex::Utf16Width(int text, int stop) noexcept { return text + stop; }\n";
+        "int LineIndex::Utf16Width(int text, int stop) noexcept { return text + stop; }\n";
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
     const auto targets = heimdall::Navigation::Definition(tree, Find(source, "Utf16Width"), &index);
     ASSERT_EQ(targets.size(), 1u);

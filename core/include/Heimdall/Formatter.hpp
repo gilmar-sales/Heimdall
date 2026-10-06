@@ -110,21 +110,27 @@ namespace heimdall
         explicit Formatter(FormatOptions options = {}) : m_options(options) {}
 
         std::string Format(std::string_view source) const;
-        std::string Format(const ParseTree &tree) const;
+
+        std::string Format(const ParseTree& tree) const;
+
         // Minimal line-diff between `source` and `Format(source)`: empty when the
         // file is already formatted. Edits are disjoint and ascending.
         std::vector<FormatEdit> FormatEdits(std::string_view source) const;
+
         // Format the whole buffer but only apply edits overlapping
         // [start_line, end_line); lines outside are byte-identical.
         std::string FormatRange(std::string_view source, std::size_t start_line,
             std::size_t end_line) const;
 
     private:
-        std::string DeclarationLayout(const ParseTree &tree) const;
-        std::string FormatImpl(std::string_view source, const std::vector<Token> & tokens,
-            const std::vector<PreprocessorDirective> & directives) const;
-        std::string FormatShaped(std::string_view source, const std::vector<Token> & tokens,
-            const std::vector<PreprocessorDirective> & directives) const;
+        std::string DeclarationLayout(const ParseTree& tree) const;
+
+        std::string FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+            const std::vector<PreprocessorDirective>& directives) const;
+
+        std::string FormatShaped(std::string_view source, const std::vector<Token>& tokens,
+            const std::vector<PreprocessorDirective>& directives) const;
+
         FormatOptions m_options;
     };
 

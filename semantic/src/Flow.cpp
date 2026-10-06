@@ -12,21 +12,24 @@
 namespace heimdall
 {
 
-    FunctionTable::FunctionTable(std::pmr::memory_resource *resource)
-    : node(resource), body(resource), symbol(resource), entry(resource), exit(resource), first_block(resource),
+    FunctionTable::FunctionTable(std::pmr::memory_resource* resource)
+    : node(resource), body(resource), symbol(resource), entry(resource), exit(resource),
+        first_block(resource),
         block_count(resource), complete(resource) {}
 
-    BlockTable::BlockTable(std::pmr::memory_resource *resource)
-    : function(resource), first_event(resource), event_count(resource), first_succ(resource), succ_count(resource),
+    BlockTable::BlockTable(std::pmr::memory_resource* resource)
+    : function(resource), first_event(resource), event_count(resource), first_succ(resource),
+        succ_count(resource),
         returns(resource) {}
 
-    EventTable::EventTable(std::pmr::memory_resource *resource)
+    EventTable::EventTable(std::pmr::memory_resource* resource)
     : kind(resource), symbol(resource), token(resource), block(resource) {}
 
-    FlowModel::FlowModel(const TypeModel &types, std::size_t arena_hint)
+    FlowModel::FlowModel(const TypeModel& types, std::size_t arena_hint)
     : m_arena(std::make_unique<Arena>(arena_hint)), m_types(&types), m_functions(m_arena->Resource()),
         m_blocks(m_arena->Resource()), m_events(m_arena->Resource()), m_successors(m_arena->Resource()),
-        m_owner(m_arena->Resource()), m_symbol_begin(m_arena->Resource()), m_symbol_events(m_arena->Resource()),
+        m_owner(m_arena->Resource()), m_symbol_begin(m_arena->Resource()),
+        m_symbol_events(m_arena->Resource()),
         m_node_function(m_arena->Resource()) {}
 
     FunctionId FlowModel::FunctionOfNode(std::uint32_t node) const noexcept
@@ -44,13 +47,13 @@ namespace heimdall
 
         const auto first = m_functions.first_block[function];
         seen.assign(m_functions.block_count[function], 0);
-        std::vector<BlockId> pending {m_functions.entry[function]};
+        std::vector<BlockId> pending{m_functions.entry[function]};
         seen[m_functions.entry[function] - first] = 1;
         while (!pending.empty())
         {
             const auto current = pending.back();
             pending.pop_back();
-            for (const auto next: Successors(current))
+            for (const auto next : Successors(current))
             {
                 if (next >= first && next - first < seen.size() && seen[next - first] == 0)
                 {
@@ -99,7 +102,7 @@ namespace heimdall
         }
 
         std::size_t inits = 0;
-        for (const auto index: EventsOf(symbol))
+        for (const auto index : EventsOf(symbol))
         {
             switch (m_events.kind[index])
             {
@@ -121,11 +124,9 @@ namespace heimdall
     class FlowBuilder
     {
     public:
-        explicit FlowBuilder(FlowModel &out)
+        explicit FlowBuilder(FlowModel& out)
         : m(out), types(out.Types()), table(out.Types().Types()), model(out.Model()),
-          nodes(out.Model().Tree().NodesSoA()), symbols(out.Model().Symbols()), view(out.Model())
-        {
-        }
+            nodes(out.Model().Tree().NodesSoA()), symbols(out.Model().Symbols()), view(out.Model()) {}
 
         void Run()
         {
@@ -164,7 +165,7 @@ namespace heimdall
         std::uint32_t BodyOf(std::uint32_t node) const
         {
             std::uint32_t body = kNone;
-            for (const auto child: model.ChildrenOf(node))
+            for (const auto child : model.ChildrenOf(node))
             {
                 if (nodes.Kind(child) == GrammarKind::CompoundStatement &&
                     (body == kNone || nodes.FirstToken(child) > nodes.FirstToken(body)))
@@ -187,7 +188,7 @@ namespace heimdall
                 }
             }
 
-            auto &functions = m.m_functions;
+            auto& functions = m.m_functions;
             m.m_node_function.assign(nodes.size(), kUnset);
             for (std::uint32_t node = 0; node < nodes.size(); ++node)
             {
@@ -243,7 +244,7 @@ namespace heimdall
                 current = nodes.Parent(current);
             }
 
-            for (const auto visited: path)
+            for (const auto visited : path)
             {
                 m.m_node_function[visited] = result;
             }
@@ -253,7 +254,7 @@ namespace heimdall
 
         void AssignOwners()
         {
-            const auto &scopes = model.Scopes();
+            const auto& scopes = model.Scopes();
             for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
             {
                 const auto kind = symbols.kind[symbol];
@@ -314,13 +315,13 @@ namespace heimdall
                 [&](std::uint32_t a, std::uint32_t b)
                 {
                     return nodes.FirstToken(a) < nodes.FirstToken(b);
-                });
+            });
             return result;
         }
 
         std::uint32_t FindChild(std::uint32_t node, GrammarKind kind) const
         {
-            for (const auto child: model.ChildrenOf(node))
+            for (const auto child : model.ChildrenOf(node))
             {
                 if (nodes.Kind(child) == kind)
                 {
@@ -338,7 +339,7 @@ namespace heimdall
         }
 
         // `(` ... `)` of an if/for/while/switch header: positions of both.
-        bool Header(std::uint32_t node, std::size_t &open, std::size_t &close) const
+        bool Header(std::uint32_t node, std::size_t& open, std::size_t& close) const
         {
             const auto begin = view.Range(node).first;
             const auto end = view.Range(node).second;
@@ -378,13 +379,15 @@ namespace heimdall
         // ---- type shape of a variable -----------------------------------
         struct Shape
         {
-            bool scalar = false;  // arithmetic, enum or pointer: no members, no overloaded operators
+            bool scalar = false; // arithmetic, enum or pointer: no members, no overloaded operators
             bool pointer = false;
             bool array = false;
             bool external = false; // library type
             bool known = false;
             TypeId value = TypeTable::Unknown;
-        };
+        }
+
+        ;
 
         Shape ShapeOf(SymbolId symbol) const
         {
@@ -403,7 +406,7 @@ namespace heimdall
         {
             const auto shape = ShapeOf(symbol);
             bool nested = false; // reached through `x[i]` or `x.m`: the object is changed, not replaced
-            const auto finish = [&](EventKind kind)
+            const auto finish =[&](EventKind kind)
             {
                 return nested && kind == EventKind::Write ? EventKind::Modify : kind;
             };
@@ -418,7 +421,7 @@ namespace heimdall
                 }
 
                 const auto kids = Sorted(parent);
-                const auto [begin, end] = view.Range(parent);
+                const auto[begin, end] = view.Range(parent);
                 switch (nodes.Kind(parent))
                 {
                 case GrammarKind::ParenthesizedExpression:
@@ -432,7 +435,7 @@ namespace heimdall
                         return EventKind::Escape;
                     }
 
-                    const auto [type_begin, type_end] = view.Range(kids[0]);
+                    const auto[type_begin, type_end] = view.Range(kids[0]);
                     for (auto p = type_begin; p < type_end; ++p)
                     {
                         if (view.At(p) == Tok::Amp || view.At(p) == Tok::AmpAmp)
@@ -449,7 +452,7 @@ namespace heimdall
                     const Tok last = end > begin ? view.At(end - 1) : Tok::None;
                     if (first == Tok::PlusPlus || first == Tok::MinusMinus ||
                         (kids.size() == 1 && kids[0] == current && view.Range(current).first == begin &&
-                            (last == Tok::PlusPlus || last == Tok::MinusMinus)))
+                        (last == Tok::PlusPlus || last == Tok::MinusMinus)))
                     {
                         return EventKind::Modify;
                     }
@@ -569,7 +572,7 @@ namespace heimdall
                         if (!call_kids.empty() && call_kids[0] == parent)
                         {
                             return IsConstMethod(shape, view.Text(view.Range(kids[1]).first)) ? EventKind::Read
-                                                                                              : EventKind::Modify;
+                            : EventKind::Modify;
                         }
                     }
 
@@ -622,7 +625,7 @@ namespace heimdall
         }
 
         // Const members the engine trusts to leave the object alone.
-        bool IsConstMethod(const Shape &shape, std::string_view name) const
+        bool IsConstMethod(const Shape& shape, std::string_view name) const
         {
             if (shape.external)
             {
@@ -639,16 +642,17 @@ namespace heimdall
             const auto id = model.Names().Find(name);
             const auto klass = static_cast<SymbolId>(table.Arg(shape.value));
             const auto first = id == kNone || klass >= symbols.Size() ? kNone
-                                                                     : model.LookupMember(klass, id);
+            : model.LookupMember(klass, id);
             if (first == kNone || symbols.kind[first] != SymbolKind::Function)
             {
                 return false;
             }
 
             const auto scope = symbols.scope[first];
-            for (auto overload = model.LookupLocal(scope, id); overload != kNone; overload = symbols.next_same_name[overload])
+            for (auto overload = model.LookupLocal(scope,
+                id); overload != kNone; overload = symbols.next_same_name[overload])
             {
-                if (symbols.kind[overload] != SymbolKind::Function || (symbols.flags[overload] & SymbolFlag::Const) == 0)
+                if (symbols.kind[overload] != SymbolKind::Function ||(symbols.flags[overload] & SymbolFlag::Const) == 0)
                 {
                     return false;
                 }
@@ -657,7 +661,7 @@ namespace heimdall
             return true;
         }
 
-        EventKind ReturnContext(const Shape &shape) const
+        EventKind ReturnContext(const Shape& shape) const
         {
             // Returning a class object by name can be a move; `const` would turn it into a copy.
             if (!shape.scalar)
@@ -705,13 +709,14 @@ namespace heimdall
         // Library functions that take their arguments by value or const reference.
         static bool TakesByValue(std::string_view name)
         {
-            static constexpr std::string_view kNames[] = {"printf", "std::printf", "puts", "putchar", "sqrt", "std::sqrt",
+            static constexpr std::string_view kNames[] = {"printf", "std::printf", "puts", "putchar", "sqrt",
+                "std::sqrt",
                 "pow", "std::pow", "floor", "std::floor", "ceil", "std::ceil", "fabs", "std::fabs", "std::min",
                 "std::max", "std::to_string", "std::format", "std::print", "std::println"};
             return std::find(std::begin(kNames), std::end(kNames), name) != std::end(kNames);
         }
 
-        EventKind ArgumentContext(std::uint32_t callee, std::size_t index, const Shape &shape)
+        EventKind ArgumentContext(std::uint32_t callee, std::size_t index, const Shape& shape)
         {
             const auto range = view.Range(callee);
             if (nodes.Kind(callee) == GrammarKind::IdentifierExpression)
@@ -729,7 +734,7 @@ namespace heimdall
                 }
 
                 return symbols.kind[target] == SymbolKind::Function ? ParameterContext(target, index, shape)
-                                                                    : EventKind::Escape;
+                : EventKind::Escape;
             }
 
             // `static_cast<T>(x)` copies a value; `static_cast<T&>(x)` aliases it.
@@ -767,13 +772,14 @@ namespace heimdall
 
         // Every overload that could take the call: by value or `const T&` keeps the
         // argument untouched.
-        EventKind ParameterContext(SymbolId function, std::size_t index, const Shape &shape)
+        EventKind ParameterContext(SymbolId function, std::size_t index, const Shape& shape)
         {
             bool viable = false;
-            for (auto overload = model.LookupLocal(symbols.scope[function], symbols.name[function]); overload != kNone;
+            for (auto overload = model.LookupLocal(symbols.scope[function],
+                symbols.name[function]); overload != kNone;
                 overload = symbols.next_same_name[overload])
             {
-                if (symbols.kind[overload] != SymbolKind::Function || (symbols.flags[overload] & SymbolFlag::Template) != 0)
+                if (symbols.kind[overload] != SymbolKind::Function ||(symbols.flags[overload] & SymbolFlag::Template) != 0)
                 {
                     return EventKind::Escape;
                 }
@@ -839,7 +845,7 @@ namespace heimdall
                             }
 
                             by_const_ref_or_value = is_rref ? false
-                                : is_ref ? is_const : (!shape.array || (is_pointer && is_const));
+                            : is_ref ? is_const : (!shape.array ||(is_pointer&& is_const));
                         }
 
                         if (p > begin)
@@ -889,9 +895,10 @@ namespace heimdall
 
         // Identifier nodes below `node`, not descending into function-like nodes,
         // which are reported separately through `nested`.
-        void CollectRefs(std::uint32_t node, std::vector<std::uint32_t> &refs, std::vector<std::uint32_t> &nested)
+        void CollectRefs(std::uint32_t node, std::vector<std::uint32_t>& refs,
+            std::vector<std::uint32_t>& nested)
         {
-            std::vector<std::uint32_t> pending {node};
+            std::vector<std::uint32_t> pending{node};
             while (!pending.empty())
             {
                 const auto current = pending.back();
@@ -914,7 +921,7 @@ namespace heimdall
                     break;
                 }
 
-                for (const auto child: model.ChildrenOf(current))
+                for (const auto child : model.ChildrenOf(current))
                 {
                     pending.push_back(child);
                 }
@@ -927,7 +934,7 @@ namespace heimdall
             std::vector<std::uint32_t> nested;
             CollectRefs(node, refs, nested);
             std::vector<RawEvent> local;
-            for (const auto ref: refs)
+            for (const auto ref : refs)
             {
                 const auto token = nodes.FirstToken(ref);
                 const auto symbol = model.ResolveToken(token);
@@ -937,16 +944,17 @@ namespace heimdall
                     const auto position = view.PositionOf(token);
                     const bool in_decltype = position >= 2 && view.At(position - 1) == Tok::LParen &&
                         view.At(position - 2) == Tok::KwDecltype;
-                    local.push_back({in_decltype ? EventKind::Escape : Classify(ref, symbol), symbol, token, m_current});
+                    local.push_back({in_decltype ? EventKind::Escape : Classify(ref, symbol), symbol, token,
+                            m_current});
                 }
             }
 
             // Whatever a nested function or local class names from this body escapes.
-            for (const auto inner: nested)
+            for (const auto inner : nested)
             {
                 std::vector<std::uint32_t> inner_refs;
                 CollectAll(inner, inner_refs);
-                for (const auto ref: inner_refs)
+                for (const auto ref : inner_refs)
                 {
                     const auto token = nodes.FirstToken(ref);
                     const auto symbol = model.ResolveToken(token);
@@ -958,17 +966,17 @@ namespace heimdall
             }
 
             std::sort(local.begin(), local.end(),
-                [](const RawEvent &a, const RawEvent &b)
+                [](const RawEvent& a, const RawEvent& b)
                 {
                     return a.token < b.token;
-                });
+            });
             m_events.insert(m_events.end(), local.begin(), local.end());
         }
 
         // Every identifier node below `node`, nested functions included.
-        void CollectAll(std::uint32_t node, std::vector<std::uint32_t> &refs)
+        void CollectAll(std::uint32_t node, std::vector<std::uint32_t>& refs)
         {
-            std::vector<std::uint32_t> pending {node};
+            std::vector<std::uint32_t> pending{node};
             while (!pending.empty())
             {
                 const auto current = pending.back();
@@ -979,7 +987,7 @@ namespace heimdall
                     continue;
                 }
 
-                for (const auto child: model.ChildrenOf(current))
+                for (const auto child : model.ChildrenOf(current))
                 {
                     pending.push_back(child);
                 }
@@ -989,13 +997,13 @@ namespace heimdall
         // ---- statements -----------------------------------------------------
         void Declaration(std::uint32_t node)
         {
-            for (const auto child: Sorted(node))
+            for (const auto child : Sorted(node))
             {
                 if (nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator)
                 {
                     std::uint32_t name = kNone;
                     const auto declarator = nodes.Kind(child) == GrammarKind::Declarator
-                        ? child : FindChild(child, GrammarKind::Declarator);
+                    ? child : FindChild(child, GrammarKind::Declarator);
                     if (declarator != kNone)
                     {
                         const auto declared = FindChild(declarator, GrammarKind::DeclaredName);
@@ -1044,7 +1052,7 @@ namespace heimdall
             switch (nodes.Kind(node))
             {
             case GrammarKind::CompoundStatement:
-                for (const auto child: Sorted(node))
+                for (const auto child : Sorted(node))
                 {
                     current = Statement(child, current, depth + 1);
                 }
@@ -1132,19 +1140,22 @@ namespace heimdall
 
         // Children of a header, split at the closing parenthesis: the part inside
         // is evaluated, the rest are the bodies.
-        void SplitHeader(std::uint32_t node, std::size_t close, std::vector<std::uint32_t> &header,
-            std::vector<std::uint32_t> &bodies) const
+        void SplitHeader(
+            std::uint32_t node,
+            std::size_t close,
+            std::vector<std::uint32_t>& header,
+            std::vector<std::uint32_t>& bodies) const
         {
-            for (const auto child: Sorted(node))
+            for (const auto child : Sorted(node))
             {
                 (view.Range(child).first > close ? bodies : header).push_back(child);
             }
         }
 
-        void Evaluate(const std::vector<std::uint32_t> &parts, BlockId current)
+        void Evaluate(const std::vector<std::uint32_t>& parts, BlockId current)
         {
             m_current = current;
-            for (const auto part: parts)
+            for (const auto part : parts)
             {
                 if (nodes.Kind(part) == GrammarKind::DeclarationStatement || nodes.Kind(part) == GrammarKind::Declaration)
                 {
@@ -1175,7 +1186,7 @@ namespace heimdall
 
             BlockId then_end = current;
             BlockId else_end = current;
-            for (const auto body: bodies)
+            for (const auto body : bodies)
             {
                 const bool is_else = view.At(view.Range(body).first - 1) == Tok::KwElse;
                 const auto start = NewBlock();
@@ -1236,7 +1247,7 @@ namespace heimdall
             std::vector<std::uint32_t> condition;
             std::vector<std::uint32_t> step;
             const bool is_for = view.At(view.Range(node).first) == Tok::KwFor;
-            for (const auto part: header)
+            for (const auto part : header)
             {
                 const auto first = view.Range(part).first;
                 if (!is_for || found < 2)
@@ -1274,7 +1285,7 @@ namespace heimdall
             m_breaks.push_back(after);
             m_continues.push_back(step_block);
             BlockId end = body_start;
-            for (const auto body: bodies)
+            for (const auto body : bodies)
             {
                 end = Statement(body, end, depth + 1);
             }
@@ -1298,7 +1309,7 @@ namespace heimdall
             BlockId end = body_start;
             std::vector<std::uint32_t> tail;
             bool have_body = false;
-            for (const auto child: Sorted(node))
+            for (const auto child : Sorted(node))
             {
                 if (!have_body && IsStatement(nodes.Kind(child)))
                 {
@@ -1354,7 +1365,7 @@ namespace heimdall
                     continue;
                 }
 
-                for (const auto child: Sorted(body))
+                for (const auto child : Sorted(body))
                 {
                     if (nodes.Kind(child) == GrammarKind::CaseLabel)
                     {
@@ -1386,7 +1397,7 @@ namespace heimdall
         BlockId Try(std::uint32_t node, BlockId current, std::size_t depth)
         {
             const auto join = NewBlock();
-            for (const auto child: Sorted(node))
+            for (const auto child : Sorted(node))
             {
                 if (nodes.Kind(child) != GrammarKind::CompoundStatement)
                 {
@@ -1408,7 +1419,7 @@ namespace heimdall
         void BuildFunction(FunctionId function)
         {
             m_function = function;
-            auto &functions = m.m_functions;
+            auto& functions = m.m_functions;
             const auto first = static_cast<BlockId>(m_block_function.size());
             const auto entry = NewBlock();
             m_exit = NewBlock();
@@ -1432,7 +1443,7 @@ namespace heimdall
 
         bool ContainsUnmodeled(std::uint32_t body) const
         {
-            const auto [begin, end] = view.Range(body);
+            const auto[begin, end] = view.Range(body);
             for (auto p = begin; p < end; ++p)
             {
                 switch (view.At(p))
@@ -1456,7 +1467,7 @@ namespace heimdall
         // arguments...) are accounted for as escapes of every local of that name.
         void ScanStray(FunctionId function)
         {
-            const auto [begin, end] = view.Range(m.m_functions.body[function]);
+            const auto[begin, end] = view.Range(m.m_functions.body[function]);
             m_current = m.m_functions.entry[function];
             for (auto p = begin; p < end; ++p)
             {
@@ -1472,7 +1483,7 @@ namespace heimdall
                 }
 
                 if (p > begin && (view.At(p - 1) == Tok::Dot || view.At(p - 1) == Tok::Arrow ||
-                        view.At(p - 1) == Tok::ColonColon))
+                    view.At(p - 1) == Tok::ColonColon))
                 {
                     continue;
                 }
@@ -1484,7 +1495,7 @@ namespace heimdall
                     continue;
                 }
 
-                for (const auto symbol: found->second)
+                for (const auto symbol : found->second)
                 {
                     if (m.m_owner[symbol] == function && symbols.decl_token[symbol] < token)
                     {
@@ -1498,12 +1509,12 @@ namespace heimdall
         void Finish()
         {
             const auto block_count = m_block_function.size();
-            auto &blocks = m.m_blocks;
-            auto &events = m.m_events;
+            auto& blocks = m.m_blocks;
+            auto& events = m.m_events;
 
             // Events grouped by block, in the order they were emitted.
             std::vector<std::uint32_t> counts(block_count + 1, 0);
-            for (const auto &event: m_events)
+            for (const auto& event : m_events)
             {
                 ++counts[event.block + 1];
             }
@@ -1518,12 +1529,12 @@ namespace heimdall
                 auto cursor = counts;
                 for (std::uint32_t i = 0; i < m_events.size(); ++i)
                 {
-                    order[cursor[m_events[i].block]++] = i;
+                    order[cursor[m_events[i].block] ++] = i;
                 }
             }
 
             std::vector<std::uint32_t> successor_counts(block_count + 1, 0);
-            for (const auto &edge: m_edges)
+            for (const auto& edge : m_edges)
             {
                 ++successor_counts[edge.first + 1];
             }
@@ -1536,9 +1547,9 @@ namespace heimdall
             m.m_successors.resize(m_edges.size());
             {
                 auto cursor = successor_counts;
-                for (const auto &edge: m_edges)
+                for (const auto& edge : m_edges)
                 {
-                    m.m_successors[cursor[edge.first]++] = edge.second;
+                    m.m_successors[cursor[edge.first] ++] = edge.second;
                 }
             }
 
@@ -1552,9 +1563,9 @@ namespace heimdall
                 blocks.returns.push_back(m_block_returns[b]);
             }
 
-            for (const auto index: order)
+            for (const auto index : order)
             {
-                const auto &event = m_events[index];
+                const auto& event = m_events[index];
                 events.kind.push_back(event.kind);
                 events.symbol.push_back(event.symbol);
                 events.token.push_back(event.token);
@@ -1563,9 +1574,9 @@ namespace heimdall
 
             // Per symbol, in token order.
             const auto symbol_count = symbols.Size();
-            auto &begin = m.m_symbol_begin;
+            auto& begin = m.m_symbol_begin;
             begin.assign(symbol_count + 1, 0);
-            for (const auto symbol: events.symbol)
+            for (const auto symbol : events.symbol)
             {
                 ++begin[symbol + 1];
             }
@@ -1580,7 +1591,7 @@ namespace heimdall
                 std::vector<std::uint32_t> cursor(begin.begin(), begin.end());
                 for (std::uint32_t i = 0; i < events.Size(); ++i)
                 {
-                    m.m_symbol_events[cursor[events.symbol[i]]++] = i;
+                    m.m_symbol_events[cursor[events.symbol[i]] ++] = i;
                 }
             }
 
@@ -1590,11 +1601,11 @@ namespace heimdall
                     [&](std::uint32_t a, std::uint32_t b)
                     {
                         return events.token[a] < events.token[b];
-                    });
+                });
             }
 
             // Nodes outside any function have no id.
-            for (auto &entry: m.m_node_function)
+            for (auto& entry : m.m_node_function)
             {
                 if (entry == kUnset)
                 {
@@ -1603,12 +1614,12 @@ namespace heimdall
             }
         }
 
-        FlowModel &m;
-        const TypeModel &types;
-        const TypeTable &table;
-        const SemanticModel &model;
-        const GrammarNodeSoA &nodes;
-        const SymbolTable &symbols;
+        FlowModel& m;
+        const TypeModel& types;
+        const TypeTable& table;
+        const SemanticModel& model;
+        const GrammarNodeSoA& nodes;
+        const SymbolTable& symbols;
         detail::TokenView view;
 
         FunctionId m_function = kNone;
@@ -1624,7 +1635,7 @@ namespace heimdall
         std::unordered_map<NameId, std::vector<SymbolId>> m_locals_by_name;
     };
 
-    FlowModel Flow::Build(const TypeModel &types)
+    FlowModel Flow::Build(const TypeModel& types)
     {
         FlowModel model(types);
         FlowBuilder(model).Run();

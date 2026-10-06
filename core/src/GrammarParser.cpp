@@ -50,7 +50,7 @@ namespace heimdall
             int nest = 0;
             bool opens_namespace = false;
             bool saw_brace = false;
-            for (const auto & token: tokens)
+            for (const auto& token : tokens)
             {
                 if (token.kind == TokenKind::Whitespace)
                 {
@@ -112,14 +112,19 @@ namespace heimdall
     class GrammarParser
     {
     public:
-        GrammarParser(ParseTree &tree, const PreprocessorResult &preprocessing, std::stop_token stop,
-            const Preprocessor::MacroMap * macros, const ParseReuse * reuse, const TypeNameOracle * type_names)
+        GrammarParser(
+            ParseTree& tree,
+            const PreprocessorResult& preprocessing,
+            std::stop_token stop,
+            const Preprocessor::MacroMap* macros,
+            const ParseReuse* reuse,
+            const TypeNameOracle* type_names)
         : m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names)
         {
             m_names_hash = type_names != nullptr ? type_names->Fingerprint() : 0;
             // identifier text -> "is a decoration macro", memoized per parse
             std::unordered_map<std::string_view, bool> decoration;
-            for (const auto & diagnostic: preprocessing.diagnostics)
+            for (const auto& diagnostic : preprocessing.diagnostics)
             {
                 tree.m_diagnostics.push_back({diagnostic.offset, diagnostic.message});
             }
@@ -128,7 +133,7 @@ namespace heimdall
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
             {
-                const auto &token = tree.Tokens()[i];
+                const auto& token = tree.Tokens()[i];
                 while (active_cursor < preprocessing.active_ranges.size() &&
                     preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <= token.offset)
                 {
@@ -148,7 +153,7 @@ namespace heimdall
                 if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
                 {
-                    if (macros != nullptr && (!macros->empty() || !preprocessing.local_macros.empty()) && !directive &&
+                    if (macros != nullptr && (!macros->empty() ||!preprocessing.local_macros.empty()) && !directive &&
                         token.kind == TokenKind::Identifier)
                     {
                         const std::string_view word = tree.m_source.substr(token.offset, token.length);
@@ -158,8 +163,8 @@ namespace heimdall
                             const auto local = preprocessing.local_macros.find(std::string(word));
                             const auto found = macros->find(word);
                             const bool is_decoration = local != preprocessing.local_macros.end()
-                                ? IsDecorationMacro(local->second)
-                                : found != macros->end() && IsDecorationMacro(found->second);
+                            ? IsDecorationMacro(local->second)
+                            : found != macros->end() && IsDecorationMacro(found->second);
                             cached = decoration.emplace(word, is_decoration).first;
                         }
 
@@ -180,7 +185,7 @@ namespace heimdall
             }
 
             m_sig_tok.reserve(m_sig.size());
-            for (const std::size_t token_index: m_sig)
+            for (const std::size_t token_index : m_sig)
             {
                 m_sig_tok.push_back(tree.Tokens()[token_index].tok);
             }
@@ -252,15 +257,15 @@ namespace heimdall
         alignas(alignof(std::max_align_t)) std::array<std::byte, kScratchBytes> m_scratch_buffer;
         std::pmr::monotonic_buffer_resource m_scratch{m_scratch_buffer.data(),
             m_scratch_buffer.size()};
-        ParseTree &m_tree;
+        ParseTree& m_tree;
         std::stop_token m_stop;
         std::pmr::vector<std::uint32_t> m_sig{&m_scratch};
 
         std::pmr::vector<Tok> m_sig_tok{&m_scratch};
         std::pmr::vector<std::uint32_t> m_match{&m_scratch};
         std::uint32_t m_last_expression_node = Invalid;
-        const ParseReuse *m_reuse = nullptr;
-        const TypeNameOracle *m_oracle = nullptr;
+        const ParseReuse* m_reuse = nullptr;
+        const TypeNameOracle* m_oracle = nullptr;
         // File-level names (flags above) and their order-independent hash, seeded
         // with the oracle's fingerprint; block scopes live on a stack.
         struct BlockName
@@ -268,6 +273,7 @@ namespace heimdall
             std::string_view name;
             std::uint8_t flags;
         };
+
         // Open-addressing table (power-of-two size, linear probing) over views into the
         // source: file-level names are looked up and added thousands of times in a header.
         struct NameSlot
@@ -276,6 +282,7 @@ namespace heimdall
             std::uint64_t hash = 0;
             std::uint8_t flags = 0;
         };
+
         std::vector<NameSlot> m_slots;
         std::size_t m_slot_count = 0;
         std::uint64_t m_names_hash = 0;
@@ -292,7 +299,7 @@ namespace heimdall
         std::string_view Text(std::size_t sig) const
         {
             if (sig >= m_sig.size()) return {};
-            const auto &token = m_tree.Tokens()[m_sig[sig]];
+            const auto& token = m_tree.Tokens()[m_sig[sig]];
             return m_tree.m_source.substr(token.offset, token.length);
         }
 
@@ -303,7 +310,11 @@ namespace heimdall
                 (open == Tok::LBrace && close == Tok::RBrace);
         }
 
-        std::size_t Add(GrammarKind kind, std::size_t begin, std::size_t end, std::size_t parent)
+        std::size_t Add(
+            GrammarKind kind,
+            std::size_t begin,
+            std::size_t end,
+            std::size_t parent)
         {
             const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
             const std::size_t past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
@@ -372,7 +383,8 @@ namespace heimdall
                 if (m_tree.m_source[i] != ' ' && m_tree.m_source[i] != '\t' && m_tree.m_source[i] != '\r')
                 {
                     return false;
-            }}
+                }
+            }
 
             return true;
         }
@@ -891,8 +903,11 @@ namespace heimdall
             return i;
         }
 
-        std::size_t ParseQualifiedName(std::size_t begin, std::size_t end, std::size_t parent,
-            std::size_t & name_pos)
+        std::size_t ParseQualifiedName(
+            std::size_t begin,
+            std::size_t end,
+            std::size_t parent,
+            std::size_t& name_pos)
         {
             name_pos = Invalid;
             auto i = ParseNestedNamePrefix(begin, end, parent);
@@ -1027,6 +1042,7 @@ namespace heimdall
                         i = m_match[i + 1] + 1;
                         continue;
                     }
+
                     // `signed long`, `unsigned long long`, `long double` etc. all stay in specifiers.
                     ++i;
                     saw_type |= IsBuiltinType(text) || text == "struct" || text == "class" ||
@@ -1393,7 +1409,7 @@ namespace heimdall
                 static constexpr std::string_view binary_ops[] = {"||", "&&", "|", "^", "&", "==", "!=",
                     "<=", ">=", "<=>", "<<", ">>", "<", ">", "+", "-", "*", "/", "%"};
                 bool is_binary = false;
-                for (const auto op: binary_ops)
+                for (const auto op : binary_ops)
                 {
                     if (!Is(i, op))
                     {
@@ -1502,7 +1518,9 @@ namespace heimdall
                             if (IsIdentifierToken(j) && m_match[j] == Invalid)
                             {
                                 candidate = j;
-                    }}}
+                            }
+                        }
+                    }
 
                     i = m_match[i] + 1;
                     continue;
@@ -1836,7 +1854,10 @@ namespace heimdall
             return tail;
         }
 
-        std::size_t AddTypeAndDeclarator(std::size_t begin, std::size_t end, std::size_t parent,
+        std::size_t AddTypeAndDeclarator(
+            std::size_t begin,
+            std::size_t end,
+            std::size_t parent,
             bool include_type = true)
         {
             if (begin >= end)
@@ -1986,6 +2007,7 @@ namespace heimdall
                         m_tree.m_nodes_soa.parent.pop_back();
                         m_tree.m_nodes_soa.subtree_end.pop_back();
                     }
+
                     m_tree.m_nodes_aos_dirty = true;
 
                     spec_end = probe_end;
@@ -2073,7 +2095,10 @@ namespace heimdall
             return consumed;
         }
 
-        void AddDeclarationDetails(std::size_t begin, std::size_t end, std::size_t parent,
+        void AddDeclarationDetails(
+            std::size_t begin,
+            std::size_t end,
+            std::size_t parent,
             bool parameter = false)
         {
             if (begin >= end)
@@ -2109,6 +2134,7 @@ namespace heimdall
                     m_tree.m_nodes_soa.parent.pop_back();
                     m_tree.m_nodes_soa.subtree_end.pop_back();
                 }
+
                 m_tree.m_nodes_aos_dirty = true;
             }
 
@@ -2283,12 +2309,13 @@ namespace heimdall
                 "char32_t",
                 "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t",
                 "const", "constexpr", "static", "struct", "class", "enum", "typename", "using"};
-            for (const auto word: type_words)
+            for (const auto word : type_words)
             {
                 if (Text(begin) == word)
                 {
                     return GrammarKind::DeclarationStatement;
-            }}
+                }
+            }
 
             if (m_tree.Tokens()[m_sig[begin]].kind == TokenKind::Identifier)
             {
@@ -2411,7 +2438,11 @@ namespace heimdall
             return 0;
         }
 
-        std::size_t ParseExpression(std::size_t pos, std::size_t end, std::size_t parent, int minimum = 1)
+        std::size_t ParseExpression(
+            std::size_t pos,
+            std::size_t end,
+            std::size_t parent,
+            int minimum = 1)
         {
             if (pos >= end)
             {
@@ -2723,8 +2754,8 @@ namespace heimdall
                     m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
                     m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
                 {
-                    const auto &previous = m_tree.Tokens()[m_sig[pos - 1]];
-                    const auto &current = m_tree.Tokens()[m_sig[pos]];
+                    const auto& previous = m_tree.Tokens()[m_sig[pos - 1]];
+                    const auto& current = m_tree.Tokens()[m_sig[pos]];
                     if (current.offset == previous.offset + previous.length)
                     {
                         ++pos;
@@ -2782,7 +2813,7 @@ namespace heimdall
             return pos;
         }
 
-        void ParseStatement(std::size_t & pos, std::size_t end, std::size_t parent)
+        void ParseStatement(std::size_t& pos, std::size_t end, std::size_t parent)
         {
             const auto start = pos;
             if (Is(pos, "}"))
@@ -3098,7 +3129,7 @@ namespace heimdall
             Add(GrammarKind::Error, start, pos, parent);
         }
 
-        std::size_t ParseCompound(std::size_t & pos, std::size_t end, std::size_t parent)
+        std::size_t ParseCompound(std::size_t& pos, std::size_t end, std::size_t parent)
         {
             const auto start = pos++;
             const auto node = Add(GrammarKind::CompoundStatement, start, start + 1, parent);
@@ -3150,7 +3181,7 @@ namespace heimdall
 
             PopBlock();
 
-            auto &record = m_tree.m_nodes_soa;
+            auto& record = m_tree.m_nodes_soa;
             const auto past = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1 : record.first_token[node];
             record.token_count[node] = past - record.first_token[node];
             m_tree.m_nodes_aos_dirty = true;
@@ -3266,7 +3297,7 @@ namespace heimdall
         static std::uint64_t HashName(std::string_view name)
         {
             std::uint64_t hash = 14695981039346656037ull;
-            for (const char c: name)
+            for (const char c : name)
             {
                 hash ^= static_cast<unsigned char>(c);
                 hash *= 1099511628211ull;
@@ -3278,11 +3309,11 @@ namespace heimdall
         // What one entry contributes to the order-independent hash of the table.
         static std::uint64_t MixEntry(std::uint64_t hash, std::uint8_t flags)
         {
-            hash = (hash ^ (static_cast<std::uint64_t>(flags) * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull;
-            return hash ^ (hash >> 32);
+            hash = (hash ^(static_cast<std::uint64_t>(flags) * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull;
+            return hash ^(hash >> 32);
         }
 
-        NameSlot *FindSlot(std::string_view name, std::uint64_t hash)
+        NameSlot* FindSlot(std::string_view name, std::uint64_t hash)
         {
             if (m_slots.empty())
             {
@@ -3292,7 +3323,7 @@ namespace heimdall
             const std::size_t mask = m_slots.size() - 1;
             for (std::size_t i = hash & mask;; i = (i + 1) & mask)
             {
-                NameSlot &slot = m_slots[i];
+                NameSlot& slot = m_slots[i];
                 if (slot.flags == 0)
                 {
                     return &slot; // empty: where it would go
@@ -3322,7 +3353,7 @@ namespace heimdall
             {
                 std::vector<NameSlot> old(m_slots.empty() ? 64 : m_slots.size() * 2);
                 old.swap(m_slots);
-                for (const NameSlot &slot: old)
+                for (const NameSlot& slot : old)
                 {
                     if (slot.flags != 0)
                     {
@@ -3332,7 +3363,7 @@ namespace heimdall
             }
 
             const std::uint64_t hash = HashName(name);
-            NameSlot *slot = FindSlot(name, hash);
+            NameSlot* slot = FindSlot(name, hash);
             const std::uint8_t before = slot->flags;
             const auto merged = static_cast<std::uint8_t>(before | flags);
             if (merged == before)
@@ -3370,19 +3401,22 @@ namespace heimdall
 
             if (!m_slots.empty())
             {
-                const NameSlot *slot = const_cast<GrammarParser *>(this)->FindSlot(name, HashName(name));
+                const NameSlot* slot = const_cast<GrammarParser*>(this)->FindSlot(name, HashName(name));
                 if (slot->flags != 0)
                 {
                     return slot->flags;
                 }
             }
 
-            return m_oracle != nullptr && m_oracle->IsType(name) ? kNameType : std::uint8_t {0};
+            return m_oracle != nullptr && m_oracle->IsType(name) ? kNameType : std::uint8_t
+            {
+                0
+            };
         }
 
         std::string_view RawText(std::uint32_t token) const
         {
-            const auto &t = m_tree.Tokens()[token];
+            const auto& t = m_tree.Tokens()[token];
             return m_tree.m_source.substr(t.offset, t.length);
         }
 
@@ -3393,7 +3427,8 @@ namespace heimdall
 
         std::size_t SigOf(std::uint32_t token) const
         {
-            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(), token) - m_sig.begin());
+            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(),
+                token) - m_sig.begin());
         }
 
         // Name introduced by `class X`, `struct [[a]] X`, `enum class X`, `union X`
@@ -3449,7 +3484,7 @@ namespace heimdall
         // skipped: their names belong to the block scopes opened by ParseCompound.
         void RegisterNodes(std::size_t from, std::size_t to)
         {
-            const auto &nodes = m_tree.m_nodes_soa;
+            const auto& nodes = m_tree.m_nodes_soa;
             to = std::min(to, nodes.size());
             for (std::size_t n = from; n < to; ++n)
             {
@@ -3468,7 +3503,7 @@ namespace heimdall
                     std::size_t high = to;
                     while (low < high)
                     {
-                        const std::size_t mid = low + (high - low) / 2;
+                        const std::size_t mid = low +(high - low) / 2;
                         if (nodes.first_token[mid] < limit)
                         {
                             low = mid + 1;
@@ -3539,7 +3574,7 @@ namespace heimdall
 
                     if (owner >= nodes.size() ||
                         (static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::Declaration &&
-                            static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::DeclarationStatement))
+                        static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::DeclarationStatement))
                     {
                         break;
                     }
@@ -3574,7 +3609,7 @@ namespace heimdall
         // Parameters of the function whose body is about to be parsed.
         void DeclareParameters(std::size_t function)
         {
-            const auto &nodes = m_tree.m_nodes_soa;
+            const auto& nodes = m_tree.m_nodes_soa;
             const std::size_t size = nodes.size();
             for (std::size_t n = function + 1; n < size; ++n)
             {
@@ -3604,7 +3639,7 @@ namespace heimdall
         bool IsCastTypeId(std::size_t begin, std::size_t end) const
         {
             std::size_t i = begin;
-            const auto qualifiers = [&]()
+            const auto qualifiers =[&]()
             {
                 while (i < end && (Is(i, "const") || Is(i, "volatile")))
                 {
@@ -3617,7 +3652,7 @@ namespace heimdall
                 return false;
             }
 
-            const auto builtin = [&](std::size_t at)
+            const auto builtin =[&](std::size_t at)
             {
                 const auto text = Text(at);
                 return IsBuiltinType(text) && text != "auto" && text != "decltype";
@@ -3674,7 +3709,7 @@ namespace heimdall
                 // Most parenthesized expressions fail on shape alone: look the name up last.
                 std::size_t tail = i;
                 while (tail < end && (Is(tail, "*") || Is(tail, "&") || Is(tail, "&&") || Is(tail, "const") ||
-                           Is(tail, "volatile")))
+                    Is(tail, "volatile")))
                 {
                     ++tail;
                 }
@@ -3698,7 +3733,7 @@ namespace heimdall
                 return false;
             }
 
-            const auto &token = m_tree.Tokens()[m_sig[pos]];
+            const auto& token = m_tree.Tokens()[m_sig[pos]];
             switch (token.kind)
             {
             case TokenKind::Number:
@@ -3766,7 +3801,7 @@ namespace heimdall
                 reusable = kind != GrammarKind::Error && kind != GrammarKind::ErrorExpression &&
                     first_token >= item.first_token && first_token < item.token_end &&
                     first_token + token_count <= item.token_end &&
-                    (parent == ParseTree::RootNode || (parent >= item.node_begin && parent < item.node_end));
+                    (parent == ParseTree::RootNode ||(parent >= item.node_begin && parent < item.node_end));
             }
 
             item.reusable = reusable;
@@ -3775,15 +3810,15 @@ namespace heimdall
 
         // Copies the matching item of the previous tree when the edit provably
         // cannot have changed how it parses; advances `pos` past it.
-        bool TryReuseItem(std::size_t &pos, std::size_t end)
+        bool TryReuseItem(std::size_t& pos, std::size_t end)
         {
             if (m_reuse == nullptr || m_reuse->previous == nullptr)
             {
                 return false;
             }
 
-            const ParseTree &prev = *m_reuse->previous;
-            const auto &items = prev.m_items;
+            const ParseTree& prev = *m_reuse->previous;
+            const auto& items = prev.m_items;
             const std::size_t edit = m_reuse->offset;
             const std::size_t old_end = edit + m_reuse->old_length;
             const std::size_t new_end = edit + m_reuse->new_length;
@@ -3804,17 +3839,17 @@ namespace heimdall
             }
 
             const auto found = std::lower_bound(items.begin(), items.end(), old_offset,
-                [&prev](const TopLevelItem &item, std::size_t value)
+                [&prev](const TopLevelItem& item, std::size_t value)
                 {
                     return prev.Tokens()[item.first_token].offset < value;
-                });
+            });
             if (found == items.end() || prev.Tokens()[found->first_token].offset != old_offset ||
                 !found->reusable)
             {
                 return false;
             }
 
-            const TopLevelItem &item = *found;
+            const TopLevelItem& item = *found;
             // Read under other known names, the same tokens may parse differently.
             if (item.names_hash != m_names_hash)
             {
@@ -3832,7 +3867,7 @@ namespace heimdall
             {
                 // The item must end before the edit, and so must the token after it:
                 // the parser may peek one token past an item to decide where it ends.
-                const auto &last = prev.Tokens()[item.token_end - 1];
+                const auto& last = prev.Tokens()[item.token_end - 1];
                 const auto next = found + 1;
                 if (static_cast<std::size_t>(last.offset) + last.length >= edit || next == items.end() ||
                     prev.Tokens()[next->first_token].offset >= edit)
@@ -3844,7 +3879,7 @@ namespace heimdall
             const std::size_t token_count = item.token_end - item.first_token;
             const std::size_t after_sig = pos + item.sig_count;
             if (after_sig > end || token + token_count > m_tree.Tokens().size() ||
-                m_sig[after_sig - 1] != token + (item.token_end - 1 - item.first_token) ||
+                m_sig[after_sig - 1] != token +(item.token_end - 1 - item.first_token) ||
                 (after_sig < m_sig.size() && m_sig[after_sig] < token + token_count) ||
                 !BracketsClosedWithin(pos, after_sig))
             {
@@ -3854,8 +3889,8 @@ namespace heimdall
             const std::ptrdiff_t byte_shift = after ? shift : 0;
             const std::ptrdiff_t token_shift = static_cast<std::ptrdiff_t>(token) -
                 static_cast<std::ptrdiff_t>(item.first_token);
-            const auto &last_new = m_tree.Tokens()[token + token_count - 1];
-            const auto &last_old = prev.Tokens()[item.token_end - 1];
+            const auto& last_new = m_tree.Tokens()[token + token_count - 1];
+            const auto& last_old = prev.Tokens()[item.token_end - 1];
             if (static_cast<std::ptrdiff_t>(last_new.offset) !=
                 static_cast<std::ptrdiff_t>(last_old.offset) + byte_shift ||
                 last_new.length != last_old.length)
@@ -3864,8 +3899,8 @@ namespace heimdall
             }
 
             const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
-            auto &nodes = m_tree.m_nodes_soa;
-            const auto &old_nodes = prev.m_nodes_soa;
+            auto& nodes = m_tree.m_nodes_soa;
+            const auto& old_nodes = prev.m_nodes_soa;
             const std::size_t node_count = item.node_end - item.node_begin;
             // Copy unchanged columns in contiguous batches, then remap only the
             // version-dependent indices. One resize replaces five push_backs per node.
@@ -3881,6 +3916,7 @@ namespace heimdall
                 {
                     parent = parent - item.node_begin + node_base;
                 }
+
                 const std::uint32_t subtree_end = prev.m_nodes_soa.subtree_end[n] - item.node_begin + node_base;
 
                 const auto target = node_base + n - item.node_begin;
@@ -3888,6 +3924,7 @@ namespace heimdall
                 nodes.parent[target] = parent;
                 nodes.subtree_end[target] = subtree_end;
             }
+
             m_tree.m_nodes_aos_dirty = true;
             // The copied nodes declare what a fresh parse of them would have declared.
             RegisterNodes(node_base, m_tree.m_nodes_soa.size());
@@ -3914,7 +3951,11 @@ namespace heimdall
             return true;
         }
 
-        void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
+        void ParseScope(
+            std::size_t begin,
+            std::size_t end,
+            std::size_t parent,
+            bool member_scope)
         {
             const bool top_level = parent == ParseTree::RootNode;
             auto pos = begin;
@@ -4056,6 +4097,7 @@ namespace heimdall
                         }
                     }
                 }
+
                 const bool namespace_decl = Is(declaration_start, "namespace");
                 const bool record_decl = Is(declaration_start, "class") || Is(declaration_start, "struct") ||
                     Is(declaration_start, "union") || Is(declaration_start, "enum");
@@ -4119,7 +4161,8 @@ namespace heimdall
                         if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < brace)
                         {
                             has_function_parens = true;
-                    }}
+                        }
+                    }
 
                     const bool function_body = has_function_parens && !namespace_decl && !record_decl;
                     if (!namespace_decl && !record_decl && !function_body && !language_linkage)
@@ -4221,7 +4264,8 @@ namespace heimdall
                         if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < semi)
                         {
                             function_declaration = true;
-                    }}
+                        }
+                    }
 
                     if (function_declaration)
                     {
@@ -4280,11 +4324,21 @@ namespace heimdall
     namespace detail
     {
 
-        void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-            std::stop_token stop, const Preprocessor::MacroMap * macros, const ParseReuse * reuse,
-            const TypeNameOracle * type_names)
+        void ParseWithGrammar(
+            ParseTree& tree,
+            const PreprocessorResult& preprocessing,
+            std::stop_token stop,
+            const Preprocessor::MacroMap* macros,
+            const ParseReuse* reuse,
+            const TypeNameOracle* type_names)
         {
-            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse, type_names);
+            GrammarParser parser(
+                tree,
+                preprocessing,
+                std::move(stop),
+                macros,
+                reuse,
+                type_names);
             parser.Run();
         }
 

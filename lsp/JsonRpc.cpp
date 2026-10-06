@@ -12,7 +12,7 @@ namespace heimdall::lsp
     {
         constexpr char hex[] = "0123456789abcdef";
         out += '"';
-        for (const unsigned char c: value)
+        for (const unsigned char c : value)
         {
             switch (c)
             {

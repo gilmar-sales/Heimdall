@@ -32,9 +32,9 @@ namespace
         std::size_t bytes = 0;
     };
 
-    bool LoadCorpus(benchmark::State & state, Corpus &corpus)
+    bool LoadCorpus(benchmark::State& state, Corpus& corpus)
     {
-        for (const auto & entry: std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
+        for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
             {
@@ -52,7 +52,7 @@ namespace
             corpus.bytes += buffer->size();
         }
 
-        for (const auto & source: corpus.sources)
+        for (const auto& source : corpus.sources)
         {
             corpus.trees.push_back(heimdall::ParseTree::Parse(*source));
         }
@@ -78,7 +78,7 @@ namespace
         return source;
     }
 
-    void BM_Bind(benchmark::State & state)
+    void BM_Bind(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -88,11 +88,11 @@ namespace
 
         std::size_t symbols = 0;
         std::size_t arena_bytes = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             symbols = 0;
             arena_bytes = 0;
-            for (const auto & tree: corpus.trees)
+            for (const auto& tree : corpus.trees)
             {
                 const auto model = heimdall::Binder::Bind(tree);
                 symbols += model.Symbols().Size();
@@ -107,11 +107,11 @@ namespace
             symbols == 0 ? 0.0 : static_cast<double>(arena_bytes) / static_cast<double>(symbols);
     }
 
-    void BM_BindHierarchy(benchmark::State & state)
+    void BM_BindHierarchy(benchmark::State& state)
     {
         const std::string source = Hierarchy(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(source);
-        for (auto _: state)
+        for (auto _ : state)
         {
             const auto model = heimdall::Binder::Bind(tree);
             benchmark::DoNotOptimize(model.Symbols().Size());
@@ -120,13 +120,13 @@ namespace
         state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * source.size()));
     }
 
-    void BM_ModernizeOverride(benchmark::State & state)
+    void BM_ModernizeOverride(benchmark::State& state)
     {
         const std::string source = Hierarchy(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = heimdall::SemanticRules::AnalyzeOverride(model).size();
             benchmark::DoNotOptimize(reported);
@@ -155,7 +155,7 @@ namespace
         return source;
     }
 
-    void BM_Type(benchmark::State & state)
+    void BM_Type(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -164,7 +164,7 @@ namespace
         }
 
         std::vector<heimdall::SemanticModel> models;
-        for (const auto & tree: corpus.trees)
+        for (const auto& tree : corpus.trees)
         {
             models.push_back(heimdall::Binder::Bind(tree));
         }
@@ -172,12 +172,12 @@ namespace
         std::size_t types = 0;
         std::size_t arena_bytes = 0;
         std::size_t symbols = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             types = 0;
             arena_bytes = 0;
             symbols = 0;
-            for (const auto & model: models)
+            for (const auto& model : models)
             {
                 const auto typed = heimdall::Typer::Type(model);
                 types += typed.Types().Size();
@@ -193,12 +193,12 @@ namespace
             symbols == 0 ? 0.0 : static_cast<double>(arena_bytes) / static_cast<double>(symbols);
     }
 
-    void BM_TypeFunctions(benchmark::State & state)
+    void BM_TypeFunctions(benchmark::State& state)
     {
         const std::string source = TypedFunctions(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
-        for (auto _: state)
+        for (auto _ : state)
         {
             const auto typed = heimdall::Typer::Type(model);
             benchmark::DoNotOptimize(typed.Types().Size());
@@ -207,14 +207,14 @@ namespace
         state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * source.size()));
     }
 
-    void BM_TypeRules(benchmark::State & state)
+    void BM_TypeRules(benchmark::State& state)
     {
         const std::string source = TypedFunctions(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         const auto typed = heimdall::Typer::Type(model);
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = heimdall::SemanticRules::AnalyzeImplicitBool(typed).size() +
                 heimdall::SemanticRules::AnalyzeRangeLoop(typed).size() +
@@ -225,7 +225,7 @@ namespace
         state.counters["diagnostics"] = static_cast<double>(reported);
     }
 
-    void BM_AnalyzeAllRules(benchmark::State & state)
+    void BM_AnalyzeAllRules(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -234,16 +234,16 @@ namespace
         }
 
         std::vector<heimdall::SemanticModel> models;
-        for (const auto & tree: corpus.trees)
+        for (const auto& tree : corpus.trees)
         {
             models.push_back(heimdall::Binder::Bind(tree));
         }
 
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = 0;
-            for (const auto & model: models)
+            for (const auto& model : models)
             {
                 reported += heimdall::SemanticRules::Analyze(model).size();
             }
@@ -257,7 +257,7 @@ namespace
 
     // F4 (flow): the CFG and def-use events of every function body, then the two
     // rules that read them.
-    void BM_Flow(benchmark::State & state)
+    void BM_Flow(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -266,22 +266,22 @@ namespace
         }
 
         std::vector<heimdall::SemanticModel> models;
-        for (const auto & tree: corpus.trees)
+        for (const auto& tree : corpus.trees)
         {
             models.push_back(heimdall::Binder::Bind(tree));
         }
 
         std::vector<heimdall::TypeModel> typed;
-        for (const auto & model: models)
+        for (const auto& model : models)
         {
             typed.push_back(heimdall::Typer::Type(model));
         }
 
         std::size_t events = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             events = 0;
-            for (const auto & types: typed)
+            for (const auto& types : typed)
             {
                 const auto flow = heimdall::Flow::Build(types);
                 events += flow.Events().Size();
@@ -293,7 +293,7 @@ namespace
         state.counters["events"] = static_cast<double>(events);
     }
 
-    void BM_ModernizeConst(benchmark::State & state)
+    void BM_ModernizeConst(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -302,28 +302,28 @@ namespace
         }
 
         std::vector<heimdall::SemanticModel> models;
-        for (const auto & tree: corpus.trees)
+        for (const auto& tree : corpus.trees)
         {
             models.push_back(heimdall::Binder::Bind(tree));
         }
 
         std::vector<heimdall::TypeModel> typed;
-        for (const auto & model: models)
+        for (const auto& model : models)
         {
             typed.push_back(heimdall::Typer::Type(model));
         }
 
         std::vector<heimdall::FlowModel> flows;
-        for (const auto & types: typed)
+        for (const auto& types : typed)
         {
             flows.push_back(heimdall::Flow::Build(types));
         }
 
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = 0;
-            for (const auto & flow: flows)
+            for (const auto& flow : flows)
             {
                 reported += heimdall::SemanticRules::AnalyzeConst(flow).size();
                 reported += heimdall::SemanticRules::AnalyzeConstexpr(flow).size();
@@ -338,7 +338,7 @@ namespace
 
     // F3 (project layer). Summaries are built once per header and shared, so the
     // cost that matters per keystroke is the ProjectIndex plus the rules.
-    void BM_HeaderSummary(benchmark::State & state)
+    void BM_HeaderSummary(benchmark::State& state)
     {
         Corpus corpus;
         if (!LoadCorpus(state, corpus))
@@ -347,10 +347,10 @@ namespace
         }
 
         std::size_t exports = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             exports = 0;
-            for (const auto & source: corpus.sources)
+            for (const auto& source : corpus.sources)
             {
                 auto summary = heimdall::HeaderSummary::FromSource(*source);
                 exports += summary->ExportCount();
@@ -364,7 +364,7 @@ namespace
 
     // A leaf at the end of a chain of `count` classes, in a source file: the rule
     // walks the whole chain for polymorphism and every class for derived classes.
-    void BM_ModernizeFinal(benchmark::State & state)
+    void BM_ModernizeFinal(benchmark::State& state)
     {
         const std::string source = Hierarchy(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(source);
@@ -374,7 +374,7 @@ namespace
             "bench.cpp", nullptr, nullptr
         };
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = heimdall::SemanticRules::AnalyzeFinal(model, context).size();
             benchmark::DoNotOptimize(reported);
@@ -414,6 +414,7 @@ namespace
                 source += "lib::T" + std::to_string(i) + " v" + std::to_string(i) + " = {lib::f" + std::to_string(i) + "(1)};\n";
             }
         }
+
         ~ProjectFixture()
         {
             std::error_code ec;
@@ -425,7 +426,7 @@ namespace
         std::string source;
     };
 
-    void BM_IncludeWhatYouUse(benchmark::State & state)
+    void BM_IncludeWhatYouUse(benchmark::State& state)
     {
         ProjectFixture project(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(project.source);
@@ -437,7 +438,7 @@ namespace
             project.root / "main.cpp", profile.get(), &project.command
         };
         std::size_t reported = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             reported = heimdall::SemanticRules::AnalyzeIncludeWhatYouUse(model, context).size();
             benchmark::DoNotOptimize(reported);
@@ -446,14 +447,14 @@ namespace
         state.counters["diagnostics"] = static_cast<double>(reported);
     }
 
-    void BM_ProjectIndex(benchmark::State & state)
+    void BM_ProjectIndex(benchmark::State& state)
     {
         ProjectFixture project(static_cast<std::size_t>(state.range(0)));
         const auto tree = heimdall::ParseTree::Parse(project.source);
         const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.root / "main.cpp", tree,
             &project.command);
         std::size_t summaries = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             const auto index = heimdall::ProjectIndex::Build(*profile);
             summaries = index.Summaries().size();
@@ -466,15 +467,27 @@ namespace
 } // namespace
 
 BENCHMARK(BM_Bind);
+
 BENCHMARK(BM_Type);
+
 BENCHMARK(BM_AnalyzeAllRules);
+
 BENCHMARK(BM_BindHierarchy)->Arg(100)->Arg(1000);
+
 BENCHMARK(BM_ModernizeOverride)->Arg(100)->Arg(1000);
+
 BENCHMARK(BM_TypeFunctions)->Arg(100)->Arg(1000);
+
 BENCHMARK(BM_TypeRules)->Arg(100)->Arg(1000);
+
 BENCHMARK(BM_HeaderSummary);
+
 BENCHMARK(BM_Flow);
+
 BENCHMARK(BM_ModernizeConst);
+
 BENCHMARK(BM_ModernizeFinal)->Arg(100)->Arg(1000);
+
 BENCHMARK(BM_IncludeWhatYouUse)->Arg(10)->Arg(100);
+
 BENCHMARK(BM_ProjectIndex)->Arg(10)->Arg(100);

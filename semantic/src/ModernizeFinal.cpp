@@ -26,7 +26,7 @@ namespace heimdall
         using detail::SortByOffset;
 
         // Only a source file keeps its definitions to itself: nothing includes it.
-        bool IsSourceFile(const std::filesystem::path & file)
+        bool IsSourceFile(const std::filesystem::path& file)
         {
             const std::string extension = detail::Lowercase(file.extension().string());
             return extension == ".cpp" || extension == ".cc" || extension == ".cxx" || extension == ".c++" ||
@@ -39,18 +39,18 @@ namespace heimdall
         class FinalAnalysis
         {
         public:
-            FinalAnalysis(const SemanticModel &model, const ProjectContext &context) : m_model(model),
-              m_tree(model.Tree()), m_symbols(model.Symbols()), m_scopes(model.Scopes()),
-              m_source_file(IsSourceFile(context.file)),
-              m_virtual(detail::ClassesWithVirtualMembers(model)), m_children(model.Symbols().Size()),
-              m_reporter(model.Tree())
+            FinalAnalysis(const SemanticModel& model, const ProjectContext& context) : m_model(model),
+                m_tree(model.Tree()), m_symbols(model.Symbols()), m_scopes(model.Scopes()),
+                m_source_file(IsSourceFile(context.file)),
+                m_virtual(detail::ClassesWithVirtualMembers(model)), m_children(model.Symbols().Size()),
+                m_reporter(model.Tree())
             {
                 if (context.profile != nullptr)
                 {
                     m_index = std::make_unique<ProjectIndex>(ProjectIndex::Build(*context.profile));
                 }
 
-                const auto &bases = model.Bases();
+                const auto& bases = model.Bases();
                 for (std::size_t i = 0; i < bases.derived.size(); ++i)
                 {
                     if (bases.target[i] != kNone)
@@ -89,7 +89,7 @@ namespace heimdall
                 std::vector<Diagnostic> diagnostics;
                 for (SymbolId klass = 0; klass < m_symbols.Size(); ++klass)
                 {
-                    if (!IsPlainClass(klass) || !Closed(klass))
+                    if (!IsPlainClass(klass) ||!Closed(klass))
                     {
                         continue;
                     }
@@ -114,7 +114,9 @@ namespace heimdall
                 No,
                 Yes,
                 Unknown
-            };
+            }
+
+            ;
 
             std::string_view NameOf(SymbolId symbol) const
             {
@@ -126,12 +128,12 @@ namespace heimdall
             bool IsPlainClass(SymbolId klass) const
             {
                 if (m_symbols.kind[klass] != SymbolKind::Class || m_symbols.member_scope[klass] == kNone ||
-                    m_symbols.name[klass] == kNone || (m_symbols.flags[klass] & SymbolFlag::Template) != 0)
+                    m_symbols.name[klass] == kNone ||(m_symbols.flags[klass] & SymbolFlag::Template) != 0)
                 {
                     return false;
                 }
 
-                const auto &tokens = m_tree.Tokens();
+                const auto& tokens = m_tree.Tokens();
                 for (std::size_t i = m_symbols.decl_token[klass], steps = 0; i > 0 && steps < 16;)
                 {
                     --i;
@@ -152,7 +154,7 @@ namespace heimdall
                     }
                 }
 
-                return !detail::ClassHeadIsFinal(m_tree, m_symbols.decl_token[klass]);
+                return!detail::ClassHeadIsFinal(m_tree, m_symbols.decl_token[klass]);
             }
 
             // Every class that could derive from `klass` is visible: it sits in an
@@ -185,23 +187,24 @@ namespace heimdall
                     return false;
                 }
 
-                return m_index == nullptr || !m_index->HasDerived(NameOf(klass));
+                return m_index == nullptr ||!m_index->HasDerived(NameOf(klass));
             }
 
-            Tri Polymorphic(SymbolId klass, std::vector<SymbolId> & visiting) const
+            Tri Polymorphic(SymbolId klass, std::vector<SymbolId>& visiting) const
             {
                 if (m_virtual[klass] != 0)
                 {
                     return Tri::Yes;
                 }
 
-                if (visiting.size() >= kMaxDepth || std::find(visiting.begin(), visiting.end(), klass) != visiting.end())
+                if (visiting.size() >= kMaxDepth || std::find(visiting.begin(), visiting.end(),
+                    klass) != visiting.end())
                 {
                     return Tri::Unknown;
                 }
 
                 visiting.push_back(klass);
-                const auto &bases = m_model.Bases();
+                const auto& bases = m_model.Bases();
                 Tri result = Tri::No;
                 for (std::uint32_t i = 0; i < m_symbols.base_count[klass] && result != Tri::Yes; ++i)
                 {
@@ -240,7 +243,7 @@ namespace heimdall
                 return result;
             }
 
-            void ReportClass(SymbolId klass, std::vector<Diagnostic> & out)
+            void ReportClass(SymbolId klass, std::vector<Diagnostic>& out)
             {
                 // An abstract class exists to be derived from; only a class with
                 // virtual functions (its own or inherited) gains from `final`.
@@ -255,11 +258,11 @@ namespace heimdall
                     return;
                 }
 
-                const auto &token = m_tree.Tokens()[m_symbols.decl_token[klass]];
+                const auto& token = m_tree.Tokens()[m_symbols.decl_token[klass]];
                 const std::string name(NameOf(klass));
                 out.push_back(m_reporter.Make(RuleId::ModernizeFinal, "cpp/modernize-final",
-                        "class '" + name + "' has no derived classes; mark it 'final'", token.offset, token.length,
-                        TextEdit{token.offset + token.length, 0, " final"}, "Mark class " + name + " final"));
+                    "class '" + name + "' has no derived classes; mark it 'final'", token.offset, token.length,
+                    TextEdit{token.offset + token.length, 0, " final"}, "Mark class " + name + " final"));
             }
 
             // Some class below `klass` may have derived classes the file does not
@@ -268,7 +271,7 @@ namespace heimdall
             void MarkOpenBelow()
             {
                 m_open_below.assign(m_symbols.Size(), 0);
-                const auto &bases = m_model.Bases();
+                const auto& bases = m_model.Bases();
                 std::vector<SymbolId> pending;
                 for (SymbolId klass = 0; klass < m_symbols.Size(); ++klass)
                 {
@@ -316,7 +319,7 @@ namespace heimdall
                 {
                     const auto current = pending.back();
                     pending.pop_back();
-                    for (const auto child: m_children[current])
+                    for (const auto child : m_children[current])
                     {
                         if (m_seen[child] == m_epoch)
                         {
@@ -338,7 +341,7 @@ namespace heimdall
                 return false;
             }
 
-            void ReportMethods(SymbolId klass, std::vector<Diagnostic> & out)
+            void ReportMethods(SymbolId klass, std::vector<Diagnostic>& out)
             {
                 if (m_open_below.empty())
                 {
@@ -353,7 +356,7 @@ namespace heimdall
                 for (auto method = FirstMember(klass); method != kNone; method = NextMember(method))
                 {
                     const auto flags = m_symbols.flags[method];
-                    if (m_symbols.kind[method] != SymbolKind::Function || (flags & SymbolFlag::Override) == 0 ||
+                    if (m_symbols.kind[method] != SymbolKind::Function ||(flags& SymbolFlag::Override) == 0 ||
                         (flags & (SymbolFlag::Final | SymbolFlag::Static | SymbolFlag::Constructor |
                         SymbolFlag::Destructor | SymbolFlag::Template)) != 0)
                     {
@@ -371,11 +374,11 @@ namespace heimdall
                         continue;
                     }
 
-                    const auto &token = m_tree.Tokens()[m_symbols.decl_token[method]];
+                    const auto& token = m_tree.Tokens()[m_symbols.decl_token[method]];
                     const std::string name(NameOf(method));
                     out.push_back(m_reporter.Make(RuleId::ModernizeFinal, "cpp/modernize-final",
-                            "'" + name + "' is never overridden in a derived class; mark it 'final'", token.offset,
-                            token.length, TextEdit{insert_at, 0, " final"}, "Mark " + name + " final"));
+                        "'" + name + "' is never overridden in a derived class; mark it 'final'", token.offset,
+                        token.length, TextEdit{insert_at, 0, " final"}, "Mark " + name + " final"));
                 }
             }
 
@@ -391,9 +394,9 @@ namespace heimdall
 
             // Offset just after the `override` of the declaration whose name token
             // is `name_token`.
-            bool AfterOverride(std::uint32_t name_token, std::size_t & offset) const
+            bool AfterOverride(std::uint32_t name_token, std::size_t& offset) const
             {
-                const auto &tokens = m_tree.Tokens();
+                const auto& tokens = m_tree.Tokens();
                 int depth = 0;
                 for (std::size_t i = std::size_t{name_token} + 1; i < tokens.size(); ++i)
                 {
@@ -425,10 +428,10 @@ namespace heimdall
                 return false;
             }
 
-            const SemanticModel &m_model;
-            const ParseTree &m_tree;
-            const SymbolTable &m_symbols;
-            const ScopeTable &m_scopes;
+            const SemanticModel& m_model;
+            const ParseTree& m_tree;
+            const SymbolTable& m_symbols;
+            const ScopeTable& m_scopes;
             bool m_source_file;
             std::vector<std::uint8_t> m_virtual;
             std::vector<std::uint8_t> m_pure;
@@ -447,7 +450,8 @@ namespace heimdall
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeFinal(const SemanticModel &model, const ProjectContext &context)
+    std::vector<Diagnostic> SemanticRules::AnalyzeFinal(const SemanticModel& model,
+        const ProjectContext& context)
     {
         return FinalAnalysis(model, context).Run();
     }

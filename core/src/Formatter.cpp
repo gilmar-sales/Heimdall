@@ -89,12 +89,13 @@ namespace heimdall
                 "float", "double", "auto", "decltype", "typename", "const",
                 "volatile", "unsigned",
             };
-            for (const auto type: kTypes)
+            for (const auto type : kTypes)
             {
                 if (text == type)
                 {
                     return true;
-            }}
+                }
+            }
 
             return false;
         }
@@ -105,12 +106,13 @@ namespace heimdall
                 "const", "volatile", "static", "extern", "mutable", "unsigned",
                 "long", "short", "signed", "struct", "class", "union", "enum",
             };
-            for (const auto qualifier: kQualifiers)
+            for (const auto qualifier : kQualifiers)
             {
                 if (text == qualifier)
                 {
                     return true;
-            }}
+                }
+            }
 
             return false;
         }
@@ -125,7 +127,9 @@ namespace heimdall
         // Defined after the spacing rules (they operate on whole files); declared
         // here because SpacingGap consults them per token pair.
         bool IsTrailingReturnArrow(const std::vector<Sig>& sigs, std::size_t k);
+
         bool IsBlockOpenBrace(const std::vector<Sig>& sigs, std::size_t brace);
+
         bool IsConstevalIfHead(const std::vector<Sig>& sigs, std::size_t consteval_index);
         constexpr std::size_t kNoSig = static_cast<std::size_t>(-1);
 
@@ -171,12 +175,13 @@ namespace heimdall
                 "=", "==", "!=", "+", "-", "*", "/", "%", "^", "|", "||", "&",
                 "&&", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "?",
             };
-            for (const auto op: kBinary)
+            for (const auto op : kBinary)
             {
                 if (text == op)
                 {
                     return true;
-            }}
+                }
+            }
 
             return false;
         }
@@ -234,6 +239,54 @@ namespace heimdall
             return false;
         }
 
+        bool IsRangeForColon(const std::vector<Sig>& sigs, std::size_t colon)
+        {
+            if (sigs[colon].text != ":" || sigs[colon].paren_depth == 0)
+            {
+                return false;
+            }
+
+            const auto depth = sigs[colon].paren_depth;
+            std::size_t nested = 0;
+            for (auto i = colon; i > 0;)
+            {
+                --i;
+                const auto& sig = sigs[i];
+                if (sig.text == ")" || sig.text == "]" || sig.text == "}")
+                {
+                    ++nested;
+                    continue;
+                }
+
+                if (nested > 0)
+                {
+                    if (sig.text == "(" || sig.text == "[" || sig.text == "{")
+                    {
+                        --nested;
+                    }
+
+                    continue;
+                }
+
+                if (sig.text == "(" && sig.paren_depth + 1 == depth)
+                {
+                    return i > 0 && sigs[i - 1].text == "for";
+                }
+
+                if (sig.paren_depth == depth && (sig.text == "?" || sig.text == ":"))
+                {
+                    return false;
+                }
+
+                if (sig.paren_depth < depth)
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
         // True when sigs[k] (`*`, `&` or `&&`) declares rather than computes:
         // `T *p`, `T &r = ...`, `f(T&&)`, `T *f()`. Genuinely ambiguous cases
         // (`f(a & b)`, `x * y;`) follow the declaration reading, matching the
@@ -259,14 +312,9 @@ namespace heimdall
                 return false;
             }
 
-            if (sigs[k].in_condition)
-            {
-                return false;
-            }
-
             // Abstract declarator of a type-id (`sizeof(void*)`, `f(char*, int)`,
             // `static_cast<T*>(p)`): no binary operator can be followed by `)`, `,` or `>`.
-            if (k + 1 < sigs.size() && sigs[k + 1].line == sigs[k].line &&
+            if (!sigs[k].in_condition && k + 1 < sigs.size() && sigs[k + 1].line == sigs[k].line &&
                 sigs[k + 1].kind == TokenKind::Punctuation &&
                 (sigs[k + 1].text == ")" || sigs[k + 1].text == "," || sigs[k + 1].text == ">"))
             {
@@ -297,9 +345,40 @@ namespace heimdall
                 return false;
             }
 
-            if (sigs[name].kind != TokenKind::Identifier)
+            // Structured bindings are names too: `auto& [key, value] : items`.
+            if (sigs[name].text == "[")
+            {
+                std::size_t depth = 1;
+                while (++name < sigs.size())
+                {
+                    if (sigs[name].text == "[")
+                    {
+                        ++depth;
+                    }
+                    else if (sigs[name].text == "]" && --depth == 0)
+                    {
+                        break;
+                    }
+                }
+
+                if (name >= sigs.size())
+                {
+                    return false;
+                }
+            }
+            else if (sigs[name].kind != TokenKind::Identifier)
             {
                 return false;
+            }
+
+            // Out-of-class definitions have a qualified declarator name:
+            // `const Model& Context::Semantic()`. Inspect the token after
+            // the complete name, not the first scope-resolution operator.
+            while (name + 2 < sigs.size() && sigs[name + 1].line == sigs[k].line &&
+                sigs[name + 2].line == sigs[k].line && sigs[name + 1].text == "::" &&
+                sigs[name + 2].kind == TokenKind::Identifier)
+            {
+                name += 2;
             }
 
             if (name + 1 >= sigs.size() || sigs[name + 1].line != sigs[k].line)
@@ -308,8 +387,14 @@ namespace heimdall
             }
 
             const std::string_view after = sigs[name + 1].text;
+            const bool range_declarator = after == ":" && IsRangeForColon(sigs, name + 1);
+            if (sigs[k].in_condition && !range_declarator)
+            {
+                return false;
+            }
+
             const bool function_declarator = after == "(";
-            if (after != ";" && after != "=" && after != "," && after != ")" && !function_declarator)
+            if (after != ";" && after != "=" && after != "," && after != ")" && !function_declarator && !range_declarator)
             {
                 return false;
             }
@@ -388,12 +473,13 @@ namespace heimdall
                     "return", "case", "sizeof", "new", "delete", "throw",
                     "co_await", "co_return", "co_yield", "not", "and", "or",
                 };
-                for (const auto keyword: kKeywords)
+                for (const auto keyword : kKeywords)
                 {
                     if (prev.text == keyword)
                     {
                         return true;
-                }}
+                    }
+                }
 
                 return false;
             }
@@ -516,8 +602,11 @@ namespace heimdall
         // (reference knob). `before_name` selects the gap between the operator
         // and the declared name (Right: none) vs between the type and the
         // operator (Right: one space); Left mirrors both.
-        int DeclaratorGap(std::string_view token, bool before_name,
-            PointerAlignment pointer_alignment, ReferenceAlignment reference_alignment)
+        int DeclaratorGap(
+            std::string_view token,
+            bool before_name,
+            PointerAlignment pointer_alignment,
+            ReferenceAlignment reference_alignment)
         {
             const bool right = token == "*"
             ? pointer_alignment == PointerAlignment::Right
@@ -533,9 +622,14 @@ namespace heimdall
         // Gap decision between two adjacent significant tokens of one chunk.
         // Returns -1 to preserve the original gap (exactly one space iff the source
         // had whitespace there), 0 for no space, 1 for exactly one space.
-        int SpacingGap(const std::vector<Sig>& sigs, std::size_t prev, std::size_t cur,
-            std::string_view source, const std::vector<Token>& tokens,
-            PointerAlignment pointer_alignment, ReferenceAlignment reference_alignment,
+        int SpacingGap(
+            const std::vector<Sig>& sigs,
+            std::size_t prev,
+            std::size_t cur,
+            std::string_view source,
+            const std::vector<Token>& tokens,
+            PointerAlignment pointer_alignment,
+            ReferenceAlignment reference_alignment,
             bool space_before_inheritance_colon)
         {
             const std::string_view left = sigs[prev].text;
@@ -579,6 +673,11 @@ namespace heimdall
 
             if (right == "[")
             {
+                if ((left == "&" || left == "&&") && IsDeclaratorStar(sigs, prev))
+                {
+                    return DeclaratorGap(left, true, pointer_alignment, reference_alignment);
+                }
+
                 return 0;
             } // `a[0]`, `new int[5]`, `delete[] p`
 
@@ -601,7 +700,7 @@ namespace heimdall
             // parenthesized ternary branches `(a) : b` take a space).
             if (right == ":")
             {
-                return left == ")" || IsTernaryColon(sigs, cur) ||
+                return left == ")" || IsRangeForColon(sigs, cur) || IsTernaryColon(sigs, cur) ||
                     (space_before_inheritance_colon && IsInheritanceColon(sigs, cur))
                 ? 1
                 : 0;
@@ -910,17 +1009,21 @@ namespace heimdall
 
         bool PassInDirectives(std::size_t offset, const std::vector<PreprocessorDirective>& dirs)
         {
-            for (const auto & directive: dirs)
+            for (const auto& directive : dirs)
             {
                 if (directive.offset <= offset && offset < directive.offset + directive.length)
                 {
                     return true;
-            }}
+                }
+            }
 
             return false;
         }
 
-        std::size_t PassMatchForward(const std::vector<PSig>& sigs, std::size_t open, char opener,
+        std::size_t PassMatchForward(
+            const std::vector<PSig>& sigs,
+            std::size_t open,
+            char opener,
             char closer)
         {
             int depth = 0;
@@ -952,7 +1055,10 @@ namespace heimdall
             return kNoPos;
         }
 
-        std::size_t PassMatchBackward(const std::vector<PSig>& sigs, std::size_t close, char opener,
+        std::size_t PassMatchBackward(
+            const std::vector<PSig>& sigs,
+            std::size_t close,
+            char opener,
             char closer)
         {
             int depth = 0;
@@ -1076,8 +1182,11 @@ namespace heimdall
             std::size_t body_start = 0;     // sig index of the body
         };
 
-        bool PassParseHeader(const std::vector<PSig>& sigs, const std::vector<Token>& tokens,
-            std::size_t s, ControlHeader& out)
+        bool PassParseHeader(
+            const std::vector<PSig>& sigs,
+            const std::vector<Token>& tokens,
+            std::size_t s,
+            ControlHeader& out)
         {
             const std::string_view keyword = sigs[s].text;
             const bool takes_parens = keyword == "if" || keyword == "for" || keyword == "while";
@@ -1132,12 +1241,13 @@ namespace heimdall
                 "return", "goto", "throw", "delete", "new",
                 "co_return", "co_yield", "co_await", "break", "continue",
             };
-            for (const auto keyword: kStatements)
+            for (const auto keyword : kStatements)
             {
                 if (sigs[begin].text == keyword)
                 {
                     return false;
-            }}
+                }
+            }
 
             if (IsTypeKeyword(sigs[begin].text) || IsQualifierKeyword(sigs[begin].text) ||
                 sigs[begin].text == "static_assert" || sigs[begin].text == "template" ||
@@ -1193,7 +1303,8 @@ namespace heimdall
                     if (work[i] == '\n')
                     {
                         line_starts.push_back(i + 1);
-                }}
+                    }
+                }
 
                 for (std::size_t t = 0; t < tokens.size(); ++t)
                 {
@@ -1238,7 +1349,8 @@ namespace heimdall
                     if (sigs[i].direct)
                     {
                         return true;
-                }}
+                    }
+                }
 
                 return false;
             }
@@ -1406,7 +1518,7 @@ namespace heimdall
                 {
                     return left.start > right.start;
             });
-            for (const auto & span: spans)
+            for (const auto& span : spans)
             {
                 work.replace(span.start, span.end - span.start, span.replacement);
             }
@@ -1503,7 +1615,7 @@ namespace heimdall
                 {
                     return left.pos > right.pos;
             });
-            for (const auto & ins: insertions)
+            for (const auto& ins : insertions)
             {
                 work.erase(ins.pos, ins.erase);
                 work.insert(ins.pos, ins.text);
@@ -1584,7 +1696,7 @@ namespace heimdall
                 {
                     return left > right;
             });
-            for (const auto pos: breaks)
+            for (const auto pos : breaks)
             {
                 work.insert(pos, "\n");
             }
@@ -1663,7 +1775,7 @@ namespace heimdall
                 {
                     return left.start > right.start;
             });
-            for (const auto & join: joins)
+            for (const auto& join : joins)
             {
                 work.replace(join.start, join.end - join.start, " ");
             }
@@ -1988,12 +2100,13 @@ namespace heimdall
                             return true;
                         }
 
-                        for (const auto word: kHeaderWords)
+                        for (const auto word : kHeaderWords)
                         {
                             if (t.text == word)
                             {
                                 header = true;
-                        }}
+                            }
+                        }
                     }
                 }
 
@@ -2020,19 +2133,21 @@ namespace heimdall
                 const Sig& s = sigs[k];
                 if (s.kind == TokenKind::Identifier)
                 {
-                    for (const auto keyword: kTrueKeywords)
+                    for (const auto keyword : kTrueKeywords)
                     {
                         if (s.text == keyword)
                         {
                             return true;
-                    }}
+                        }
+                    }
 
-                    for (const auto keyword: kFalseKeywords)
+                    for (const auto keyword : kFalseKeywords)
                     {
                         if (s.text == keyword)
                         {
                             return false;
-                    }}
+                        }
+                    }
 
                     // new and delete followed by a brace-init are block-open braces
                     // (e.g., `new Node{...}`, `delete p{...}`) so they should trigger
@@ -2188,7 +2303,7 @@ namespace heimdall
                 {
                     return left.start > right.start;
             });
-            for (const auto & edit: edits)
+            for (const auto& edit : edits)
             {
                 work.replace(edit.start, edit.end - edit.start, edit.text);
             }
@@ -2245,6 +2360,7 @@ namespace heimdall
         {
             return Format(ParseTree::Parse(source, {}));
         }
+
         const auto tokens = Lexer(source).Lex();
         const auto directives = Preprocessor().Process(source).directives;
         return FormatImpl(source, tokens, directives);
@@ -2259,6 +2375,7 @@ namespace heimdall
             const auto directives = Preprocessor().Process(layout).directives;
             return FormatImpl(layout, tokens, directives);
         }
+
         return FormatImpl(tree.Source(), tree.Tokens(), tree.Directives());
     }
 
@@ -2294,7 +2411,8 @@ namespace heimdall
             if (source[i] == '\n')
             {
                 line_starts.push_back(i + 1);
-        }}
+            }
+        }
 
         const std::size_t line_count = line_starts.size();
         auto line_range =[&](std::size_t line)->std::pair<std::size_t, std::size_t>{
@@ -2544,7 +2662,8 @@ namespace heimdall
                 if (source[i] == ' ' || source[i] == '\t')
                 {
                     return true;
-            }}
+                }
+            }
 
             return false;
         };
@@ -2679,20 +2798,15 @@ namespace heimdall
                     else if (text == "}" && sigs[i].kind == TokenKind::Punctuation)
                     {
                         // Code before a block-closing `}` moves it to its own
-                        // line, but runs of closers (`}}`), empty blocks (`{}`)
-                        // and initializer closes (`{1, 2}`) stay together. The
+                        // line, including consecutive block closes (`}}`). Empty
+                        // blocks (`{}`) and initializer closes stay together. The
                         // match link tells block closes apart from initializers.
                         const std::size_t open = sigs[i].match;
                         const bool closes_block =
                             open == kNoPos || open >= sigs.size() || IsBlockOpenBrace(sigs, open);
                         const std::string_view prev =
                             first ? std::string_view() : sigs[i - 1].text;
-                        // `}` right after an empty `{}` pair is a new closer, not
-                        // part of a `}}` run.
-                        const bool prev_empty_pair =!first && prev == "}" && i >= kTwoTokenOffset &&
-                            sigs[i - kTwoTokenOffset].text == "{" &&
-                            sigs[i - 1].match == i - kTwoTokenOffset;
-                        if (!first && (prev != "}" || prev_empty_pair) && prev != "{" && closes_block)
+                        if (!first && prev != "{" && closes_block)
                         {
                             emit(i);
                         } // `}` starts a line
@@ -2710,7 +2824,7 @@ namespace heimdall
                         const bool detach =
                             !attached ||(m_options.brace_style == BraceStyle::Allman &&
                             (next == "else" || next == "catch"));
-                        if (!last && detach)
+                        if (!last && detach && closes_block)
                         {
                             emit(i + 1);
                         }
@@ -2771,7 +2885,7 @@ namespace heimdall
         }
         // Per-chunk context: labels, closers, continuation.
         const Chunk* prev_code_chunk = nullptr;
-        for (auto & chunk: chunks)
+        for (auto& chunk : chunks)
         {
             if (chunk.directive || chunk.verbatim || chunk.begin == chunk.end)
             {
@@ -2796,7 +2910,8 @@ namespace heimdall
                 if (!IsCloserish(sigs[i].text))
                 {
                     all_closers = false;
-            }}
+                }
+            }
 
             chunk.closer_only = all_closers;
             std::size_t eff_paren = sigs[chunk.begin].paren_depth;
@@ -2822,7 +2937,8 @@ namespace heimdall
                     if (sigs[i].text == ":" && sigs[i].kind == TokenKind::Punctuation)
                     {
                         last_colon = i;
-                }}
+                    }
+                }
 
                 if (last_colon != static_cast<std::size_t>(-1))
                 {
@@ -2869,7 +2985,7 @@ namespace heimdall
             bool prev_label = false;
             bool prev_dangling = false;
             int dangle_level = 0;
-            for (auto & chunk: chunks)
+            for (auto& chunk : chunks)
             {
                 if (chunk.directive)
                 {
@@ -3037,7 +3153,7 @@ namespace heimdall
                 const std::size_t first_off = tokens[sigs[chunk.begin].token].offset;
                 const Token& last_tok = tokens[sigs[chunk.end - 1].token];
                 const std::size_t last_end = last_tok.offset + last_tok.length;
-                for (const auto t: line_comments[chunk.source_line])
+                for (const auto t : line_comments[chunk.source_line])
                 {
                     if (tokens[t].offset < first_off && tokens[t].offset >= span_start)
                     {
@@ -3052,7 +3168,7 @@ namespace heimdall
             else
             {
                 // Comment-only line: every comment of the line belongs to it.
-                for (const auto t: line_comments[chunk.source_line])
+                for (const auto t : line_comments[chunk.source_line])
                 {
                     if (tokens[t].offset >= span_start && tokens[t].offset < span_end)
                     {
@@ -3075,7 +3191,7 @@ namespace heimdall
                 return is_line;
             };
             bool first_piece = true;
-            for (const auto t: leading)
+            for (const auto t : leading)
             {
                 const bool is_line = emit_comment(t, first_piece);
                 first_piece = false;
@@ -3128,7 +3244,7 @@ namespace heimdall
                 text += piece;
             }
 
-            for (const auto t: trailing)
+            for (const auto t : trailing)
             {
                 const bool is_line = tokens[t].kind == TokenKind::LineComment;
                 std::string piece =
@@ -3634,7 +3750,7 @@ namespace heimdall
         }
 
         std::string output;
-        for (const auto & line: out_lines)
+        for (const auto& line : out_lines)
         {
             if (line.blank)
             {
@@ -3792,7 +3908,7 @@ namespace heimdall
         }
 
         std::vector<FormatEdit> edits;
-        for (const auto & hunk: hunks)
+        for (const auto& hunk : hunks)
         {
             FormatEdit edit;
             edit.start_line = hunk.s;
@@ -3821,7 +3937,7 @@ namespace heimdall
 
         std::string output;
         std::size_t cursor = 0;
-        for (const auto & edit: edits)
+        for (const auto& edit : edits)
         {
             // Hunk lines [start_line, end_line) vs the inclusive end_line.
             if (edit.start_line > end_line || edit.end_line <= start_line)

@@ -16,27 +16,36 @@ namespace heimdall
     {
     public:
         MappedBuffer() = default;
-        MappedBuffer(const MappedBuffer &) = delete;
-        MappedBuffer &operator= (const MappedBuffer &) = delete;
-        MappedBuffer(MappedBuffer &&other) noexcept;
-        MappedBuffer &operator= (MappedBuffer &&other) noexcept;
+
+        MappedBuffer(const MappedBuffer&) = delete;
+
+        MappedBuffer& operator= (const MappedBuffer&) = delete;
+
+        MappedBuffer(MappedBuffer&& other) noexcept;
+
+        MappedBuffer& operator= (MappedBuffer&& other) noexcept;
+
         ~MappedBuffer();
 
-        static std::expected<MappedBuffer, std::string> Open(const char *path);
-        static std::expected<MappedBuffer, std::string> Open(const std::string & path);
+        static std::expected<MappedBuffer, std::string> Open(const char* path);
 
-        const char * data() const noexcept
+        static std::expected<MappedBuffer, std::string> Open(const std::string& path);
+
+        const char* data() const noexcept
         {
             return m_data;
         }
+
         std::size_t size() const noexcept
         {
             return m_size;
         }
+
         std::string_view view() const noexcept
         {
             return {m_data, m_size};
         }
+
         bool empty() const noexcept
         {
             return m_size == 0;
@@ -44,12 +53,13 @@ namespace heimdall
 
     private:
         void Release();
-        static std::expected<MappedBuffer, std::string> OpenBuffered(const char *path);
 
-        const char *m_data = "";
+        static std::expected<MappedBuffer, std::string> OpenBuffered(const char* path);
+
+        const char* m_data = "";
         std::size_t m_size = 0;
-        void *m_file_handle = nullptr;
-        void *m_map_handle = nullptr;
+        void* m_file_handle = nullptr;
+        void* m_map_handle = nullptr;
         std::string m_owned;
     };
 

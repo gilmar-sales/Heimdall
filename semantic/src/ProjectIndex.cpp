@@ -19,7 +19,7 @@ namespace heimdall
         index.m_summaries = std::move(summaries);
         for (std::uint32_t s = 0; s < index.m_summaries.size(); ++s)
         {
-            const HeaderSummary &summary = *index.m_summaries[s];
+            const HeaderSummary& summary = *index.m_summaries[s];
             for (std::uint32_t i = 0; i < summary.ExportCount(); ++i)
             {
                 index.m_exports[summary.ExportName(i)].push_back({s, i});
@@ -38,14 +38,14 @@ namespace heimdall
         return index;
     }
 
-    ProjectIndex ProjectIndex::Build(const IncludeProfile &profile)
+    ProjectIndex ProjectIndex::Build(const IncludeProfile& profile)
     {
         std::vector<std::shared_ptr<const HeaderSummary>> summaries;
         std::unordered_set<std::string> seen;
-        for (const auto & entry: profile.entries)
+        for (const auto& entry : profile.entries)
         {
             // Conditional includes are not walked: only their own file is known.
-            const auto add =[&](const std::filesystem::path & file)
+            const auto add =[&](const std::filesystem::path& file)
             {
                 if (file.empty() || profile.IsSystemFile(file) ||
                     !seen.insert(file.lexically_normal().generic_string()).second)
@@ -64,7 +64,7 @@ namespace heimdall
                 add(entry.header);
             }
 
-            for (const auto & file: entry.closure)
+            for (const auto& file : entry.closure)
             {
                 add(file);
             }
@@ -76,13 +76,13 @@ namespace heimdall
     std::span<const ProjectIndex::Ref> ProjectIndex::ExportsNamed(std::string_view name) const
     {
         const auto found = m_exports.find(name);
-        return found == m_exports.end() ? std::span<const Ref>{} : std::span<const Ref>(found->second);
+        return found == m_exports.end() ? std::span<const Ref> {}: std::span<const Ref>(found->second);
     }
 
     std::span<const ProjectIndex::Ref> ProjectIndex::ClassesNamed(std::string_view name) const
     {
         const auto found = m_classes.find(name);
-        return found == m_classes.end() ? std::span<const Ref>{} : std::span<const Ref>(found->second);
+        return found == m_classes.end() ? std::span<const Ref> {}: std::span<const Ref>(found->second);
     }
 
     bool ProjectIndex::HasDerived(std::string_view name) const
@@ -97,7 +97,7 @@ namespace heimdall
     }
 
     ProjectIndex::Tri ProjectIndex::IsPolymorphic(std::string_view name,
-        std::vector<std::string_view> & visiting) const
+        std::vector<std::string_view>& visiting) const
     {
         const auto classes = ClassesNamed(name);
         if (classes.size() != 1 || visiting.size() >= kMaxDepth ||
@@ -106,7 +106,7 @@ namespace heimdall
             return Tri::Unknown;
         }
 
-        const HeaderSummary &summary = *m_summaries[classes.front().summary];
+        const HeaderSummary& summary = *m_summaries[classes.front().summary];
         const std::size_t c = classes.front().index;
         if (summary.ClassHasVirtual(c))
         {

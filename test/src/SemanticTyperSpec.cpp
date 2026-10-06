@@ -13,14 +13,15 @@ namespace
     struct Typed
     {
         explicit Typed(std::string text)
-        : source(std::move(text)), tree(heimdall::ParseTree::Parse(source)), model(heimdall::Binder::Bind(tree)),
-            types(heimdall::Typer::Type(model))
-        {
-        }
-        Typed(const Typed &) = delete;
-        Typed &operator= (const Typed &) = delete;
+        : source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
+            model(heimdall::Binder::Bind(tree)),
+            types(heimdall::Typer::Type(model)) {}
 
-        heimdall::SymbolId Find(const std::string &name) const
+        Typed(const Typed&) = delete;
+
+        Typed& operator= (const Typed&) = delete;
+
+        heimdall::SymbolId Find(const std::string& name) const
         {
             const auto id = model.Names().Find(name);
             for (heimdall::SymbolId symbol = 0; symbol < model.Symbols().Size(); ++symbol)
@@ -34,7 +35,7 @@ namespace
             return heimdall::kNone;
         }
 
-        std::string Of(const std::string &name) const
+        std::string Of(const std::string& name) const
         {
             const auto symbol = Find(name);
             return symbol == heimdall::kNone ? "<no symbol>" : types.Spell(types.SymbolType(symbol));
@@ -46,31 +47,31 @@ namespace
         heimdall::TypeModel types;
     };
 
-    std::string Body(const std::string &statements)
+    std::string Body(const std::string& statements)
     {
         return "void wrapper() {\n" + statements + "\n}\n";
     }
 
-    std::vector<heimdall::Diagnostic> ImplicitBool(const std::string &source)
+    std::vector<heimdall::Diagnostic> ImplicitBool(const std::string& source)
     {
         const Typed typed(source);
         return heimdall::SemanticRules::AnalyzeImplicitBool(typed.types);
     }
 
-    std::vector<heimdall::Diagnostic> RangeLoop(const std::string &source)
+    std::vector<heimdall::Diagnostic> RangeLoop(const std::string& source)
     {
         const Typed typed(source);
         return heimdall::SemanticRules::AnalyzeRangeLoop(typed.types);
     }
 
-    std::vector<heimdall::Diagnostic> LoopConvert(const std::string &source)
+    std::vector<heimdall::Diagnostic> LoopConvert(const std::string& source)
     {
         const Typed typed(source);
         return heimdall::SemanticRules::AnalyzeLoopConvert(typed.types);
     }
 
     // Applies the only fix, replacing the loop it covers.
-    std::string ApplyFix(std::string source, const heimdall::Diagnostic &diagnostic)
+    std::string ApplyFix(std::string source, const heimdall::Diagnostic& diagnostic)
     {
         source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
         return source;
@@ -121,7 +122,7 @@ TEST(TypeTable, ClassifiesBuiltinTypes)
 {
     heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
-    const auto of = [&](heimdall::BuiltinType type)
+    const auto of =[&](heimdall::BuiltinType type)
     {
         return table.Builtin(type);
     };
@@ -423,7 +424,10 @@ TEST(Typer, TypesComparisonsAndLogicalOperators)
         "int i = 0; long l = 0; int* p = 0; double d = 0;\n"
         "auto c1 = i < l; auto c2 = p == nullptr; auto c3 = d != i; auto c4 = i && l; auto c5 = !i; auto c6 = p || d;\n"
         "auto c7 = !p;"));
-    for (const char *name: {"c1", "c2", "c3", "c4", "c5", "c6", "c7"})
+    for (const char* name :
+        {
+            "c1", "c2", "c3", "c4", "c5", "c6", "c7"
+    })
     {
         EXPECT_EQ(typed.Of(name), "bool") << name;
     }
@@ -618,7 +622,7 @@ TEST(Typer, BuiltinCastsTypeTheirWholeExpression)
 TEST(Typer, NodeTypeCoversEveryExpression)
 {
     const Typed typed(Body("int i = 0; long l = 0; auto x = i + l;"));
-    const auto &nodes = typed.tree.Nodes();
+    const auto& nodes = typed.tree.Nodes();
     std::size_t binary = 0;
     for (std::uint32_t node = 0; node < nodes.size(); ++node)
     {
@@ -663,11 +667,11 @@ TEST(Typer, ToleratesBrokenInput)
 {
     const std::string sample =
         "struct P { int x; int* q; int get(); };\n"
-        "void f(P p, std::vector<int>& v) {\n"
-        "    auto a = p.x + (p.get() * 2);\n"
-        "    for (size_t i = 0; i < v.size(); ++i) { if (!v[i] && p.q) {} }\n"
-        "    auto b = static_cast<long>(a) ? p.q : nullptr;\n"
-        "}\n";
+    "void f(P p, std::vector<int>& v) {\n"
+    "    auto a = p.x + (p.get() * 2);\n"
+    "    for (size_t i = 0; i < v.size(); ++i) { if (!v[i] && p.q) {} }\n"
+    "    auto b = static_cast<long>(a) ? p.q : nullptr;\n"
+    "}\n";
     for (std::size_t length = 0; length <= sample.size(); ++length)
     {
         const std::string cut = sample.substr(0, length);
@@ -675,11 +679,15 @@ TEST(Typer, ToleratesBrokenInput)
         EXPECT_NO_FATAL_FAILURE((void) heimdall::SemanticRules::Analyze(typed.model, typed.types)) << cut;
     }
 
-    for (const char *source: {"auto x = ;", "int [", "void f( { int a = (", "a b c d", "auto = 1;", "int a[", "using = int;",
-             "struct { int x; } s; auto y = s.x;", "std::vector<", "static_cast<>(", "x = y ? : z;"})
+    for (const char* source :
+        {
+            "auto x = ;", "int [", "void f( { int a = (", "a b c d", "auto = 1;", "int a[", "using = int;",
+            "struct { int x; } s; auto y = s.x;", "std::vector<", "static_cast<>(", "x = y ? : z;"
+    })
     {
         const Typed typed(source);
-        EXPECT_NO_FATAL_FAILURE((void) heimdall::SemanticRules::Analyze(typed.model, typed.types)) << source;
+        EXPECT_NO_FATAL_FAILURE((void) heimdall::SemanticRules::Analyze(typed.model,
+            typed.types)) << source;
     }
 }
 
@@ -719,7 +727,7 @@ TEST(ImplicitBool, ReportsIntegersFloatsAndPointersInConditions)
     EXPECT_NE(diagnostics[4].message.find("'size_t'"), std::string::npos);
     EXPECT_NE(diagnostics[4].message.find("a 'for' condition"), std::string::npos);
     EXPECT_NE(diagnostics[5].message.find("'?:'"), std::string::npos);
-    for (const auto &diagnostic: diagnostics)
+    for (const auto& diagnostic : diagnostics)
     {
         EXPECT_FALSE(diagnostic.has_fix);
     }
@@ -775,16 +783,16 @@ TEST(ImplicitBool, SilentWhenTheTypeIsUnknown)
 {
     const std::string source =
         "template <class T> void g(T value, T* ptr) { if (value) {} if (ptr) {} }\n"
-        "void f() {\n"
-        "    auto x = missing();\n"
-        "    if (x) {}\n"
-        "    if (unknown_name) {}\n"
-        "    if (!unknown_name) {}\n"
-        "    std::unique_ptr<int> up;\n"
-        "    if (up) {}\n"
-        "    std::optional<int> o;\n"
-        "    if (o && x) {}\n"
-        "}\n";
+    "void f() {\n"
+    "    auto x = missing();\n"
+    "    if (x) {}\n"
+    "    if (unknown_name) {}\n"
+    "    if (!unknown_name) {}\n"
+    "    std::unique_ptr<int> up;\n"
+    "    if (up) {}\n"
+    "    std::optional<int> o;\n"
+    "    if (o && x) {}\n"
+    "}\n";
     const auto diagnostics = ImplicitBool(source);
     // `T*` is known to be a pointer even though T is not
     ASSERT_EQ(diagnostics.size(), 1u);
@@ -795,12 +803,12 @@ TEST(ImplicitBool, SilentForClassesAndEnums)
 {
     const std::string source =
         "struct Flag { explicit operator bool() const; };\n"
-        "enum Mode { Off, On };\n"
-        "void f(Flag flag, Mode mode, Flag* none) {\n"
-        "    if (flag) {}\n"
-        "    if (mode) {}\n"
-        "    if (!flag) {}\n"
-        "}\n";
+    "enum Mode { Off, On };\n"
+    "void f(Flag flag, Mode mode, Flag* none) {\n"
+    "    if (flag) {}\n"
+    "    if (mode) {}\n"
+    "    if (!flag) {}\n"
+    "}\n";
     EXPECT_TRUE(ImplicitBool(source).empty());
 }
 
@@ -838,13 +846,13 @@ TEST(ImplicitBool, ReportsUseOfMembersAndCalls)
 {
     const std::string source =
         "struct S { int n; int* p; int size() const; };\n"
-        "int* find();\n"
-        "void f(S s, S* sp) {\n"
-        "    if (s.n) {}\n"
-        "    if (sp->p) {}\n"
-        "    if (s.size()) {}\n"
-        "    if (find()) {}\n"
-        "}\n";
+    "int* find();\n"
+    "void f(S s, S* sp) {\n"
+    "    if (s.n) {}\n"
+    "    if (sp->p) {}\n"
+    "    if (s.size()) {}\n"
+    "    if (find()) {}\n"
+    "}\n";
     EXPECT_EQ(ImplicitBool(source).size(), 4u);
 }
 
@@ -852,17 +860,20 @@ TEST(ImplicitBool, IgnoresInactiveCode)
 {
     const std::string source =
         "void f(int n) {\n"
-        "#if 0\n"
-        "    if (n) {}\n"
-        "#endif\n"
-        "}\n";
+    "#if 0\n"
+    "    if (n) {}\n"
+    "#endif\n"
+    "}\n";
     EXPECT_TRUE(ImplicitBool(source).empty());
 }
 
 TEST(ImplicitBool, ToleratesBrokenInput)
 {
-    for (const char *source: {"void f(int n) { if (n", "void f() { while (", "void f(int a) { if (a &&", "void f() { for (;",
-             "void f(int a) { a ? : ; }", "void f(int a) { if (a ? b : ) }", "void f(int a) { !", "if ()"})
+    for (const char* source :
+        {
+            "void f(int n) { if (n", "void f() { while (", "void f(int a) { if (a &&", "void f() { for (;",
+            "void f(int a) { a ? : ; }", "void f(int a) { if (a ? b : ) }", "void f(int a) { !", "if ()"
+    })
     {
         EXPECT_NO_FATAL_FAILURE(ImplicitBool(source)) << source;
     }
@@ -874,15 +885,16 @@ TEST(RangeLoop, ConvertsAnIndexLoopOverAVector)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 0; i < v.size(); ++i) {\n"
-        "        use(v[i]);\n"
-        "    }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) {\n"
+    "        use(v[i]);\n"
+    "    }\n"
+    "}\n";
     const auto diagnostics = RangeLoop(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-range-loop");
     EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::ModernizeRangeLoop);
-    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "for (int i = 0; i < v.size(); ++i)");
+    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length),
+        "for (int i = 0; i < v.size(); ++i)");
     EXPECT_TRUE(diagnostics[0].has_fix);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
@@ -897,10 +909,10 @@ TEST(RangeLoop, ConvertsLoopsOverArrays)
 {
     const std::string source =
         "void f() {\n"
-        "    int a[8];\n"
-        "    for (unsigned i = 0; i < 8; i++) a[i] = 0;\n"
-        "    for (size_t j = 0; j < std::size(a); j += 1) { a[j] += a[j]; }\n"
-        "}\n";
+    "    int a[8];\n"
+    "    for (unsigned i = 0; i < 8; i++) a[i] = 0;\n"
+    "    for (size_t j = 0; j < std::size(a); j += 1) { a[j] += a[j]; }\n"
+    "}\n";
     const auto diagnostics = RangeLoop(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
@@ -921,10 +933,10 @@ TEST(RangeLoop, ConvertsLoopsOverStrings)
 {
     const std::string source =
         "int f(const std::string& s) {\n"
-        "    int n = 0;\n"
-        "    for (std::size_t i = 0; i < s.size(); ++i) { if (s[i] == 'a') ++n; }\n"
-        "    return n;\n"
-        "}\n";
+    "    int n = 0;\n"
+    "    for (std::size_t i = 0; i < s.size(); ++i) { if (s[i] == 'a') ++n; }\n"
+    "    return n;\n"
+    "}\n";
     const auto diagnostics = RangeLoop(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
@@ -939,11 +951,11 @@ TEST(RangeLoop, KeepsConstOfConstArrays)
 {
     const std::string source =
         "int f() {\n"
-        "    const int a[2] = {1, 2};\n"
-        "    int sum = 0;\n"
-        "    for (int i = 0; i < 2; ++i) sum += a[i];\n"
-        "    return sum;\n"
-        "}\n";
+    "    const int a[2] = {1, 2};\n"
+    "    int sum = 0;\n"
+    "    for (int i = 0; i < 2; ++i) sum += a[i];\n"
+    "    return sum;\n"
+    "}\n";
     const auto diagnostics = RangeLoop(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_NE(diagnostics[0].fix.replacement.find("const auto& element : a"), std::string::npos);
@@ -953,9 +965,9 @@ TEST(RangeLoop, PicksANameThatIsNotInUse)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    int element = 0;\n"
-        "    for (int i = 0; i < v.size(); ++i) { element += v[i]; }\n"
-        "}\n";
+    "    int element = 0;\n"
+    "    for (int i = 0; i < v.size(); ++i) { element += v[i]; }\n"
+    "}\n";
     const auto diagnostics = RangeLoop(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_NE(diagnostics[0].fix.replacement.find("auto& item : v"), std::string::npos);
@@ -966,12 +978,12 @@ TEST(RangeLoop, SilentWhenTheIndexIsUsedForAnythingElse)
 {
     const std::string source =
         "void f(std::vector<int>& v, int* out) {\n"
-        "    for (int i = 0; i < v.size(); ++i) { out[i] = v[i]; }\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(i, v[i]); }\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i + 1]); }\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i], v[i - 1]); }\n"
-        "    for (int i = 0; i < v.size(); ++i) { }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) { out[i] = v[i]; }\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(i, v[i]); }\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i + 1]); }\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i], v[i - 1]); }\n"
+    "    for (int i = 0; i < v.size(); ++i) { }\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -979,10 +991,10 @@ TEST(RangeLoop, SilentWhenTheContainerIsUsedOtherwise)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 0; i < v.size(); ++i) { if (v[i]) v.push_back(1); }\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v, v[i]); }\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v.back(), v[i]); }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) { if (v[i]) v.push_back(1); }\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v, v[i]); }\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v.back(), v[i]); }\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -990,12 +1002,12 @@ TEST(RangeLoop, SilentWhenTheContainerTypeIsUnknown)
 {
     const std::string source =
         "void f(Foo& foo, int* raw, int n) {\n"
-        "    for (int i = 0; i < foo.size(); ++i) { use(foo[i]); }\n"
-        "    for (int i = 0; i < n; ++i) { use(raw[i]); }\n"
-        "    for (int i = 0; i < unknown.size(); ++i) { use(unknown[i]); }\n"
-        "    for (int i = 0; i < std::size(raw); ++i) { use(raw[i]); }\n"
-        "}\n"
-        "template <class C> void g(C& c) { for (int i = 0; i < c.size(); ++i) { use(c[i]); } }\n";
+    "    for (int i = 0; i < foo.size(); ++i) { use(foo[i]); }\n"
+    "    for (int i = 0; i < n; ++i) { use(raw[i]); }\n"
+    "    for (int i = 0; i < unknown.size(); ++i) { use(unknown[i]); }\n"
+    "    for (int i = 0; i < std::size(raw); ++i) { use(raw[i]); }\n"
+    "}\n"
+    "template <class C> void g(C& c) { for (int i = 0; i < c.size(); ++i) { use(c[i]); } }\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1003,10 +1015,10 @@ TEST(RangeLoop, SilentWhenTheArrayBoundDiffers)
 {
     const std::string source =
         "void f() {\n"
-        "    int a[8];\n"
-        "    for (int i = 0; i < 4; ++i) use(a[i]);\n"
-        "    for (int i = 0; i < 9; ++i) use(a[i]);\n"
-        "}\n";
+    "    int a[8];\n"
+    "    for (int i = 0; i < 4; ++i) use(a[i]);\n"
+    "    for (int i = 0; i < 9; ++i) use(a[i]);\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1021,15 +1033,15 @@ TEST(RangeLoop, SilentForOtherLoopShapes)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 1; i < v.size(); ++i) use(v[i]);\n"
-        "    for (int i = 0; i <= v.size(); ++i) use(v[i]);\n"
-        "    for (int i = 0; i < v.size(); i += 2) use(v[i]);\n"
-        "    for (int i = 0; i < v.size(); --i) use(v[i]);\n"
-        "    for (double d = 0; d < v.size(); ++d) use(v[d]);\n"
-        "    for (int i = 0, j = 0; i < v.size(); ++i) use(v[i]);\n"
-        "    for (auto& x: v) use(x);\n"
-        "    for (int i = 0; i < v.size();) use(v[i++]);\n"
-        "}\n";
+    "    for (int i = 1; i < v.size(); ++i) use(v[i]);\n"
+    "    for (int i = 0; i <= v.size(); ++i) use(v[i]);\n"
+    "    for (int i = 0; i < v.size(); i += 2) use(v[i]);\n"
+    "    for (int i = 0; i < v.size(); --i) use(v[i]);\n"
+    "    for (double d = 0; d < v.size(); ++d) use(v[d]);\n"
+    "    for (int i = 0, j = 0; i < v.size(); ++i) use(v[i]);\n"
+    "    for (auto& x: v) use(x);\n"
+    "    for (int i = 0; i < v.size();) use(v[i++]);\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1037,8 +1049,8 @@ TEST(RangeLoop, SilentWhenALambdaCouldCaptureTheIndex)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 0; i < v.size(); ++i) { run([&] { use(v[i]); }); }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) { run([&] { use(v[i]); }); }\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1046,9 +1058,9 @@ TEST(RangeLoop, SilentForClassMembers)
 {
     const std::string source =
         "struct S {\n"
-        "    std::vector<int> items;\n"
-        "    void f() { for (int i = 0; i < items.size(); ++i) { use(items[i]); } }\n"
-        "};\n";
+    "    std::vector<int> items;\n"
+    "    void f() { for (int i = 0; i < items.size(); ++i) { use(items[i]); } }\n"
+    "};\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1056,8 +1068,8 @@ TEST(RangeLoop, SilentWhenTheIndexIsShadowed)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 0; i < v.size(); ++i) { for (int i = 0; i < 2; ++i) { use(v[i]); } }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) { for (int i = 0; i < 2; ++i) { use(v[i]); } }\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1065,10 +1077,10 @@ TEST(RangeLoop, IgnoresInactiveCode)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "#if 0\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
-        "#endif\n"
-        "}\n";
+    "#if 0\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
+    "#endif\n"
+    "}\n";
     EXPECT_TRUE(RangeLoop(source).empty());
 }
 
@@ -1076,8 +1088,8 @@ TEST(RangeLoop, ToleratesBrokenInput)
 {
     const std::string sample =
         "void f(std::vector<int>& v) {\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
-        "}\n";
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
+    "}\n";
     for (std::size_t length = 0; length <= sample.size(); ++length)
     {
         EXPECT_NO_FATAL_FAILURE(RangeLoop(sample.substr(0, length))) << length;
@@ -1090,10 +1102,10 @@ TEST(LoopConvert, ConvertsAnIteratorLoop)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) {\n"
-        "        use(*it);\n"
-        "    }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) {\n"
+    "        use(*it);\n"
+    "    }\n"
+    "}\n";
     const auto diagnostics = LoopConvert(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-loop-convert");
@@ -1113,9 +1125,9 @@ TEST(LoopConvert, ConvertsMemberAccessAndMapIteration)
 {
     const std::string source =
         "void f(std::map<int, std::string>& m, std::list<Foo>& l) {\n"
-        "    for (auto it = m.begin(); it != m.end(); it++) use(it->first, it->second);\n"
-        "    for (auto it = l.begin(); it != l.end(); ++it) { it->run(); (*it).stop(); }\n"
-        "}\n";
+    "    for (auto it = m.begin(); it != m.end(); it++) use(it->first, it->second);\n"
+    "    for (auto it = l.begin(); it != l.end(); ++it) { it->run(); (*it).stop(); }\n"
+    "}\n";
     const auto diagnostics = LoopConvert(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
@@ -1134,9 +1146,9 @@ TEST(LoopConvert, UsesConstForConstContainersAndCbegin)
 {
     const std::string source =
         "void f(const std::vector<int>& v, std::vector<int>& w) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) use(*it);\n"
-        "    for (auto it = w.cbegin(); it != w.cend(); ++it) use(*it);\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) use(*it);\n"
+    "    for (auto it = w.cbegin(); it != w.cend(); ++it) use(*it);\n"
+    "}\n";
     const auto diagnostics = LoopConvert(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_NE(diagnostics[0].fix.replacement.find("const auto& element : v"), std::string::npos);
@@ -1147,22 +1159,24 @@ TEST(LoopConvert, ConvertsFreeBeginEndOverArraysAndContainers)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    int a[4];\n"
-        "    for (auto it = std::begin(a); it != std::end(a); ++it) *it = 0;\n"
-        "    for (auto it = std::begin(v); it != std::end(v); ++it) use(*it);\n"
-        "}\n";
+    "    int a[4];\n"
+    "    for (auto it = std::begin(a); it != std::end(a); ++it) *it = 0;\n"
+    "    for (auto it = std::begin(v); it != std::end(v); ++it) use(*it);\n"
+    "}\n";
     const auto diagnostics = LoopConvert(source);
     ASSERT_EQ(diagnostics.size(), 2u);
-    EXPECT_NE(diagnostics[0].fix.replacement.find("for (auto& element : a) element = 0;"), std::string::npos);
-    EXPECT_NE(diagnostics[1].fix.replacement.find("for (auto& element : v) use(element);"), std::string::npos);
+    EXPECT_NE(diagnostics[0].fix.replacement.find("for (auto& element : a) element = 0;"),
+        std::string::npos);
+    EXPECT_NE(diagnostics[1].fix.replacement.find("for (auto& element : v) use(element);"),
+        std::string::npos);
 }
 
 TEST(LoopConvert, MultiplicationIsNotADereference)
 {
     const std::string source =
         "void f(std::vector<int>& v, int k) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(k * it); }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(k * it); }\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1170,12 +1184,12 @@ TEST(LoopConvert, SilentWhenTheIteratorEscapes)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(it); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(*(it + 1)); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { v.erase(it); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { auto next = it; }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(it); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(*(it + 1)); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { v.erase(it); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { auto next = it; }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { }\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1183,9 +1197,9 @@ TEST(LoopConvert, SilentWhenTheContainerIsTouched)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { if (*it) v.push_back(1); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(v.size(), *it); }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) { if (*it) v.push_back(1); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(v.size(), *it); }\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1193,11 +1207,11 @@ TEST(LoopConvert, SilentForUnknownContainers)
 {
     const std::string source =
         "void f(Foo& foo, int* raw) {\n"
-        "    for (auto it = foo.begin(); it != foo.end(); ++it) use(*it);\n"
-        "    for (auto it = unknown.begin(); it != unknown.end(); ++it) use(*it);\n"
-        "    for (auto it = std::begin(raw); it != std::end(raw); ++it) use(*it);\n"
-        "}\n"
-        "template <class C> void g(C& c) { for (auto it = c.begin(); it != c.end(); ++it) use(*it); }\n";
+    "    for (auto it = foo.begin(); it != foo.end(); ++it) use(*it);\n"
+    "    for (auto it = unknown.begin(); it != unknown.end(); ++it) use(*it);\n"
+    "    for (auto it = std::begin(raw); it != std::end(raw); ++it) use(*it);\n"
+    "}\n"
+    "template <class C> void g(C& c) { for (auto it = c.begin(); it != c.end(); ++it) use(*it); }\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1205,14 +1219,14 @@ TEST(LoopConvert, SilentForOtherLoopShapes)
 {
     const std::string source =
         "void f(std::vector<int>& v, std::vector<int>& w) {\n"
-        "    for (auto it = v.begin(); it != w.end(); ++it) use(*it);\n"
-        "    for (auto it = v.begin(); it != v.end(); it += 2) use(*it);\n"
-        "    for (auto it = v.begin() + 1; it != v.end(); ++it) use(*it);\n"
-        "    for (auto it = v.rbegin(); it != v.rend(); ++it) use(*it);\n"
-        "    for (std::vector<int>::iterator it = v.begin(); it != v.end(); ++it) use(*it);\n"
-        "    for (auto it = v.begin(); it < v.end(); ++it) use(*it);\n"
-        "    for (auto it = v.cbegin(); it != v.end(); ++it) use(*it);\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != w.end(); ++it) use(*it);\n"
+    "    for (auto it = v.begin(); it != v.end(); it += 2) use(*it);\n"
+    "    for (auto it = v.begin() + 1; it != v.end(); ++it) use(*it);\n"
+    "    for (auto it = v.rbegin(); it != v.rend(); ++it) use(*it);\n"
+    "    for (std::vector<int>::iterator it = v.begin(); it != v.end(); ++it) use(*it);\n"
+    "    for (auto it = v.begin(); it < v.end(); ++it) use(*it);\n"
+    "    for (auto it = v.cbegin(); it != v.end(); ++it) use(*it);\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1220,10 +1234,10 @@ TEST(LoopConvert, SilentForVectorOfBoolAndMembers)
 {
     const std::string source =
         "struct S {\n"
-        "    std::vector<int> items;\n"
-        "    void f() { for (auto it = items.begin(); it != items.end(); ++it) use(*it); }\n"
-        "};\n"
-        "void g(std::vector<bool>& v) { for (auto it = v.begin(); it != v.end(); ++it) use(*it); }\n";
+    "    std::vector<int> items;\n"
+    "    void f() { for (auto it = items.begin(); it != items.end(); ++it) use(*it); }\n"
+    "};\n"
+    "void g(std::vector<bool>& v) { for (auto it = v.begin(); it != v.end(); ++it) use(*it); }\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1231,8 +1245,8 @@ TEST(LoopConvert, SilentWhenALambdaCouldCaptureTheIterator)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { run([&] { use(*it); }); }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) { run([&] { use(*it); }); }\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1240,10 +1254,10 @@ TEST(LoopConvert, IgnoresInactiveCode)
 {
     const std::string source =
         "void f(std::vector<int>& v) {\n"
-        "#if 0\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) use(*it);\n"
-        "#endif\n"
-        "}\n";
+    "#if 0\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) use(*it);\n"
+    "#endif\n"
+    "}\n";
     EXPECT_TRUE(LoopConvert(source).empty());
 }
 
@@ -1251,8 +1265,8 @@ TEST(LoopConvert, ToleratesBrokenInput)
 {
     const std::string sample =
         "void f(std::vector<int>& v) {\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); it->x; }\n"
-        "}\n";
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); it->x; }\n"
+    "}\n";
     for (std::size_t length = 0; length <= sample.size(); ++length)
     {
         EXPECT_NO_FATAL_FAILURE(LoopConvert(sample.substr(0, length))) << length;
@@ -1263,25 +1277,31 @@ TEST(LoopConvert, ToleratesBrokenInput)
 
 TEST(TyperRules, AreInTheCatalog)
 {
-    for (const char *code: {"cpp/no-implicit-bool-conversion", "cpp/modernize-range-loop", "cpp/modernize-loop-convert"})
+    for (const char* code :
+        {
+            "cpp/no-implicit-bool-conversion", "cpp/modernize-range-loop", "cpp/modernize-loop-convert"
+    })
     {
         EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
     }
 
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-implicit-bool-conversion")->id, heimdall::RuleId::NoImplicitBoolConversion);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-range-loop")->id, heimdall::RuleId::ModernizeRangeLoop);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-loop-convert")->id, heimdall::RuleId::ModernizeLoopConvert);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-implicit-bool-conversion") -> id,
+        heimdall::RuleId::NoImplicitBoolConversion);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-range-loop") -> id,
+        heimdall::RuleId::ModernizeRangeLoop);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-loop-convert") -> id,
+        heimdall::RuleId::ModernizeLoopConvert);
 }
 
 TEST(TyperRules, AnalyzeRunsThemAllSortedByOffset)
 {
     const std::string source =
         "void f(std::vector<int>& v, int n) {\n"
-        "    if (n) {}\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); }\n"
-        "    void* p = (void*)0;\n"
-        "}\n";
+    "    if (n) {}\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); }\n"
+    "    void* p = (void*)0;\n"
+    "}\n";
     const Typed typed(source);
     const auto with_types = heimdall::SemanticRules::Analyze(typed.model, typed.types);
     const auto standalone = heimdall::SemanticRules::Analyze(typed.model);
@@ -1301,10 +1321,10 @@ TEST(TyperRules, PolicyCanDisableAndSuppressEachRule)
 {
     const std::string source =
         "void f(std::vector<int>& v, int n) {\n"
-        "    if (n) {} // heimdall-disable-line cpp/no-implicit-bool-conversion\n"
-        "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
-        "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); }\n"
-        "}\n";
+    "    if (n) {} // heimdall-disable-line cpp/no-implicit-bool-conversion\n"
+    "    for (int i = 0; i < v.size(); ++i) { use(v[i]); }\n"
+    "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); }\n"
+    "}\n";
     const Typed typed(source);
     const auto raw = heimdall::SemanticRules::Analyze(typed.model, typed.types);
     ASSERT_EQ(raw.size(), 3u);
@@ -1323,7 +1343,10 @@ TEST(TyperRules, TypeModelIsIndependentOfTheRuleThatAsksForIt)
     const Typed first(source);
     const Typed second(source);
     ASSERT_EQ(first.types.Types().Size(), second.types.Types().Size());
-    for (const char *name: {"a", "b", "c"})
+    for (const char* name :
+        {
+            "a", "b", "c"
+    })
     {
         EXPECT_EQ(first.Of(name), second.Of(name));
     }

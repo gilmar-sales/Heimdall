@@ -31,7 +31,7 @@ namespace heimdall::cli
 )";
     }
 
-    bool RunInit(const Options &options, std::string &error, std::filesystem::path &created_path)
+    bool RunInit(const Options& options, std::string& error, std::filesystem::path& created_path)
     {
         std::filesystem::path directory;
         if (!options.inputs.empty())

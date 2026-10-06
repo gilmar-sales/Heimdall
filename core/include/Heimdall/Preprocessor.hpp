@@ -62,6 +62,7 @@ namespace heimdall
     struct TransparentStringHash
     {
         using is_transparent = void;
+
         std::size_t operator()(std::string_view text) const noexcept
         {
             return std::hash<std::string_view>{}
@@ -83,8 +84,10 @@ namespace heimdall
         // same full expression as Process(), which is safe.
         Preprocessor()
         : m_owned(std::make_shared<const MacroMap>()), m_predefined(m_owned.get()) {}
+
         // Non-owning view: zero copies.
-        explicit Preprocessor(const MacroMap &predefined) : m_predefined(&predefined) {}
+        explicit Preprocessor(const MacroMap& predefined) : m_predefined(&predefined) {}
+
         explicit Preprocessor(std::shared_ptr<const MacroMap> predefined)
         : m_owned(std::move(predefined)), m_predefined(m_owned.get())
         {
@@ -102,7 +105,7 @@ namespace heimdall
 
     private:
         std::shared_ptr<const MacroMap> m_owned;
-        const MacroMap *m_predefined = nullptr;
+        const MacroMap* m_predefined = nullptr;
     };
 
 } // namespace heimdall

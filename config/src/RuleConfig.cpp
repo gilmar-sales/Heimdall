@@ -17,7 +17,7 @@ namespace heimdall
             return heimdall::IsKnownRuleCode(code);
         }
 
-        bool IsGitRoot(const std::filesystem::path & directory)
+        bool IsGitRoot(const std::filesystem::path& directory)
         {
             // A `.git` entry marks the repository root: a directory for a
             // normal checkout, or a file (gitfile) for worktrees/submodules.
@@ -25,7 +25,7 @@ namespace heimdall
             return std::filesystem::exists(directory / ".git", ec) && !ec;
         }
 
-        std::string ErrorFor(const std::filesystem::path & path, simdjson::error_code error)
+        std::string ErrorFor(const std::filesystem::path& path, simdjson::error_code error)
         {
             return "cannot parse Heimdall config '" + path.string() + "': " +
                 std::string(simdjson::error_message(error));
@@ -33,7 +33,8 @@ namespace heimdall
 
     } // namespace
 
-    std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const std::filesystem::path & path)
+    std::expected<RuleConfiguration,
+        std::string> LoadRuleConfiguration(const std::filesystem::path& path)
     {
         simdjson::dom::parser parser;
         simdjson::dom::element document;
@@ -58,7 +59,7 @@ namespace heimdall
                 return std::unexpected("'rules' in Heimdall config must be an object: " + path.string());
             }
 
-            for (const auto field: rules)
+            for (const auto field : rules)
             {
                 const std::string_view code = field.key;
                 if (!IsKnownRule(code))
@@ -92,6 +93,7 @@ namespace heimdall
                     return std::unexpected("invalid setting for rule '" + std::string(code) +
                         "': expected 'off', 'warning' or 'error'");
                 }
+
                 configuration.options.overrides.push_back(std::move(override));
             }
         }
@@ -149,7 +151,7 @@ namespace heimdall
             std::vector<IncludeGroup> parsed_order;
             bool saw_angle = false;
             bool saw_quote = false;
-            for (const auto group: groups)
+            for (const auto group : groups)
             {
                 std::string_view name;
                 if (const auto error = group.get_string().get(name); error)
@@ -163,6 +165,7 @@ namespace heimdall
                     {
                         return std::unexpected("'angle' appears more than once in 'include-order': " + path.string());
                     }
+
                     saw_angle = true;
                     parsed_order.push_back(IncludeGroup::Angle);
                 }
@@ -172,6 +175,7 @@ namespace heimdall
                     {
                         return std::unexpected("'quote' appears more than once in 'include-order': " + path.string());
                     }
+
                     saw_quote = true;
                     parsed_order.push_back(IncludeGroup::Quote);
                 }
@@ -181,7 +185,7 @@ namespace heimdall
                 }
             }
 
-            if (!saw_angle || !saw_quote)
+            if (!saw_angle ||!saw_quote)
             {
                 return std::unexpected("'groups' in 'include-order' must list both 'angle' and 'quote': " + path.string());
             }
@@ -224,8 +228,8 @@ namespace heimdall
                 }
 
                 configuration.options.doc_scope = scope == "public" ? DocScope::Public
-                    : scope == "private" ? DocScope::Private
-                                         : DocScope::All;
+                : scope == "private" ? DocScope::Private
+                : DocScope::All;
                 configuration.has_doc_scope = true;
             }
         }
@@ -239,27 +243,35 @@ namespace heimdall
                 return std::unexpected("'format' in Heimdall config must be an object: " + path.string());
             }
 
-            for (const auto field: format)
+            for (const auto field : format)
             {
                 const std::string_view key = field.key;
                 if (key == "blank-line-between-methods")
                 {
                     bool setting;
                     if (field.value.get_bool().get(setting))
+                    {
                         return std::unexpected("'blank-line-between-methods' in 'format' must be a boolean: " + path.string());
+                    }
+
                     configuration.format_options.blank_line_between_methods = setting;
                     configuration.has_blank_line_between_methods = true;
                     continue;
                 }
+
                 if (key == "max-parameters-per-line")
                 {
                     std::uint64_t setting;
                     if (field.value.get_uint64().get(setting) || setting > std::numeric_limits<std::size_t>::max())
+                    {
                         return std::unexpected("'max-parameters-per-line' in 'format' must be a non-negative integer: " + path.string());
+                    }
+
                     configuration.format_options.max_parameters_per_line = static_cast<std::size_t>(setting);
                     configuration.has_max_parameters_per_line = true;
                     continue;
                 }
+
                 std::string_view setting;
                 if (const auto error = field.value.get_string().get(setting); error)
                 {
@@ -282,6 +294,7 @@ namespace heimdall
                         return std::unexpected("invalid 'pointer-alignment' in Heimdall config '" +
                             path.string() + "': expected 'left' or 'right'");
                     }
+
                     configuration.has_pointer_alignment = true;
                 }
                 else if (key == "reference-alignment")
@@ -299,6 +312,7 @@ namespace heimdall
                         return std::unexpected("invalid 'reference-alignment' in Heimdall config '" +
                             path.string() + "': expected 'left' or 'right'");
                     }
+
                     configuration.has_reference_alignment = true;
                 }
                 else
@@ -312,7 +326,7 @@ namespace heimdall
     }
 
     std::expected<std::vector<RuleConfiguration>, std::string> FindConfigurations(
-        const std::filesystem::path & directory)
+        const std::filesystem::path& directory)
     {
         std::vector<RuleConfiguration> configurations;
         auto current = directory;
@@ -320,10 +334,12 @@ namespace heimdall
         {
             current = std::filesystem::current_path();
         }
+
         if (std::filesystem::is_regular_file(current))
         {
             current = current.parent_path();
         }
+
         current = std::filesystem::absolute(current).lexically_normal();
 
         while (!current.empty())
@@ -337,6 +353,7 @@ namespace heimdall
                 {
                     return std::unexpected(loaded.error());
                 }
+
                 const bool reached_root = loaded->root;
                 configurations.push_back(std::move(*loaded));
                 if (reached_root)
@@ -358,6 +375,7 @@ namespace heimdall
             {
                 break;
             }
+
             current = parent;
         }
 
@@ -365,14 +383,15 @@ namespace heimdall
     }
 
     std::expected<std::optional<RuleOptions>, std::string> FindRuleOptions(
-        const std::filesystem::path & directory)
+        const std::filesystem::path& directory)
     {
         auto found = FindConfigurations(directory);
         if (!found)
         {
             return std::unexpected(found.error());
         }
-        auto & configurations = *found;
+
+        auto& configurations = *found;
 
         if (configurations.empty())
         {
@@ -388,28 +407,32 @@ namespace heimdall
             {
                 merged.honor_suppressions = it->options.honor_suppressions;
             }
+
             if (it->has_include_order)
             {
                 merged.include_order = it->options.include_order;
                 merged.include_case_insensitive = it->options.include_case_insensitive;
             }
+
             if (it->has_doc_scope)
             {
                 merged.doc_scope = it->options.doc_scope;
             }
         }
+
         return std::optional<RuleOptions>{std::move(merged)};
     }
 
     std::expected<std::optional<FormatOptions>, std::string> FindFormatOptions(
-        const std::filesystem::path & directory)
+        const std::filesystem::path& directory)
     {
         auto found = FindConfigurations(directory);
         if (!found)
         {
             return std::unexpected(found.error());
         }
-        auto & configurations = *found;
+
+        auto& configurations = *found;
 
         if (configurations.empty())
         {
@@ -423,15 +446,23 @@ namespace heimdall
             {
                 merged.pointer_alignment = it->format_options.pointer_alignment;
             }
+
             if (it->has_reference_alignment)
             {
                 merged.reference_alignment = it->format_options.reference_alignment;
             }
+
             if (it->has_blank_line_between_methods)
+            {
                 merged.blank_line_between_methods = it->format_options.blank_line_between_methods;
+            }
+
             if (it->has_max_parameters_per_line)
+            {
                 merged.max_parameters_per_line = it->format_options.max_parameters_per_line;
+            }
         }
+
         return std::optional<FormatOptions>{std::move(merged)};
     }
 

@@ -34,28 +34,34 @@ namespace heimdall
             No,
             Yes,
             Unknown
-        };
+        }
 
-        static ProjectIndex Build(const IncludeProfile &profile);
+        ;
+
+        static ProjectIndex Build(const IncludeProfile& profile);
+
         static ProjectIndex FromSummaries(std::vector<std::shared_ptr<const HeaderSummary>> summaries);
 
-        const std::vector<std::shared_ptr<const HeaderSummary>> & Summaries() const noexcept
+        const std::vector<std::shared_ptr<const HeaderSummary>>& Summaries() const noexcept
         {
             return m_summaries;
         }
+
         // Exports called `name`, in no particular order.
         std::span<const Ref> ExportsNamed(std::string_view name) const;
+
         std::span<const Ref> ClassesNamed(std::string_view name) const;
 
         // Whether the class called `name` has a virtual function of its own or
         // through its bases, following bases through the indexed headers. Unknown
         // when the name is ambiguous or a base is not in the index.
         Tri IsPolymorphic(std::string_view name) const;
+
         // Some indexed class lists `name` among its bases.
         bool HasDerived(std::string_view name) const;
 
     private:
-        Tri IsPolymorphic(std::string_view name, std::vector<std::string_view> & visiting) const;
+        Tri IsPolymorphic(std::string_view name, std::vector<std::string_view>& visiting) const;
 
         std::vector<std::shared_ptr<const HeaderSummary>> m_summaries;
         std::unordered_map<std::string_view, std::vector<Ref>> m_exports;

@@ -10,7 +10,11 @@ TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
     const auto tree = heimdall::SyntaxTree::Parse(source);
 
     std::string reconstructed;
-    for (const auto& token : tree.Tokens()) reconstructed.append(tree.Text(token));
+    for (const auto& token : tree.Tokens())
+    {
+        reconstructed.append(tree.Text(token));
+    }
+
     EXPECT_EQ(reconstructed, source);
     ASSERT_EQ(tree.Nodes().front().kind, heimdall::SyntaxKind::TranslationUnit);
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
@@ -25,6 +29,7 @@ TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
         brackets += node.kind == heimdall::SyntaxKind::BracketedGroup;
         braces += node.kind == heimdall::SyntaxKind::BracedGroup;
     }
+
     EXPECT_EQ(parens, 2);
     EXPECT_EQ(brackets, 1);
     EXPECT_EQ(braces, 1);
@@ -52,8 +57,11 @@ TEST(SyntaxTreeSpec, EnforcesNestingLimitAndStillProducesTree)
 TEST(SyntaxTreeSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
 {
     constexpr std::string_view source = "int f() { return 0; }";
-    for (const auto standard : { heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,
-                                 heimdall::CppStandard::Cpp26 })
+    for (const auto standard :
+        {
+            heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,
+            heimdall::CppStandard::Cpp26
+    })
     {
         const auto tree = heimdall::SyntaxTree::Parse(source, standard);
         EXPECT_EQ(tree.Standard(), standard);

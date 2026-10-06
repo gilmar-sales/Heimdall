@@ -50,7 +50,7 @@ namespace heimdall::detail
     class ConstantAnalysis
     {
     public:
-        explicit ConstantAnalysis(const FlowModel &flow);
+        explicit ConstantAnalysis(const FlowModel& flow);
 
         Specifiers SpecifiersOf(std::uint32_t decl_node, std::uint32_t name_token) const;
 
@@ -63,12 +63,15 @@ namespace heimdall::detail
             None,
             ReplaceConst,   // `const T x = c;`: write `constexpr` instead of `const`
             InsertConstexpr // `T x = c;` that nothing modifies: add `constexpr`
-        };
+        }
+
+        ;
         // What the constexpr rule would do to this variable.
         Candidate ConstexprVariable(SymbolId variable);
 
         // A function that is not declared `constexpr` but could be.
         bool EligibleFunction(SymbolId function);
+
         bool DeclaredConstexpr(SymbolId function) const;
 
         // The declaration names exactly one variable.
@@ -89,6 +92,7 @@ namespace heimdall::detail
             std::int64_t i = 0;
             double f = 0;
         };
+
         class Parser;
 
         enum class State : std::uint8_t
@@ -97,22 +101,31 @@ namespace heimdall::detail
             Visiting,
             Yes,
             No
-        };
+        }
+
+        ;
 
         bool Literal(TypeId type, bool allow_void) const;
+
         bool UsableInConstantExpression(SymbolId variable);
+
         bool CalleeUsable(SymbolId callee, SymbolId current);
+
         bool CouldBeConstexpr(SymbolId function);
+
         bool BodyIsConstexprSafe(SymbolId function, FunctionId id);
-        const std::vector<SymbolId> &LocalsOf(FunctionId function);
-        bool InitializerRange(SymbolId variable, std::size_t &begin, std::size_t &end) const;
+
+        const std::vector<SymbolId>& LocalsOf(FunctionId function);
+
+        bool InitializerRange(SymbolId variable, std::size_t& begin, std::size_t& end) const;
+
         bool InAnonymousNamespace(ScopeId scope) const;
 
-        const FlowModel &m_flow;
-        const TypeModel &m_types;
-        const TypeTable &m_table;
-        const SemanticModel &m_model;
-        const SymbolTable &m_symbols;
+        const FlowModel& m_flow;
+        const TypeModel& m_types;
+        const TypeTable& m_table;
+        const SemanticModel& m_model;
+        const SymbolTable& m_symbols;
         TokenView m_view;
         std::unordered_map<SymbolId, State> m_initializer;
         std::unordered_map<SymbolId, State> m_function;

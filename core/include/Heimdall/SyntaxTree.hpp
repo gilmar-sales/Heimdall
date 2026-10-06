@@ -48,6 +48,7 @@ namespace heimdall
 
         static SyntaxTree Parse(std::string_view source,
             std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
+
         static SyntaxTree Parse(std::string_view source, CppStandard standard,
             std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
 
@@ -87,7 +88,9 @@ namespace heimdall
         }
 
         std::vector<std::size_t> Children(std::size_t node_index) const;
+
         bool IsDescendant(std::size_t node_index, std::size_t candidate) const noexcept;
+
         void HoldSource(std::shared_ptr<const std::string> owned);
 
     private:

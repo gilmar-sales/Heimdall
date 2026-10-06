@@ -11,12 +11,12 @@ namespace heimdall::detail
     // True when the head of the class whose name is at `name_token` says
     // `final` (`class A final : B {`). Reads tokens from the name up to the base
     // clause or the body.
-    inline bool ClassHeadIsFinal(const ParseTree &tree, std::uint32_t name_token)
+    inline bool ClassHeadIsFinal(const ParseTree& tree, std::uint32_t name_token)
     {
-        const auto &tokens = tree.Tokens();
+        const auto& tokens = tree.Tokens();
         for (std::size_t i = std::size_t{name_token} + 1; i < tokens.size(); ++i)
         {
-            const Token &token = tokens[i];
+            const Token& token = tokens[i];
             if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
                 token.kind == TokenKind::BlockComment)
             {
@@ -28,7 +28,7 @@ namespace heimdall::detail
                 return false;
             }
 
-            if (token.tok == Tok::KwFinal || (token.kind == TokenKind::Identifier && tree.Text(token) == "final"))
+            if (token.tok == Tok::KwFinal ||(token.kind == TokenKind::Identifier && tree.Text(token) == "final"))
             {
                 return true;
             }
@@ -39,16 +39,16 @@ namespace heimdall::detail
 
     // Per class symbol: declares a virtual, override, final or pure member
     // function. Indexed by SymbolId; non-classes are false.
-    inline std::vector<std::uint8_t> ClassesWithVirtualMembers(const SemanticModel &model)
+    inline std::vector<std::uint8_t> ClassesWithVirtualMembers(const SemanticModel& model)
     {
-        const auto &symbols = model.Symbols();
-        const auto &scopes = model.Scopes();
+        const auto& symbols = model.Symbols();
+        const auto& scopes = model.Scopes();
         std::vector<std::uint8_t> result(symbols.Size(), 0);
         constexpr std::uint32_t virtualish = SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final |
             SymbolFlag::Pure;
         for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
         {
-            if (symbols.kind[symbol] != SymbolKind::Function || (symbols.flags[symbol] & virtualish) == 0)
+            if (symbols.kind[symbol] != SymbolKind::Function ||(symbols.flags[symbol] & virtualish) == 0)
             {
                 continue;
             }

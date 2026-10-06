@@ -34,7 +34,10 @@ namespace heimdall
             return std::filesystem::path(text);
         }
 
-        void ParseOption(CompileCommand& command, std::string_view arg, std::string_view next,
+        void ParseOption(
+            CompileCommand& command,
+            std::string_view arg,
+            std::string_view next,
             bool& consume_next)
         {
             consume_next = false;
@@ -285,7 +288,7 @@ namespace heimdall
         }
 
         CompileDatabase database;
-        for (simdjson::dom::element entry_element: entries)
+        for (simdjson::dom::element entry_element : entries)
         {
             simdjson::dom::object entry;
             if (entry_element.get_object().get(entry))
@@ -322,7 +325,7 @@ namespace heimdall
                 simdjson::dom::array args;
                 if (!args_element.get_array().get(args))
                 {
-                    for (simdjson::dom::element arg: args)
+                    for (simdjson::dom::element arg : args)
                     {
                         std::string_view value;
                         if (!arg.get_string().get(value))
@@ -359,10 +362,10 @@ namespace heimdall
         return database;
     }
 
-    const CompileCommand * CompileDatabase::Find(std::filesystem::path file) const
+    const CompileCommand* CompileDatabase::Find(std::filesystem::path file) const
     {
         file = ComparableKey(file);
-        for (const auto & command: m_commands)
+        for (const auto& command : m_commands)
         {
             if (ComparableKey(command.file) == file)
             {
@@ -373,7 +376,7 @@ namespace heimdall
         return nullptr;
     }
 
-    const CompileCommand * CompileDatabase::FindOrNearest(std::filesystem::path file) const
+    const CompileCommand* CompileDatabase::FindOrNearest(std::filesystem::path file) const
     {
         if (const auto * exact = Find(file))
         {
@@ -383,7 +386,7 @@ namespace heimdall
         file = ComparableKey(file);
         const CompileCommand* best = nullptr;
         std::size_t best_score = 0;
-        for (const auto & command: m_commands)
+        for (const auto& command : m_commands)
         {
             const auto other = ComparableKey(command.file);
             std::size_t score = 0;

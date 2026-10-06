@@ -332,7 +332,7 @@ namespace heimdall::cli
             return false;
         }
 
-        for (const auto & override: options.rule_overrides)
+        for (const auto& override : options.rule_overrides)
         {
             if (!heimdall::IsKnownRuleCode(override.code))
             {

@@ -203,7 +203,9 @@ namespace heimdall
             {
                 return soa.subtree_end[index];
             }
-        };
+        }
+
+        ;
 
         View operator[](std::size_t i) const noexcept
         {
@@ -224,6 +226,7 @@ namespace heimdall
         std::shared_ptr<const Preprocessor::MacroMap> shared_macros;
         // Type names declared by the headers the file includes; may be null.
         std::shared_ptr<const TypeNameOracle> type_names;
+
         const Preprocessor::MacroMap& Macros() const noexcept
         {
             return shared_macros ? *shared_macros : predefined_macros;
@@ -282,7 +285,9 @@ namespace heimdall
         static constexpr std::size_t RootNode = 0;
 
         static ParseTree Parse(std::string_view source, CppStandard standard = CppStandard::Cpp20);
+
         static ParseTree Parse(std::string_view source, const ParserOptions& options);
+
         // Cooperative cancellation: the grammar pass polls `stop` between
         // top-level items. A cancelled tree is partial; check Cancelled() and
         // discard it.
@@ -371,7 +376,9 @@ namespace heimdall
         {
             return m_source.substr(token.offset, token.length);
         }
+
         std::vector<std::size_t> Children(std::size_t node_index) const;
+
         // Allocation-free direct-child traversal. The tree must outlive the range.
         class ChildRange
         {
@@ -382,32 +389,47 @@ namespace heimdall
                 using value_type = std::size_t;
                 using difference_type = std::ptrdiff_t;
                 using iterator_category = std::forward_iterator_tag;
+
                 Iterator() = default;
+
                 std::size_t operator * () const noexcept
                 {
                     return m_index;
                 }
+
                 Iterator & operator++() noexcept;
+
                 Iterator operator++(int) noexcept
                 {
                     auto old = *this;
                     ++ * this;
                     return old;
                 }
+
                 bool operator==(const Iterator& other) const noexcept = default;
+
             private:
                 friend class ChildRange;
-                Iterator(const GrammarNodeSoA* soa, std::size_t index, std::size_t end, std::size_t parent)
+
+                Iterator(
+                    const GrammarNodeSoA* soa,
+                    std::size_t index,
+                    std::size_t end,
+                    std::size_t parent)
                 : m_soa(soa), m_index(index), m_end(end), m_parent(parent)
                 {
                     Seek();
                 }
+
                 void Seek() noexcept;
+
                 const GrammarNodeSoA* m_soa = nullptr;
                 std::size_t m_index = 0;
                 std::size_t m_end = 0;
                 std::size_t m_parent = 0;
-            };
+            }
+
+            ;
 
             Iterator begin() const noexcept
             {
@@ -418,26 +440,40 @@ namespace heimdall
             {
                 return {m_soa, m_end, m_end, m_parent};
             }
+
         private:
             friend class ParseTree;
-            ChildRange(const GrammarNodeSoA* soa, std::size_t begin, std::size_t end, std::size_t parent)
+
+            ChildRange(
+                const GrammarNodeSoA* soa,
+                std::size_t begin,
+                std::size_t end,
+                std::size_t parent)
             : m_soa(soa), m_begin(begin), m_end(end), m_parent(parent) {}
+
             const GrammarNodeSoA* m_soa;
             std::size_t m_begin;
             std::size_t m_end;
             std::size_t m_parent;
-        };
+        }
+
+        ;
 
         ChildRange DirectChildren(std::size_t node_index) const noexcept;
+
         bool IsDescendant(std::size_t node_index, std::size_t candidate) const noexcept;
+
         void HoldSource(std::shared_ptr<const std::string> owned);
+
         std::shared_ptr<const std::string> SharedSource() const noexcept
         {
             return m_owned_source;
         }
+
         // Backing container estimate, excluding source and the lazy AoS adapter.
         // Does not construct or read mutable compatibility storage.
         std::size_t StorageBytes() const noexcept;
+
         // Drops the tree's claim on the source text and the view of it. Afterwards
         // only the tokens, nodes, items and diagnostics may be used (that is all a
         // parse reusing this tree reads); call it only on a tree nobody else holds.
@@ -466,6 +502,7 @@ namespace heimdall
 
     private:
         friend class GrammarParser;
+
         friend void detail::ParseWithGrammar(
             ParseTree&,
             const PreprocessorResult&,
@@ -476,11 +513,13 @@ namespace heimdall
 
         // Called by GrammarParser after parsing to build auxiliary structures
         void BuildAuxiliary();
+
         void Build(const ParserOptions& options, std::stop_token stop, const ParseReuse* reuse);
 
         // Lazy construction of AoS view for backward compatibility
         mutable std::vector<GrammarNode> m_nodes_aos;
         mutable bool m_nodes_aos_dirty = true;
+
         void EnsureNodesAoS() const;
 
         std::shared_ptr<const std::string> m_owned_source;

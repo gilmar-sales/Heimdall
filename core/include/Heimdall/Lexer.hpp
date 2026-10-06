@@ -46,12 +46,14 @@ namespace heimdall
             std::size_t offset = 0;
             std::size_t old_length = 0;
             std::size_t new_length = 0;
-        };
+        }
+
+        ;
 
         // Merges two consecutive edits (`second` is expressed in the text that
         // `first` produced) into one edit, relative to the text before `first`,
         // that covers both.
-        static TextEdit Compose(const TextEdit &first, const TextEdit &second) noexcept
+        static TextEdit Compose(const TextEdit& first, const TextEdit& second) noexcept
         {
             const std::size_t first_new_end = first.offset + first.new_length;
             const std::size_t second_end = second.offset + second.old_length;
@@ -67,15 +69,18 @@ namespace heimdall
         }
 
         std::vector<Token> Lex() const;
+
         // Incremental re-lex. `tokens` must be the tokens of the text before
         // `edit`; the lexer's source is the text after it. Only a window around
         // the edit is re-scanned and the tokens after it are shifted, yielding
         // exactly what Lex() would produce.
-        void Relex(std::vector<Token> & tokens, const TextEdit &edit) const;
-        std::string_view Text(const Token &token) const noexcept;
+        void Relex(std::vector<Token>& tokens, const TextEdit& edit) const;
+
+        std::string_view Text(const Token& token) const noexcept;
 
     private:
         Token ScanToken(std::size_t start) const;
+
         std::string_view m_source;
     };
 

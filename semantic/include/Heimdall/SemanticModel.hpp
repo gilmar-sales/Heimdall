@@ -32,8 +32,11 @@ namespace heimdall
         explicit InternPool(std::pmr::memory_resource* resource);
 
         NameId Intern(std::string_view text);
+
         NameId InternCopy(std::string_view text);
+
         NameId Find(std::string_view text) const;
+
         std::string_view Text(NameId id) const noexcept
         {
             return id < m_text.size() ? m_text[id] : std::string_view {};
@@ -167,6 +170,7 @@ namespace heimdall
         static constexpr ScopeId TranslationUnitScope = 0;
 
         explicit SemanticModel(const ParseTree& tree, std::size_t arena_hint = 64 * 1024);
+
         SemanticModel(SemanticModel&&) noexcept = default;
 
         const ParseTree& Tree() const noexcept
@@ -212,13 +216,17 @@ namespace heimdall
         // First symbol named `name` declared directly in `scope`; further
         // overloads follow through Symbols().next_same_name.
         SymbolId LookupLocal(ScopeId scope, NameId name) const;
+
         // Unqualified lookup from `scope` outwards. In function and block scopes
         // only declarations before `before_token` are visible.
         SymbolId Lookup(ScopeId scope, NameId name, std::uint32_t before_token = kNone) const;
+
         // Member of a class (searching its resolved bases) or namespace.
         SymbolId LookupMember(SymbolId owner, NameId name) const;
+
         // Resolution recorded for the identifier at `token`, or kNone.
         SymbolId ResolveToken(std::uint32_t token) const;
+
         // Scope that contains `node`'s declarations (its own scope for namespaces,
         // classes, functions and blocks).
         ScopeId ScopeOfNode(std::uint32_t node) const

@@ -44,17 +44,17 @@ namespace heimdall
         class DesignatedOrder
         {
         public:
-            explicit DesignatedOrder(const SemanticModel &model) : m_model(model), m_view(model),
-              m_symbols(model.Symbols()), m_reporter(model.Tree())
-            {
-            }
+            explicit DesignatedOrder(const SemanticModel& model) : m_model(model), m_view(model),
+                m_symbols(model.Symbols()), m_reporter(model.Tree()) {}
 
             enum class Mode
             {
                 Order,
                 Zero,
                 Integer
-            };
+            }
+
+            ;
 
             std::vector<Diagnostic> Run(Mode mode)
             {
@@ -193,7 +193,7 @@ namespace heimdall
                 std::size_t i = open + 1;
                 while (i < close)
                 {
-                    if (m_view.At(i) != Tok::Dot || !m_view.IsWord(i + 1) ||
+                    if (m_view.At(i) != Tok::Dot ||!m_view.IsWord(i + 1) ||
                         (m_view.At(i + 2) != Tok::Eq && m_view.At(i + 2) != Tok::LBrace))
                     {
                         return {};
@@ -235,7 +235,7 @@ namespace heimdall
             }
 
             // `.ptr = 0`: the member is declared with `*` and the value is a null constant.
-            void CheckNulls(std::size_t open, bool integers, std::vector<Diagnostic> & out)
+            void CheckNulls(std::size_t open, bool integers, std::vector<Diagnostic>& out)
             {
                 const auto klass = OwnerOf(open);
                 if (klass == kNone)
@@ -249,7 +249,7 @@ namespace heimdall
                     return;
                 }
 
-                for (const auto & entry: Parse(open, close))
+                for (const auto& entry : Parse(open, close))
                 {
                     if (entry.end != entry.begin + 4 || m_view.At(entry.begin + 2) != Tok::Eq)
                     {
@@ -257,7 +257,7 @@ namespace heimdall
                     }
 
                     const bool zero = m_view.IsZeroLiteral(entry.begin + 3);
-                    const bool integer = !zero && m_view.KindAt(entry.begin + 3) == TokenKind::Number &&
+                    const bool integer =!zero && m_view.KindAt(entry.begin + 3) == TokenKind::Number &&
                         IsIntegerLiteral(m_view.Text(entry.begin + 3));
                     if (integers ? !integer : !zero)
                     {
@@ -300,7 +300,7 @@ namespace heimdall
                 }
             }
 
-            void Check(std::size_t open, std::vector<Diagnostic> & out)
+            void Check(std::size_t open, std::vector<Diagnostic>& out)
             {
                 const auto klass = OwnerOf(open);
                 if (klass == kNone)
@@ -328,7 +328,7 @@ namespace heimdall
                 }
 
                 std::vector<std::size_t> order;
-                for (const auto & entry: list)
+                for (const auto& entry : list)
                 {
                     const auto found = rank.find(entry.name);
                     if (found == rank.end())
@@ -366,9 +366,9 @@ namespace heimdall
                     [&](std::size_t a, std::size_t b)
                     {
                         return order[a] < order[b];
-                    });
+                });
 
-                const auto text = [&](const Designator & entry)
+                const auto text =[&](const Designator& entry)
                 {
                     const std::size_t begin = m_view.Offset(entry.begin);
                     return source.substr(begin, m_view.End(entry.end - 1) - begin);
@@ -387,30 +387,30 @@ namespace heimdall
 
                 const std::size_t anchor = m_view.Offset(list.front().begin);
                 out.push_back(m_reporter.Make(RuleId::DesignatedInitOrder, "cpp/designated-init-order",
-                        "designated initializers must follow the declaration order of the members", anchor,
-                        m_view.End(list.front().begin + 1) - anchor, TextEdit{first, last - first, std::move(replacement)},
-                        "Reorder designated initializers"));
+                    "designated initializers must follow the declaration order of the members", anchor,
+                    m_view.End(list.front().begin + 1) - anchor, TextEdit{first, last - first, std::move(replacement)},
+                    "Reorder designated initializers"));
             }
 
-            const SemanticModel &m_model;
+            const SemanticModel& m_model;
             detail::TokenView m_view;
-            const SymbolTable &m_symbols;
+            const SymbolTable& m_symbols;
             detail::Reporter m_reporter;
         };
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedInitOrder(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedInitOrder(const SemanticModel& model)
     {
         return DesignatedOrder(model).Run(DesignatedOrder::Mode::Order);
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedZeroAsNull(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedZeroAsNull(const SemanticModel& model)
     {
         return DesignatedOrder(model).Run(DesignatedOrder::Mode::Zero);
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedIntegerToPointer(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedIntegerToPointer(const SemanticModel& model)
     {
         return DesignatedOrder(model).Run(DesignatedOrder::Mode::Integer);
     }

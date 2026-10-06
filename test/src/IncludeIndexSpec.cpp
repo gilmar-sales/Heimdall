@@ -14,36 +14,44 @@
 namespace
 {
 
-std::filesystem::path IncludeDir()
-{
-    return std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test" / "fixtures" / "include";
-}
-
-heimdall::CompileCommand CommandWithIncludes()
-{
-    heimdall::CompileCommand command;
-    command.include_directories.push_back(IncludeDir());
-    return command;
-}
-
-bool Contains(const std::vector<heimdall::CompletionItem>& items, std::string_view label)
-{
-    for (const auto& item : items)
+    std::filesystem::path IncludeDir()
     {
-        if (item.label == label) return true;
+        return std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test" / "fixtures" / "include";
     }
-    return false;
-}
 
-const heimdall::IndexedScope* FindScope(const heimdall::ScopeIndex& index,
-                                        std::vector<std::string> path)
-{
-    for (const auto& scope : index)
+    heimdall::CompileCommand CommandWithIncludes()
     {
-        if (scope.path == path) return &scope;
+        heimdall::CompileCommand command;
+        command.include_directories.push_back(IncludeDir());
+        return command;
     }
-    return nullptr;
-}
+
+    bool Contains(const std::vector<heimdall::CompletionItem>& items, std::string_view label)
+    {
+        for (const auto& item : items)
+        {
+            if (item.label == label)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    const heimdall::IndexedScope* FindScope(const heimdall::ScopeIndex& index,
+        std::vector<std::string> path)
+    {
+        for (const auto& scope : index)
+        {
+            if (scope.path == path)
+            {
+                return &scope;
+            }
+        }
+
+        return nullptr;
+    }
 
 } // namespace
 
@@ -66,22 +74,27 @@ TEST(IncludeIndexSpec, RealCliOptionsAndFilesystemPathHaveCompilerLayouts)
     {
         GTEST_SKIP() << "Compiler does not expose standard library include directories";
     }
+
     command.standard = heimdall::CppStandard::Cpp26;
-    command.include_directories = {root / "core/include", root / "semantic/include", root / "config/include"};
-    for (const auto &dir: command.include_directories)
+    command.include_directories = {root / "core/include", root / "semantic/include",
+        root / "config/include"};
+    for (const auto& dir : command.include_directories)
     {
         command.arguments.push_back("-I" + dir.generic_string());
     }
+
     constexpr std::string_view source =
         "#include \"CliOptions.hpp\"\nheimdall::cli::Options options;\nstd::filesystem::path file;";
     const auto index = heimdall::IncludeIndex::Build(root / "src", source, &command);
-    const auto options = heimdall::CompletionEngine::Hover(source, {}, source.rfind("Options") + 1, &index.Scopes());
+    const auto options = heimdall::CompletionEngine::Hover(source, {}, source.rfind("Options") + 1,
+        &index.Scopes());
     ASSERT_TRUE(options.has_value());
     EXPECT_EQ(options->detail, "struct heimdall::cli::Options");
     ASSERT_TRUE(options->has_layout);
     EXPECT_EQ(options->size_bytes, sizeof(heimdall::cli::Options));
     EXPECT_EQ(options->align_bytes, alignof(heimdall::cli::Options));
-    const auto path = heimdall::CompletionEngine::Hover(source, {}, source.find("path file") + 1, &index.Scopes());
+    const auto path = heimdall::CompletionEngine::Hover(source, {}, source.find("path file") + 1,
+        &index.Scopes());
     ASSERT_TRUE(path.has_value());
     EXPECT_EQ(path->detail, "class std::filesystem::path");
     EXPECT_TRUE(path->has_layout);
@@ -109,7 +122,7 @@ TEST(IncludeIndexSpec, BuildsMergedMemberIndexSkippingReservedNames)
     EXPECT_TRUE(Contains(root->members, "mylib"));
     EXPECT_FALSE(Contains(root->members, "_MYLIB_CORE_GUARD"));
 
-    const auto* mylib = FindScope(index.Scopes(), { "mylib" });
+    const auto* mylib = FindScope(index.Scopes(), {"mylib"});
     ASSERT_NE(mylib, nullptr) << "expected a mylib scope in the index";
     EXPECT_TRUE(Contains(mylib->members, "Widget"));
     EXPECT_TRUE(Contains(mylib->members, "run"));
@@ -125,7 +138,7 @@ TEST(IncludeIndexSpec, CompletesQualifiedMembersFromHeaders)
     const auto index = heimdall::IncludeIndex::Build(IncludeDir(), text, &command);
     heimdall::ParserOptions options;
     const auto items = heimdall::CompletionEngine::Complete(text, options, text.size() - 2,
-                                                           &index.Scopes());
+        &index.Scopes());
     EXPECT_TRUE(Contains(items, "Widget"));
     EXPECT_FALSE(Contains(items, "MYLIB_MODE"));
 }
@@ -138,9 +151,9 @@ TEST(IncludeIndexSpec, CacheKeyTracksHeaderSets)
     const auto headers = heimdall::IncludeIndex::ResolveHeaders(IncludeDir(), with_extra, &command);
     const auto none = heimdall::IncludeIndex::ResolveHeaders(IncludeDir(), empty, &command);
     EXPECT_NE(heimdall::IncludeIndex::CacheKey(headers, &command),
-              heimdall::IncludeIndex::CacheKey(none, &command));
+        heimdall::IncludeIndex::CacheKey(none, &command));
     EXPECT_EQ(heimdall::IncludeIndex::CacheKey(headers, &command),
-              heimdall::IncludeIndex::CacheKey(headers, &command));
+        heimdall::IncludeIndex::CacheKey(headers, &command));
 }
 
 TEST(IncludeIndexSpec, SystemIncludeDiscoveryDoesNotCrash)
@@ -176,23 +189,28 @@ TEST(IncludeIndexSpec, IndexedItemsRecordTheirHeaderFileAndOffset)
     {
         for (const auto& member : scope.members)
         {
-            if (!member.has_location) continue;
+            if (!member.has_location)
+            {
+                continue;
+            }
+
             saw_located = true;
             ASSERT_GE(member.file, 0);
             ASSERT_LT(static_cast<std::size_t>(member.file), index.Files().size());
         }
     }
+
     EXPECT_TRUE(saw_located);
 }
 
 namespace
 {
 
-std::filesystem::path ResolveAt(std::string_view text, std::string_view marker)
-{
-    const auto command = CommandWithIncludes();
-    return heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(marker), &command);
-}
+    std::filesystem::path ResolveAt(std::string_view text, std::string_view marker)
+    {
+        const auto command = CommandWithIncludes();
+        return heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(marker), &command);
+    }
 
 } // namespace
 
@@ -233,9 +251,13 @@ TEST(IncludeIndexSpec, ResolveIncludeAtFindsSystemHeadersNamedLikeTypes)
     }
 
     constexpr std::string_view text = "#include <vector>\n#include <string>\n";
-    for (const std::string_view name: {"vector", "string"})
+    for (const std::string_view name :
+        {
+            "vector", "string"
+    })
     {
-        const auto header = heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(name), nullptr);
+        const auto header = heimdall::IncludeIndex::ResolveIncludeAt(IncludeDir(), text, text.find(name),
+            nullptr);
         ASSERT_FALSE(header.empty()) << name;
         EXPECT_EQ(header.filename().string(), name);
     }
@@ -257,7 +279,8 @@ TEST(IncludeIndexSpec, MemberAccessResolvesGuardedDecoratedHeaderTypes)
     std::string source = "void f() { mylib::ShapeAlias s; s.";
     heimdall::ParserOptions options;
     options.shared_macros = std::make_shared<const heimdall::Preprocessor::MacroMap>(command.defines);
-    const auto items = heimdall::CompletionEngine::Complete(source, options, source.size(), &index.Scopes());
+    const auto items = heimdall::CompletionEngine::Complete(source, options, source.size(),
+        &index.Scopes());
     EXPECT_TRUE(Contains(items, "area"));
     EXPECT_TRUE(Contains(items, "cached"));
     EXPECT_TRUE(Contains(items, "base_value")); // inherited
@@ -297,15 +320,16 @@ namespace
             std::filesystem::remove_all(m_root, ec);
         }
 
-        IncludeTree(const IncludeTree &) = delete;
-        IncludeTree & operator=(const IncludeTree &) = delete;
+        IncludeTree(const IncludeTree&) = delete;
+
+        IncludeTree& operator= (const IncludeTree&) = delete;
 
         std::filesystem::path Src() const
         {
             return m_root / "src";
         }
 
-        const heimdall::CompileCommand * Command() const
+        const heimdall::CompileCommand* Command() const
         {
             return &m_command;
         }
@@ -313,7 +337,8 @@ namespace
         std::vector<std::string> Labels(bool angled, std::string_view typed) const
         {
             std::vector<std::string> labels;
-            for (const auto & candidate: heimdall::IncludeIndex::CompleteIncludePath(Src(), angled, typed, &m_command))
+            for (const auto& candidate : heimdall::IncludeIndex::CompleteIncludePath(Src(), angled, typed,
+                &m_command))
             {
                 if (candidate.origin != heimdall::IncludeOrigin::System)
                 {
@@ -325,7 +350,7 @@ namespace
         }
 
     private:
-        void Touch(const std::string & relative) const
+        void Touch(const std::string& relative) const
         {
             const auto path = m_root / relative;
             std::filesystem::create_directories(path.parent_path());
@@ -336,7 +361,7 @@ namespace
         heimdall::CompileCommand m_command;
     };
 
-    bool Has(const std::vector<std::string> & labels, std::string_view label)
+    bool Has(const std::vector<std::string>& labels, std::string_view label)
     {
         return std::find(labels.begin(), labels.end(), label) != labels.end();
     }
@@ -365,9 +390,10 @@ TEST(IncludeCompletionSpec, AngledIncludesNeverSearchTheIncludingDirectoryOrQuot
     EXPECT_TRUE(Has(labels, "lib/"));
     EXPECT_TRUE(Has(labels, "extra.h"));
     // `local.hpp` exists next to the file and in -I: only the -I copy may be offered.
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "local", tree.Command());
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "local",
+        tree.Command());
     std::vector<heimdall::IncludeCandidate> project;
-    for (const auto & candidate: candidates)
+    for (const auto& candidate : candidates)
     {
         if (candidate.origin != heimdall::IncludeOrigin::System)
         {
@@ -382,9 +408,10 @@ TEST(IncludeCompletionSpec, AngledIncludesNeverSearchTheIncludingDirectoryOrQuot
 TEST(IncludeCompletionSpec, QuotedDuplicateKeepsTheFirstDirectoryInSearchOrder)
 {
     IncludeTree tree;
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "local", tree.Command());
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "local",
+        tree.Command());
     std::size_t count = 0;
-    for (const auto & candidate: candidates)
+    for (const auto& candidate : candidates)
     {
         if (candidate.label == "local.hpp")
         {
@@ -426,7 +453,8 @@ TEST(IncludeCompletionSpec, SkipsSourcesBinariesAndDotFiles)
 TEST(IncludeCompletionSpec, ProjectEntriesComeBeforeSystemOnesAndDirectoriesFirstWithinAnOrigin)
 {
     IncludeTree tree;
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "", tree.Command());
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "",
+        tree.Command());
     for (std::size_t i = 0; i < candidates.size(); ++i)
     {
         EXPECT_EQ(candidates[i].directory, candidates[i].label.back() == '/');
@@ -435,7 +463,7 @@ TEST(IncludeCompletionSpec, ProjectEntriesComeBeforeSystemOnesAndDirectoriesFirs
             continue;
         }
 
-        const auto & previous = candidates[i - 1];
+        const auto& previous = candidates[i - 1];
         EXPECT_LE(static_cast<int>(previous.origin), static_cast<int>(candidates[i].origin));
         if (previous.origin == candidates[i].origin)
         {
@@ -447,9 +475,10 @@ TEST(IncludeCompletionSpec, ProjectEntriesComeBeforeSystemOnesAndDirectoriesFirs
 TEST(IncludeCompletionSpec, TheLimitNeverDropsProjectHeadersForSystemOnes)
 {
     IncludeTree tree;
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "", tree.Command(), 4);
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), true, "",
+        tree.Command(), 4);
     ASSERT_EQ(candidates.size(), 4);
-    for (const auto & candidate: candidates)
+    for (const auto& candidate : candidates)
     {
         EXPECT_EQ(candidate.origin, heimdall::IncludeOrigin::Include) << candidate.label;
     }
@@ -459,7 +488,8 @@ TEST(IncludeCompletionSpec, AbsolutePathsAreListedAsTyped)
 {
     IncludeTree tree;
     const std::string typed = (tree.Src() / "sub").generic_string() + "/";
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath({}, false, typed, tree.Command());
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath({}, false, typed,
+        tree.Command());
     ASSERT_EQ(candidates.size(), 1);
     EXPECT_EQ(candidates[0].label, "nested.hpp");
     EXPECT_EQ(candidates[0].origin, heimdall::IncludeOrigin::Absolute);
@@ -468,9 +498,13 @@ TEST(IncludeCompletionSpec, AbsolutePathsAreListedAsTyped)
 TEST(IncludeCompletionSpec, WorksWithoutACompileCommand)
 {
     IncludeTree tree;
-    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "loc", nullptr);
+    const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "loc",
+        nullptr);
     const auto local = std::find_if(candidates.begin(), candidates.end(),
-        [](const heimdall::IncludeCandidate &candidate) { return candidate.label == "local.hpp"; });
+        [](const heimdall::IncludeCandidate& candidate)
+        {
+            return candidate.label == "local.hpp";
+    });
     ASSERT_NE(local, candidates.end());
     EXPECT_EQ(local->origin, heimdall::IncludeOrigin::Local);
 }
@@ -478,7 +512,9 @@ TEST(IncludeCompletionSpec, WorksWithoutACompileCommand)
 TEST(IncludeCompletionSpec, HonorsTheResultLimit)
 {
     IncludeTree tree;
-    EXPECT_EQ(heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "", tree.Command(), 2).size(), 2);
+    EXPECT_EQ(heimdall::IncludeIndex::CompleteIncludePath(tree.Src(), false, "", tree.Command(),
+        2).size(),
+        2);
 }
 
 TEST(IncludeContextSpec, DetectsTheDelimiterAndTheTypedOffset)
@@ -524,11 +560,11 @@ TEST(IncludeIndexSpec, TypeNamesFeedTheParserOfTheIncludingFile)
     command.defines["MYLIB_NODISCARD"] = "[[nodiscard]]";
     const std::string text =
         "#include \"mylib/shapes.hpp\"\n"
-        "void f(void *p, int a, int b) {\n"
-        "    auto s = (mylib::Shape*)p;\n"
-        "    mylib::Base * base = nullptr;\n"
-        "    a * b;\n"
-        "}\n";
+    "void f(void *p, int a, int b) {\n"
+    "    auto s = (mylib::Shape*)p;\n"
+    "    mylib::Base * base = nullptr;\n"
+    "    a * b;\n"
+    "}\n";
     const auto index = heimdall::IncludeIndex::Build(IncludeDir(), text, &command);
     ASSERT_NE(index.TypeNames(), nullptr);
     EXPECT_TRUE(index.TypeNames()->IsType("Shape"));
@@ -537,10 +573,10 @@ TEST(IncludeIndexSpec, TypeNamesFeedTheParserOfTheIncludingFile)
     EXPECT_FALSE(index.TypeNames()->IsType("area")); // a member function
     EXPECT_FALSE(index.TypeNames()->IsType("base_value"));
 
-    const auto count = [](const heimdall::ParseTree &tree, heimdall::GrammarKind kind)
+    const auto count =[](const heimdall::ParseTree& tree, heimdall::GrammarKind kind)
     {
         std::size_t n = 0;
-        for (const auto &node: tree.Nodes())
+        for (const auto& node : tree.Nodes())
         {
             n += node.kind == kind;
         }

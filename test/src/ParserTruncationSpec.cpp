@@ -19,20 +19,21 @@ namespace
 
     constexpr std::string_view kSample =
         "#include <vector>\n"
-        "namespace demo {\n"
-        "template <typename T> struct Box { T value; int get() const { return value; } };\n"
-        "enum class Color { Red, Green = 2 };\n"
-        "int add(int left, int right) {\n"
-        "    if (left > right) { return left - right; }\n"
-        "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
-        "    auto lambda = [&](int x) { return x + left; };\n"
-        "    return lambda(right) + (left ? right : 0);\n"
-        "}\n"
-        "}\n";
+    "namespace demo {\n"
+    "template <typename T> struct Box { T value; int get() const { return value; } };\n"
+    "enum class Color { Red, Green = 2 };\n"
+    "int add(int left, int right) {\n"
+    "    if (left > right) { return left - right; }\n"
+    "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
+    "    auto lambda = [&](int x) { return x + left; };\n"
+    "    return lambda(right) + (left ? right : 0);\n"
+    "}\n"
+    "}\n";
 
-    std::size_t CountErrors(const heimdall::ParseTree & tree)
+    std::size_t CountErrors(const heimdall::ParseTree& tree)
     {
-        return static_cast<std::size_t>(std::count_if(tree.Nodes().begin(), tree.Nodes().end(), [](const auto & node)
+        return static_cast<std::size_t>(std::count_if(tree.Nodes().begin(), tree.Nodes().end(),
+            [](const auto& node)
             {
                 return node.kind == GrammarKind::Error || node.kind == GrammarKind::ErrorExpression;
         }));
@@ -55,11 +56,12 @@ namespace
             ASSERT_FALSE(tree.Cancelled());
             ASSERT_FALSE(tree.Nodes().empty()) << "prefix of " << length << " bytes";
             ASSERT_EQ(tree.Nodes()[heimdall::ParseTree::RootNode].kind, GrammarKind::TranslationUnit);
-            for (const auto & node: tree.Nodes())
+            for (const auto& node : tree.Nodes())
             {
                 ASSERT_LE(node.subtree_end, tree.Nodes().size());
                 ASSERT_LE(static_cast<std::size_t>(node.first_token) + node.token_count, tree.Tokens().size());
             }
+
             const std::size_t errors = CountErrors(tree);
             if (errors > worst_errors)
             {
@@ -67,13 +69,15 @@ namespace
                 worst_at = length;
             }
         }
+
         EXPECT_LE(worst_errors, 8u) << "worst prefix: " << worst_at;
     }
 
     TEST(ParserTruncation, UnclosedBraceDoesNotSwallowErrorBudget)
     {
         // A single missing `}` must not cascade into one error per remaining token.
-        const std::string source = "int f() {\n" + std::string(200, ' ') + "int a = 1;\nint b = 2;\nint c = 3;\n";
+        const std::string source = "int f() {\n" + std::string(200,
+            ' ') + "int a = 1;\nint b = 2;\nint c = 3;\n";
         EXPECT_LE(CountErrors(heimdall::ParseTree::Parse(source)), 8u);
     }
 
@@ -99,7 +103,8 @@ namespace
         ASSERT_TRUE(large);
         // The lexer is emitted twice; the second copy must not collide with the first.
         EXPECT_NE(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"), std::string::npos);
-        EXPECT_EQ(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"), large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
+        EXPECT_EQ(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"),
+            large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
     }
 
     TEST(StbCorpus, MissingDirectoryYieldsNullopt)

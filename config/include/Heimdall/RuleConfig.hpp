@@ -28,12 +28,16 @@ namespace heimdall
         bool has_max_parameters_per_line = false;
     };
 
-    std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const std::filesystem::path & path);
+    std::expected<RuleConfiguration,
+        std::string> LoadRuleConfiguration(const std::filesystem::path& path);
+
     std::expected<std::vector<RuleConfiguration>, std::string> FindConfigurations(
-        const std::filesystem::path & directory);
+        const std::filesystem::path& directory);
+
     std::expected<std::optional<RuleOptions>, std::string> FindRuleOptions(
-        const std::filesystem::path & directory);
+        const std::filesystem::path& directory);
+
     std::expected<std::optional<FormatOptions>, std::string> FindFormatOptions(
-        const std::filesystem::path & directory);
+        const std::filesystem::path& directory);
 
 } // namespace heimdall

@@ -13,8 +13,12 @@
 namespace heimdall::detail
 {
 
-    void ParseWithGrammar(ParseTree &tree, const PreprocessorResult &preprocessing,
-        std::stop_token stop, const Preprocessor::MacroMap *macros, const ParseReuse *reuse,
-        const TypeNameOracle *type_names);
+    void ParseWithGrammar(
+        ParseTree& tree,
+        const PreprocessorResult& preprocessing,
+        std::stop_token stop,
+        const Preprocessor::MacroMap* macros,
+        const ParseReuse* reuse,
+        const TypeNameOracle* type_names);
 
 } // namespace heimdall::detail

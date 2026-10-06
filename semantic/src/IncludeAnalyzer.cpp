@@ -21,6 +21,7 @@ namespace heimdall
     struct NameHash
     {
         using is_transparent = void;
+
         std::size_t operator()(std::string_view name) const noexcept
         {
             return std::hash<std::string_view>{}
@@ -246,7 +247,7 @@ namespace heimdall
                 if (token.kind == TokenKind::Punctuation)
                 {
                     const std::string_view punctuation = text(i);
-                    for (const char c: punctuation)
+                    for (const char c : punctuation)
                     {
                         if (c == '[')
                         {
@@ -416,7 +417,7 @@ namespace heimdall
                                 continue;
                             }
 
-                            for (const char c: text(j))
+                            for (const char c : text(j))
                             {
                                 if (c == '<')
                                 {
@@ -660,7 +661,7 @@ namespace heimdall
                                 continue;
                             }
 
-                            for (const char c: text(j))
+                            for (const char c : text(j))
                             {
                                 if (c == '<')
                                 {
@@ -711,7 +712,7 @@ namespace heimdall
                     const std::string_view piece = text(j);
                     if (tokens[j].kind == TokenKind::Punctuation)
                     {
-                        for (const char c: piece)
+                        for (const char c : piece)
                         {
                             if (c == '[')
                             {
@@ -749,7 +750,7 @@ namespace heimdall
                 RecordDecl record;
                 record.name = std::string(names.back());
                 record.keyword = std::string(word);
-                for (const auto & piece: namespace_names)
+                for (const auto& piece : namespace_names)
                 {
                     if (!record.ns.empty())
                     {
@@ -1019,7 +1020,7 @@ namespace heimdall
                     }
                 }
 
-                for (const auto &[begin, end]: bodies)
+                for (const auto& [begin, end] : bodies)
                 {
                     bool mentions = false;
                     bool unsafe = false;
@@ -1187,7 +1188,7 @@ namespace heimdall
 
             std::vector<IncludeDirective> result;
             std::size_t depth = 0;
-            for (const auto & directive: directives)
+            for (const auto& directive : directives)
             {
                 switch (directive.kind)
                 {
@@ -1346,14 +1347,14 @@ namespace heimdall
                 }
 
                 key += '\0';
-                for (const auto & dir: command->include_directories)
+                for (const auto& dir : command->include_directories)
                 {
                     key += dir.generic_string();
                     key += '\1';
                 }
 
                 key += '\0';
-                for (const auto & dir: command->quote_directories)
+                for (const auto& dir : command->quote_directories)
                 {
                     key += dir.generic_string();
                     key += '\1';
@@ -1377,8 +1378,11 @@ namespace heimdall
 
         // Closure of `#include <target>` seen from base_dir; `complete` is false
         // for anything that could not be fully resolved (never cached).
-        std::vector<std::filesystem::path> ResolveClosure(const std::filesystem::path& base_dir,
-            const std::string& target, const CompileCommand* command, const IncludeIndex::Limits& limits,
+        std::vector<std::filesystem::path> ResolveClosure(
+            const std::filesystem::path& base_dir,
+            const std::string& target,
+            const CompileCommand* command,
+            const IncludeIndex::Limits& limits,
             bool& complete)
         {
             const std::string key = ClosureKey(base_dir, target, command);
@@ -1411,7 +1415,7 @@ namespace heimdall
             {
                 CachedClosure cached;
                 cached.files = files;
-                for (const auto & path: files)
+                for (const auto& path : files)
                 {
                     cached.stamps.emplace_back(SizeOf(path), MTimeOf(path));
                 }
@@ -1441,12 +1445,12 @@ namespace heimdall
         const IncludeProfile::Entry& entry, const std::vector<std::string_view>& matched)
     {
         std::vector<RecordDecl> chosen;
-        for (const std::string_view name: matched)
+        for (const std::string_view name : matched)
         {
             const RecordDecl* found = nullptr;
-            for (const auto & provider: entry.providers)
+            for (const auto& provider : entry.providers)
             {
-                for (const auto & record: provider->records)
+                for (const auto& record : provider->records)
                 {
                     if (record.name != name)
                     {
@@ -1479,7 +1483,7 @@ namespace heimdall
         }
 
         std::vector<std::string> lines;
-        for (const auto & record: chosen)
+        for (const auto& record : chosen)
         {
             std::string line = record.ns.empty() ? "" : "namespace " + record.ns + " { ";
             line += record.keyword + " " + record.name + ";";
@@ -1520,7 +1524,7 @@ namespace heimdall
         // the file has to name anyway; only project headers can be "used" through
         // an operator alone.
         std::vector<std::filesystem::path> system_dirs;
-        for (const auto & dir: IncludeIndex::SystemIncludes(
+        for (const auto& dir : IncludeIndex::SystemIncludes(
             command != nullptr && !command->arguments.empty() ? std::string_view(command->arguments.front())
             : std::string_view()))
         {
@@ -1565,7 +1569,7 @@ namespace heimdall
 
             closures[i].files = ResolveClosure(base_dir, includes[i].target, command, limits,
                 closures[i].complete);
-            for (const auto & path: closures[i].files)
+            for (const auto& path : closures[i].files)
             {
                 closures[i].keys.insert(PathKey(path));
             }
@@ -1587,7 +1591,7 @@ namespace heimdall
         const std::filesystem::path self = std::filesystem::absolute(file, absolute_ec).lexically_normal();
         for (std::size_t i = 0; i < includes.size() && !absolute_ec; ++i)
         {
-            for (const auto & path: closures[i].files)
+            for (const auto& path : closures[i].files)
             {
                 std::error_code equivalent_ec;
                 if (path.filename() == self.filename() && std::filesystem::equivalent(path, self, equivalent_ec) &&
@@ -1640,7 +1644,7 @@ namespace heimdall
             }
 
             bool usable = true;
-            for (const auto & path: closure.files)
+            for (const auto& path : closure.files)
             {
                 const std::string key = PathKey(path);
                 const bool direct = key == header_key;
@@ -1670,9 +1674,9 @@ namespace heimdall
         }
 
         std::unordered_set<std::string> stamped;
-        for (const auto & closure: closures)
+        for (const auto& closure : closures)
         {
-            for (const auto & path: closure.files)
+            for (const auto& path : closure.files)
             {
                 if (stamped.insert(PathKey(path)).second)
                 {
@@ -1714,7 +1718,7 @@ namespace heimdall
         const bool guarded = HasIncludeGuard(directives);
         std::size_t cursor = 0;
         bool after_member_access = false;
-        for (const auto & token: tokens)
+        for (const auto& token : tokens)
         {
             if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
                 token.kind == TokenKind::BlockComment)
@@ -1793,7 +1797,7 @@ namespace heimdall
 
             // Names of this header the file actually uses.
             std::vector<std::string_view> matched;
-            for (const std::string_view word: used)
+            for (const std::string_view word : used)
             {
                 if (std::any_of(entry.providers.begin(), entry.providers.end(),
                     [&](const auto& provider)
@@ -1827,7 +1831,7 @@ namespace heimdall
             if (auto replacement = ForwardDeclarations(tree, entry, matched))
             {
                 std::string names;
-                for (const std::string_view word: matched)
+                for (const std::string_view word : matched)
                 {
                     names +=(names.empty() ? "" : ", ");
                     names += word;
@@ -1835,7 +1839,7 @@ namespace heimdall
 
                 const bool crlf = source.find("\r\n") != std::string_view::npos;
                 std::string text;
-                for (const auto & line: *replacement)
+                for (const auto& line : *replacement)
                 {
                     text += line;
                     text += crlf ? "\r\n" : "\n";

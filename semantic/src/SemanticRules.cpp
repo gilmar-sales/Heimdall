@@ -19,7 +19,7 @@ namespace heimdall
             SymbolFlag::Template;
         constexpr std::uint32_t kVirtualish = SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final;
 
-        bool IsTrivia(const Token &token)
+        bool IsTrivia(const Token& token)
         {
             return token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
                 token.kind == TokenKind::BlockComment;
@@ -31,6 +31,7 @@ namespace heimdall
         struct Visited
         {
             explicit Visited(std::size_t symbols) : stamp(symbols, 0) {}
+
             bool Mark(SymbolId symbol)
             {
                 return stamp[symbol] != epoch && (stamp[symbol] = epoch, true);
@@ -42,12 +43,16 @@ namespace heimdall
 
         // A virtual function with the same name and signature in any ancestor
         // whose base chain is resolved. Returns the owning class symbol.
-        SymbolId FindOverridden(const SemanticModel &model, Visited &visited, SymbolId derived, NameId name,
+        SymbolId FindOverridden(
+            const SemanticModel& model,
+            Visited& visited,
+            SymbolId derived,
+            NameId name,
             std::uint64_t signature)
         {
             ++visited.epoch;
-            const auto &symbols = model.Symbols();
-            const auto &bases = model.Bases();
+            const auto& symbols = model.Symbols();
+            const auto& bases = model.Bases();
             std::vector<SymbolId> pending;
             const auto push_bases =[&](SymbolId klass)
             {
@@ -90,9 +95,9 @@ namespace heimdall
 
         // End of the declarator: just after the parameter list and its
         // cv/ref/noexcept/trailing-return parts, where `override` is written.
-        bool OverrideInsertionOffset(const ParseTree &tree, std::uint32_t name_token, std::size_t & offset)
+        bool OverrideInsertionOffset(const ParseTree& tree, std::uint32_t name_token, std::size_t& offset)
         {
-            const auto &tokens = tree.Tokens();
+            const auto& tokens = tree.Tokens();
             const auto next =[&](std::size_t from)
             {
                 while (from < tokens.size() && IsTrivia(tokens[from]))
@@ -172,12 +177,12 @@ namespace heimdall
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeOverride(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeOverride(const SemanticModel& model)
     {
         std::vector<Diagnostic> diagnostics;
-        const auto &symbols = model.Symbols();
-        const auto &scopes = model.Scopes();
-        const auto &tree = model.Tree();
+        const auto& symbols = model.Symbols();
+        const auto& scopes = model.Scopes();
+        const auto& tree = model.Tree();
         LineTable lines;
         bool lines_built = false;
         Visited visited(symbols.Size());
@@ -216,7 +221,7 @@ namespace heimdall
                 lines_built = true;
             }
 
-            const auto &name_token = tree.Tokens()[token];
+            const auto& name_token = tree.Tokens()[token];
             const auto position = lines.Lookup(name_token.offset);
             const std::string name(model.Names().Text(symbols.name[symbol]));
             Diagnostic diagnostic{RuleId::ModernizeOverride, Severity::Warning, "cpp/modernize-override",
@@ -232,7 +237,7 @@ namespace heimdall
         }
 
         std::sort(diagnostics.begin(), diagnostics.end(),
-            [](const Diagnostic &a, const Diagnostic &b)
+            [](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
         });
@@ -246,11 +251,19 @@ namespace heimdall
         class Reporter
         {
         public:
-            explicit Reporter(const SemanticModel &model) : m_model(model) {}
+            explicit Reporter(const SemanticModel& model) : m_model(model) {}
 
-            void Report(RuleId rule, std::string_view code, std::string message, std::size_t offset,
-                std::size_t length, std::size_t fix_offset, std::size_t fix_length, std::string replacement,
-                bool safe, std::string title)
+            void Report(
+                RuleId rule,
+                std::string_view code,
+                std::string message,
+                std::size_t offset,
+                std::size_t length,
+                std::size_t fix_offset,
+                std::size_t fix_length,
+                std::string replacement,
+                bool safe,
+                std::string title)
             {
                 if (!m_lines_built)
                 {
@@ -259,15 +272,19 @@ namespace heimdall
                 }
 
                 const auto position = m_lines.Lookup(offset);
-                Diagnostic diagnostic {rule, Severity::Warning, std::string(code), std::move(message), offset,
+                Diagnostic diagnostic{rule, Severity::Warning, std::string(code), std::move(message), offset,
                     length, position.line, position.column, true,
-                    TextEdit {fix_offset, fix_length, std::move(replacement)}};
+                    TextEdit{fix_offset, fix_length, std::move(replacement)}};
                 diagnostic.fix_is_safe = safe;
                 diagnostic.fix_title = std::move(title);
                 m_diagnostics.push_back(std::move(diagnostic));
             }
 
-            void ReportNoFix(RuleId rule, std::string_view code, std::string message, std::size_t offset,
+            void ReportNoFix(
+                RuleId rule,
+                std::string_view code,
+                std::string message,
+                std::size_t offset,
                 std::size_t length)
             {
                 if (!m_lines_built)
@@ -277,22 +294,22 @@ namespace heimdall
                 }
 
                 const auto position = m_lines.Lookup(offset);
-                m_diagnostics.push_back(Diagnostic {rule, Severity::Warning, std::string(code), std::move(message),
-                    offset, length, position.line, position.column, false, TextEdit {0, 0, std::string()}});
+                m_diagnostics.push_back(Diagnostic{rule, Severity::Warning, std::string(code), std::move(message),
+                        offset, length, position.line, position.column, false, TextEdit{0, 0, std::string()}});
             }
 
             std::vector<Diagnostic> Take()
             {
                 std::sort(m_diagnostics.begin(), m_diagnostics.end(),
-                    [](const Diagnostic &a, const Diagnostic &b)
+                    [](const Diagnostic& a, const Diagnostic& b)
                     {
                         return a.offset < b.offset;
-                    });
+                });
                 return std::move(m_diagnostics);
             }
 
         private:
-            const SemanticModel &m_model;
+            const SemanticModel& m_model;
             LineTable m_lines;
             bool m_lines_built = false;
             std::vector<Diagnostic> m_diagnostics;
@@ -333,7 +350,7 @@ namespace heimdall
 
         // `[first, last)` spell a pointer type: type words, names, `::`, template
         // arguments and `*`, ending in `*` (a trailing cv-qualifier is allowed).
-        bool IsPointerType(const TokenView &view, std::size_t first, std::size_t last)
+        bool IsPointerType(const TokenView& view, std::size_t first, std::size_t last)
         {
             if (first >= last)
             {
@@ -369,14 +386,14 @@ namespace heimdall
             return star;
         }
 
-        bool IsNullConstant(const TokenView &view, std::size_t position)
+        bool IsNullConstant(const TokenView& view, std::size_t position)
         {
-            return view.IsZeroLiteral(position) || (view.IsWord(position) && view.Text(position) == "NULL");
+            return view.IsZeroLiteral(position) ||(view.IsWord(position) && view.Text(position) == "NULL");
         }
 
         // Tokens after which `(T*)0` cannot be a cast: a call or a keyword
         // construct that owns the parentheses.
-        bool OwnsParentheses(const TokenView &view, std::size_t before)
+        bool OwnsParentheses(const TokenView& view, std::size_t before)
         {
             if (view.IsWord(before))
             {
@@ -416,7 +433,7 @@ namespace heimdall
 
         // The cast result is used as an object (`((T*)0)->member`, the classic
         // offsetof idiom): `nullptr` would not compile there.
-        bool UsedAsObject(const TokenView &view, std::size_t after)
+        bool UsedAsObject(const TokenView& view, std::size_t after)
         {
             while (view.At(after) == Tok::RParen)
             {
@@ -429,11 +446,11 @@ namespace heimdall
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeNullptr(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeNullptr(const SemanticModel& model)
     {
         Reporter reporter(model);
         const TokenView view(model);
-        const auto report = [&](std::size_t first, std::size_t last)
+        const auto report =[&](std::size_t first, std::size_t last)
         {
             const auto offset = view.Offset(first);
             reporter.Report(RuleId::ModernizeNullptr, "cpp/modernize-nullptr",
@@ -459,7 +476,7 @@ namespace heimdall
                     ++close;
                 }
 
-                if (close >= view.Size() || view.At(close) != Tok::RParen || !IsPointerType(view, i + 1, close) ||
+                if (close >= view.Size() || view.At(close) != Tok::RParen ||!IsPointerType(view, i + 1, close) ||
                     !IsNullConstant(view, close + 1) || UsedAsObject(view, close + 2))
                 {
                     continue;
@@ -477,7 +494,8 @@ namespace heimdall
                 }
 
                 const auto angle = view.MatchAngle(i + 1, view.Size());
-                if (angle >= view.Size() || !IsPointerType(view, i + 2, angle) || view.At(angle + 1) != Tok::LParen ||
+                if (angle >= view.Size() ||!IsPointerType(view, i + 2,
+                    angle) || view.At(angle + 1) != Tok::LParen ||
                     !IsNullConstant(view, angle + 2) || view.At(angle + 3) != Tok::RParen ||
                     UsedAsObject(view, angle + 4))
                 {
@@ -492,23 +510,23 @@ namespace heimdall
         return reporter.Take();
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeZeroAsNull(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeZeroAsNull(const SemanticModel& model)
     {
         Reporter reporter(model);
         const TokenView view(model);
-        const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().NodesSoA();
-        const auto report = [&](std::size_t position, std::string_view context)
+        const auto& symbols = model.Symbols();
+        const auto& nodes = model.Tree().NodesSoA();
+        const auto report =[&](std::size_t position, std::string_view context)
         {
             const auto offset = view.Offset(position);
             const auto length = view.End(position) - offset;
             reporter.Report(RuleId::NoZeroAsNull, "cpp/no-zero-as-null",
                 std::string("use nullptr instead of ") + std::string(view.Text(position)) + " " +
-                    std::string(context),
+                std::string(context),
                 offset, length, offset, length, "nullptr", true,
                 "Replace " + std::string(view.Text(position)) + " with nullptr");
         };
-        const auto is_pointer = [&](SymbolId symbol)
+        const auto is_pointer =[&](SymbolId symbol)
         {
             return symbol != kNone && (symbols.flags[symbol] & SymbolFlag::Pointer) != 0 &&
                 (symbols.kind[symbol] == SymbolKind::Variable || symbols.kind[symbol] == SymbolKind::Parameter);
@@ -531,7 +549,7 @@ namespace heimdall
             }
 
             const auto name = view.PositionOf(symbols.decl_token[symbol]);
-            if (view.At(name + 1) != Tok::Eq || !view.IsZeroLiteral(name + 2))
+            if (view.At(name + 1) != Tok::Eq ||!view.IsZeroLiteral(name + 2))
             {
                 continue;
             }
@@ -550,7 +568,7 @@ namespace heimdall
             if (nodes.Kind(node) == GrammarKind::BinaryExpression)
             {
                 // `p = 0`, `p == 0`, `p != 0`, `0 == p`
-                const auto [begin, end] = view.Range(node);
+                const auto[begin, end] = view.Range(node);
                 if (end != begin + 3)
                 {
                     continue;
@@ -573,9 +591,9 @@ namespace heimdall
             else if (nodes.Kind(node) == GrammarKind::ReturnStatement)
             {
                 // `return 0;` in a function that returns a pointer
-                const auto [begin, end] = view.Range(node);
-                if (view.At(begin) != Tok::KwReturn || !view.IsZeroLiteral(begin + 1) ||
-                    !(end == begin + 2 || (end == begin + 3 && view.At(begin + 2) == Tok::Semi)))
+                const auto[begin, end] = view.Range(node);
+                if (view.At(begin) != Tok::KwReturn ||!view.IsZeroLiteral(begin + 1) ||
+                    !(end == begin + 2 ||(end == begin + 3 && view.At(begin + 2) == Tok::Semi)))
                 {
                     continue;
                 }
@@ -611,20 +629,20 @@ namespace heimdall
         diagnostics.insert(diagnostics.end(), std::make_move_iterator(designated.begin()),
             std::make_move_iterator(designated.end()));
         std::stable_sort(diagnostics.begin(), diagnostics.end(),
-            [](const Diagnostic &a, const Diagnostic &b)
+            [](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
-            });
+        });
         return diagnostics;
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeIntegerToPointer(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeIntegerToPointer(const SemanticModel& model)
     {
         Reporter reporter(model);
         const TokenView view(model);
-        const auto &symbols = model.Symbols();
-        const auto &nodes = model.Tree().NodesSoA();
-        const auto is_integer = [&](std::size_t position)
+        const auto& symbols = model.Symbols();
+        const auto& nodes = model.Tree().NodesSoA();
+        const auto is_integer =[&](std::size_t position)
         {
             if (view.KindAt(position) != TokenKind::Number || view.IsZeroLiteral(position))
             {
@@ -639,15 +657,16 @@ namespace heimdall
 
             return text.find_first_not_of("0123456789'uUlLzZ") == std::string_view::npos;
         };
-        const auto report = [&](std::size_t position)
+        const auto report =[&](std::size_t position)
         {
             const auto offset = view.Offset(position);
             const auto length = view.End(position) - offset;
             reporter.ReportNoFix(RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer",
-                "integer constant " + std::string(view.Text(position)) + " cannot be converted to a pointer", offset,
+                "integer constant " + std::string(view.Text(position)) + " cannot be converted to a pointer",
+                offset,
                 length);
         };
-        const auto is_pointer = [&](SymbolId symbol)
+        const auto is_pointer =[&](SymbolId symbol)
         {
             return symbol != kNone && (symbols.flags[symbol] & SymbolFlag::Pointer) != 0 &&
                 (symbols.kind[symbol] == SymbolKind::Variable || symbols.kind[symbol] == SymbolKind::Parameter);
@@ -679,7 +698,7 @@ namespace heimdall
                 continue;
             }
 
-            const auto [begin, end] = view.Range(node);
+            const auto[begin, end] = view.Range(node);
             if (end == begin + 3 && view.At(begin + 1) == Tok::Eq && view.IsWord(begin) && is_integer(begin + 2) &&
                 is_pointer(model.ResolveToken(view.TokenAt(begin))))
             {
@@ -691,26 +710,26 @@ namespace heimdall
         auto designated = AnalyzeDesignatedIntegerToPointer(model);
         diagnostics.insert(diagnostics.end(), std::make_move_iterator(designated.begin()),
             std::make_move_iterator(designated.end()));
-        for (auto &diagnostic: diagnostics)
+        for (auto& diagnostic : diagnostics)
         {
             diagnostic.severity = Severity::Error;
             diagnostic.has_fix = false;
         }
 
         std::stable_sort(diagnostics.begin(), diagnostics.end(),
-            [](const Diagnostic &a, const Diagnostic &b)
+            [](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
-            });
+        });
         return diagnostics;
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeAuto(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeAuto(const SemanticModel& model)
     {
         Reporter reporter(model);
         const TokenView view(model);
-        const auto &nodes = model.Tree().NodesSoA();
-        const auto &scopes = model.Scopes();
+        const auto& nodes = model.Tree().NodesSoA();
+        const auto& scopes = model.Scopes();
 
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
@@ -728,12 +747,12 @@ namespace heimdall
             // One declarator: an InitDeclarator holding a Declarator and an initializer.
             std::uint32_t declarator = kNone;
             std::size_t declarators = 0;
-            for (const auto child: model.ChildrenOf(node))
+            for (const auto child : model.ChildrenOf(node))
             {
                 if (nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator)
                 {
                     ++declarators;
-                    for (const auto inner: model.ChildrenOf(child))
+                    for (const auto inner : model.ChildrenOf(child))
                     {
                         if (nodes.Kind(inner) == GrammarKind::Declarator)
                         {
@@ -749,7 +768,7 @@ namespace heimdall
             }
 
             std::uint32_t name_token = kNone;
-            for (const auto inner: model.ChildrenOf(declarator))
+            for (const auto inner : model.ChildrenOf(declarator))
             {
                 if (nodes.Kind(inner) == GrammarKind::DeclaredName)
                 {
@@ -768,7 +787,7 @@ namespace heimdall
                 continue;
             }
 
-            auto [begin, end] = view.Range(node);
+            auto[begin, end] = view.Range(node);
             if (end > begin && view.At(end - 1) == Tok::Semi)
             {
                 --end;
@@ -923,12 +942,16 @@ namespace heimdall
     {
 
         // Child of `parent` whose significant tokens are exactly [begin, end).
-        std::uint32_t ChildSpanning(const SemanticModel &model, const TokenView &view, std::uint32_t parent,
-            std::size_t begin, std::size_t end)
+        std::uint32_t ChildSpanning(
+            const SemanticModel& model,
+            const TokenView& view,
+            std::uint32_t parent,
+            std::size_t begin,
+            std::size_t end)
         {
-            for (const auto child: model.ChildrenOf(parent))
+            for (const auto child : model.ChildrenOf(parent))
             {
-                const auto [b, e] = view.Range(child);
+                const auto[b, e] = view.Range(child);
                 if (b == begin && e == end)
                 {
                     return child;
@@ -941,9 +964,9 @@ namespace heimdall
         // The expression a control statement tests, or kNone when the statement is
         // not a plain `if`/`while`/classic `for` or the grammar did not give the
         // condition a node of its own (declaration conditions, C-style casts).
-        std::uint32_t ConditionOf(const SemanticModel &model, const TokenView &view, std::uint32_t stmt)
+        std::uint32_t ConditionOf(const SemanticModel& model, const TokenView& view, std::uint32_t stmt)
         {
-            const auto [begin, end] = view.Range(stmt);
+            const auto[begin, end] = view.Range(stmt);
             const Tok keyword = view.At(begin);
             if (keyword != Tok::KwIf && keyword != Tok::KwWhile && keyword != Tok::KwFor)
             {
@@ -1010,9 +1033,9 @@ namespace heimdall
             return first < last ? ChildSpanning(model, view, stmt, first, last) : kNone;
         }
 
-        bool IsVectorOfBool(const TypeModel &types, TypeId type)
+        bool IsVectorOfBool(const TypeModel& types, TypeId type)
         {
-            const auto &table = types.Types();
+            const auto& table = types.Types();
             return table.Kind(type) == TypeKind::External &&
                 types.ExternalNames().Text(table.Arg(type)).starts_with("std::vector<bool");
         }
@@ -1030,9 +1053,9 @@ namespace heimdall
             std::size_t end = 0;
         };
 
-        bool SplitFor(const TokenView &view, std::uint32_t node, ForLoop &loop)
+        bool SplitFor(const TokenView& view, std::uint32_t node, ForLoop& loop)
         {
-            const auto [begin, end] = view.Range(node);
+            const auto[begin, end] = view.Range(node);
             if (view.At(begin) != Tok::KwFor || view.At(begin + 1) != Tok::LParen)
             {
                 return false;
@@ -1079,16 +1102,20 @@ namespace heimdall
         }
 
         // `++i`, `i++` or `i += 1` over [begin, end).
-        bool IsIncrementOf(const SemanticModel &model, const TokenView &view, std::size_t begin, std::size_t end,
+        bool IsIncrementOf(
+            const SemanticModel& model,
+            const TokenView& view,
+            std::size_t begin,
+            std::size_t end,
             SymbolId variable)
         {
-            const auto names = [&](std::size_t position)
+            const auto names =[&](std::size_t position)
             {
                 return view.IsWord(position) && model.ResolveToken(view.TokenAt(position)) == variable;
             };
             if (end == begin + 2)
             {
-                return (view.At(begin) == Tok::PlusPlus && names(begin + 1)) ||
+                return (view.At(begin) == Tok::PlusPlus&& names(begin + 1)) ||
                     (names(begin) && view.At(begin + 1) == Tok::PlusPlus);
             }
 
@@ -1097,9 +1124,12 @@ namespace heimdall
 
         // Picks a name for the loop variable that nothing in the loop or the file
         // already uses.
-        std::string FreshElementName(const SemanticModel &model, const TokenView &view, const ForLoop &loop)
+        std::string FreshElementName(const SemanticModel& model, const TokenView& view, const ForLoop& loop)
         {
-            for (const std::string_view candidate: {"element", "item", "entry", "value"})
+            for (const std::string_view candidate :
+                {
+                    "element", "item", "entry", "value"
+            })
             {
                 bool used = model.Names().Find(candidate) != kNone;
                 for (std::size_t i = loop.kw; i < loop.end && !used; ++i)
@@ -1118,7 +1148,7 @@ namespace heimdall
 
         // A `[` that does not subscript anything starts a lambda or an attribute:
         // captures would change meaning when the loop variable changes.
-        bool StartsLambda(const TokenView &view, std::size_t position, std::size_t body_begin)
+        bool StartsLambda(const TokenView& view, std::size_t position, std::size_t body_begin)
         {
             if (view.At(position) != Tok::LBracket)
             {
@@ -1130,11 +1160,11 @@ namespace heimdall
                 return true;
             }
 
-            return !(view.IsWord(position - 1) || view.At(position - 1) == Tok::RBracket ||
+            return!(view.IsWord(position - 1) || view.At(position - 1) == Tok::RBracket ||
                 view.At(position - 1) == Tok::RParen);
         }
 
-        bool EndsOperand(const TokenView &view, std::size_t position)
+        bool EndsOperand(const TokenView& view, std::size_t position)
         {
             if (view.IsWord(position) || view.IsLiteralToken(position))
             {
@@ -1155,9 +1185,17 @@ namespace heimdall
 
         // The loop as a range-based for: `header` replaces everything up to the
         // closing parenthesis and `edits` (ascending, disjoint) rewrite the body.
-        Diagnostic BuildLoopDiagnostic(const SemanticModel &model, const TokenView &view, const ForLoop &loop,
-            RuleId rule, std::string_view code, std::string message, const std::string &header,
-            const std::vector<Edit> &edits, LineTable &lines, bool &lines_built)
+        Diagnostic BuildLoopDiagnostic(
+            const SemanticModel& model,
+            const TokenView& view,
+            const ForLoop& loop,
+            RuleId rule,
+            std::string_view code,
+            std::string message,
+            const std::string& header,
+            const std::vector<Edit>& edits,
+            LineTable& lines,
+            bool& lines_built)
         {
             const auto source = model.Tree().Source();
             const auto body_offset = view.End(loop.close);
@@ -1177,48 +1215,48 @@ namespace heimdall
 
             const auto offset = view.Offset(loop.kw);
             const auto position = lines.Lookup(offset);
-            Diagnostic diagnostic {rule, Severity::Warning, std::string(code), std::move(message), offset,
+            Diagnostic diagnostic{rule, Severity::Warning, std::string(code), std::move(message), offset,
                 body_offset - offset, position.line, position.column, true,
-                TextEdit {offset, loop_end - offset, header + body}};
+                TextEdit{offset, loop_end - offset, header + body}};
             // The body is rewritten by pattern: offered as a quick fix, not in batch.
             diagnostic.fix_is_safe = false;
             diagnostic.fix_title = "Convert to a range-based for";
             return diagnostic;
         }
 
-        void SortByOffset(std::vector<Diagnostic> &diagnostics)
+        void SortByOffset(std::vector<Diagnostic>& diagnostics)
         {
             std::sort(diagnostics.begin(), diagnostics.end(),
-                [](const Diagnostic &a, const Diagnostic &b)
+                [](const Diagnostic& a, const Diagnostic& b)
                 {
                     return a.offset < b.offset;
-                });
+            });
         }
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeImplicitBool(const TypeModel &types)
+    std::vector<Diagnostic> SemanticRules::AnalyzeImplicitBool(const TypeModel& types)
     {
-        const auto &model = types.Model();
-        const auto &table = types.Types();
-        const auto &nodes = model.Tree().NodesSoA();
+        const auto& model = types.Model();
+        const auto& table = types.Types();
+        const auto& nodes = model.Tree().NodesSoA();
         Reporter reporter(model);
         const TokenView view(model);
-        const auto check = [&](std::uint32_t operand, std::string_view context)
+        const auto check =[&](std::uint32_t operand, std::string_view context)
         {
             if (operand >= nodes.size() || nodes.Kind(operand) == GrammarKind::LiteralExpression)
             {
                 return;
             }
 
-            const auto [begin, end] = view.Range(operand);
-            if (begin >= end || !model.IsCode(view.TokenAt(begin)))
+            const auto[begin, end] = view.Range(operand);
+            if (begin >= end ||!model.IsCode(view.TokenAt(begin)))
             {
                 return;
             }
 
             const auto type = table.Strip(types.NodeType(operand));
-            const char *advice = nullptr;
+            const char* advice = nullptr;
             if (table.IsInteger(type))
             {
                 advice = "compare with 0 explicitly";
@@ -1246,7 +1284,7 @@ namespace heimdall
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
             const auto kids = model.ChildrenOf(node);
-            const auto [begin, end] = view.Range(node);
+            const auto[begin, end] = view.Range(node);
             if (begin >= end)
             {
                 continue;
@@ -1325,18 +1363,18 @@ namespace heimdall
         return reporter.Take();
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeRangeLoop(const TypeModel &types)
+    std::vector<Diagnostic> SemanticRules::AnalyzeRangeLoop(const TypeModel& types)
     {
-        const auto &model = types.Model();
-        const auto &table = types.Types();
-        const auto &nodes = model.Tree().NodesSoA();
-        const auto &symbols = model.Symbols();
+        const auto& model = types.Model();
+        const auto& table = types.Types();
+        const auto& nodes = model.Tree().NodesSoA();
+        const auto& symbols = model.Symbols();
         const TokenView view(model);
         std::vector<Diagnostic> diagnostics;
         LineTable lines;
         bool lines_built = false;
 
-        const auto indexable = [&](SymbolId symbol, bool allow_array)
+        const auto indexable =[&](SymbolId symbol, bool allow_array)
         {
             if (symbol == kNone ||
                 (symbols.kind[symbol] != SymbolKind::Variable && symbols.kind[symbol] != SymbolKind::Parameter))
@@ -1363,7 +1401,7 @@ namespace heimdall
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
             ForLoop loop;
-            if (nodes.Kind(node) != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+            if (nodes.Kind(node) != GrammarKind::LoopStatement ||!SplitFor(view, node, loop) ||
                 !model.IsCode(view.TokenAt(loop.kw)))
             {
                 continue;
@@ -1376,7 +1414,7 @@ namespace heimdall
             }
 
             const auto name_pos = loop.semi1 - 3;
-            if (!view.IsWord(name_pos) || view.At(name_pos + 1) != Tok::Eq || !view.IsZeroLiteral(name_pos + 2))
+            if (!view.IsWord(name_pos) || view.At(name_pos + 1) != Tok::Eq ||!view.IsZeroLiteral(name_pos + 2))
             {
                 continue;
             }
@@ -1388,7 +1426,8 @@ namespace heimdall
             }
 
             const auto name_id = model.Names().Find(view.Text(name_pos));
-            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node), name_id);
+            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node),
+                name_id);
             if (!simple || variable == kNone || symbols.decl_token[variable] != view.TokenAt(name_pos) ||
                 symbols.kind[variable] != SymbolKind::Variable ||
                 !table.IsInteger(table.Strip(types.SymbolType(variable))))
@@ -1397,7 +1436,7 @@ namespace heimdall
             }
 
             // cond: `i < bound`, inc: `++i`
-            if (loop.semi2 < loop.semi1 + 4 || !view.IsWord(loop.semi1 + 1) ||
+            if (loop.semi2 < loop.semi1 + 4 ||!view.IsWord(loop.semi1 + 1) ||
                 model.ResolveToken(view.TokenAt(loop.semi1 + 1)) != variable || view.At(loop.semi1 + 2) != Tok::Lt ||
                 !IsIncrementOf(model, view, loop.semi2 + 1, loop.close, variable))
             {
@@ -1435,7 +1474,7 @@ namespace heimdall
                 }
 
                 std::uint64_t literal = 0;
-                for (const char c: text)
+                for (const char c : text)
                 {
                     literal = literal * 10 + static_cast<std::uint64_t>(c - '0');
                 }
@@ -1451,7 +1490,7 @@ namespace heimdall
                 }
 
                 const auto array = container == kNone ? TypeTable::Unknown : table.Strip(types.SymbolType(container));
-                if (!indexable(container, true) || !table.IsArray(array) || table.Extent(array) != literal)
+                if (!indexable(container, true) ||!table.IsArray(array) || table.Extent(array) != literal)
                 {
                     continue;
                 }
@@ -1503,7 +1542,7 @@ namespace heimdall
                 continue;
             }
 
-            for (auto &edit: edits)
+            for (auto& edit : edits)
             {
                 edit.text = element;
             }
@@ -1521,12 +1560,12 @@ namespace heimdall
         return diagnostics;
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeLoopConvert(const TypeModel &types)
+    std::vector<Diagnostic> SemanticRules::AnalyzeLoopConvert(const TypeModel& types)
     {
-        const auto &model = types.Model();
-        const auto &table = types.Types();
-        const auto &nodes = model.Tree().NodesSoA();
-        const auto &symbols = model.Symbols();
+        const auto& model = types.Model();
+        const auto& table = types.Types();
+        const auto& nodes = model.Tree().NodesSoA();
+        const auto& symbols = model.Symbols();
         const TokenView view(model);
         std::vector<Diagnostic> diagnostics;
         LineTable lines;
@@ -1535,7 +1574,7 @@ namespace heimdall
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
             ForLoop loop;
-            if (nodes.Kind(node) != GrammarKind::LoopStatement || !SplitFor(view, node, loop) ||
+            if (nodes.Kind(node) != GrammarKind::LoopStatement ||!SplitFor(view, node, loop) ||
                 !model.IsCode(view.TokenAt(loop.kw)))
             {
                 continue;
@@ -1543,7 +1582,7 @@ namespace heimdall
 
             // init: `auto it = c.begin()` or `auto it = std::begin(c)`
             const auto first = loop.open + 1;
-            if (view.At(first) != Tok::KwAuto || !view.IsWord(first + 1) || view.At(first + 2) != Tok::Eq)
+            if (view.At(first) != Tok::KwAuto ||!view.IsWord(first + 1) || view.At(first + 2) != Tok::Eq)
             {
                 continue;
             }
@@ -1576,7 +1615,8 @@ namespace heimdall
 
             const auto name_pos = first + 1;
             const auto name_id = model.Names().Find(view.Text(name_pos));
-            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node), name_id);
+            const auto variable = name_id == kNone ? kNone : model.LookupLocal(model.ScopeOfNode(node),
+                name_id);
             const auto container = model.ResolveToken(view.TokenAt(container_pos));
             if (variable == kNone || container == kNone || symbols.decl_token[variable] != view.TokenAt(name_pos) ||
                 symbols.kind[variable] != SymbolKind::Variable ||
@@ -1588,8 +1628,8 @@ namespace heimdall
 
             const auto container_type = table.Strip(types.SymbolType(container));
             const bool known_container = (table.Kind(container_type) == TypeKind::External &&
-                                             !IsVectorOfBool(types, container_type) &&
-                                             IsStdContainerHead(types.ExternalHead(container_type))) ||
+                !IsVectorOfBool(types, container_type) &&
+                IsStdContainerHead(types.ExternalHead(container_type))) ||
                 (free_form && table.IsArray(container_type));
             if (!known_container)
             {
@@ -1600,15 +1640,15 @@ namespace heimdall
             const auto condition = loop.semi1 + 1;
             const std::string_view end_name = begin_name == "begin" ? "end" : "cend";
             const bool cond_shape = free_form
-                ? loop.semi2 == condition + 8 && view.Text(condition + 2) == "std" &&
-                    view.At(condition + 3) == Tok::ColonColon && view.Text(condition + 4) == end_name &&
-                    view.At(condition + 5) == Tok::LParen && view.IsWord(condition + 6) &&
-                    view.At(condition + 7) == Tok::RParen && model.ResolveToken(view.TokenAt(condition + 6)) == container
-                : loop.semi2 == condition + 7 && view.IsWord(condition + 2) &&
-                    model.ResolveToken(view.TokenAt(condition + 2)) == container &&
-                    view.At(condition + 3) == Tok::Dot && view.Text(condition + 4) == end_name &&
-                    view.At(condition + 5) == Tok::LParen && view.At(condition + 6) == Tok::RParen;
-            if (!cond_shape || !view.IsWord(condition) || model.ResolveToken(view.TokenAt(condition)) != variable ||
+            ? loop.semi2 == condition + 8 && view.Text(condition + 2) == "std" &&
+                view.At(condition + 3) == Tok::ColonColon && view.Text(condition + 4) == end_name &&
+                view.At(condition + 5) == Tok::LParen && view.IsWord(condition + 6) &&
+                view.At(condition + 7) == Tok::RParen && model.ResolveToken(view.TokenAt(condition + 6)) == container
+            : loop.semi2 == condition + 7 && view.IsWord(condition + 2) &&
+                model.ResolveToken(view.TokenAt(condition + 2)) == container &&
+                view.At(condition + 3) == Tok::Dot && view.Text(condition + 4) == end_name &&
+                view.At(condition + 5) == Tok::LParen && view.At(condition + 6) == Tok::RParen;
+            if (!cond_shape ||!view.IsWord(condition) || model.ResolveToken(view.TokenAt(condition)) != variable ||
                 view.At(condition + 1) != Tok::BangEq)
             {
                 continue;
@@ -1617,9 +1657,9 @@ namespace heimdall
             const auto inc_begin = loop.semi2 + 1;
             if (loop.close != inc_begin + 2 ||
                 !((view.At(inc_begin) == Tok::PlusPlus && view.IsWord(inc_begin + 1) &&
-                      model.ResolveToken(view.TokenAt(inc_begin + 1)) == variable) ||
-                    (view.IsWord(inc_begin) && model.ResolveToken(view.TokenAt(inc_begin)) == variable &&
-                        view.At(inc_begin + 1) == Tok::PlusPlus)))
+                model.ResolveToken(view.TokenAt(inc_begin + 1)) == variable) ||
+                (view.IsWord(inc_begin) && model.ResolveToken(view.TokenAt(inc_begin)) == variable &&
+                view.At(inc_begin + 1) == Tok::PlusPlus)))
             {
                 continue;
             }
@@ -1652,7 +1692,7 @@ namespace heimdall
                         ok = false;
                     }
                     else if (p > body_begin && view.At(p - 1) == Tok::Star &&
-                        (p - 1 == body_begin || !EndsOperand(view, p - 2)))
+                        (p - 1 == body_begin ||!EndsOperand(view, p - 2)))
                     {
                         edits.push_back({p - 1, p, element}); // `*it`
                     }
@@ -1673,7 +1713,7 @@ namespace heimdall
             }
 
             const bool read_only = begin_name == "cbegin" || table.IsConstQualified(types.SymbolType(container));
-            const std::string header = std::string("for (") + (read_only ? "const auto& " : "auto& ") + element +
+            const std::string header = std::string("for (") +(read_only ? "const auto& " : "auto& ") + element +
                 " : " + std::string(container_name) + ")";
             diagnostics.push_back(BuildLoopDiagnostic(model, view, loop, RuleId::ModernizeLoopConvert,
                 "cpp/modernize-loop-convert",
@@ -1685,30 +1725,32 @@ namespace heimdall
         return diagnostics;
     }
 
-
-    std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel& model)
     {
         return Analyze(model, Typer::Type(model));
     }
 
-    std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel &model, const TypeModel &types)
+    std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel& model, const TypeModel& types)
     {
         const auto flow = Flow::Build(types);
         auto all = AnalyzeOverride(model);
-        for (auto &&part: {AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
-                 AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
-                 AnalyzeConstexpr(flow), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
-                 AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
-                 AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)})
+        for (auto&& part :
+            {
+                AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
+                AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
+                AnalyzeConstexpr(flow), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
+                AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
+                AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)
+        })
         {
             all.insert(all.end(), part.begin(), part.end());
         }
 
         std::stable_sort(all.begin(), all.end(),
-            [](const Diagnostic &a, const Diagnostic &b)
+            [](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
-            });
+        });
         return all;
     }
 

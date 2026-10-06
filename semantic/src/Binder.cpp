@@ -15,7 +15,7 @@ namespace heimdall
 
         std::uint64_t HashBytes(std::uint64_t hash, std::string_view text)
         {
-            for (const char c: text)
+            for (const char c : text)
             {
                 hash ^= static_cast<unsigned char>(c);
                 hash *= kFnvPrime;
@@ -77,32 +77,35 @@ namespace heimdall
     class BinderImpl
     {
     public:
-        explicit BinderImpl(SemanticModel &model, const ParseTree &tree) : m_model(model), m_tree(tree), m_sig(model.m_sig), m_child_begin(model.m_child_begin),
-          m_child_list(model.m_child_list)
-    {
-    }
+        explicit BinderImpl(SemanticModel& model, const ParseTree& tree) : m_model(model), m_tree(tree),
+            m_sig(model.m_sig), m_child_begin(model.m_child_begin),
+            m_child_list(model.m_child_list) {}
 
         void Run();
 
     private:
         // ---- token helpers -------------------------------------------------
-        const std::vector<Token> & Tokens() const
+        const std::vector<Token>& Tokens() const
         {
             return m_tree.Tokens();
         }
+
         std::string_view Text(std::uint32_t token) const
         {
             return m_tree.Text(Tokens()[token]);
         }
+
         Tok TokOf(std::uint32_t token) const
         {
             return Tokens()[token].tok;
         }
+
         bool IsIdent(std::uint32_t token) const
         {
             return token < Tokens().size() && Tokens()[token].kind == TokenKind::Identifier &&
                 Tokens()[token].tok == Tok::None;
         }
+
         bool Is(std::uint32_t token, Tok tok) const
         {
             return token < Tokens().size() && Tokens()[token].tok == tok;
@@ -110,72 +113,122 @@ namespace heimdall
 
         // Significant (non-trivia, non-directive) tokens, ascending.
         void BuildCoverage();
+
         void BuildSignificant();
+
         void FillNodeScopes();
+
         std::uint32_t PointerFlags(std::uint32_t declarator) const;
+
         std::uint32_t ReturnsPointerFlag(std::uint32_t function) const;
+
         // First significant position at or after raw token `token`.
         std::size_t SigAtOrAfter(std::uint32_t token) const;
+
         std::uint32_t PrevSig(std::uint32_t token) const;
+
         std::uint32_t NextSig(std::uint32_t token) const;
+
         // Significant token positions of a node as [begin, end) in m_sig.
         std::pair<std::size_t, std::size_t> NodeSig(std::uint32_t node) const;
+
         // Position of the sig token matching the bracket at sig position `pos`.
         std::size_t MatchSig(std::size_t pos, std::size_t end) const;
 
         // ---- node helpers --------------------------------------------------
         void BuildChildren();
+
         std::pair<std::uint32_t, std::uint32_t> Children(std::uint32_t node) const
         {
             return {m_child_begin[node], m_child_begin[node + 1]};
         }
+
         std::uint32_t FindChild(std::uint32_t node, GrammarKind kind) const;
+
         GrammarKind KindOf(std::uint32_t node) const
         {
             return m_tree.NodesSoA().Kind(node);
         }
+
         std::uint32_t DeclaredNameToken(std::uint32_t declarator) const;
 
         // ---- scopes --------------------------------------------------------
         ScopeId ScopeFor(std::uint32_t node);
+
         ScopeId ParentScopeFor(std::uint32_t node);
+
         ScopeId CreateScope(std::uint32_t node, ScopeId parent);
-        ScopeId AddScope(ScopeId parent, ScopeKind kind, SymbolId owner, std::uint32_t node);
+
+        ScopeId AddScope(
+            ScopeId parent,
+            ScopeKind kind,
+            SymbolId owner,
+            std::uint32_t node);
+
         ScopeId CreateNamespace(std::uint32_t node, ScopeId parent);
+
         ScopeId CreateRecord(std::uint32_t node, ScopeId parent);
+
         ScopeId CreateFunction(std::uint32_t node, ScopeId parent);
 
         // ---- symbols -------------------------------------------------------
-        SymbolId Declare(NameId name, SymbolKind kind, ScopeId scope, std::uint32_t flags,
-            std::uint32_t token, std::uint32_t node, ScopeId member_scope, bool register_name);
+        SymbolId Declare(
+            NameId name,
+            SymbolKind kind,
+            ScopeId scope,
+            std::uint32_t flags,
+            std::uint32_t token,
+            std::uint32_t node,
+            ScopeId member_scope,
+            bool register_name);
+
         void DeclareNode(std::uint32_t node);
+
         void DeclareDeclaration(std::uint32_t node);
+
         void DeclareEnumerators(std::uint32_t node);
+
         void DeclareParameter(std::uint32_t node);
+
         void DeclareFunction(std::uint32_t node);
+
         void DeclareUsing(std::uint32_t node);
+
         FunctionHead ScanHead(std::uint32_t node) const;
-        std::uint32_t FlagsFromHead(std::uint32_t node, const FunctionHead &head,
-            std::uint64_t & signature) const;
-        std::uint64_t ParameterSignature(std::uint32_t node, const FunctionHead &head) const;
-        NameId HeadName(const FunctionHead &head);
+
+        std::uint32_t FlagsFromHead(std::uint32_t node, const FunctionHead& head,
+            std::uint64_t& signature) const;
+
+        std::uint64_t ParameterSignature(std::uint32_t node, const FunctionHead& head) const;
+
+        NameId HeadName(const FunctionHead& head);
+
         bool QualifierSegments(std::uint32_t first, std::uint32_t last_exclusive,
-            std::vector<std::uint32_t> & out) const;
-        SymbolId ResolveQualifier(std::uint32_t first, std::uint32_t name_token, ScopeId from,
-            bool &global) const;
+            std::vector<std::uint32_t>& out) const;
+
+        SymbolId ResolveQualifier(
+            std::uint32_t first,
+            std::uint32_t name_token,
+            ScopeId from,
+            bool& global) const;
 
         // ---- resolution ----------------------------------------------------
         void ResolveBases();
-        void ResolveRefs();
-        SymbolId ResolvePath(std::uint32_t first_token, ScopeId from, std::uint32_t before,
-            bool &template_id,
-            std::uint32_t & last_token) const;
 
-        SemanticModel &m_model;
-        const ParseTree &m_tree;
-        std::pmr::vector<std::uint32_t> &m_sig;
-        std::pmr::vector<std::uint32_t> &m_child_begin;
-        std::pmr::vector<std::uint32_t> &m_child_list;
+        void ResolveRefs();
+
+        SymbolId ResolvePath(
+            std::uint32_t first_token,
+            ScopeId from,
+            std::uint32_t before,
+            bool& template_id,
+            std::uint32_t& last_token) const;
+
+        SemanticModel& m_model;
+        const ParseTree& m_tree;
+        std::pmr::vector<std::uint32_t>& m_sig;
+        std::pmr::vector<std::uint32_t>& m_child_begin;
+        std::pmr::vector<std::uint32_t>& m_child_list;
         std::vector<ScopeId> m_own_scope;
         // class symbols whose bases are still to be recorded: (symbol, node)
         std::vector<std::pair<SymbolId, std::uint32_t>> m_pending_bases;
@@ -185,13 +238,13 @@ namespace heimdall
     // ---------------------------------------------------------------------
     void BinderImpl::BuildSignificant()
     {
-        const auto &tokens = Tokens();
-        const auto &directives = m_tree.Directives();
+        const auto& tokens = Tokens();
+        const auto& directives = m_tree.Directives();
         std::size_t directive = 0;
         m_sig.reserve(tokens.size() / 2);
         for (std::size_t i = 0; i < tokens.size(); ++i)
         {
-            const auto &token = tokens[i];
+            const auto& token = tokens[i];
             if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
                 token.kind == TokenKind::BlockComment)
             {
@@ -223,8 +276,8 @@ namespace heimdall
     // and code the preprocessor switched off.
     void BinderImpl::BuildCoverage()
     {
-        const auto &tokens = Tokens();
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& tokens = Tokens();
+        const auto& nodes = m_tree.NodesSoA();
         std::vector<std::int32_t> delta(tokens.size() + 1, 0);
         for (std::size_t i = 1; i < nodes.size(); ++i)
         {
@@ -250,7 +303,7 @@ namespace heimdall
 
     void BinderImpl::FillNodeScopes()
     {
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& nodes = m_tree.NodesSoA();
         m_model.m_node_scope.assign(nodes.size(), SemanticModel::TranslationUnitScope);
         for (std::uint32_t node = 1; node < nodes.size(); ++node)
         {
@@ -411,7 +464,7 @@ namespace heimdall
 
     void BinderImpl::BuildChildren()
     {
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& nodes = m_tree.NodesSoA();
         const std::size_t count = nodes.size();
         m_child_begin.assign(count + 1, 0);
         for (std::size_t i = 1; i < count; ++i)
@@ -472,9 +525,13 @@ namespace heimdall
     }
 
     // ---- scopes ---------------------------------------------------------
-    ScopeId BinderImpl::AddScope(ScopeId parent, ScopeKind kind, SymbolId owner, std::uint32_t node)
+    ScopeId BinderImpl::AddScope(
+        ScopeId parent,
+        ScopeKind kind,
+        SymbolId owner,
+        std::uint32_t node)
     {
-        auto &scopes = m_model.m_scopes;
+        auto& scopes = m_model.m_scopes;
         scopes.parent.push_back(parent);
         scopes.kind.push_back(kind);
         scopes.owner.push_back(owner);
@@ -484,7 +541,7 @@ namespace heimdall
 
     ScopeId BinderImpl::ScopeFor(std::uint32_t node)
     {
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& nodes = m_tree.NodesSoA();
         std::vector<std::uint32_t> pending;
         ScopeId base = SemanticModel::TranslationUnitScope;
         std::uint32_t index = node;
@@ -712,10 +769,17 @@ namespace heimdall
     }
 
     // ---- symbols --------------------------------------------------------
-    SymbolId BinderImpl::Declare(NameId name, SymbolKind kind, ScopeId scope, std::uint32_t flags,
-        std::uint32_t token, std::uint32_t node, ScopeId member_scope, bool register_name)
+    SymbolId BinderImpl::Declare(
+        NameId name,
+        SymbolKind kind,
+        ScopeId scope,
+        std::uint32_t flags,
+        std::uint32_t token,
+        std::uint32_t node,
+        ScopeId member_scope,
+        bool register_name)
     {
-        auto &symbols = m_model.m_symbols;
+        auto& symbols = m_model.m_symbols;
         const auto id = static_cast<SymbolId>(symbols.Size());
         symbols.name.push_back(name);
         symbols.scope.push_back(scope);
@@ -873,7 +937,7 @@ namespace heimdall
         return head;
     }
 
-    NameId BinderImpl::HeadName(const FunctionHead &head)
+    NameId BinderImpl::HeadName(const FunctionHead& head)
     {
         if (head.name_token == kNone)
         {
@@ -909,7 +973,7 @@ namespace heimdall
         return m_model.m_names.Intern(Text(head.name_token));
     }
 
-    std::uint64_t BinderImpl::ParameterSignature(std::uint32_t node, const FunctionHead &head) const
+    std::uint64_t BinderImpl::ParameterSignature(std::uint32_t node, const FunctionHead& head) const
     {
         const auto declarator = FindChild(node, GrammarKind::Declarator);
         std::uint32_t suffix = declarator == kNone ? kNone : FindChild(declarator,
@@ -965,8 +1029,8 @@ namespace heimdall
         return HashU64(hash, parameters);
     }
 
-    std::uint32_t BinderImpl::FlagsFromHead(std::uint32_t node, const FunctionHead &head,
-        std::uint64_t & signature) const
+    std::uint32_t BinderImpl::FlagsFromHead(std::uint32_t node, const FunctionHead& head,
+        std::uint64_t& signature) const
     {
         std::uint32_t flags = 0;
         auto[begin, end] = NodeSig(node);
@@ -1084,7 +1148,7 @@ namespace heimdall
     }
 
     bool BinderImpl::QualifierSegments(std::uint32_t first, std::uint32_t last_exclusive,
-        std::vector<std::uint32_t> & out) const
+        std::vector<std::uint32_t>& out) const
     {
         out.clear();
         for (auto i = SigAtOrAfter(first); i < m_sig.size() && m_sig[i] < last_exclusive; ++i)
@@ -1106,8 +1170,11 @@ namespace heimdall
         return true;
     }
 
-    SymbolId BinderImpl::ResolveQualifier(std::uint32_t first, std::uint32_t name_token, ScopeId from,
-        bool &global) const
+    SymbolId BinderImpl::ResolveQualifier(
+        std::uint32_t first,
+        std::uint32_t name_token,
+        ScopeId from,
+        bool& global) const
     {
         std::vector<std::uint32_t> segments;
         global = Is(first, Tok::ColonColon);
@@ -1342,8 +1409,12 @@ namespace heimdall
     // ---- resolution -----------------------------------------------------
     // Reads `[::] a [:: b ...]` starting at `first_token` and resolves it.
     // `template_id` is set when the path continues with `<` (a template-id).
-    SymbolId BinderImpl::ResolvePath(std::uint32_t first_token, ScopeId from, std::uint32_t before,
-        bool &template_id, std::uint32_t & last_token) const
+    SymbolId BinderImpl::ResolvePath(
+        std::uint32_t first_token,
+        ScopeId from,
+        std::uint32_t before,
+        bool& template_id,
+        std::uint32_t& last_token) const
     {
         template_id = false;
         std::size_t pos = SigAtOrAfter(first_token);
@@ -1397,9 +1468,9 @@ namespace heimdall
 
     void BinderImpl::ResolveBases()
     {
-        auto &bases = m_model.m_bases;
-        auto &symbols = m_model.m_symbols;
-        for (const auto &[symbol, node]: m_pending_bases)
+        auto& bases = m_model.m_bases;
+        auto& symbols = m_model.m_symbols;
+        for (const auto& [symbol, node] : m_pending_bases)
         {
             const auto[begin, end] = NodeSig(node);
             std::size_t brace = begin;
@@ -1484,7 +1555,7 @@ namespace heimdall
 
     void BinderImpl::ResolveRefs()
     {
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& nodes = m_tree.NodesSoA();
         std::vector<std::pair<std::uint32_t, SymbolId>> found;
         for (std::uint32_t node = 0; node < nodes.size(); ++node)
         {
@@ -1540,15 +1611,15 @@ namespace heimdall
 
         std::sort(found.begin(), found.end());
         found.erase(std::unique(found.begin(), found.end(),
-            [](const auto &a, const auto &b)
+            [](const auto& a, const auto& b)
             {
                 return a.first == b.first;
         }),
             found.end());
-        auto &refs = m_model.m_refs;
+        auto& refs = m_model.m_refs;
         refs.token.reserve(found.size());
         refs.target.reserve(found.size());
-        for (const auto &[token, target]: found)
+        for (const auto& [token, target] : found)
         {
             refs.token.push_back(token);
             refs.target.push_back(target);
@@ -1557,7 +1628,7 @@ namespace heimdall
 
     void BinderImpl::Run()
     {
-        const auto &nodes = m_tree.NodesSoA();
+        const auto& nodes = m_tree.NodesSoA();
         BuildCoverage();
         BuildSignificant();
         BuildChildren();
@@ -1587,11 +1658,11 @@ namespace heimdall
         ResolveRefs();
     }
 
-    SemanticModel Binder::Bind(const ParseTree &tree)
+    SemanticModel Binder::Bind(const ParseTree& tree)
     {
         const auto nodes = tree.NodesSoA().size();
         SemanticModel model(tree, std::max<std::size_t>(64 * 1024, nodes * 96));
-        auto &symbols = model.m_symbols;
+        auto& symbols = model.m_symbols;
         const auto expected = nodes / 6 + 8;
         symbols.name.reserve(expected);
         symbols.scope.reserve(expected);

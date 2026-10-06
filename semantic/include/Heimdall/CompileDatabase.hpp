@@ -34,7 +34,9 @@ namespace heimdall
         {
             return m_commands;
         }
+
         const CompileCommand* Find(std::filesystem::path file) const;
+
         // Exact match, else the entry sharing the longest directory prefix with
         // `file` (headers are absent from compile databases). Null when empty.
         const CompileCommand* FindOrNearest(std::filesystem::path file) const;

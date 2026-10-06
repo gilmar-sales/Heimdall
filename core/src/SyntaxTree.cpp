@@ -61,7 +61,7 @@ namespace heimdall
 
         for (std::size_t i = 0; i < tree.m_tokens.size(); ++i)
         {
-            const Token &token = tree.m_tokens[i];
+            const Token& token = tree.m_tokens[i];
             const std::string_view text = tree.Text(token);
             if (token.kind != TokenKind::Punctuation || text.size() != 1)
             {
@@ -94,7 +94,7 @@ namespace heimdall
                 if (!group_stack.empty())
                 {
                     const std::size_t node = group_stack.back();
-                    const Token &opener = tree.m_tokens[tree.m_nodes[node].first_token];
+                    const Token& opener = tree.m_tokens[tree.m_nodes[node].first_token];
                     const char expected = ExpectedCloser(tree.Text(opener).front());
                     if (c == expected)
                     {
@@ -118,7 +118,7 @@ namespace heimdall
             tree.m_token_parents[i] = current_parent;
         }
 
-        for (const std::size_t node: group_stack)
+        for (const std::size_t node : group_stack)
         {
             const std::size_t first = tree.m_nodes[node].first_token;
             tree.m_nodes[node].token_count =

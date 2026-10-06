@@ -31,7 +31,7 @@ namespace heimdall::cli
                 text.find(kBracketOpen) != std::string_view::npos;
         }
 
-        bool MatchBracket(std::string_view pattern, std::size_t &pi, char value)
+        bool MatchBracket(std::string_view pattern, std::size_t& pi, char value)
         {
             // pattern[pi] == '[' on entry. Consumes through ']' and reports
             // whether `value` is in the class. Supports [!...]/[^...] negation
@@ -84,7 +84,7 @@ namespace heimdall::cli
                 ++pi;
             }
 
-            if (pi >= pattern.size() || !has_item)
+            if (pi >= pattern.size() ||!has_item)
             {
                 pi = open;
                 return false;
@@ -94,7 +94,11 @@ namespace heimdall::cli
             return negated ? !matched : matched;
         }
 
-        bool MatchGlobRec(std::string_view pattern, std::size_t pi, std::string_view text, std::size_t si)
+        bool MatchGlobRec(
+            std::string_view pattern,
+            std::size_t pi,
+            std::string_view text,
+            std::size_t si)
         {
             while (pi < pattern.size())
             {
@@ -205,7 +209,7 @@ namespace heimdall::cli
             return si == text.size();
         }
 
-        bool ExpandGlob(const std::string &raw_input, std::vector<std::filesystem::path> & files)
+        bool ExpandGlob(const std::string& raw_input, std::vector<std::filesystem::path>& files)
         {
             const std::string normalized = NormalizeSeparators(raw_input);
             const std::size_t first_glob = normalized.find_first_of("*?[");
@@ -332,7 +336,7 @@ namespace heimdall::cli
 
     } // namespace
 
-    bool IsSourceFile(const std::filesystem::path & path)
+    bool IsSourceFile(const std::filesystem::path& path)
     {
         const auto ext = path.extension().string();
         return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx" || ext == ".h" ||
@@ -344,10 +348,10 @@ namespace heimdall::cli
         return MatchGlobRec(NormalizeSeparators(pattern), 0, NormalizeSeparators(text), 0);
     }
 
-    bool CollectFiles(const std::vector<std::filesystem::path> & inputs,
-        std::vector<std::filesystem::path> & files)
+    bool CollectFiles(const std::vector<std::filesystem::path>& inputs,
+        std::vector<std::filesystem::path>& files)
     {
-        for (const auto & input: inputs)
+        for (const auto& input : inputs)
         {
             const std::string raw = input.string();
             if (HasGlobChars(NormalizeSeparators(raw)))

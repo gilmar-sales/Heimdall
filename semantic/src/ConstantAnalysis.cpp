@@ -50,7 +50,8 @@ namespace heimdall::detail
     class ConstantAnalysis::Parser
     {
     public:
-        Parser(ConstantAnalysis &owner, std::size_t begin, std::size_t end) : m_owner(owner), m_view(owner.m_view),
+        Parser(ConstantAnalysis& owner, std::size_t begin, std::size_t end) : m_owner(owner),
+            m_view(owner.m_view),
             m_pos(begin), m_end(end) {}
 
         // The whole range must be one expression.
@@ -61,7 +62,11 @@ namespace heimdall::detail
         }
 
     private:
-        static Value Int(std::int64_t i, bool known, bool wide, bool is_unsigned)
+        static Value Int(
+            std::int64_t i,
+            bool known,
+            bool wide,
+            bool is_unsigned)
         {
             Value v;
             v.ok = true;
@@ -82,15 +87,19 @@ namespace heimdall::detail
             return v;
         }
 
-        static double AsDouble(const Value &v)
+        static double AsDouble(const Value& v)
         {
             return v.is_float ? v.f : static_cast<double>(v.i);
         }
 
         // Result of an integer operation: wraps unsigned, rejects signed overflow.
-        static Value Normalize(std::int64_t r, bool known, bool wide, bool is_unsigned)
+        static Value Normalize(
+            std::int64_t r,
+            bool known,
+            bool wide,
+            bool is_unsigned)
         {
-            if (wide || !known)
+            if (wide ||!known)
             {
                 return Int(0, false, wide, is_unsigned);
             }
@@ -102,18 +111,18 @@ namespace heimdall::detail
 
             if (r < kIntMin || r > kIntMax)
             {
-                return Value {}; // signed overflow: not a constant expression
+                return Value{}; // signed overflow: not a constant expression
             }
 
             return Int(r, true, false, false);
         }
 
-        static std::int64_t As(const Value &v, bool is_unsigned)
+        static std::int64_t As(const Value& v, bool is_unsigned)
         {
             return is_unsigned ? static_cast<std::int64_t>(static_cast<std::uint32_t>(v.i)) : v.i;
         }
 
-        static bool Truthy(const Value &v)
+        static bool Truthy(const Value& v)
         {
             return v.is_float ? v.f != 0.0 : v.i != 0;
         }
@@ -121,7 +130,7 @@ namespace heimdall::detail
         Value Number(std::string_view text) const
         {
             std::string digits;
-            for (const char c: text)
+            for (const char c : text)
             {
                 if (c != '\'')
                 {
@@ -132,7 +141,7 @@ namespace heimdall::detail
             const bool hex = digits.size() > 1 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
             const bool binary = digits.size() > 1 && digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B');
             const bool floating = hex ? digits.find_first_of("pP") != std::string::npos
-                                      : !binary && digits.find_first_of(".eE") != std::string::npos;
+            : !binary && digits.find_first_of(".eE") != std::string::npos;
             if (floating)
             {
                 while (!digits.empty() && (digits.back() == 'f' || digits.back() == 'F' || digits.back() == 'l' ||
@@ -146,7 +155,7 @@ namespace heimdall::detail
                     digits.pop_back();
                 }
 
-                char *stop = nullptr;
+                char* stop = nullptr;
                 const double parsed = std::strtod(digits.c_str(), &stop);
                 return stop != nullptr && *stop == '\0' ? Float(parsed, true) : Value {};
             }
@@ -157,7 +166,7 @@ namespace heimdall::detail
             {
                 const char c = digits.back();
                 is_unsigned = is_unsigned || c == 'u' || c == 'U';
-                longs += (c == 'l' || c == 'L' || c == 'z' || c == 'Z') ? 1 : 0;
+                longs +=(c == 'l' || c == 'L' || c == 'z' || c == 'Z') ? 1 : 0;
                 digits.pop_back();
             }
 
@@ -181,7 +190,7 @@ namespace heimdall::detail
 
             if (digits.size() <= skip)
             {
-                return Value {};
+                return Value{};
             }
 
             std::uint64_t magnitude = 0;
@@ -189,8 +198,8 @@ namespace heimdall::detail
             {
                 const char c = digits[k];
                 const int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
-                                                                  : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 99;
-                if (digit >= base || magnitude > (UINT64_MAX - static_cast<std::uint64_t>(digit)) / static_cast<std::uint64_t>(base))
+                : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 99;
+                if (digit >= base || magnitude >(UINT64_MAX - static_cast<std::uint64_t>(digit)) / static_cast<std::uint64_t>(base))
                 {
                     return Int(0, false, true, is_unsigned); // malformed or beyond 64 bits
                 }
@@ -206,7 +215,7 @@ namespace heimdall::detail
             if (is_unsigned)
             {
                 return magnitude <= static_cast<std::uint64_t>(kUIntMax)
-                    ? Int(static_cast<std::int64_t>(magnitude), true, false, true) : Int(0, false, true, true);
+                ? Int(static_cast<std::int64_t>(magnitude), true, false, true) : Int(0, false, true, true);
             }
 
             if (magnitude <= static_cast<std::uint64_t>(kIntMax))
@@ -224,14 +233,14 @@ namespace heimdall::detail
 
         Value Logical(bool a_known, bool b_known, bool result) const
         {
-            return Int(result ? 1 : 0, a_known && b_known, false, false);
+            return Int(result ? 1 : 0, a_known&& b_known, false, false);
         }
 
-        Value Apply(Tok op, const Value &a, const Value &b) const
+        Value Apply(Tok op, const Value& a, const Value& b) const
         {
-            if (!a.ok || !b.ok)
+            if (!a.ok ||!b.ok)
             {
-                return Value {};
+                return Value{};
             }
 
             const bool both = a.known && b.known;
@@ -252,12 +261,24 @@ namespace heimdall::detail
                     bool result = false;
                     switch (op)
                     {
-                    case Tok::Lt: result = x < y; break;
-                    case Tok::Gt: result = x > y; break;
-                    case Tok::Le: result = x <= y; break;
-                    case Tok::Ge: result = x >= y; break;
-                    case Tok::EqEq: result = x == y; break;
-                    default: result = x != y; break;
+                    case Tok::Lt:
+                        result = x < y;
+                        break;
+                    case Tok::Gt:
+                        result = x > y;
+                        break;
+                    case Tok::Le:
+                        result = x <= y;
+                        break;
+                    case Tok::Ge:
+                        result = x >= y;
+                        break;
+                    case Tok::EqEq:
+                        result = x == y;
+                        break;
+                    default:
+                        result = x != y;
+                        break;
                     }
 
                     return Logical(a.known, b.known, result);
@@ -265,12 +286,12 @@ namespace heimdall::detail
 
                 if (op != Tok::Plus && op != Tok::Minus && op != Tok::Star && op != Tok::Slash)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 if (op == Tok::Slash && b.known && AsDouble(b) == 0.0)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 const double x = AsDouble(a);
@@ -283,9 +304,9 @@ namespace heimdall::detail
             // arithmetic conversions.
             if (op == Tok::Shl || op == Tok::Shr)
             {
-                if (b.known && (b.i < 0 || b.i >= (a.wide ? 64 : 32)))
+                if (b.known && (b.i < 0 || b.i >=(a.wide ? 64 : 32)))
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 if (!both || a.wide)
@@ -298,9 +319,10 @@ namespace heimdall::detail
                     return Normalize(a.i >> b.i, true, false, a.is_unsigned);
                 }
 
-                const auto shifted = static_cast<std::uint32_t>(static_cast<std::uint64_t>(As(a, a.is_unsigned)) << b.i);
+                const auto shifted = static_cast<std::uint32_t>(static_cast<std::uint64_t>(As(a,
+                    a.is_unsigned)) << b.i);
                 return a.is_unsigned ? Normalize(static_cast<std::int64_t>(shifted), true, false, true)
-                                     : Normalize(static_cast<std::int64_t>(static_cast<std::int32_t>(shifted)), true, false, false);
+                : Normalize(static_cast<std::int64_t>(static_cast<std::int32_t>(shifted)), true, false, false);
             }
 
             const bool wide = a.wide || b.wide;
@@ -317,12 +339,24 @@ namespace heimdall::detail
                 bool result = false;
                 switch (op)
                 {
-                case Tok::Lt: result = x < y; break;
-                case Tok::Gt: result = x > y; break;
-                case Tok::Le: result = x <= y; break;
-                case Tok::Ge: result = x >= y; break;
-                case Tok::EqEq: result = x == y; break;
-                default: result = x != y; break;
+                case Tok::Lt:
+                    result = x < y;
+                    break;
+                case Tok::Gt:
+                    result = x > y;
+                    break;
+                case Tok::Le:
+                    result = x <= y;
+                    break;
+                case Tok::Ge:
+                    result = x >= y;
+                    break;
+                case Tok::EqEq:
+                    result = x == y;
+                    break;
+                default:
+                    result = x != y;
+                    break;
                 }
 
                 return Int(result ? 1 : 0, true, false, false);
@@ -332,7 +366,7 @@ namespace heimdall::detail
             {
                 if (b.known && b.i == 0)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 if (!both || wide)
@@ -344,7 +378,7 @@ namespace heimdall::detail
                 const auto y = As(b, is_unsigned);
                 if (y == 0)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 return Normalize(op == Tok::Slash ? x / y : x % y, true, false, is_unsigned);
@@ -366,20 +400,20 @@ namespace heimdall::detail
             case Tok::Star:
                 // Both operands fit in 32 bits, so the product fits in 64 unless two large
                 // unsigned values meet; those are left unknown.
-                if (std::llabs(x) > (1ll << 31) || std::llabs(y) > (1ll << 31))
+                if (std::llabs(x) >(1ll << 31) || std::llabs(y) >(1ll << 31))
                 {
                     return Int(0, false, false, is_unsigned);
                 }
 
-                return Normalize(x * y, true, false, is_unsigned);
+                return Normalize(x* y, true, false, is_unsigned);
             case Tok::Amp:
-                return Normalize(x & y, true, false, is_unsigned);
+                return Normalize(x& y, true, false, is_unsigned);
             case Tok::Pipe:
                 return Normalize(x | y, true, false, is_unsigned);
             case Tok::Caret:
                 return Normalize(x ^ y, true, false, is_unsigned);
             default:
-                return Value {};
+                return Value{};
             }
         }
 
@@ -387,25 +421,36 @@ namespace heimdall::detail
         {
             switch (tok)
             {
-            case Tok::PipePipe: return 1;
-            case Tok::AmpAmp: return 2;
-            case Tok::Pipe: return 3;
-            case Tok::Caret: return 4;
-            case Tok::Amp: return 5;
+            case Tok::PipePipe:
+                return 1;
+            case Tok::AmpAmp:
+                return 2;
+            case Tok::Pipe:
+                return 3;
+            case Tok::Caret:
+                return 4;
+            case Tok::Amp:
+                return 5;
             case Tok::EqEq:
-            case Tok::BangEq: return 6;
+            case Tok::BangEq:
+                return 6;
             case Tok::Lt:
             case Tok::Gt:
             case Tok::Le:
-            case Tok::Ge: return 7;
+            case Tok::Ge:
+                return 7;
             case Tok::Shl:
-            case Tok::Shr: return 8;
+            case Tok::Shr:
+                return 8;
             case Tok::Plus:
-            case Tok::Minus: return 9;
+            case Tok::Minus:
+                return 9;
             case Tok::Star:
             case Tok::Slash:
-            case Tok::Percent: return 10;
-            default: return 0;
+            case Tok::Percent:
+                return 10;
+            default:
+                return 0;
             }
         }
 
@@ -421,14 +466,14 @@ namespace heimdall::detail
             const Value yes = Ternary();
             if (!yes.ok || m_pos >= m_end || m_view.At(m_pos) != Tok::Colon)
             {
-                return Value {};
+                return Value{};
             }
 
             ++m_pos;
             const Value no = Ternary();
             if (!no.ok)
             {
-                return Value {};
+                return Value{};
             }
 
             if (condition.known && yes.known && no.known && yes.is_float == no.is_float)
@@ -468,7 +513,7 @@ namespace heimdall::detail
         {
             if (m_pos >= m_end)
             {
-                return Value {};
+                return Value{};
             }
 
             const Tok tok = m_view.At(m_pos);
@@ -478,7 +523,7 @@ namespace heimdall::detail
                 const Value operand = Unary();
                 if (!operand.ok)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 if (tok == Tok::Bang)
@@ -516,7 +561,7 @@ namespace heimdall::detail
         {
             if (m_pos >= m_end)
             {
-                return Value {};
+                return Value{};
             }
 
             const Tok tok = m_view.At(m_pos);
@@ -543,15 +588,15 @@ namespace heimdall::detail
                 const Value inner = Ternary();
                 if (!inner.ok || m_pos >= m_end || m_view.At(m_pos) != Tok::RParen)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 ++m_pos;
                 // `(T)x` is a cast, not a parenthesized value.
                 if (m_pos < m_end && (m_view.IsWord(m_pos) || m_view.KindAt(m_pos) == TokenKind::Number ||
-                        m_view.At(m_pos) == Tok::LParen))
+                    m_view.At(m_pos) == Tok::LParen))
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 return inner;
@@ -562,7 +607,7 @@ namespace heimdall::detail
                 return Name();
             }
 
-            return Value {};
+            return Value{};
         }
 
         // An enumerator, a constant variable or a call to a constexpr function.
@@ -572,10 +617,10 @@ namespace heimdall::detail
             const auto symbol = m_owner.m_model.ResolveToken(m_view.TokenAt(position));
             if (symbol == kNone)
             {
-                return Value {};
+                return Value{};
             }
 
-            const auto &symbols = m_owner.m_symbols;
+            const auto& symbols = m_owner.m_symbols;
             switch (symbols.kind[symbol])
             {
             case SymbolKind::Enumerator:
@@ -588,33 +633,33 @@ namespace heimdall::detail
                     return Int(0, false, true, false);
                 }
 
-                return Value {};
+                return Value{};
             case SymbolKind::Variable:
                 return m_owner.UsableInConstantExpression(symbol) ? Variable(symbol) : Value {};
             case SymbolKind::Function:
                 return Call(symbol);
             default:
-                return Value {};
+                return Value{};
             }
         }
 
         Value Variable(SymbolId symbol) const
         {
             const auto found = m_owner.m_values.find(symbol);
-            return found == m_owner.m_values.end() ? Value {} : found->second;
+            return found == m_owner.m_values.end() ? Value{}: found->second;
         }
 
         Value Call(SymbolId function)
         {
-            if (m_pos >= m_end || m_view.At(m_pos) != Tok::LParen || !m_owner.CalleeUsable(function, kNone))
+            if (m_pos >= m_end || m_view.At(m_pos) != Tok::LParen ||!m_owner.CalleeUsable(function, kNone))
             {
-                return Value {};
+                return Value{};
             }
 
             const auto close = m_view.Match(m_pos, m_end);
             if (close >= m_end)
             {
-                return Value {};
+                return Value{};
             }
 
             ++m_pos;
@@ -622,14 +667,14 @@ namespace heimdall::detail
             {
                 if (!Ternary().ok)
                 {
-                    return Value {};
+                    return Value{};
                 }
 
                 if (m_pos < close)
                 {
                     if (m_view.At(m_pos) != Tok::Comma)
                     {
-                        return Value {};
+                        return Value{};
                     }
 
                     ++m_pos;
@@ -644,11 +689,11 @@ namespace heimdall::detail
 
     public:
         // The value converted to what a variable or function result of `type` holds.
-        static Value Convert(const Value &value, TypeId type, const TypeTable &table)
+        static Value Convert(const Value& value, TypeId type, const TypeTable& table)
         {
             if (!value.ok)
             {
-                return Value {};
+                return Value{};
             }
 
             const TypeId base = table.Strip(type);
@@ -657,9 +702,9 @@ namespace heimdall::detail
                 return Int(0, false, true, false);
             }
 
-            if (table.Kind(base) != TypeKind::Builtin || !table.IsArithmetic(base))
+            if (table.Kind(base) != TypeKind::Builtin ||!table.IsArithmetic(base))
             {
-                return Value {};
+                return Value{};
             }
 
             switch (static_cast<BuiltinType>(table.Arg(base)))
@@ -702,18 +747,18 @@ namespace heimdall::detail
             case BuiltinType::Char32:
                 return Int(0, false, false, false); // promotes to int; the value is not tracked
             default:
-                return Int(0, false, true, false);  // long, long long, size_t: width depends on the platform
+                return Int(0, false, true, false); // long, long long, size_t: width depends on the platform
             }
         }
 
     private:
-        ConstantAnalysis &m_owner;
-        const TokenView &m_view;
+        ConstantAnalysis& m_owner;
+        const TokenView& m_view;
         std::size_t m_pos;
         std::size_t m_end;
     };
 
-    ConstantAnalysis::ConstantAnalysis(const FlowModel &flow)
+    ConstantAnalysis::ConstantAnalysis(const FlowModel& flow)
     : m_flow(flow), m_types(flow.Types()), m_table(flow.Types().Types()), m_model(flow.Model()),
         m_symbols(flow.Model().Symbols()), m_view(flow.Model())
     {
@@ -740,20 +785,48 @@ namespace heimdall::detail
         {
             switch (m_view.At(p))
             {
-            case Tok::KwStatic: result.mask |= Spec::Static; break;
-            case Tok::KwConstexpr: result.mask |= Spec::Constexpr; break;
-            case Tok::KwConstinit: result.mask |= Spec::Constinit; break;
-            case Tok::KwConsteval: result.mask |= Spec::Consteval; break;
-            case Tok::KwExtern: result.mask |= Spec::Extern; break;
-            case Tok::KwThreadLocal: result.mask |= Spec::ThreadLocal; break;
-            case Tok::KwMutable: result.mask |= Spec::Mutable; break;
-            case Tok::KwVolatile: result.mask |= Spec::Volatile; break;
-            case Tok::KwRegister: result.mask |= Spec::Register; break;
-            case Tok::KwInline: result.mask |= Spec::Inline; break;
-            case Tok::KwVirtual: result.mask |= Spec::Virtual; break;
-            case Tok::KwFriend: result.mask |= Spec::Friend; break;
-            case Tok::KwTypedef: result.mask |= Spec::Typedef; break;
-            case Tok::KwExplicit: result.mask |= Spec::Explicit; break;
+            case Tok::KwStatic:
+                result.mask |= Spec::Static;
+                break;
+            case Tok::KwConstexpr:
+                result.mask |= Spec::Constexpr;
+                break;
+            case Tok::KwConstinit:
+                result.mask |= Spec::Constinit;
+                break;
+            case Tok::KwConsteval:
+                result.mask |= Spec::Consteval;
+                break;
+            case Tok::KwExtern:
+                result.mask |= Spec::Extern;
+                break;
+            case Tok::KwThreadLocal:
+                result.mask |= Spec::ThreadLocal;
+                break;
+            case Tok::KwMutable:
+                result.mask |= Spec::Mutable;
+                break;
+            case Tok::KwVolatile:
+                result.mask |= Spec::Volatile;
+                break;
+            case Tok::KwRegister:
+                result.mask |= Spec::Register;
+                break;
+            case Tok::KwInline:
+                result.mask |= Spec::Inline;
+                break;
+            case Tok::KwVirtual:
+                result.mask |= Spec::Virtual;
+                break;
+            case Tok::KwFriend:
+                result.mask |= Spec::Friend;
+                break;
+            case Tok::KwTypedef:
+                result.mask |= Spec::Typedef;
+                break;
+            case Tok::KwExplicit:
+                result.mask |= Spec::Explicit;
+                break;
             case Tok::KwConst:
                 result.mask |= Spec::Const;
                 ++result.const_count;
@@ -769,7 +842,7 @@ namespace heimdall::detail
 
     bool ConstantAnalysis::InAnonymousNamespace(ScopeId scope) const
     {
-        const auto &scopes = m_model.Scopes();
+        const auto& scopes = m_model.Scopes();
         for (; scope != kNone && scope != SemanticModel::TranslationUnitScope; scope = scopes.parent[scope])
         {
             if (scopes.kind[scope] == ScopeKind::Namespace && scopes.owner[scope] == kNone)
@@ -789,7 +862,7 @@ namespace heimdall::detail
         switch (m_table.Kind(base))
         {
         case TypeKind::Builtin:
-            return allow_void || !m_table.IsBuiltin(base, BuiltinType::Void);
+            return allow_void ||!m_table.IsBuiltin(base, BuiltinType::Void);
         case TypeKind::Enum:
         case TypeKind::Pointer:
             return true;
@@ -800,7 +873,7 @@ namespace heimdall::detail
         }
     }
 
-    const std::vector<SymbolId> &ConstantAnalysis::LocalsOf(FunctionId function)
+    const std::vector<SymbolId>& ConstantAnalysis::LocalsOf(FunctionId function)
     {
         if (!m_locals_built)
         {
@@ -821,7 +894,8 @@ namespace heimdall::detail
     }
 
     // `= expr` or `{expr}` after the name: the tokens of the expression.
-    bool ConstantAnalysis::InitializerRange(SymbolId variable, std::size_t &begin, std::size_t &end) const
+    bool ConstantAnalysis::InitializerRange(SymbolId variable, std::size_t& begin,
+        std::size_t& end) const
     {
         const auto name = m_symbols.decl_token[variable];
         const auto position = m_view.PositionOf(name);
@@ -895,7 +969,8 @@ namespace heimdall::detail
         {
             const auto type = m_types.SymbolType(variable);
             const auto base = m_table.Strip(type);
-            if ((m_table.IsArithmetic(base) || m_table.Kind(base) == TypeKind::Enum) && InitializerRange(variable, begin, end))
+            if ((m_table.IsArithmetic(base) || m_table.Kind(base) == TypeKind::Enum) && InitializerRange(variable,
+                begin, end))
             {
                 Parser parser(*this, begin, end);
                 value = Parser::Convert(parser.Run(), type, m_table);
@@ -940,13 +1015,14 @@ namespace heimdall::detail
 
     bool ConstantAnalysis::DeclaredConstexpr(SymbolId function) const
     {
-        for (auto other = m_model.LookupLocal(m_symbols.scope[function], m_symbols.name[function]); other != kNone;
+        for (auto other = m_model.LookupLocal(m_symbols.scope[function],
+            m_symbols.name[function]); other != kNone;
             other = m_symbols.next_same_name[other])
         {
             if (m_symbols.kind[other] == SymbolKind::Function &&
                 (other == function || m_symbols.signature[other] == m_symbols.signature[function]) &&
                 (SpecifiersOf(m_symbols.decl_node[other], m_symbols.decl_token[other]).mask &
-                    (Spec::Constexpr | Spec::Consteval)) != 0)
+                (Spec::Constexpr | Spec::Consteval)) != 0)
             {
                 return true;
             }
@@ -959,7 +1035,8 @@ namespace heimdall::detail
     bool ConstantAnalysis::CalleeUsable(SymbolId callee, SymbolId current)
     {
         bool any = false;
-        for (auto other = m_model.LookupLocal(m_symbols.scope[callee], m_symbols.name[callee]); other != kNone;
+        for (auto other = m_model.LookupLocal(m_symbols.scope[callee],
+            m_symbols.name[callee]); other != kNone;
             other = m_symbols.next_same_name[other])
         {
             if (m_symbols.kind[other] != SymbolKind::Function)
@@ -1007,7 +1084,7 @@ namespace heimdall::detail
             constexpr std::uint32_t kExcluded = SymbolFlag::Virtual | SymbolFlag::Constructor | SymbolFlag::Destructor |
                 SymbolFlag::Qualified | SymbolFlag::Friend | SymbolFlag::Operator | SymbolFlag::Template |
                 SymbolFlag::Override | SymbolFlag::Final | SymbolFlag::Pure | SymbolFlag::Defaulted;
-            if (m_symbols.kind[function] != SymbolKind::Function || (m_symbols.flags[function] & SymbolFlag::Definition) == 0 ||
+            if (m_symbols.kind[function] != SymbolKind::Function ||(m_symbols.flags[function] & SymbolFlag::Definition) == 0 ||
                 (m_symbols.flags[function] & kExcluded) != 0 || m_model.Names().Text(m_symbols.name[function]) == "main")
             {
                 break;
@@ -1028,12 +1105,12 @@ namespace heimdall::detail
             // constexpr implies inline: only a function whose linkage is internal, that
             // is already inline, or that is a static member can take it without
             // breaking callers in other files.
-            const auto &scopes = m_model.Scopes();
+            const auto& scopes = m_model.Scopes();
             const auto scope = m_symbols.scope[function];
             bool linkage_ok = false;
             if (scopes.kind[scope] == ScopeKind::Class)
             {
-                linkage_ok = (m_symbols.flags[function] & SymbolFlag::Static) != 0 || (spec.mask & Spec::Static) != 0;
+                linkage_ok = (m_symbols.flags[function] & SymbolFlag::Static) != 0 ||(spec.mask & Spec::Static) != 0;
             }
             else if (scopes.kind[scope] == ScopeKind::TranslationUnit || scopes.kind[scope] == ScopeKind::Namespace)
             {
@@ -1060,33 +1137,33 @@ namespace heimdall::detail
             for (auto other = m_model.LookupLocal(scope, m_symbols.name[function]); other != kNone;
                 other = m_symbols.next_same_name[other])
             {
-                redeclared = redeclared || (other != function && m_symbols.kind[other] == SymbolKind::Function &&
+                redeclared = redeclared ||(other != function && m_symbols.kind[other] == SymbolKind::Function &&
                     m_symbols.signature[other] == m_symbols.signature[function]);
             }
 
-            if (redeclared || !Literal(m_types.SymbolType(function), true))
+            if (redeclared ||!Literal(m_types.SymbolType(function), true))
             {
                 break;
             }
 
             // Parameters: every written one has a name and a literal type.
-            const auto &nodes = m_model.Tree().NodesSoA();
+            const auto& nodes = m_model.Tree().NodesSoA();
             std::size_t written = 0;
-            for (const auto declarator: m_model.ChildrenOf(m_symbols.decl_node[function]))
+            for (const auto declarator : m_model.ChildrenOf(m_symbols.decl_node[function]))
             {
                 if (nodes.Kind(declarator) != GrammarKind::Declarator)
                 {
                     continue;
                 }
 
-                for (const auto suffix: m_model.ChildrenOf(declarator))
+                for (const auto suffix : m_model.ChildrenOf(declarator))
                 {
                     if (nodes.Kind(suffix) != GrammarKind::FunctionSuffix)
                     {
                         continue;
                     }
 
-                    for (const auto parameter: m_model.ChildrenOf(suffix))
+                    for (const auto parameter : m_model.ChildrenOf(suffix))
                     {
                         written += nodes.Kind(parameter) == GrammarKind::ParameterDeclaration ? 1 : 0;
                     }
@@ -1095,7 +1172,7 @@ namespace heimdall::detail
 
             std::size_t named = 0;
             bool literal_parameters = true;
-            for (const auto local: LocalsOf(id))
+            for (const auto local : LocalsOf(id))
             {
                 if (m_symbols.kind[local] == SymbolKind::Parameter)
                 {
@@ -1118,20 +1195,21 @@ namespace heimdall::detail
 
     bool ConstantAnalysis::BodyIsConstexprSafe(SymbolId function, FunctionId id)
     {
-        const auto &functions = m_flow.Functions();
-        const auto &nodes = m_model.Tree().NodesSoA();
-        if (functions.complete[id] == 0 || !m_flow.ExitReachable(id))
+        const auto& functions = m_flow.Functions();
+        const auto& nodes = m_model.Tree().NodesSoA();
+        if (functions.complete[id] == 0 ||!m_flow.ExitReachable(id))
         {
             return false;
         }
 
-        const bool returns_void = m_table.IsBuiltin(m_table.Strip(m_types.SymbolType(function)), BuiltinType::Void);
+        const bool returns_void = m_table.IsBuiltin(m_table.Strip(m_types.SymbolType(function)),
+            BuiltinType::Void);
         if (!returns_void && !m_flow.HasReachableReturn(id))
         {
             return false;
         }
 
-        const auto [begin, end] = m_view.Range(functions.body[id]);
+        const auto[begin, end] = m_view.Range(functions.body[id]);
         if (end < begin + 3)
         {
             return false; // `{}`: nothing to evaluate
@@ -1139,7 +1217,7 @@ namespace heimdall::detail
 
         // Positions inside a type: their names are not expressions.
         std::vector<std::uint8_t> in_type(end - begin, 0);
-        std::vector<std::uint32_t> pending {functions.body[id]};
+        std::vector<std::uint32_t> pending{functions.body[id]};
         while (!pending.empty())
         {
             const auto node = pending.back();
@@ -1177,7 +1255,7 @@ namespace heimdall::detail
             case GrammarKind::TypeSpecifier:
             case GrammarKind::NestedNameSpecifier:
             {
-                const auto [first, last] = m_view.Range(node);
+                const auto[first, last] = m_view.Range(node);
                 for (auto p = std::max(first, begin); p < last && p < end; ++p)
                 {
                     in_type[p - begin] = 1;
@@ -1189,7 +1267,7 @@ namespace heimdall::detail
                 return false; // lambda, try, error, template, ...: not modeled
             }
 
-            for (const auto child: m_model.ChildrenOf(node))
+            for (const auto child : m_model.ChildrenOf(node))
             {
                 pending.push_back(child);
             }
@@ -1324,7 +1402,7 @@ namespace heimdall::detail
             }
         }
 
-        for (const auto local: LocalsOf(id))
+        for (const auto local : LocalsOf(id))
         {
             if (m_symbols.kind[local] != SymbolKind::Variable)
             {
@@ -1334,7 +1412,7 @@ namespace heimdall::detail
             const auto spec = SpecifiersOf(m_symbols.decl_node[local], m_symbols.decl_token[local]);
             if (!Literal(m_types.SymbolType(local), false) ||
                 (spec.mask & (Spec::Static | Spec::ThreadLocal | Spec::Volatile | Spec::Mutable | Spec::Register |
-                    Spec::Extern)) != 0)
+                Spec::Extern)) != 0)
             {
                 return false;
             }
@@ -1346,14 +1424,14 @@ namespace heimdall::detail
     bool ConstantAnalysis::DeclaresSingleName(SymbolId variable) const
     {
         const auto node = m_symbols.decl_node[variable];
-        const auto &nodes = m_model.Tree().NodesSoA();
+        const auto& nodes = m_model.Tree().NodesSoA();
         if (node >= nodes.size())
         {
             return false;
         }
 
         std::size_t names = 0;
-        for (const auto child: m_model.ChildrenOf(node))
+        for (const auto child : m_model.ChildrenOf(node))
         {
             names += nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator ? 1 : 0;
         }
@@ -1364,16 +1442,16 @@ namespace heimdall::detail
     ConstantAnalysis::Candidate ConstantAnalysis::ConstexprVariable(SymbolId variable)
     {
         if (variable >= m_symbols.Size() || m_symbols.kind[variable] != SymbolKind::Variable ||
-            m_symbols.decl_node[variable] >= m_model.Tree().NodesSoA().size() || !DeclaresSingleName(variable))
+            m_symbols.decl_node[variable] >= m_model.Tree().NodesSoA().size() ||!DeclaresSingleName(variable))
         {
             return Candidate::None;
         }
 
-        const auto &nodes = m_model.Tree().NodesSoA();
+        const auto& nodes = m_model.Tree().NodesSoA();
         const auto decl = m_symbols.decl_node[variable];
         const auto parent = nodes.Parent(decl);
         if (parent < nodes.size() && (nodes.Kind(parent) == GrammarKind::LoopStatement ||
-                nodes.Kind(parent) == GrammarKind::IfStatement || nodes.Kind(parent) == GrammarKind::SwitchStatement))
+            nodes.Kind(parent) == GrammarKind::IfStatement || nodes.Kind(parent) == GrammarKind::SwitchStatement))
         {
             return Candidate::None; // declared in a statement header
         }
@@ -1384,7 +1462,7 @@ namespace heimdall::detail
             return Candidate::None;
         }
 
-        const auto &scopes = m_model.Scopes();
+        const auto& scopes = m_model.Scopes();
         const auto scope_kind = scopes.kind[m_symbols.scope[variable]];
         if (scope_kind == ScopeKind::Class && (spec.mask & Spec::Static) == 0)
         {

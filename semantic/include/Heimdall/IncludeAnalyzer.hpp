@@ -86,7 +86,7 @@ namespace heimdall
         std::vector<Entry> entries;
         std::vector<FileStamp> stamps;
 
-        bool IsSystemFile(const std::filesystem::path & file) const;
+        bool IsSystemFile(const std::filesystem::path& file) const;
     };
 
     // Two rules share this analysis:
@@ -107,22 +107,22 @@ namespace heimdall
     public:
         // Literal includes of `tree`, in source order; entry i of an IncludeProfile
         // built from the same include block describes element i.
-        static std::vector<DirectInclude> DirectIncludes(const ParseTree &tree);
+        static std::vector<DirectInclude> DirectIncludes(const ParseTree& tree);
 
-        static std::shared_ptr<const IncludeProfile> BuildProfile(const std::filesystem::path & file,
-            const ParseTree &tree, const CompileCommand *command);
+        static std::shared_ptr<const IncludeProfile> BuildProfile(const std::filesystem::path& file,
+            const ParseTree& tree, const CompileCommand* command);
 
         // Same fingerprint scheme as IncludeIndex::IncludeFingerprint.
-        static std::string Fingerprint(const std::filesystem::path & file, const ParseTree &tree,
-            const CompileCommand *command);
+        static std::string Fingerprint(const std::filesystem::path& file, const ParseTree& tree,
+            const CompileCommand* command);
 
         // True while none of the headers behind the profile changed on disk.
-        static bool IsFresh(const IncludeProfile &profile);
+        static bool IsFresh(const IncludeProfile& profile);
 
         // Diagnostics (not yet filtered by rule overrides or suppressions; run
         // them through RuleEngine::ApplyPolicy). Each carries an unsafe quick fix
         // that deletes the directive line.
-        static std::vector<Diagnostic> Analyze(const ParseTree &tree, const IncludeProfile &profile);
+        static std::vector<Diagnostic> Analyze(const ParseTree& tree, const IncludeProfile& profile);
     };
 
 } // namespace heimdall

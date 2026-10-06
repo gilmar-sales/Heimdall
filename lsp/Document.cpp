@@ -19,7 +19,10 @@ namespace heimdall::lsp
         }
     }
 
-    void LineIndex::Update(std::string_view text, std::size_t offset, std::size_t old_length,
+    void LineIndex::Update(
+        std::string_view text,
+        std::size_t offset,
+        std::size_t old_length,
         std::size_t new_length)
     {
         if (m_line_starts.empty())
@@ -256,7 +259,7 @@ namespace heimdall::lsp
         }
 
         constexpr std::string_view digits = "0123456789ABCDEF";
-        for (const char c: generic)
+        for (const char c : generic)
         {
             const unsigned char byte = static_cast<unsigned char>(c);
             const bool plain = (byte >= 'A' && byte <= 'Z') ||(byte >= 'a' && byte <= 'z') ||

@@ -12,15 +12,22 @@ namespace heimdall
     class AnalysisFeatures
     {
     public:
-        static std::vector<CompletionItem> Complete(const AnalysisContext &context,
-            std::size_t offset, const ScopeIndex *external = nullptr);
-        static std::optional<CompletionItem> Hover(const AnalysisContext &context,
-            std::size_t offset, const ScopeIndex *external = nullptr);
-        static std::vector<NavTarget> Definition(const AnalysisContext &context,
-            std::size_t offset, const ScopeIndex *external = nullptr);
-        static std::vector<NavTarget> Implementation(const AnalysisContext &context,
-            std::size_t offset, const ScopeIndex *external = nullptr);
-        static std::vector<Diagnostic> Diagnostics(const AnalysisContext &context,
-            const RuleEngine &engine, bool semantic = true, const ProjectContext &project = {});
+        static std::vector<CompletionItem> Complete(const AnalysisContext& context,
+            std::size_t offset, const ScopeIndex* external = nullptr);
+
+        static std::optional<CompletionItem> Hover(const AnalysisContext& context,
+            std::size_t offset, const ScopeIndex* external = nullptr);
+
+        static std::vector<NavTarget> Definition(const AnalysisContext& context,
+            std::size_t offset, const ScopeIndex* external = nullptr);
+
+        static std::vector<NavTarget> Implementation(const AnalysisContext& context,
+            std::size_t offset, const ScopeIndex* external = nullptr);
+
+        static std::vector<Diagnostic> Diagnostics(
+            const AnalysisContext& context,
+            const RuleEngine& engine,
+            bool semantic = true,
+            const ProjectContext& project = {});
     };
 }

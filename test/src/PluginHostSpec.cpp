@@ -16,7 +16,7 @@ namespace
         PluginRule rule;
         rule.code = std::move(code);
         rule.interests = {PluginNodeKind::Return};
-        rule.on_node = [](const PluginContext &context, NodeId node, std::vector<PluginDiagnostic> &out)
+        rule.on_node =[](const PluginContext& context, NodeId node, std::vector<PluginDiagnostic>& out)
         {
             out.push_back({context.NodeRange(node), "experimental return check"});
         };
@@ -57,7 +57,7 @@ namespace
         PluginRule rule;
         rule.code = "test/queries";
         rule.interests = {PluginNodeKind::Return};
-        rule.on_node = [](const PluginContext &context, NodeId node, std::vector<PluginDiagnostic> &out)
+        rule.on_node =[](const PluginContext& context, NodeId node, std::vector<PluginDiagnostic>& out)
         {
             EXPECT_EQ(context.NodeKind(node), PluginNodeKind::Return);
             EXPECT_EQ(context.Document(), 0);
@@ -76,7 +76,10 @@ namespace
             EXPECT_EQ(context.SymbolName(InvalidHandle), InvalidHandle);
             EXPECT_TRUE(context.String(InvalidHandle).empty());
             out.push_back({range, "valid query diagnostic"});
-            out.push_back({{9999, 1}, "invalid diagnostic"});
+            out.push_back({
+                    {
+                        9999, 1
+                    }, "invalid diagnostic"});
         };
         plugin.rules.push_back(std::move(rule));
         ASSERT_TRUE(host.Register(std::move(plugin)));
@@ -91,8 +94,10 @@ namespace
     {
         PluginHost host;
         auto broken = Returns("broken", "test/broken");
-        broken.rules[0].on_node = [](const PluginContext &, NodeId, std::vector<PluginDiagnostic> &)
-        { throw std::runtime_error("plugin failure"); };
+        broken.rules[0].on_node =[](const PluginContext&, NodeId, std::vector<PluginDiagnostic>&)
+        {
+            throw std::runtime_error("plugin failure");
+        };
         ASSERT_TRUE(host.Register(std::move(broken)));
         ASSERT_TRUE(host.Register(Returns("valid", "test/valid")));
         auto result = host.Analyze(Context(), RuleEngine());
@@ -108,8 +113,10 @@ namespace
         ScheduledRule native;
         native.metadata.code = "test/native";
         native.interests = {GrammarKind::ReturnStatement};
-        native.on_node = [](const AnalysisContext &context, NodeId node, DiagnosticSink &sink)
-        { sink.Emit(context.NodeRange(node), "native direct SoA view"); };
+        native.on_node =[](const AnalysisContext& context, NodeId node, DiagnosticSink& sink)
+        {
+            sink.Emit(context.NodeRange(node), "native direct SoA view");
+        };
         ASSERT_TRUE(engine.RegisterNative(std::move(native)));
         ASSERT_TRUE(engine.RegisterPlugin(Returns("plugin", "test/plugin")));
         auto result = engine.Analyze(Context(), false, {}, true);
@@ -117,6 +124,9 @@ namespace
         EXPECT_EQ(result.rules[0].execution_count, 1);
         EXPECT_EQ(result.rules[1].execution_count, 1);
         EXPECT_EQ(std::count_if(result.diagnostics.begin(), result.diagnostics.end(),
-            [](const Diagnostic &d) { return d.code == "test/plugin" || d.code == "test/native"; }), 2);
+            [](const Diagnostic& d)
+            {
+                return d.code == "test/plugin" || d.code == "test/native";
+            }), 2);
     }
 }

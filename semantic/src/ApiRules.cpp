@@ -51,24 +51,25 @@ namespace heimdall
         class ApiAnalysis
         {
         public:
-            explicit ApiAnalysis(const SemanticModel &model) : m_model(model), m_view(model),
-              m_symbols(model.Symbols()), m_scopes(model.Scopes()), m_tree(model.Tree())
-            {
-            }
+            explicit ApiAnalysis(const SemanticModel& model) : m_model(model), m_view(model),
+                m_symbols(model.Symbols()), m_scopes(model.Scopes()), m_tree(model.Tree()) {}
 
-            const SemanticModel &Model() const
+            const SemanticModel& Model() const
             {
                 return m_model;
             }
-            const detail::TokenView &View() const
+
+            const detail::TokenView& View() const
             {
                 return m_view;
             }
-            const SymbolTable &Symbols() const
+
+            const SymbolTable& Symbols() const
             {
                 return m_symbols;
             }
-            const ScopeTable &Scopes() const
+
+            const ScopeTable& Scopes() const
             {
                 return m_scopes;
             }
@@ -88,7 +89,7 @@ namespace heimdall
                     return std::nullopt;
                 }
 
-                const auto [begin, end] = m_view.Range(m_symbols.decl_node[klass]);
+                const auto[begin, end] = m_view.Range(m_symbols.decl_node[klass]);
                 const auto name = m_view.PositionOf(m_symbols.decl_token[klass]);
                 ClassBody body;
                 bool found_keyword = false;
@@ -130,7 +131,7 @@ namespace heimdall
             }
 
             // Access level in force at `position` among the direct members of `body`.
-            Access AccessAt(const ClassBody &body, std::size_t position) const
+            Access AccessAt(const ClassBody& body, std::size_t position) const
             {
                 Access access = body.is_class ? Access::Private : Access::Public;
                 for (auto i = body.open + 1; i < position && i < body.close; ++i)
@@ -141,11 +142,11 @@ namespace heimdall
                         i = m_view.Match(i, m_view.Size());
                     }
                     else if (m_view.At(i + 1) == Tok::Colon && (tok == Tok::KwPublic || tok == Tok::KwProtected ||
-                                 tok == Tok::KwPrivate))
+                        tok == Tok::KwPrivate))
                     {
                         access = tok == Tok::KwPublic ? Access::Public
-                            : tok == Tok::KwProtected ? Access::Protected
-                                                      : Access::Private;
+                        : tok == Tok::KwProtected ? Access::Protected
+                        : Access::Private;
                     }
                 }
 
@@ -155,7 +156,7 @@ namespace heimdall
             // First token of the member declaration whose name is at `name`, after
             // any `template<...>` header: where a specifier or a using-declaration
             // can be inserted. `has_template` tells a template header was skipped.
-            std::size_t DeclarationStart(const ClassBody &body, std::size_t name, bool &has_template) const
+            std::size_t DeclarationStart(const ClassBody& body, std::size_t name, bool& has_template) const
             {
                 std::size_t start = name;
                 while (start > body.open + 1)
@@ -184,7 +185,11 @@ namespace heimdall
                 return start;
             }
 
-            Diagnostic Make(RuleId rule, std::string_view code, std::string message, std::size_t position)
+            Diagnostic Make(
+                RuleId rule,
+                std::string_view code,
+                std::string message,
+                std::size_t position)
             {
                 if (!m_lines_built)
                 {
@@ -199,7 +204,10 @@ namespace heimdall
             }
 
             // The fix rests on what the model could see: a quick fix, never applied in batch.
-            static void AddQuickFix(Diagnostic &diagnostic, std::size_t offset, std::string replacement,
+            static void AddQuickFix(
+                Diagnostic& diagnostic,
+                std::size_t offset,
+                std::string replacement,
                 std::string title)
             {
                 diagnostic.has_fix = true;
@@ -209,16 +217,16 @@ namespace heimdall
             }
 
         private:
-            const SemanticModel &m_model;
+            const SemanticModel& m_model;
             detail::TokenView m_view;
-            const SymbolTable &m_symbols;
-            const ScopeTable &m_scopes;
-            const ParseTree &m_tree;
+            const SymbolTable& m_symbols;
+            const ScopeTable& m_scopes;
+            const ParseTree& m_tree;
             LineTable m_lines;
             bool m_lines_built = false;
         };
 
-        bool IsVirtualish(const SymbolTable &symbols, SymbolId function)
+        bool IsVirtualish(const SymbolTable& symbols, SymbolId function)
         {
             return (symbols.flags[function] & kVirtualish) != 0;
         }
@@ -229,10 +237,10 @@ namespace heimdall
         class VirtualDestructor
         {
         public:
-            explicit VirtualDestructor(ApiAnalysis &analysis) : m_analysis(analysis),
-              m_destructor(analysis.Symbols().Size(), kNone), m_introduces_virtual(analysis.Symbols().Size(), 0)
+            explicit VirtualDestructor(ApiAnalysis& analysis) : m_analysis(analysis),
+                m_destructor(analysis.Symbols().Size(), kNone), m_introduces_virtual(analysis.Symbols().Size(), 0)
             {
-                const auto &symbols = analysis.Symbols();
+                const auto& symbols = analysis.Symbols();
                 for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
                 {
                     if (symbols.kind[symbol] != SymbolKind::Function)
@@ -247,12 +255,12 @@ namespace heimdall
                     }
 
                     const auto flags = symbols.flags[symbol];
-                    if ((flags & SymbolFlag::Destructor) != 0)
+                    if ((flags& SymbolFlag::Destructor) != 0)
                     {
                         m_destructor[klass] = symbol;
                     }
                     else if ((flags & (SymbolFlag::Virtual | SymbolFlag::Pure)) != 0 &&
-                        (flags & SymbolFlag::Constructor) == 0)
+                        (flags& SymbolFlag::Constructor) == 0)
                     {
                         m_introduces_virtual[klass] = 1;
                     }
@@ -262,8 +270,8 @@ namespace heimdall
             std::vector<Diagnostic> Run()
             {
                 std::vector<Diagnostic> diagnostics;
-                const auto &symbols = m_analysis.Symbols();
-                const auto &model = m_analysis.Model();
+                const auto& symbols = m_analysis.Symbols();
+                const auto& model = m_analysis.Model();
                 for (SymbolId klass = 0; klass < symbols.Size(); ++klass)
                 {
                     if (symbols.kind[klass] != SymbolKind::Class || m_introduces_virtual[klass] == 0)
@@ -278,7 +286,7 @@ namespace heimdall
                     }
 
                     const auto destructor = m_destructor[klass];
-                    const auto &view = m_analysis.View();
+                    const auto& view = m_analysis.View();
                     std::size_t name_position = 0;
                     if (destructor != kNone)
                     {
@@ -319,7 +327,7 @@ namespace heimdall
             // whose destructor is); Unknown when a base does not resolve.
             Tri HasVirtualDestructor(SymbolId klass, std::size_t depth) const
             {
-                const auto &symbols = m_analysis.Symbols();
+                const auto& symbols = m_analysis.Symbols();
                 if (depth > kMaxDepth)
                 {
                     return Tri::Unknown;
@@ -331,7 +339,7 @@ namespace heimdall
                     return Tri::Yes;
                 }
 
-                const auto &bases = m_analysis.Model().Bases();
+                const auto& bases = m_analysis.Model().Bases();
                 Tri result = Tri::No;
                 for (std::uint32_t i = 0; i < symbols.base_count[klass]; ++i)
                 {
@@ -351,7 +359,7 @@ namespace heimdall
                 return result;
             }
 
-            ApiAnalysis &m_analysis;
+            ApiAnalysis& m_analysis;
             std::vector<SymbolId> m_destructor;
             std::vector<std::uint8_t> m_introduces_virtual;
         };
@@ -361,8 +369,8 @@ namespace heimdall
 
         // The parameters of the list that opens at `open`: [begin, end) positions
         // of each one. False when the list does not close.
-        bool SplitParameters(const detail::TokenView &view, std::size_t open,
-            std::vector<std::pair<std::size_t, std::size_t>> &parameters)
+        bool SplitParameters(const detail::TokenView& view, std::size_t open,
+            std::vector<std::pair<std::size_t, std::size_t>>& parameters)
         {
             const auto close = view.Match(open, view.Size());
             if (close >= view.Size())
@@ -398,7 +406,7 @@ namespace heimdall
             return true;
         }
 
-        bool HasToken(const detail::TokenView &view, std::pair<std::size_t, std::size_t> range, Tok tok)
+        bool HasToken(const detail::TokenView& view, std::pair<std::size_t, std::size_t> range, Tok tok)
         {
             for (auto i = range.first; i < range.second; ++i)
             {
@@ -413,7 +421,8 @@ namespace heimdall
 
         // The parameter refers to the class itself by reference (copy/move
         // constructor) or is a braced-list type: conversions there are intended.
-        bool IsCopyMoveOrListParameter(const detail::TokenView &view, std::pair<std::size_t, std::size_t> range,
+        bool IsCopyMoveOrListParameter(const detail::TokenView& view, std::pair<std::size_t,
+            std::size_t> range,
             std::string_view class_name)
         {
             bool saw_class = false;
@@ -437,12 +446,12 @@ namespace heimdall
             return false;
         }
 
-        std::vector<Diagnostic> ExplicitConstructor(ApiAnalysis &analysis)
+        std::vector<Diagnostic> ExplicitConstructor(ApiAnalysis& analysis)
         {
             std::vector<Diagnostic> diagnostics;
-            const auto &symbols = analysis.Symbols();
-            const auto &view = analysis.View();
-            const auto &model = analysis.Model();
+            const auto& symbols = analysis.Symbols();
+            const auto& view = analysis.View();
+            const auto& model = analysis.Model();
             std::vector<std::pair<std::size_t, std::size_t>> parameters;
             for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
             {
@@ -473,7 +482,7 @@ namespace heimdall
                     continue;
                 }
 
-                const auto &first = parameters.front();
+                const auto& first = parameters.front();
                 const std::string_view class_name = model.Names().Text(symbols.name[klass]);
                 bool callable_with_one = true;
                 for (std::size_t i = 1; i < parameters.size(); ++i)
@@ -516,7 +525,7 @@ namespace heimdall
         // api/overload-hiding
 
         // The class body names `using ...::name;`.
-        bool HasUsingFor(const detail::TokenView &view, const ClassBody &body, std::string_view name)
+        bool HasUsingFor(const detail::TokenView& view, const ClassBody& body, std::string_view name)
         {
             for (auto i = body.open + 1; i < body.close; ++i)
             {
@@ -542,13 +551,13 @@ namespace heimdall
             return false;
         }
 
-        std::vector<Diagnostic> OverloadHiding(ApiAnalysis &analysis)
+        std::vector<Diagnostic> OverloadHiding(ApiAnalysis& analysis)
         {
             std::vector<Diagnostic> diagnostics;
-            const auto &symbols = analysis.Symbols();
-            const auto &view = analysis.View();
-            const auto &model = analysis.Model();
-            const auto &bases = model.Bases();
+            const auto& symbols = analysis.Symbols();
+            const auto& view = analysis.View();
+            const auto& model = analysis.Model();
+            const auto& bases = model.Bases();
             std::unordered_set<std::uint64_t> seen;
             std::vector<SymbolId> pending;
             std::unordered_set<SymbolId> visited;
@@ -556,7 +565,7 @@ namespace heimdall
             {
                 constexpr std::uint32_t skipped = kNotMember | SymbolFlag::Constructor | SymbolFlag::Destructor |
                     SymbolFlag::Operator | SymbolFlag::Template;
-                if (symbols.kind[symbol] != SymbolKind::Function || (symbols.flags[symbol] & skipped) != 0 ||
+                if (symbols.kind[symbol] != SymbolKind::Function ||(symbols.flags[symbol] & skipped) != 0 ||
                     symbols.name[symbol] == kNone)
                 {
                     continue;
@@ -564,7 +573,8 @@ namespace heimdall
 
                 const auto klass = analysis.OwnerClass(symbols.scope[symbol]);
                 if (klass == kNone || symbols.base_count[klass] == 0 ||
-                    !seen.insert(std::uint64_t{klass} << 32 | symbols.name[symbol]).second)
+                    !seen.insert(std::uint64_t{klass}
+                    << 32 | symbols.name[symbol]).second)
                 {
                     continue;
                 }
@@ -599,7 +609,7 @@ namespace heimdall
                 pending.clear();
                 visited.clear();
                 visited.insert(klass);
-                const auto push_bases = [&](SymbolId derived)
+                const auto push_bases =[&](SymbolId derived)
                 {
                     for (std::uint32_t i = 0; i < symbols.base_count[derived]; ++i)
                     {
@@ -627,7 +637,7 @@ namespace heimdall
                             IsVirtualish(symbols, member) && (symbols.flags[member] & kNotMember) == 0 &&
                             symbols.signature[member] != 0;
                         if (candidate && std::find(derived_signatures.begin(), derived_signatures.end(),
-                                symbols.signature[member]) == derived_signatures.end())
+                            symbols.signature[member]) == derived_signatures.end())
                         {
                             hidden_in = base;
                             break;
@@ -669,18 +679,18 @@ namespace heimdall
         class VirtualCall
         {
         public:
-            explicit VirtualCall(ApiAnalysis &analysis) : m_analysis(analysis) {}
+            explicit VirtualCall(ApiAnalysis& analysis) : m_analysis(analysis) {}
 
             std::vector<Diagnostic> Run()
             {
                 std::vector<Diagnostic> diagnostics;
-                const auto &symbols = m_analysis.Symbols();
-                const auto &model = m_analysis.Model();
-                const auto &view = m_analysis.View();
+                const auto& symbols = m_analysis.Symbols();
+                const auto& model = m_analysis.Model();
+                const auto& view = m_analysis.View();
                 for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
                 {
                     constexpr std::uint32_t special = SymbolFlag::Constructor | SymbolFlag::Destructor;
-                    if (symbols.kind[symbol] != SymbolKind::Function || (symbols.flags[symbol] & special) == 0 ||
+                    if (symbols.kind[symbol] != SymbolKind::Function ||(symbols.flags[symbol] & special) == 0 ||
                         (symbols.flags[symbol] & SymbolFlag::Definition) == 0)
                     {
                         continue;
@@ -723,7 +733,7 @@ namespace heimdall
         private:
             std::optional<std::pair<std::size_t, std::size_t>> BodyOfFunction(std::uint32_t node) const
             {
-                for (const auto child: m_analysis.Model().ChildrenOf(node))
+                for (const auto child : m_analysis.Model().ChildrenOf(node))
                 {
                     if (m_analysis.Model().Tree().NodesSoA().Kind(child) == GrammarKind::CompoundStatement)
                     {
@@ -738,9 +748,9 @@ namespace heimdall
             // or kNone when `q` is not such a call.
             SymbolId VirtualCallee(std::uint32_t function_node, std::size_t q) const
             {
-                const auto &view = m_analysis.View();
-                const auto &model = m_analysis.Model();
-                const auto &symbols = m_analysis.Symbols();
+                const auto& view = m_analysis.View();
+                const auto& model = m_analysis.Model();
+                const auto& symbols = m_analysis.Symbols();
                 if (!view.IsWord(q) || view.At(q + 1) != Tok::LParen)
                 {
                     return kNone;
@@ -749,7 +759,7 @@ namespace heimdall
                 const Tok before = q > 0 ? view.At(q - 1) : Tok::None;
                 const bool via_this = before == Tok::Arrow && q > 1 && view.At(q - 2) == Tok::KwThis;
                 if (before == Tok::Dot || before == Tok::ColonColon || before == Tok::Gt ||
-                    (before == Tok::Arrow && !via_this) || (q > 0 && view.IsWord(q - 1)))
+                    (before == Tok::Arrow && !via_this) ||(q > 0 && view.IsWord(q - 1)))
                 {
                     return kNone;
                 }
@@ -785,7 +795,7 @@ namespace heimdall
             {
                 if (!m_lambdas_built)
                 {
-                    const auto &nodes = m_analysis.Model().Tree().NodesSoA();
+                    const auto& nodes = m_analysis.Model().Tree().NodesSoA();
                     for (std::uint32_t node = 0; node < nodes.size(); ++node)
                     {
                         if (nodes.Kind(node) == GrammarKind::LambdaExpression)
@@ -798,38 +808,38 @@ namespace heimdall
                 }
 
                 return std::any_of(m_lambdas.begin(), m_lambdas.end(),
-                    [position](const std::pair<std::size_t, std::size_t> &range)
+                    [position](const std::pair<std::size_t, std::size_t>& range)
                     {
                         return position >= range.first && position < range.second;
-                    });
+                });
             }
 
-            ApiAnalysis &m_analysis;
+            ApiAnalysis& m_analysis;
             std::vector<std::pair<std::size_t, std::size_t>> m_lambdas;
             bool m_lambdas_built = false;
         };
 
     } // namespace
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeVirtualDestructor(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeVirtualDestructor(const SemanticModel& model)
     {
         ApiAnalysis analysis(model);
         return VirtualDestructor(analysis).Run();
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeExplicitConstructor(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeExplicitConstructor(const SemanticModel& model)
     {
         ApiAnalysis analysis(model);
         return ExplicitConstructor(analysis);
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeOverloadHiding(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeOverloadHiding(const SemanticModel& model)
     {
         ApiAnalysis analysis(model);
         return OverloadHiding(analysis);
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeVirtualCallInConstructor(const SemanticModel &model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeVirtualCallInConstructor(const SemanticModel& model)
     {
         ApiAnalysis analysis(model);
         return VirtualCall(analysis).Run();

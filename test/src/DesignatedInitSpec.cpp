@@ -8,14 +8,14 @@
 namespace
 {
 
-    std::vector<heimdall::Diagnostic> Order(const std::string &source)
+    std::vector<heimdall::Diagnostic> Order(const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeDesignatedInitOrder(model);
     }
 
-    std::string Fixed(std::string source, const heimdall::Diagnostic &diagnostic)
+    std::string Fixed(std::string source, const heimdall::Diagnostic& diagnostic)
     {
         source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
         return source;
@@ -50,7 +50,7 @@ TEST(DesignatedInitOrder, KeepsSeparatorsAndMultilineLayout)
 TEST(DesignatedInitOrder, WorksForVariablesWithEqualsAndNestedCommas)
 {
     const std::string source = "struct P { std::pair<int, int> pair; int z; int y; };\n"
-                               "P p = { .y = 1, .z = 2, .pair = std::pair<int, int>{1, 2} };\n";
+    "P p = { .y = 1, .z = 2, .pair = std::pair<int, int>{1, 2} };\n";
     const auto diagnostics = Order(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(Fixed(source, diagnostics[0]),
@@ -84,8 +84,11 @@ TEST(DesignatedInitZeroAsNull, ReportsZeroAssignedToAPointerMember)
     const std::string source = kNode + "Node n{ .next = 0, .value = 0 };\n";
     const auto tree = heimdall::ParseTree::Parse(source);
     const auto model = heimdall::Binder::Bind(tree);
-    for (const auto &diagnostics: {heimdall::SemanticRules::AnalyzeDesignatedZeroAsNull(model),
-             heimdall::SemanticRules::AnalyzeZeroAsNull(model)})
+    for (const auto& diagnostics :
+        {
+            heimdall::SemanticRules::AnalyzeDesignatedZeroAsNull(model),
+            heimdall::SemanticRules::AnalyzeZeroAsNull(model)
+    })
     {
         ASSERT_EQ(diagnostics.size(), 1u); // `.value = 0` is an int
         EXPECT_EQ(diagnostics[0].code, "cpp/no-zero-as-null");
@@ -96,7 +99,7 @@ TEST(DesignatedInitZeroAsNull, ReportsZeroAssignedToAPointerMember)
 
 TEST(DesignatedInitZeroAsNull, WorksWithNewAndSilentForNullptrOrUnknownClasses)
 {
-    const auto count = [](const std::string &source)
+    const auto count =[](const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
@@ -110,7 +113,7 @@ TEST(DesignatedInitZeroAsNull, WorksWithNewAndSilentForNullptrOrUnknownClasses)
 namespace
 {
 
-    std::vector<heimdall::Diagnostic> IntegerToPointer(const std::string &source)
+    std::vector<heimdall::Diagnostic> IntegerToPointer(const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
@@ -150,7 +153,7 @@ TEST(IntegerToPointer, SilentForNullConstantsIntegersAndFloats)
 
 TEST(IntegerToPointer, IsRegisteredAsAnErrorRule)
 {
-    const auto *info = heimdall::FindRuleByCode("cpp/no-integer-to-pointer");
+    const auto* info = heimdall::FindRuleByCode("cpp/no-integer-to-pointer");
     ASSERT_NE(info, nullptr);
     EXPECT_EQ(info->default_severity, heimdall::Severity::Error);
 }

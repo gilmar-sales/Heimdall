@@ -36,43 +36,53 @@ namespace
             std::filesystem::remove_all(m_root, ec);
         }
 
-        Project(const Project &) = delete;
-        Project & operator=(const Project &) = delete;
+        Project(const Project&) = delete;
 
-        void Header(const std::string & name, std::string_view content) const
+        Project& operator= (const Project&) = delete;
+
+        void Header(const std::string& name, std::string_view content) const
         {
             const auto path = m_root / "inc" / name;
             std::filesystem::create_directories(path.parent_path());
             std::ofstream(path, std::ios::binary) << content;
         }
 
-        std::filesystem::path File(const std::string & name) const
+        std::filesystem::path File(const std::string& name) const
         {
             return m_root / name;
         }
 
-        const heimdall::CompileCommand * Command() const
+        const heimdall::CompileCommand* Command() const
         {
             return &m_command;
         }
 
-        std::vector<heimdall::Diagnostic> Iwyu(std::string_view source, const std::string & file = "main.cpp") const
+        std::vector<heimdall::Diagnostic> Iwyu(std::string_view source,
+            const std::string& file = "main.cpp") const
         {
             const auto tree = heimdall::ParseTree::Parse(source, {});
             const auto model = heimdall::Binder::Bind(tree);
             const auto profile = heimdall::IncludeAnalyzer::BuildProfile(File(file), tree, &m_command);
-            const heimdall::ProjectContext context{File(file), profile.get(), &m_command};
+            const heimdall::ProjectContext context
+            {
+                File(file), profile.get(), &m_command
+            };
             return heimdall::SemanticRules::AnalyzeIncludeWhatYouUse(model, context);
         }
 
-        std::vector<heimdall::Diagnostic> Final(std::string_view source, const std::string & file = "main.cpp",
+        std::vector<heimdall::Diagnostic> Final(std::string_view source,
+            const std::string& file = "main.cpp",
             bool with_profile = true) const
         {
             const auto tree = heimdall::ParseTree::Parse(source, {});
             const auto model = heimdall::Binder::Bind(tree);
-            const auto profile = with_profile ? heimdall::IncludeAnalyzer::BuildProfile(File(file), tree, &m_command)
-                                              : nullptr;
-            const heimdall::ProjectContext context{File(file), profile.get(), with_profile ? &m_command : nullptr};
+            const auto profile = with_profile ? heimdall::IncludeAnalyzer::BuildProfile(File(file), tree,
+                &m_command)
+            : nullptr;
+            const heimdall::ProjectContext context
+            {
+                File(file), profile.get(), with_profile ? &m_command : nullptr
+            };
             return heimdall::SemanticRules::AnalyzeFinal(model, context);
         }
 
@@ -81,14 +91,14 @@ namespace
         heimdall::CompileCommand m_command;
     };
 
-    std::string Apply(std::string_view source, const heimdall::Diagnostic & diagnostic)
+    std::string Apply(std::string_view source, const heimdall::Diagnostic& diagnostic)
     {
         std::string text(source);
         text.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
         return text;
     }
 
-    std::vector<std::string> Names(const heimdall::HeaderSummary & summary)
+    std::vector<std::string> Names(const heimdall::HeaderSummary& summary)
     {
         std::vector<std::string> names;
         for (std::size_t i = 0; i < summary.ExportCount(); ++i)
@@ -121,8 +131,9 @@ TEST(HeaderSummarySpec, ExportsNamespaceAndGlobalDeclarationsWithTheirNamespace)
         "extern int counter;\n"
         "}\n"
         "class Global {};\n");
-    EXPECT_EQ(Names(*summary), (std::vector<std::string>{"Global", "lib::Color", "lib::Handle", "lib::Mode",
-        "lib::Red", "lib::counter", "lib::detail::Impl", "lib::detail::helper"}));
+    EXPECT_EQ(Names(*summary),
+        (std::vector<std::string>{"Global", "lib::Color", "lib::Handle", "lib::Mode",
+            "lib::Red", "lib::counter", "lib::detail::Impl", "lib::detail::helper"}));
 }
 
 TEST(HeaderSummarySpec, KeepsMembersLocalsAndInternalNamesOut)
@@ -174,8 +185,9 @@ TEST(HeaderSummarySpec, RecordsClassBasesVirtualsAndFinal)
         seen.push_back(std::move(line));
     }
 
-    EXPECT_EQ(seen, (std::vector<std::string>{"Plain", "Shape virtual", "Circle virtual final :Shape :Plain",
-        "Box template :Base"}));
+    EXPECT_EQ(seen,
+        (std::vector<std::string>{"Plain", "Shape virtual", "Circle virtual final :Shape :Plain",
+            "Box template :Base"}));
 }
 
 TEST(HeaderSummarySpec, RecordsDirectIncludesAndReexports)
@@ -239,10 +251,10 @@ TEST(ProjectIndexSpec, PolymorphismFollowsBasesAcrossHeaders)
 {
     using heimdall::ProjectIndex;
     const auto index = ProjectIndex::FromSummaries({
-        heimdall::HeaderSummary::FromSource("struct Base { virtual void f(); };\n"),
-        heimdall::HeaderSummary::FromSource("struct Mid : Base {};\nstruct Plain {};\nstruct Odd : Missing {};\n"),
-        heimdall::HeaderSummary::FromSource("struct Dup {};\n"),
-        heimdall::HeaderSummary::FromSource("struct Dup { virtual void g(); };\n"),
+            heimdall::HeaderSummary::FromSource("struct Base { virtual void f(); };\n"),
+            heimdall::HeaderSummary::FromSource("struct Mid : Base {};\nstruct Plain {};\nstruct Odd : Missing {};\n"),
+            heimdall::HeaderSummary::FromSource("struct Dup {};\n"),
+            heimdall::HeaderSummary::FromSource("struct Dup { virtual void g(); };\n"),
     });
     EXPECT_EQ(index.IsPolymorphic("Base"), ProjectIndex::Tri::Yes);
     EXPECT_EQ(index.IsPolymorphic("Mid"), ProjectIndex::Tri::Yes);
@@ -258,7 +270,7 @@ TEST(ProjectIndexSpec, InheritanceCycleEndsAsUnknown)
 {
     using heimdall::ProjectIndex;
     const auto index = ProjectIndex::FromSummaries({
-        heimdall::HeaderSummary::FromSource("struct A : B {};\nstruct B : A {};\n"),
+            heimdall::HeaderSummary::FromSource("struct A : B {};\nstruct B : A {};\n"),
     });
     EXPECT_EQ(index.IsPolymorphic("A"), ProjectIndex::Tri::Unknown);
 }
@@ -282,10 +294,11 @@ TEST(IncludeWhatYouUseSpec, ReportsProjectHeaderReachedOnlyThroughAnotherInclude
 {
     Project project;
     project.Header("core.hpp", "#pragma once\nstruct Core { int x; };\n");
-    project.Header("wrapper.hpp", "#pragma once\n#include <core.hpp>\nstruct Wrapper { Core core; };\n");
+    project.Header("wrapper.hpp",
+        "#pragma once\n#include <core.hpp>\nstruct Wrapper { Core core; };\n");
     constexpr std::string_view source =
         "#include <wrapper.hpp>\n"
-        "Core value;\n";
+    "Core value;\n";
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].code, "cpp/include-what-you-use");
@@ -325,10 +338,10 @@ TEST(IncludeWhatYouUseSpec, ReportsEachMissingHeaderOnceAtItsFirstUse)
     project.Header("all.hpp", "#pragma once\n#include <a.hpp>\n#include <b.hpp>\n");
     constexpr std::string_view source =
         "#include <all.hpp>\n"
-        "A first;\n"
-        "A2 second;\n"
-        "B third;\n"
-        "A again;\n";
+    "A first;\n"
+    "A2 second;\n"
+    "B third;\n"
+    "A again;\n";
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].line, 2);
@@ -361,7 +374,8 @@ TEST(IncludeWhatYouUseSpec, UnqualifiedNamesNeedTheEnclosingNamespaceOrAUsingDir
     project.Header("wrap.hpp", "#pragma once\n#include <lib.hpp>\n");
 
     EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\nnamespace lib { Widget w; }\n").size(), 1);
-    EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\nnamespace lib { namespace inner { Widget w; } }\n").size(), 1);
+    EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\nnamespace lib { namespace inner { Widget w; } }\n").size(),
+        1);
     EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\nusing namespace lib;\nWidget w;\n").size(), 1);
     EXPECT_TRUE(project.Iwyu("#include <wrap.hpp>\nnamespace other { Widget w; }\n").empty());
     EXPECT_TRUE(project.Iwyu("#include <wrap.hpp>\nWidget w;\n").empty());
@@ -370,7 +384,8 @@ TEST(IncludeWhatYouUseSpec, UnqualifiedNamesNeedTheEnclosingNamespaceOrAUsingDir
 TEST(IncludeWhatYouUseSpec, FollowsPartialQualificationAndGlobalQualifier)
 {
     Project project;
-    project.Header("lib.hpp", "#pragma once\nnamespace outer { namespace inner { struct Widget {}; } }\nstruct Top {};\n");
+    project.Header("lib.hpp",
+        "#pragma once\nnamespace outer { namespace inner { struct Widget {}; } }\nstruct Top {};\n");
     project.Header("wrap.hpp", "#pragma once\n#include <lib.hpp>\n");
     EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\nouter::inner::Widget w;\n").size(), 1);
     EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\ninner::Widget w;\n").size(), 1);
@@ -467,14 +482,18 @@ TEST(IncludeWhatYouUseSpec, StaysSilentWhenSomeIncludeIsUnknown)
     EXPECT_TRUE(project.Iwyu("#include <wrap.hpp>\n#include \"generated.hpp\"\nCore value;\n").empty());
     EXPECT_TRUE(project.Iwyu("#include <wrap.hpp>\n#include <missing.hpp>\nCore value;\n").empty());
     // A platform header that is only included under #if is not a gap.
-    EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\n#ifdef _WIN32\n#include <windows.h>\n#endif\nCore value;\n").size(), 1);
+    EXPECT_EQ(project.Iwyu("#include <wrap.hpp>\n#ifdef _WIN32\n#include <windows.h>\n#endif\nCore value;\n").size(),
+        1);
 }
 
 TEST(IncludeWhatYouUseSpec, StaysSilentWithoutAProfile)
 {
     const auto tree = heimdall::ParseTree::Parse("#include <wrap.hpp>\nCore value;\n", {});
     const auto model = heimdall::Binder::Bind(tree);
-    const heimdall::ProjectContext context{"main.cpp", nullptr, nullptr};
+    const heimdall::ProjectContext context
+    {
+        "main.cpp", nullptr, nullptr
+    };
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzeIncludeWhatYouUse(model, context).empty());
 }
 
@@ -493,11 +512,11 @@ TEST(IncludeWhatYouUseSpec, FixKeepsTheFileLineEndingsAndGoesAfterTheLastInclude
     project.Header("wrap.hpp", "#pragma once\n#include <core.hpp>\n");
     constexpr std::string_view source =
         "#include <wrap.hpp>\r\n"
-        "#ifdef X\r\n"
-        "#include <extra.hpp>\r\n"
-        "#endif\r\n"
-        "\r\n"
-        "Core value;\r\n";
+    "#ifdef X\r\n"
+    "#include <extra.hpp>\r\n"
+    "#endif\r\n"
+    "\r\n"
+    "Core value;\r\n";
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(Apply(source, diagnostics[0]),
@@ -544,7 +563,7 @@ TEST(IncludeWhatYouUseSpec, ReportsStandardNamesTakenFromAProjectHeader)
     project.Header("wrapper.hpp", "#pragma once\n#include <vector>\n");
     constexpr std::string_view source =
         "#include <wrapper.hpp>\n"
-        "std::vector<int> values;\n";
+    "std::vector<int> values;\n";
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "vector");
@@ -602,7 +621,7 @@ TEST(ModernizeFinalSpec, ReportsLeafPolymorphicClassInASourceFile)
     Project project;
     constexpr std::string_view source =
         "struct Base { virtual void f(); virtual ~Base(); };\n"
-        "struct Leaf : Base { void f() override; };\n";
+    "struct Leaf : Base { void f() override; };\n";
     const auto diagnostics = project.Final(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-final");
@@ -666,8 +685,8 @@ TEST(ModernizeFinalSpec, HeaderClassesAreOnlyReportedInAnAnonymousNamespace)
     Project project;
     constexpr std::string_view source =
         "struct Exported { virtual void f(); };\n"
-        "namespace { struct Hidden { virtual void g(); }; }\n"
-        "namespace lib { namespace { struct Inner { virtual void h(); }; } }\n";
+    "namespace { struct Hidden { virtual void g(); }; }\n"
+    "namespace lib { namespace { struct Inner { virtual void h(); }; } }\n";
     const auto diagnostics = project.Final(source, "types.hpp");
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "Hidden");
@@ -723,8 +742,8 @@ TEST(ModernizeFinalSpec, ReportsOverridesNothingOverrides)
     Project project;
     constexpr std::string_view source =
         "struct Base { virtual void a(); virtual void b(); };\n"
-        "struct Mid : Base { void a() override; void b() override; };\n"
-        "struct Leaf : Mid { void a() override; };\n";
+    "struct Mid : Base { void a() override; void b() override; };\n"
+    "struct Leaf : Mid { void a() override; };\n";
     const auto diagnostics = project.Final(source);
     // `Leaf` itself becomes final; of Mid's overrides only `b` is never overridden below.
     ASSERT_EQ(diagnostics.size(), 2);
@@ -744,9 +763,10 @@ TEST(ModernizeFinalSpec, AnOverrideWithTheNameInADerivedClassIsNeverReported)
         "struct Base { virtual void a(); };\n"
         "struct Mid : Base { void a() override; };\n"
         "struct Leaf : Mid { void a(int) ; };\n");
-    for (const auto & diagnostic: diagnostics)
+    for (const auto& diagnostic : diagnostics)
     {
-        EXPECT_EQ(diagnostic.message.find("'a' is never overridden"), std::string::npos) << diagnostic.message;
+        EXPECT_EQ(diagnostic.message.find("'a' is never overridden"),
+            std::string::npos) << diagnostic.message;
     }
 }
 
@@ -755,8 +775,8 @@ TEST(ModernizeFinalSpec, MethodsAreSilentWhenTheHierarchyMayBeOpen)
     Project project;
     constexpr std::string_view source =
         "struct Base { virtual void a(); };\n"
-        "struct Mid : Base { void a() override; };\n"
-        "struct Leaf : Mid { };\n";
+    "struct Mid : Base { void a() override; };\n"
+    "struct Leaf : Mid { };\n";
     // A header: Mid may be derived from by files we do not see.
     EXPECT_TRUE(project.Final(source, "types.hpp").empty());
     // A name that something unresolved derives from.
@@ -792,38 +812,45 @@ TEST(ProjectRulesSpec, AnalyzeWithContextAddsTheProjectRulesInOffsetOrder)
     project.Header("wrap.hpp", "#pragma once\n#include <core.hpp>\n");
     constexpr std::string_view source =
         "#include <wrap.hpp>\n"
-        "Core value;\n"
-        "struct Solo { virtual void f(); };\n";
+    "Core value;\n"
+    "struct Solo { virtual void f(); };\n";
     const auto tree = heimdall::ParseTree::Parse(source, {});
     const auto model = heimdall::Binder::Bind(tree);
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree, project.Command());
-    const heimdall::ProjectContext context{project.File("main.cpp"), profile.get(), project.Command()};
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree,
+        project.Command());
+    const heimdall::ProjectContext context
+    {
+        project.File("main.cpp"), profile.get(), project.Command()
+    };
     const auto types = heimdall::Typer::Type(model);
 
     const auto without = heimdall::SemanticRules::Analyze(model, types);
     const auto with = heimdall::SemanticRules::Analyze(model, types, context);
     EXPECT_EQ(with.size(), without.size() + 2);
     EXPECT_TRUE(std::is_sorted(with.begin(), with.end(),
-        [](const auto & a, const auto & b)
+        [](const auto& a, const auto& b)
         {
             return a.offset < b.offset;
-        }));
-    EXPECT_TRUE(std::any_of(with.begin(), with.end(), [](const auto & d)
+    }));
+    EXPECT_TRUE(std::any_of(with.begin(), with.end(),[](const auto& d)
         {
             return d.code == "cpp/include-what-you-use";
-        }));
-    EXPECT_TRUE(std::any_of(with.begin(), with.end(), [](const auto & d)
+    }));
+    EXPECT_TRUE(std::any_of(with.begin(), with.end(),[](const auto& d)
         {
             return d.code == "cpp/modernize-final";
-        }));
+    }));
 }
 
 TEST(ProjectRulesSpec, RulesAreInTheCatalogAndCanBeSwitchedOff)
 {
-    for (const std::string_view code: {"cpp/include-what-you-use", "cpp/modernize-final"})
+    for (const std::string_view code :
+        {
+            "cpp/include-what-you-use", "cpp/modernize-final"
+    })
     {
         EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
-        const auto *info = heimdall::FindRuleByCode(code);
+        const auto* info = heimdall::FindRuleByCode(code);
         ASSERT_NE(info, nullptr);
         EXPECT_EQ(info->category, "cpp");
         EXPECT_EQ(info->layer, "semântica");
@@ -833,7 +860,10 @@ TEST(ProjectRulesSpec, RulesAreInTheCatalogAndCanBeSwitchedOff)
     constexpr std::string_view source = "struct Solo { virtual void f(); };\n";
     const auto tree = heimdall::ParseTree::Parse(source, {});
     const auto model = heimdall::Binder::Bind(tree);
-    const heimdall::ProjectContext context{project.File("main.cpp"), nullptr, nullptr};
+    const heimdall::ProjectContext context
+    {
+        project.File("main.cpp"), nullptr, nullptr
+    };
     auto diagnostics = heimdall::SemanticRules::AnalyzeFinal(model, context);
     ASSERT_EQ(diagnostics.size(), 1);
 

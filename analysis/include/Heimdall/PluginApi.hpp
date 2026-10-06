@@ -20,7 +20,11 @@ namespace heimdall
     {
         Other, Declaration, Function, Record, Namespace, Call, Identifier, Literal, Return
     };
-    enum class PluginSeverity : std::uint8_t { Warning, Error };
+
+    enum class PluginSeverity : std::uint8_t
+    {
+        Warning, Error
+    };
 
     struct PluginRange
     {
@@ -38,18 +42,31 @@ namespace heimdall
     {
     public:
         struct Impl;
+
         explicit PluginContext(std::shared_ptr<const Impl> impl);
+
         DocumentId Document() const noexcept;
+
         PluginNodeKind NodeKind(NodeId node) const;
+
         PluginRange NodeRange(NodeId node) const;
+
         std::vector<NodeId> Children(NodeId node) const;
+
         std::vector<NodeId> Descendants(NodeId node) const;
+
         SymbolId ResolveSymbol(std::size_t offset) const;
+
         TypeId SymbolType(SymbolId symbol) const;
+
         StringId SymbolName(SymbolId symbol) const;
+
         std::string_view String(StringId string) const;
+
         std::vector<SymbolId> SymbolsInScope(std::size_t offset) const;
+
         std::vector<PluginRange> References(SymbolId symbol) const;
+
     private:
         std::shared_ptr<const Impl> m_impl;
     };
@@ -63,7 +80,7 @@ namespace heimdall
         std::vector<PluginNodeKind> interests;
         // Output is buffered and validated by the host. No internal Diagnostic,
         // ParseTree, SemanticModel or table reference crosses this boundary.
-        std::function<void(const PluginContext &, NodeId, std::vector<PluginDiagnostic> &)> on_node;
+        std::function<void(const PluginContext&, NodeId, std::vector<PluginDiagnostic>&) > on_node;
     };
 
     struct Plugin

@@ -74,7 +74,7 @@ namespace heimdall
         constexpr std::size_t Hash(std::string_view text) noexcept
         {
             std::uint32_t h = kFNVOffsetBasis;
-            for (const char c: text)
+            for (const char c : text)
             {
                 h = (h ^ static_cast<unsigned char>(c)) * kFNVPrime;
             }
@@ -115,7 +115,7 @@ namespace heimdall
         constexpr std::array<std::uint32_t, kAlphabetSize> BuildKeywordShapes()
         {
             std::array<std::uint32_t, kAlphabetSize> shapes{};
-            for (const auto & entry: BuildTable())
+            for (const auto& entry : BuildTable())
             {
                 if (entry.tok != Tok::None && entry.text[0] >= 'a' && entry.text[0] <= 'z')
                 {
@@ -136,7 +136,7 @@ namespace heimdall
         constexpr std::array<Tok, kByteValueCount> BuildSingleChar()
         {
             std::array<Tok, kByteValueCount> table{};
-            for (const auto & entry: BuildTable())
+            for (const auto& entry : BuildTable())
             {
                 if (entry.tok != Tok::None && entry.text.size() == 1)
                 {

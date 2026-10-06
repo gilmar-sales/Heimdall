@@ -38,7 +38,7 @@ namespace heimdall
         // False when macros explicitly select another STL or string ABI.
         bool native_standard_library = true;
 
-        static LayoutTarget FromMacros(const Preprocessor::MacroMap &macros);
+        static LayoutTarget FromMacros(const Preprocessor::MacroMap& macros);
     };
 
     // Computes layouts from the declarations a ScopeIndex records: fundamental
@@ -49,20 +49,23 @@ namespace heimdall
     class TypeLayoutResolver
     {
     public:
-        TypeLayoutResolver(const ScopeIndex *local, const ScopeIndex *external, LayoutTarget target);
+        TypeLayoutResolver(const ScopeIndex* local, const ScopeIndex* external, LayoutTarget target);
 
         // `text` is a type as written, with pointer/array declarators appended
         // (`const Node * const`, `char[16]`). `context` is the scope path the name
         // is looked up from. A reference is as large as its referent unless
         // `reference_is_pointer` (class members store it as a pointer).
-        std::optional<TypeLayout> OfType(std::string_view text, const std::vector<std::string> &context = {},
+        std::optional<TypeLayout> OfType(std::string_view text,
+            const std::vector<std::string>& context = {},
             bool reference_is_pointer = false) const;
 
         // A record, enum or alias declared by `name` (qualified or not).
         std::optional<TypeLayout> OfNamed(std::string_view name) const;
+
         // Resolve the declaration selected by hover, preserving its owning scope.
-        std::optional<TypeLayout> OfItem(const CompletionItem &item) const;
-        std::optional<AliasOrigin> OriginOf(const CompletionItem &item) const;
+        std::optional<TypeLayout> OfItem(const CompletionItem& item) const;
+
+        std::optional<AliasOrigin> OriginOf(const CompletionItem& item) const;
 
         // `offsetof(record, member)`: `record` as written (aliases followed), `member`
         // a direct, non-static data member of it.
@@ -71,30 +74,46 @@ namespace heimdall
         // Offset of an indexed data member inside the record that declares it, found
         // by label + declaration site. Nullopt for anything that is not an instance
         // field of a record with a known layout.
-        std::optional<std::uint64_t> OffsetOfField(const CompletionItem &field) const;
+        std::optional<std::uint64_t> OffsetOfField(const CompletionItem& field) const;
 
     private:
         struct TypeEntry
         {
-            const CompletionItem *item = nullptr;
-            const IndexedScope *scope = nullptr;
+            const CompletionItem* item = nullptr;
+            const IndexedScope* scope = nullptr;
             std::vector<std::string> path; // scope path of the entry's parent
-        };
+        }
 
-        std::optional<TypeLayout> OfTypeImpl(std::string_view text, const std::vector<std::string> &context,
-            bool reference_is_pointer, int depth) const;
-        std::optional<TypeLayout> OfEntry(const TypeEntry &entry, int depth) const;
+        ;
+
+        std::optional<TypeLayout> OfTypeImpl(
+            std::string_view text,
+            const std::vector<std::string>& context,
+            bool reference_is_pointer,
+            int depth) const;
+
+        std::optional<TypeLayout> OfEntry(const TypeEntry& entry, int depth) const;
+
         // `want`: a field whose offset is stored in `found` while the record is laid out.
-        std::optional<TypeLayout> OfRecord(const TypeEntry &entry, int depth, const CompletionItem *want = nullptr,
-            std::optional<std::uint64_t> *found = nullptr) const;
-        std::optional<TypeLayout> OfTemplate(std::string_view base, std::string_view args,
-            const std::vector<std::string> &context, int depth) const;
-        const TypeEntry *Find(std::string_view name, const std::vector<std::string> &context) const;
-        const TypeEntry *FindItem(const CompletionItem &item) const;
+        std::optional<TypeLayout> OfRecord(
+            const TypeEntry& entry,
+            int depth,
+            const CompletionItem* want = nullptr,
+            std::optional<std::uint64_t>* found = nullptr) const;
+
+        std::optional<TypeLayout> OfTemplate(
+            std::string_view base,
+            std::string_view args,
+            const std::vector<std::string>& context,
+            int depth) const;
+
+        const TypeEntry* Find(std::string_view name, const std::vector<std::string>& context) const;
+
+        const TypeEntry* FindItem(const CompletionItem& item) const;
 
         LayoutTarget m_target;
-        const ScopeIndex *m_local;
-        const ScopeIndex *m_external;
+        const ScopeIndex* m_local;
+        const ScopeIndex* m_external;
         std::unordered_map<std::string, TypeEntry> m_types;
     };
 

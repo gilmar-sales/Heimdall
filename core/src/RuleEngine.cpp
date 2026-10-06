@@ -43,8 +43,15 @@ namespace heimdall
                 offset < directives[cursor].offset + directives[cursor].length;
         }
 
-        Diagnostic MakeDiagnostic(RuleId rule, std::string code, std::string message, std::size_t offset,
-            std::size_t length, LineTable::Position position, TextEdit fix, bool has_fix = true)
+        Diagnostic MakeDiagnostic(
+            RuleId rule,
+            std::string code,
+            std::string message,
+            std::size_t offset,
+            std::size_t length,
+            LineTable::Position position,
+            TextEdit fix,
+            bool has_fix = true)
         {
             return {rule, Severity::Warning, std::move(code), std::move(message), offset, length,
                 position.line, position.column, has_fix, std::move(fix)};
@@ -90,7 +97,7 @@ namespace heimdall
             constexpr std::string_view line_marker = "heimdall-disable-line";
             constexpr std::string_view next_marker = "heimdall-disable-next-line";
             std::vector<Suppression> result;
-            for (const auto & token: tokens)
+            for (const auto& token : tokens)
             {
                 if (token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
                 {
@@ -247,8 +254,11 @@ namespace heimdall
         // subscripts: zero or more [ <bound> ] groups. Anything else
         // (attributes, initializers, function declarators) is left to
         // a real parser.
-        bool IsPlainArrayDeclarator(const std::vector<Token>& tokens, std::string_view source,
-            std::size_t declarator, std::size_t end)
+        bool IsPlainArrayDeclarator(
+            const std::vector<Token>& tokens,
+            std::string_view source,
+            std::size_t declarator,
+            std::size_t end)
         {
             std::size_t j = NextSignificant(tokens, declarator + 1);
             while (j < end)
@@ -294,7 +304,7 @@ namespace heimdall
             constexpr std::string_view markers[] = {"TODO", "FIXME", "XXX"};
             for (std::size_t i = 0; i < text.size(); ++i)
             {
-                for (const auto marker: markers)
+                for (const auto marker : markers)
                 {
                     if (i + marker.size() > text.size() || text.substr(i, marker.size()) != marker)
                     {
@@ -322,7 +332,7 @@ namespace heimdall
         {
             std::string clean;
             clean.reserve(text.size());
-            for (const char c: text)
+            for (const char c : text)
             {
                 if (c != '\'')
                 {
@@ -403,8 +413,11 @@ namespace heimdall
             return value <= 1;
         }
 
-        bool IsPunctuation(const std::vector<Token>& tokens, std::string_view source,
-            std::size_t index, std::string_view text)
+        bool IsPunctuation(
+            const std::vector<Token>& tokens,
+            std::string_view source,
+            std::size_t index,
+            std::string_view text)
         {
             return index < tokens.size() && tokens[index].kind == TokenKind::Punctuation &&
                 PunctuationText(source, tokens[index]) == text;
@@ -717,7 +730,7 @@ namespace heimdall
         if (m_options.null_macro)
         {
             std::size_t directive_cursor = 0;
-            for (const auto & token: tokens)
+            for (const auto& token : tokens)
             {
                 if (token.kind != TokenKind::Identifier || IsInDirective(token.offset, directives,
                     directive_cursor))
@@ -782,7 +795,7 @@ namespace heimdall
 
         if (m_options.todo_comment)
         {
-            for (const auto & token: tokens)
+            for (const auto& token : tokens)
             {
                 if (token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
@@ -925,7 +938,7 @@ namespace heimdall
             // same header in different #ifdef branches is usually intentional.
             std::size_t conditional_depth = 0;
             std::unordered_map<std::string_view, std::size_t> seen;
-            for (const auto & directive: directives)
+            for (const auto& directive : directives)
             {
                 switch (directive.kind)
                 {
@@ -1026,7 +1039,7 @@ namespace heimdall
                             has_comma = true;
                         }
 
-                        for (const char c: text)
+                        for (const char c : text)
                         {
                             if (c == '<')
                             {
@@ -1210,7 +1223,7 @@ namespace heimdall
                         const auto offset = first.offset;
                         const auto length = last.offset + last.length - offset;
                         std::string replacement;
-                        for (const auto index: order)
+                        for (const auto index : order)
                         {
                             const auto& directive = directives[includes[block_begin + index].directive];
                             replacement.append(source.substr(directive.offset, directive.length));
@@ -1244,7 +1257,7 @@ namespace heimdall
                 return a.offset < b.offset;
         });
 
-        for (auto & diagnostic: diagnostics)
+        for (auto& diagnostic : diagnostics)
         {
             for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
             {
@@ -1289,7 +1302,7 @@ namespace heimdall
     {
         std::vector<const TextEdit*> edits;
         edits.reserve(diagnostics.size());
-        for (const auto & diagnostic: diagnostics)
+        for (const auto& diagnostic : diagnostics)
         {
             if (diagnostic.has_fix && (diagnostic.fix_is_safe || include_unsafe))
             {
@@ -1304,7 +1317,7 @@ namespace heimdall
 
         std::string result(source);
         std::size_t previous_start = source.size();
-        for (const TextEdit * edit: edits)
+        for (const TextEdit* edit : edits)
         {
             const auto owner = std::find_if(diagnostics.begin(), diagnostics.end(),[edit](const Diagnostic& d)
                 {

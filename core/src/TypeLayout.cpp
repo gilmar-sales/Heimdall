@@ -14,7 +14,7 @@ namespace heimdall
 
         bool IsIdentChar(char c) noexcept
         {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+            return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||(c >= '0' && c <= '9') || c == '_';
         }
 
         bool IsSpace(char c) noexcept
@@ -42,7 +42,7 @@ namespace heimdall
             return align <= 1 ? value : (value + align - 1) / align * align;
         }
 
-        std::string JoinPath(const std::vector<std::string> &path, std::size_t count)
+        std::string JoinPath(const std::vector<std::string>& path, std::size_t count)
         {
             std::string key;
             for (std::size_t i = 0; i < count && i < path.size(); ++i)
@@ -60,16 +60,17 @@ namespace heimdall
 
         bool StartsWithWord(std::string_view text, std::string_view word) noexcept
         {
-            return text.starts_with(word) && (text.size() == word.size() || !IsIdentChar(text[word.size()]));
+            return text.starts_with(word) && (text.size() == word.size() ||!IsIdentChar(text[word.size()]));
         }
 
         bool EndsWithWord(std::string_view text, std::string_view word) noexcept
         {
-            return text.ends_with(word) && (text.size() == word.size() || !IsIdentChar(text[text.size() - word.size() - 1]));
+            return text.ends_with(word) && (text.size() == word.size() ||!IsIdentChar(text[text.size() - word.size() - 1]));
         }
 
         // Specifiers that do not change the layout of what they qualify.
-        constexpr std::array<std::string_view, 15> kQualifiers = {"const", "volatile", "static", "struct", "class",
+        constexpr std::array<std::string_view, 15> kQualifiers = {"const", "volatile", "static", "struct",
+            "class",
             "union", "enum", "typename", "constexpr", "inline", "mutable", "thread_local", "extern", "register",
             "__restrict"};
 
@@ -79,7 +80,7 @@ namespace heimdall
             {
                 changed = false;
                 text = Trim(text);
-                for (const std::string_view word: kQualifiers)
+                for (const std::string_view word : kQualifiers)
                 {
                     if (StartsWithWord(text, word))
                     {
@@ -118,7 +119,7 @@ namespace heimdall
                 text.remove_prefix(2);
             }
 
-            for (const char c: text)
+            for (const char c : text)
             {
                 std::uint64_t digit = 0;
                 if (c >= '0' && c <= '9')
@@ -143,7 +144,7 @@ namespace heimdall
                 }
 
                 value = value * base + digit;
-                if (value > (1ull << 40))
+                if (value >(1ull << 40))
                 {
                     return std::nullopt;
                 }
@@ -154,7 +155,7 @@ namespace heimdall
 
         // `int`, `unsigned long long`, `long double`, ... as a layout, or nullopt when
         // the words are not purely fundamental.
-        std::optional<TypeLayout> Fundamental(std::string_view text, const LayoutTarget &target)
+        std::optional<TypeLayout> Fundamental(std::string_view text, const LayoutTarget& target)
         {
             int longs = 0;
             int shorts = 0;
@@ -222,7 +223,7 @@ namespace heimdall
                 return std::nullopt;
             }
 
-            const auto of = [](std::uint64_t size, std::uint64_t align = 0)
+            const auto of =[](std::uint64_t size, std::uint64_t align = 0)
             {
                 return TypeLayout{size, align == 0 ? size : align, false};
             };
@@ -279,19 +280,26 @@ namespace heimdall
             return of(4);
         }
 
-        std::optional<TypeLayout> FixedAlias(std::string_view name, const LayoutTarget &target)
+        std::optional<TypeLayout> FixedAlias(std::string_view name, const LayoutTarget& target)
         {
             struct Entry
             {
                 std::string_view name;
                 std::uint64_t size; // 0: pointer-sized
             };
-            static constexpr std::array<Entry, 22> kAliases = {{{"int8_t", 1}, {"uint8_t", 1}, {"int16_t", 2},
-                {"uint16_t", 2}, {"int32_t", 4}, {"uint32_t", 4}, {"int64_t", 8}, {"uint64_t", 8}, {"intmax_t", 8},
-                {"uintmax_t", 8}, {"size_t", 0}, {"ssize_t", 0}, {"ptrdiff_t", 0}, {"intptr_t", 0}, {"uintptr_t", 0},
-                {"nullptr_t", 0}, {"byte", 1}, {"max_align_t", 16}, {"int_least8_t", 1}, {"int_least16_t", 2},
-                {"int_least32_t", 4}, {"int_least64_t", 8}}};
-            for (const Entry &entry: kAliases)
+
+            static constexpr std::array<Entry, 22> kAliases = {
+                {
+                    {
+                        "int8_t", 1
+                    }, {"uint8_t", 1}, {"int16_t", 2},
+                        {"uint16_t", 2}, {"int32_t", 4}, {"uint32_t", 4}, {"int64_t", 8}, {"uint64_t", 8}, {"intmax_t", 8},
+                        {"uintmax_t", 8}, {"size_t", 0}, {"ssize_t", 0}, {"ptrdiff_t", 0}, {"intptr_t", 0}, {"uintptr_t",
+                        0},
+                        {"nullptr_t", 0}, {"byte", 1}, {"max_align_t", 16}, {"int_least8_t", 1}, {"int_least16_t", 2},
+                        {"int_least32_t", 4}, {"int_least64_t", 8}
+            }};
+            for (const Entry& entry : kAliases)
             {
                 if (entry.name == name)
                 {
@@ -337,9 +345,9 @@ namespace heimdall
 
     } // namespace
 
-    LayoutTarget LayoutTarget::FromMacros(const Preprocessor::MacroMap &macros)
+    LayoutTarget LayoutTarget::FromMacros(const Preprocessor::MacroMap& macros)
     {
-        const auto has = [&](std::string_view name)
+        const auto has =[&](std::string_view name)
         {
             return macros.find(name) != macros.end();
         };
@@ -379,41 +387,42 @@ namespace heimdall
         }
 
 #if defined(__GLIBCXX__)
-        target.native_standard_library = !has("_LIBCPP_VERSION") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
+        target.native_standard_library =!has("_LIBCPP_VERSION") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
         if (const auto abi = macros.find("_GLIBCXX_USE_CXX11_ABI"); abi != macros.end())
         {
             target.native_standard_library = target.native_standard_library &&
-                (Trim(abi->second) == (_GLIBCXX_USE_CXX11_ABI ? "1" : "0"));
+                (Trim(abi->second) ==(_GLIBCXX_USE_CXX11_ABI ? "1" : "0"));
         }
 #elif defined(_LIBCPP_VERSION)
-        target.native_standard_library = !has("__GLIBCXX__") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
+        target.native_standard_library =!has("__GLIBCXX__") && !has("_MSVC_STL_VERSION") && !has("_MSC_VER");
 #elif defined(_MSVC_STL_VERSION)
-        target.native_standard_library = !has("__GLIBCXX__") && !has("_LIBCPP_VERSION");
+        target.native_standard_library =!has("__GLIBCXX__") && !has("_LIBCPP_VERSION");
 #endif
         return target;
     }
 
-    TypeLayoutResolver::TypeLayoutResolver(const ScopeIndex *local, const ScopeIndex *external, LayoutTarget target)
-        : m_target(target), m_local(local), m_external(external)
+    TypeLayoutResolver::TypeLayoutResolver(const ScopeIndex* local, const ScopeIndex* external,
+        LayoutTarget target)
+    : m_target(target), m_local(local), m_external(external)
     {
-        const ScopeIndex *indexes[] = {local, external};
-        for (const ScopeIndex *index: indexes)
+        const ScopeIndex * indexes[] = {local, external};
+        for (const ScopeIndex* index : indexes)
         {
             if (index == nullptr)
             {
                 continue;
             }
 
-            for (const IndexedScope &scope: *index)
+            for (const IndexedScope& scope : *index)
             {
                 const std::string key = JoinPath(scope.path, scope.path.size());
-                for (const CompletionItem &member: scope.members)
+                for (const CompletionItem& member : scope.members)
                 {
                     // Records and enums are listed by their parent as Namespace members
                     // (detail `struct a::B`); their own scope repeats the name as a Type.
                     const bool tag = member.kind == CompletionKind::Namespace &&
                         (IsSizeKeyword(member.detail, "struct") || IsSizeKeyword(member.detail, "class") ||
-                            IsSizeKeyword(member.detail, "union") || IsSizeKeyword(member.detail, "enum"));
+                        IsSizeKeyword(member.detail, "union") || IsSizeKeyword(member.detail, "enum"));
                     if ((member.kind != CompletionKind::Type && !tag) ||
                         (member.kind == CompletionKind::Type && !scope.path.empty() && member.label == scope.path.back()))
                     {
@@ -421,8 +430,8 @@ namespace heimdall
                     }
 
                     std::string name = key.empty() ? member.label : key + "::" + member.label;
-                    auto [it, inserted] = m_types.try_emplace(std::move(name));
-                    if (inserted || (!it->second.item->is_definition && member.is_definition))
+                    auto[it, inserted] = m_types.try_emplace(std::move(name));
+                    if (inserted ||(!it->second.item->is_definition && member.is_definition))
                     {
                         it->second.item = &member;
                         it->second.path = scope.path;
@@ -431,17 +440,20 @@ namespace heimdall
             }
         }
 
-        for (const ScopeIndex *index: indexes)
+        for (const ScopeIndex* index : indexes)
         {
             if (index == nullptr)
             {
                 continue;
             }
 
-            for (const IndexedScope &scope: *index)
+            for (const IndexedScope& scope : *index)
             {
                 if (scope.path.empty() || std::any_of(scope.path.begin(), scope.path.end(),
-                        [](const std::string &element) { return element.empty(); }))
+                    [](const std::string& element)
+                    {
+                        return element.empty();
+                }))
                 {
                     continue;
                 }
@@ -455,8 +467,8 @@ namespace heimdall
         }
     }
 
-    const TypeLayoutResolver::TypeEntry *TypeLayoutResolver::Find(std::string_view name,
-        const std::vector<std::string> &context) const
+    const TypeLayoutResolver::TypeEntry* TypeLayoutResolver::Find(std::string_view name,
+        const std::vector<std::string>& context) const
     {
         if (name.starts_with("::"))
         {
@@ -484,11 +496,11 @@ namespace heimdall
         }
 
         // Written relative to a scope the caller did not name (`Inner` for `a::Inner`).
-        const TypeEntry *best = nullptr;
+        const TypeEntry* best = nullptr;
         const std::string suffix = "::" + std::string(name);
-        for (const auto &[key, entry]: m_types)
+        for (const auto& [key, entry] : m_types)
         {
-            if (key.ends_with(suffix) && (best == nullptr || (!best->item->is_definition && entry.item->is_definition)))
+            if (key.ends_with(suffix) && (best == nullptr ||(!best->item->is_definition && entry.item->is_definition)))
             {
                 best = &entry;
             }
@@ -497,7 +509,8 @@ namespace heimdall
         return best;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfType(std::string_view text, const std::vector<std::string> &context,
+    std::optional<TypeLayout> TypeLayoutResolver::OfType(std::string_view text,
+        const std::vector<std::string>& context,
         bool reference_is_pointer) const
     {
         return OfTypeImpl(text, context, reference_is_pointer, 0);
@@ -508,81 +521,118 @@ namespace heimdall
         return OfType(name);
     }
 
-    const TypeLayoutResolver::TypeEntry *TypeLayoutResolver::FindItem(const CompletionItem &item) const
+    const TypeLayoutResolver::TypeEntry* TypeLayoutResolver::FindItem(const CompletionItem& item) const
     {
         if (item.has_location)
         {
-            const ScopeIndex *indexes[] = {m_local, m_external};
-            for (const auto *index: indexes)
+            const ScopeIndex * indexes[] = {m_local, m_external};
+            for (const auto* index : indexes)
             {
-                if (index == nullptr) continue;
-                for (const auto &scope: *index)
+                if (index == nullptr)
                 {
-                    for (const auto &member: scope.members)
+                    continue;
+                }
+
+                for (const auto& scope : *index)
+                {
+                    for (const auto& member : scope.members)
                     {
                         if (member.has_location && member.file == item.file && member.offset == item.offset &&
                             member.label == item.label)
                         {
                             std::string name = JoinPath(scope.path, scope.path.size());
-                            if (!name.empty()) name += "::";
+                            if (!name.empty())
+                            {
+                                name += "::";
+                            }
+
                             name += item.label;
-                            if (const auto found = m_types.find(name); found != m_types.end()) return &found->second;
+                            if (const auto found = m_types.find(name); found != m_types.end())
+                            {
+                                return &found->second;
+                            }
                         }
                     }
                 }
             }
         }
+
         return nullptr;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfItem(const CompletionItem &item) const
+    std::optional<TypeLayout> TypeLayoutResolver::OfItem(const CompletionItem& item) const
     {
-        if (const auto *entry = FindItem(item))
+        if (const auto * entry = FindItem(item))
         {
             // Standard library types also have known layouts independent of
             // implementation-private fields that header indexing omits.
             std::string name = JoinPath(entry->path, entry->path.size());
-            if (!name.empty()) name += "::";
+            if (!name.empty())
+            {
+                name += "::";
+            }
+
             name += item.label;
             return OfType(name);
         }
+
         return item.type_text.empty() ? OfNamed(item.label) : OfType(item.type_text);
     }
 
-    std::optional<AliasOrigin> TypeLayoutResolver::OriginOf(const CompletionItem &item) const
+    std::optional<AliasOrigin> TypeLayoutResolver::OriginOf(const CompletionItem& item) const
     {
-        if (item.kind != CompletionKind::Type || item.type_text.empty()) return std::nullopt;
-        const auto *entry = FindItem(item);
-        std::vector<std::string> context = entry != nullptr ? entry->path : std::vector<std::string>{};
+        if (item.kind != CompletionKind::Type || item.type_text.empty())
+        {
+            return std::nullopt;
+        }
+
+        const auto* entry = FindItem(item);
+        std::vector<std::string> context = entry != nullptr ? entry->path : std::vector<std::string> {};
         std::string text = item.type_text;
         std::string documentation;
         for (int depth = 0; depth < kMaxDepth; ++depth)
         {
-            const auto *target = Find(StripQualifiers(text), context);
+            const auto* target = Find(StripQualifiers(text), context);
             if (target == nullptr) return AliasOrigin{std::move(text), std::move(documentation)};
-            if (!target->item->documentation.empty()) documentation = target->item->documentation;
+            if (!target->item->documentation.empty())
+            {
+                documentation = target->item->documentation;
+            }
+
             if (target->item->type_text.empty())
             {
                 std::string name = JoinPath(target->path, target->path.size());
-                if (!name.empty()) name += "::";
+                if (!name.empty())
+                {
+                    name += "::";
+                }
+
                 name += target->item->label;
                 return AliasOrigin{std::move(name), std::move(documentation)};
             }
+
             text = target->item->type_text;
             context = target->path;
         }
+
         return std::nullopt;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfTypeImpl(std::string_view text,
-        const std::vector<std::string> &context, bool reference_is_pointer, int depth) const
+    std::optional<TypeLayout> TypeLayoutResolver::OfTypeImpl(
+        std::string_view text,
+        const std::vector<std::string>& context,
+        bool reference_is_pointer,
+        int depth) const
     {
         if (depth > kMaxDepth)
         {
             return std::nullopt;
         }
 
-        const TypeLayout pointer{m_target.pointer_size, m_target.pointer_size, false};
+        const TypeLayout pointer
+        {
+            m_target.pointer_size, m_target.pointer_size, false
+        };
         std::string_view s = StripQualifiers(text);
         if (s.empty())
         {
@@ -604,7 +654,7 @@ namespace heimdall
 
             const auto count = ParseCount(s.substr(open + 1, s.size() - open - 2));
             const auto element = OfTypeImpl(s.substr(0, open), context, reference_is_pointer, depth + 1);
-            if (!count || *count == 0 || !element)
+            if (!count || *count == 0 ||!element)
             {
                 return std::nullopt;
             }
@@ -626,7 +676,7 @@ namespace heimdall
             }
 
             return reference_is_pointer ? std::optional<TypeLayout>(pointer)
-                                        : OfTypeImpl(s, context, false, depth + 1);
+            : OfTypeImpl(s, context, false, depth + 1);
         }
 
         std::string_view name = s;
@@ -672,8 +722,8 @@ namespace heimdall
 
             // path's representation belongs to the standard library used to
             // build the server. Only use it for the matching native data model.
-            if (bare == "filesystem::path" && m_target.native_standard_library && m_target.pointer_size == sizeof(void *) &&
-                m_target.long_is_32 == (sizeof(long) == 4))
+            if (bare == "filesystem::path" && m_target.native_standard_library && m_target.pointer_size == sizeof(void*) &&
+                m_target.long_is_32 ==(sizeof(long) == 4))
             {
                 return TypeLayout{sizeof(std::filesystem::path), alignof(std::filesystem::path), false};
             }
@@ -695,12 +745,15 @@ namespace heimdall
             }
         }
 
-        const TypeEntry *entry = Find(name, context);
+        const TypeEntry* entry = Find(name, context);
         return entry != nullptr ? OfEntry(*entry, depth + 1) : std::nullopt;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfTemplate(std::string_view base, std::string_view args,
-        const std::vector<std::string> &context, int depth) const
+    std::optional<TypeLayout> TypeLayoutResolver::OfTemplate(
+        std::string_view base,
+        std::string_view args,
+        const std::vector<std::string>& context,
+        int depth) const
     {
         const auto parts = SplitArgs(args);
         const std::uint64_t ptr = m_target.pointer_size;
@@ -711,7 +764,10 @@ namespace heimdall
                 return std::nullopt;
             }
 
-            return base == "vector" ? TypeLayout{3 * ptr, ptr, false} : TypeLayout{32, 8, false};
+            return base == "vector" ? TypeLayout{3 * ptr, ptr, false}: TypeLayout
+            {
+                32, 8, false
+            };
         }
 
         if (base == "unique_ptr" && parts.size() == 1)
@@ -724,7 +780,7 @@ namespace heimdall
             return TypeLayout{2 * ptr, ptr, false};
         }
 
-        if (base == "basic_string_view" || (base == "span" && parts.size() == 1))
+        if (base == "basic_string_view" ||(base == "span" && parts.size() == 1))
         {
             return TypeLayout{2 * ptr, ptr, false};
         }
@@ -738,7 +794,7 @@ namespace heimdall
         {
             const auto first = OfTypeImpl(parts[0], context, true, depth + 1);
             const auto second = OfTypeImpl(parts[1], context, true, depth + 1);
-            if (!first || !second)
+            if (!first ||!second)
             {
                 return std::nullopt;
             }
@@ -752,7 +808,7 @@ namespace heimdall
         {
             const auto element = OfTypeImpl(parts[0], context, true, depth + 1);
             const auto count = ParseCount(parts[1]);
-            if (!element || !count || *count == 0)
+            if (!element ||!count || *count == 0)
             {
                 return std::nullopt;
             }
@@ -763,14 +819,14 @@ namespace heimdall
         return std::nullopt;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfEntry(const TypeEntry &entry, int depth) const
+    std::optional<TypeLayout> TypeLayoutResolver::OfEntry(const TypeEntry& entry, int depth) const
     {
         if (depth > kMaxDepth || entry.item == nullptr)
         {
             return std::nullopt;
         }
 
-        const CompletionItem &item = *entry.item;
+        const CompletionItem& item = *entry.item;
         if (!item.type_text.empty())
         {
             return OfTypeImpl(item.type_text, entry.path, false, depth + 1);
@@ -782,7 +838,7 @@ namespace heimdall
             std::string_view underlying = item.layout_type;
             if (underlying.empty() && entry.scope != nullptr)
             {
-                for (const CompletionItem &member: entry.scope->members)
+                for (const CompletionItem& member : entry.scope->members)
                 {
                     if (member.kind == CompletionKind::Type && !entry.scope->path.empty() &&
                         member.label == entry.scope->path.back() && !member.layout_type.empty())
@@ -792,7 +848,8 @@ namespace heimdall
                 }
             }
 
-            return OfTypeImpl(underlying.empty() ? std::string_view("int") : underlying, entry.path, false, depth + 1);
+            return OfTypeImpl(underlying.empty() ? std::string_view("int") : underlying, entry.path, false,
+                depth + 1);
         }
 
         if (IsSizeKeyword(item.detail, "struct") || IsSizeKeyword(item.detail, "class") ||
@@ -808,7 +865,7 @@ namespace heimdall
         std::string_view member) const
     {
         std::string_view text = record;
-        const TypeEntry *entry = nullptr;
+        const TypeEntry* entry = nullptr;
         for (int hops = 0; hops < kMaxDepth; ++hops)
         {
             entry = Find(StripQualifiers(text), {});
@@ -825,7 +882,7 @@ namespace heimdall
             return std::nullopt;
         }
 
-        for (const CompletionItem &candidate: entry->scope->members)
+        for (const CompletionItem& candidate : entry->scope->members)
         {
             if (candidate.kind == CompletionKind::Variable && candidate.label == member)
             {
@@ -842,23 +899,23 @@ namespace heimdall
         return std::nullopt;
     }
 
-    std::optional<std::uint64_t> TypeLayoutResolver::OffsetOfField(const CompletionItem &field) const
+    std::optional<std::uint64_t> TypeLayoutResolver::OffsetOfField(const CompletionItem& field) const
     {
-        if (field.kind != CompletionKind::Variable || !field.has_location || field.layout_type.empty() ||
+        if (field.kind != CompletionKind::Variable ||!field.has_location || field.layout_type.empty() ||
             field.layout_type.starts_with("static "))
         {
             return std::nullopt;
         }
 
-        for (const auto &[key, entry]: m_types)
+        for (const auto& [key, entry] : m_types)
         {
-            if (entry.scope == nullptr || entry.item == nullptr || !entry.item->type_text.empty() ||
+            if (entry.scope == nullptr || entry.item == nullptr ||!entry.item->type_text.empty() ||
                 IsSizeKeyword(entry.item->detail, "enum"))
             {
                 continue;
             }
 
-            for (const CompletionItem &member: entry.scope->members)
+            for (const CompletionItem& member : entry.scope->members)
             {
                 if (member.offset == field.offset && member.file == field.file && member.kind == field.kind &&
                     member.label == field.label)
@@ -877,17 +934,20 @@ namespace heimdall
         return std::nullopt;
     }
 
-    std::optional<TypeLayout> TypeLayoutResolver::OfRecord(const TypeEntry &entry, int depth,
-        const CompletionItem *want, std::optional<std::uint64_t> *found) const
+    std::optional<TypeLayout> TypeLayoutResolver::OfRecord(
+        const TypeEntry& entry,
+        int depth,
+        const CompletionItem* want,
+        std::optional<std::uint64_t>* found) const
     {
-        const IndexedScope *scope = entry.scope;
+        const IndexedScope* scope = entry.scope;
         if (scope == nullptr)
         {
             // Defined without any member the index records: an empty class.
             return entry.item->is_definition ? std::optional<TypeLayout>(TypeLayout{1, 1, true}) : std::nullopt;
         }
 
-        if (scope->layout_unknown || !scope->template_params.empty())
+        if (scope->layout_unknown ||!scope->template_params.empty())
         {
             return std::nullopt;
         }
@@ -896,9 +956,9 @@ namespace heimdall
         std::uint64_t offset = 0;
         std::uint64_t align = 1;
         bool has_storage = false;
-        for (const std::string &base: scope->bases)
+        for (const std::string& base : scope->bases)
         {
-            const TypeEntry *found = Find(base, scope->path);
+            const TypeEntry* found = Find(base, scope->path);
             const auto layout = found != nullptr ? OfEntry(*found, depth + 1) : std::nullopt;
             if (!layout)
             {
@@ -915,8 +975,8 @@ namespace heimdall
             has_storage = true;
         }
 
-        std::vector<const CompletionItem *> fields;
-        for (const CompletionItem &member: scope->members)
+        std::vector<const CompletionItem*> fields;
+        for (const CompletionItem& member : scope->members)
         {
             if (member.kind == CompletionKind::Variable && !member.layout_type.starts_with("static "))
             {
@@ -925,8 +985,11 @@ namespace heimdall
         }
 
         std::stable_sort(fields.begin(), fields.end(),
-            [](const CompletionItem *left, const CompletionItem *right) { return left->offset < right->offset; });
-        for (const CompletionItem *field: fields)
+            [](const CompletionItem* left, const CompletionItem* right)
+            {
+                return left->offset < right->offset;
+        });
+        for (const CompletionItem* field : fields)
         {
             const auto layout = OfTypeImpl(field->layout_type, scope->path, true, depth + 1);
             if (!layout)

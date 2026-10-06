@@ -11,21 +11,25 @@
 namespace
 {
 
-std::string Reconstruct(std::string_view source, const std::vector<heimdall::Token>& tokens)
-{
-    std::string out;
-    for (const auto& token : tokens)
+    std::string Reconstruct(std::string_view source, const std::vector<heimdall::Token>& tokens)
     {
-        out.append(source.substr(token.offset, token.length));
+        std::string out;
+        for (const auto& token : tokens)
+        {
+            out.append(source.substr(token.offset, token.length));
+        }
+
+        return out;
     }
-    return out;
-}
 
 } // namespace
 
 TEST(LexerSpec, RoundTripsEmptyAndOrdinarySourceByteExactly)
 {
-    for (const std::string_view source : { "", "int x = 42;\r\n", "//comment\n/* block */\t" })
+    for (const std::string_view source :
+        {
+            "", "int x = 42;\r\n", "//comment\n/* block */\t"
+    })
     {
         const heimdall::Lexer lexer(source);
         const auto tokens = lexer.Lex();
@@ -37,6 +41,7 @@ TEST(LexerSpec, RoundTripsEmptyAndOrdinarySourceByteExactly)
             EXPECT_GT(token.length, 0);
             next += token.length;
         }
+
         EXPECT_EQ(next, source.size());
     }
 }
@@ -68,6 +73,7 @@ TEST(LexerSpec, RecognizesTriviaCommentsAndLiteralForms)
         number |= token.kind == heimdall::TokenKind::Number;
         EXPECT_EQ(lexer.Text(token), source.substr(token.offset, token.length));
     }
+
     EXPECT_TRUE(whitespace);
     EXPECT_TRUE(identifier);
     EXPECT_TRUE(line_comment);
@@ -96,19 +102,24 @@ TEST(LexerSpec, UnterminatedStringStopsAtNewline)
             saw_string = true;
             EXPECT_EQ(lexer.Text(token), "\"bar");
         }
+
         if (saw_string && token.kind == heimdall::TokenKind::Identifier &&
             lexer.Text(token) == "int")
         {
             saw_identifier_after = true;
         }
     }
+
     EXPECT_TRUE(saw_string);
     EXPECT_TRUE(saw_identifier_after);
 }
 
 TEST(LexerSpec, UnterminatedConstructsConsumeToEndWithoutLosingBytes)
 {
-    for (const std::string_view source : { "\"unterminated", "/* unterminated", "R\"x(raw" })
+    for (const std::string_view source :
+        {
+            "\"unterminated", "/* unterminated", "R\"x(raw"
+    })
     {
         const heimdall::Lexer lexer(source);
         const auto tokens = lexer.Lex();
@@ -126,9 +137,14 @@ TEST(LexerSpec, UsesMaximalMunchForMultiCharacterPunctuators)
     std::vector<std::string_view> punctuators;
     for (const auto& token : tokens)
     {
-        if (token.kind == heimdall::TokenKind::Punctuation) punctuators.push_back(lexer.Text(token));
+        if (token.kind == heimdall::TokenKind::Punctuation)
+        {
+            punctuators.push_back(lexer.Text(token));
+        }
     }
-    EXPECT_EQ(punctuators, (std::vector<std::string_view> { "::", "->", "==", "&&", "<=>", "...", "<<=" }));
+
+    EXPECT_EQ(punctuators,
+        (std::vector<std::string_view>{"::", "->", "==", "&&", "<=>", "...", "<<="}));
     EXPECT_EQ(Reconstruct(source, tokens), source);
 }
 
@@ -142,6 +158,7 @@ TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
         {
             continue;
         }
+
         std::ifstream file(entry.path(), std::ios::binary);
         const std::string source(std::istreambuf_iterator<char>(file), {});
         const heimdall::Lexer lexer(source);
@@ -152,46 +169,56 @@ TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
 namespace
 {
 
-bool SameTokens(const std::vector<heimdall::Token>& a, const std::vector<heimdall::Token>& b)
-{
-    if (a.size() != b.size())
+    bool SameTokens(const std::vector<heimdall::Token>& a, const std::vector<heimdall::Token>& b)
     {
-        return false;
-    }
-    for (std::size_t i = 0; i < a.size(); ++i)
-    {
-        if (a[i].kind != b[i].kind || a[i].offset != b[i].offset || a[i].length != b[i].length)
+        if (a.size() != b.size())
         {
             return false;
         }
+
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
+            if (a[i].kind != b[i].kind || a[i].offset != b[i].offset || a[i].length != b[i].length)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
-    return true;
-}
 
 } // namespace
 
 TEST(LexerSpec, RelexMatchesFullLexForTargetedEdits)
 {
     const std::string base = "#include <a>\nint main() {\n  /* c */ auto s = R\"x(raw\n)x\"; // t\n  return 0x1F + 1.5e+3;\n}\n";
-    struct Case { std::size_t offset; std::size_t old_length; std::string insert; };
+    struct Case
+    {
+        std::size_t offset;
+        std::size_t old_length;
+        std::string insert;
+    };
+
     const Case cases[] = {
-        { 0, 0, "" }, { 0, 0, "x" }, { base.size(), 0, "int y;" }, { 0, base.size(), "" },
-        { base.find("/*") + 2, 0, "*/ int q; /*" },   // changes comment boundaries
-        { base.find("R\"x(") + 3, 0, "(" },           // changes raw string delimiter
-        { base.find(")x\""), 1, "" },                 // breaks raw string terminator
-        { base.find("main"), 4, "m" },
-        { base.find("0x1F") + 1, 1, "" },             // hex number becomes decimal
-        { base.find("//"), 0, "/" },
-        { base.find("\n  return"), 1, " " },          // joins a line comment into code
+        {
+            0, 0, ""
+        }, {0, 0, "x"}, {base.size(), 0, "int y;"}, {0, base.size(), ""},
+        {base.find("/*") + 2, 0, "*/ int q; /*"}, // changes comment boundaries
+        {base.find("R\"x(") + 3, 0, "("},         // changes raw string delimiter
+        {base.find(")x\""), 1, ""},               // breaks raw string terminator
+        {base.find("main"), 4, "m"},
+        {base.find("0x1F") + 1, 1, ""}, // hex number becomes decimal
+        {base.find("//"), 0, "/"},
+        {base.find("\n  return"), 1, " "}, // joins a line comment into code
     };
     for (const auto& c : cases)
     {
         std::string edited = base;
         edited.replace(c.offset, c.old_length, c.insert);
         auto tokens = heimdall::Lexer(base).Lex();
-        heimdall::Lexer(edited).Relex(tokens, { c.offset, c.old_length, c.insert.size() });
+        heimdall::Lexer(edited).Relex(tokens, {c.offset, c.old_length, c.insert.size()});
         EXPECT_TRUE(SameTokens(tokens, heimdall::Lexer(edited).Lex()))
-            << "offset " << c.offset << " old " << c.old_length << " insert '" << c.insert << "'";
+        << "offset " << c.offset << " old " << c.old_length << " insert '" << c.insert << "'";
     }
 }
 
@@ -199,7 +226,8 @@ TEST(LexerSpec, RelexMatchesFullLexForRandomEditSequences)
 {
     const char alphabet[] = "ab_9 \n\t\"'/*(){};.<>=R\#x+-eE";
     std::uint32_t state = 12345;
-    auto next = [&](std::size_t bound) {
+    auto next =[&](std::size_t bound)
+    {
         state = state * 1664525u + 1013904223u;
         return static_cast<std::size_t>((state >> 8) % bound);
     };
@@ -214,10 +242,11 @@ TEST(LexerSpec, RelexMatchesFullLexForRandomEditSequences)
         {
             insert += alphabet[next(sizeof(alphabet) - 1)];
         }
+
         text.replace(offset, old_length, insert);
-        heimdall::Lexer(text).Relex(tokens, { offset, old_length, insert.size() });
+        heimdall::Lexer(text).Relex(tokens, {offset, old_length, insert.size()});
         ASSERT_TRUE(SameTokens(tokens, heimdall::Lexer(text).Lex()))
-            << "step " << step << " offset " << offset << " old " << old_length << " text:\n" << text;
+        << "step " << step << " offset " << offset << " old " << old_length << " text:\n" << text;
         if (text.size() > 400)
         {
             text.erase(0, 200);
@@ -229,8 +258,8 @@ TEST(LexerSpec, RelexMatchesFullLexForRandomEditSequences)
 TEST(LexerSpec, ClassifiesKeywordsAndPunctuatorsOnce)
 {
     const std::string_view source = "template<class T> struct S { T v; auto f() const -> T; };\n"
-                                    "int x = a::b >>= 1; // template\n"
-                                    "\"(\" Template classy 42 R\"x(()x\"";
+    "int x = a::b >>= 1; // template\n"
+    "\"(\" Template classy 42 R\"x(()x\"";
     const heimdall::Lexer lexer(source);
     const auto tokens = lexer.Lex();
 
@@ -243,12 +272,16 @@ TEST(LexerSpec, ClassifiesKeywordsAndPunctuatorsOnce)
         EXPECT_EQ(token.tok, classifiable ? heimdall::LookupTok(text) : heimdall::Tok::None) << text;
     }
 
-    const auto find = [&](std::string_view text)
+    const auto find =[&](std::string_view text)
     {
         for (const auto& token : tokens)
         {
-            if (lexer.Text(token) == text) return token.tok;
+            if (lexer.Text(token) == text)
+            {
+                return token.tok;
+            }
         }
+
         return heimdall::Tok::None;
     };
     EXPECT_EQ(find("template"), heimdall::Tok::KwTemplate);

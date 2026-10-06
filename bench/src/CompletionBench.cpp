@@ -22,10 +22,10 @@ namespace
         std::size_t hover_offset = 0;
     };
 
-    std::vector<CorpusFile> LoadCorpus(benchmark::State & state)
+    std::vector<CorpusFile> LoadCorpus(benchmark::State& state)
     {
         std::vector<CorpusFile> files;
-        for (const auto & entry: std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
+        for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
             {
@@ -47,7 +47,7 @@ namespace
             // first identifier of length >= 3 so the lookup does real work instead
             // of bailing out on whitespace/punctuation.
             file.complete_offset = file.source.size();
-            for (const auto & token: file.tree.Tokens())
+            for (const auto& token : file.tree.Tokens())
             {
                 if (token.kind == heimdall::TokenKind::Identifier && token.length >= 3)
                 {
@@ -67,7 +67,7 @@ namespace
         return files;
     }
 
-    void BM_Complete(benchmark::State & state)
+    void BM_Complete(benchmark::State& state)
     {
         const auto files = LoadCorpus(state);
         if (files.empty())
@@ -76,10 +76,10 @@ namespace
         }
 
         std::size_t items = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             items = 0;
-            for (const auto & file: files)
+            for (const auto& file : files)
             {
                 auto found =
                     heimdall::CompletionEngine::Complete(file.tree, file.options,
@@ -94,7 +94,7 @@ namespace
         state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations() * items));
     }
 
-    void BM_Hover(benchmark::State & state)
+    void BM_Hover(benchmark::State& state)
     {
         const auto files = LoadCorpus(state);
         if (files.empty())
@@ -103,10 +103,10 @@ namespace
         }
 
         std::size_t hits = 0;
-        for (auto _: state)
+        for (auto _ : state)
         {
             hits = 0;
-            for (const auto & file: files)
+            for (const auto& file : files)
             {
                 auto hovered = heimdall::CompletionEngine::Hover(file.tree, file.options,
                     file.hover_offset, nullptr);
@@ -119,6 +119,7 @@ namespace
     }
 
     BENCHMARK(BM_Complete);
+
     BENCHMARK(BM_Hover);
 
 } // namespace

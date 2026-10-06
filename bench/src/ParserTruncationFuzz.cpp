@@ -29,17 +29,21 @@ namespace
 
     using Clock = std::chrono::steady_clock;
 
-    std::size_t CountErrors(const heimdall::ParseTree & tree)
+    std::size_t CountErrors(const heimdall::ParseTree& tree)
     {
         std::size_t errors = 0;
-        for (const auto & node: tree.Nodes())
+        for (const auto& node : tree.Nodes())
         {
-            if (node.kind == heimdall::GrammarKind::Error || node.kind == heimdall::GrammarKind::ErrorExpression) ++errors;
+            if (node.kind == heimdall::GrammarKind::Error || node.kind == heimdall::GrammarKind::ErrorExpression)
+            {
+                ++errors;
+            }
         }
+
         return errors;
     }
 
-    double ParseMs(std::string_view source, std::size_t & errors)
+    double ParseMs(std::string_view source, std::size_t& errors)
     {
         const auto start = Clock::now();
         const auto tree = heimdall::ParseTree::Parse(source);
@@ -50,7 +54,7 @@ namespace
 
 } // namespace
 
-int main(int argc, char ** argv)
+int main(int argc, char**argv)
 {
     std::string file;
     std::string stb_dir = HEIMDALL_STB_DIR;
@@ -62,14 +66,35 @@ int main(int argc, char ** argv)
     for (int i = 1; i + 1 < argc; i += 2)
     {
         const std::string_view flag = argv[i];
-        const char * value = argv[i + 1];
-        if (flag == "--file") file = value;
-        else if (flag == "--stb-dir") stb_dir = value;
-        else if (flag == "--lines") lines = std::strtoull(value, nullptr, 10);
-        else if (flag == "--stride") stride = std::max<std::size_t>(1, std::strtoull(value, nullptr, 10));
-        else if (flag == "--time-factor") time_factor = std::atof(value);
-        else if (flag == "--max-errors") max_errors = std::strtoull(value, nullptr, 10);
-        else if (flag == "--hang-ms") hang_ms = std::atoi(value);
+        const char* value = argv[i + 1];
+        if (flag == "--file")
+        {
+            file = value;
+        }
+        else if (flag == "--stb-dir")
+        {
+            stb_dir = value;
+        }
+        else if (flag == "--lines")
+        {
+            lines = std::strtoull(value, nullptr, 10);
+        }
+        else if (flag == "--stride")
+        {
+            stride = std::max<std::size_t>(1, std::strtoull(value, nullptr, 10));
+        }
+        else if (flag == "--time-factor")
+        {
+            time_factor = std::atof(value);
+        }
+        else if (flag == "--max-errors")
+        {
+            max_errors = std::strtoull(value, nullptr, 10);
+        }
+        else if (flag == "--hang-ms")
+        {
+            hang_ms = std::atoi(value);
+        }
         else
         {
             std::fprintf(stderr, "unknown flag %s\n", argv[i]);
@@ -86,6 +111,7 @@ int main(int argc, char ** argv)
             std::fprintf(stderr, "cannot read %s\n", file.c_str());
             return 2;
         }
+
         source = std::move(*loaded);
     }
     else
@@ -96,6 +122,7 @@ int main(int argc, char ** argv)
             std::fprintf(stderr, "cannot read stb headers from %s\n", stb_dir.c_str());
             return 2;
         }
+
         source = std::move(*built);
     }
 
@@ -113,11 +140,11 @@ int main(int argc, char ** argv)
                 if (deadline != 0 && Clock::now().time_since_epoch().count() > deadline)
                 {
                     std::fprintf(stderr, "HANG: parsing the prefix of %zu bytes exceeded %d ms\n",
-                        current_offset.load(), hang_ms);
+                    current_offset.load(), hang_ms);
                     std::fflush(stderr);
                     std::_Exit(3);
-                }
             }
+        }
     });
 
     // Baseline: best of three full parses (first one warms caches).
@@ -128,10 +155,12 @@ int main(int argc, char ** argv)
         std::size_t ignored = 0;
         full_ms = std::min(full_ms, ParseMs(source, ignored));
     }
+
     std::printf("document: %zu lines, %zu bytes; full parse %.3f ms, %zu error nodes\n",
         heimdall::bench::CountLines(source), source.size(), full_ms, full_errors);
-    std::printf("limits: time <= %.1f x full (%.3f ms), error nodes <= %zu, hang > %d ms\n\n", time_factor,
-        time_factor * full_ms, max_errors, hang_ms);
+    std::printf("limits: time <= %.1f x full (%.3f ms), error nodes <= %zu, hang > %d ms\n\n",
+        time_factor,
+        time_factor* full_ms, max_errors, hang_ms);
 
     const double time_limit = time_factor * full_ms;
     const auto hang_window = std::chrono::milliseconds(hang_ms);
@@ -154,17 +183,35 @@ int main(int argc, char ** argv)
 
         ++checked;
         total_ms += ms;
-        if (ms > worst_ms) { worst_ms = ms; worst_ms_at = length; }
-        if (errors > worst_errors) { worst_errors = errors; worst_errors_at = length; }
+        if (ms > worst_ms)
+        {
+            worst_ms = ms;
+            worst_ms_at = length;
+        }
+
+        if (errors > worst_errors)
+        {
+            worst_errors = errors;
+            worst_errors_at = length;
+        }
+
         if (ms > time_limit)
         {
-            if (slow++ < 10) std::printf("SLOW  prefix %zu: %.3f ms (limit %.3f)\n", length, ms, time_limit);
+            if (slow++ < 10)
+            {
+                std::printf("SLOW  prefix %zu: %.3f ms (limit %.3f)\n", length, ms, time_limit);
+            }
         }
+
         if (errors > max_errors)
         {
-            if (noisy++ < 10) std::printf("NOISY prefix %zu: %zu error nodes (limit %zu)\n", length, errors, max_errors);
+            if (noisy++ < 10)
+            {
+                std::printf("NOISY prefix %zu: %zu error nodes (limit %zu)\n", length, errors, max_errors);
+            }
         }
     }
+
     finished = true;
     watchdog.join();
 

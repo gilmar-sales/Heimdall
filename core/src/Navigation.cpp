@@ -28,7 +28,7 @@ namespace heimdall
         std::string PathKey(const Path& path)
         {
             std::string key;
-            for (const auto & element: path)
+            for (const auto& element : path)
             {
                 key += element;
                 key += '\x1f';
@@ -40,7 +40,7 @@ namespace heimdall
         std::string Joined(const Path& path, std::string_view name)
         {
             std::string out;
-            for (const auto & element: path)
+            for (const auto& element : path)
             {
                 out += element;
                 out += "::";
@@ -132,10 +132,12 @@ namespace heimdall
             {
                 return m_tree;
             }
+
             const std::vector<Decl>& Decls() const noexcept
             {
                 return m_decls;
             }
+
             const std::vector<UsingDirective>& Directives() const noexcept
             {
                 return m_directives;
@@ -233,7 +235,7 @@ namespace heimdall
             {
                 Path best;
                 std::size_t span = kNone;
-                for (const auto & range: m_ranges)
+                for (const auto& range : m_ranges)
                 {
                     if (range.begin <= offset && offset <= range.end && range.end - range.begin < span)
                     {
@@ -267,7 +269,7 @@ namespace heimdall
                 const std::string key = PathKey(scope);
                 if (const auto found = m_by_name.find(std::string(name)); found != m_by_name.end())
                 {
-                    for (const std::size_t index: found->second)
+                    for (const std::size_t index : found->second)
                     {
                         const Decl& decl = m_decls[index];
                         if (!decl.local && PathKey(decl.scope) == key)
@@ -282,7 +284,7 @@ namespace heimdall
                     if (const auto found = m_external_by_name.find(std::string(name));
                         found != m_external_by_name.end())
                     {
-                        for (const ExternalRef & ref: found->second)
+                        for (const ExternalRef& ref : found->second)
                         {
                             if (m_external_keys[ref.scope] == key)
                             {
@@ -298,7 +300,7 @@ namespace heimdall
             {
                 if (const auto found = m_by_name.find(std::string(name)); found != m_by_name.end())
                 {
-                    for (const std::size_t index: found->second)
+                    for (const std::size_t index : found->second)
                     {
                         const Decl& decl = m_decls[index];
                         if (!decl.local && !decl.scope.empty() && IsRecordScope(decl.scope) &&
@@ -314,7 +316,7 @@ namespace heimdall
                     if (const auto found = m_external_by_name.find(std::string(name));
                         found != m_external_by_name.end())
                     {
-                        for (const ExternalRef & ref: found->second)
+                        for (const ExternalRef& ref : found->second)
                         {
                             const IndexedScope& scope = (*m_external)[ref.scope];
                             if (scope.kind == CompletionKind::Type && !scope.path.empty())
@@ -333,7 +335,7 @@ namespace heimdall
                 std::unordered_set<std::string> scopes;
                 if (const auto found = m_by_name.find(std::string(name)); found != m_by_name.end())
                 {
-                    for (const std::size_t index: found->second)
+                    for (const std::size_t index : found->second)
                     {
                         if (!m_decls[index].local)
                         {
@@ -347,7 +349,7 @@ namespace heimdall
                     if (const auto found = m_external_by_name.find(std::string(name));
                         found != m_external_by_name.end())
                     {
-                        for (const ExternalRef & ref: found->second)
+                        for (const ExternalRef& ref : found->second)
                         {
                             scopes.insert(m_external_keys[ref.scope]);
                         }
@@ -380,7 +382,7 @@ namespace heimdall
             {
                 std::vector<Path> result;
                 std::unordered_set<std::string> seen;
-                for (const UsingDirective & directive: m_directives)
+                for (const UsingDirective& directive : m_directives)
                 {
                     if (!(directive.active_begin <= pos && pos < directive.active_end))
                     {
@@ -415,10 +417,13 @@ namespace heimdall
             }
 
             // using-declarations active at `pos` introducing `name` into `level`.
-            void UsingDeclared(const Path& level, std::string_view name, std::size_t pos,
+            void UsingDeclared(
+                const Path& level,
+                std::string_view name,
+                std::size_t pos,
                 std::vector<Candidate>& out) const
             {
-                for (const UsingDecl & using_decl: m_using_decls)
+                for (const UsingDecl& using_decl : m_using_decls)
                 {
                     if (using_decl.target.empty() || using_decl.target.back() != name ||
                         !(using_decl.active_begin <= pos && pos < using_decl.active_end) ||
@@ -440,14 +445,14 @@ namespace heimdall
             std::vector<Path> BaseScopes(const Path& record) const
             {
                 std::vector<Path> out;
-                for (const RecordInfo & info: m_records)
+                for (const RecordInfo& info : m_records)
                 {
                     if (info.path != record)
                     {
                         continue;
                     }
 
-                    for (const std::string & base: info.bases)
+                    for (const std::string& base : info.bases)
                     {
                         // Same namespace first, then any record with that name.
                         Path preferred(record.begin(), record.end() - 1);
@@ -458,7 +463,7 @@ namespace heimdall
                             continue;
                         }
 
-                        for (const RecordInfo & other: m_records)
+                        for (const RecordInfo& other : m_records)
                         {
                             if (!other.path.empty() && other.path.back() == base)
                             {
@@ -482,14 +487,14 @@ namespace heimdall
                 while (grew)
                 {
                     grew = false;
-                    for (const RecordInfo & info: m_records)
+                    for (const RecordInfo& info : m_records)
                     {
                         if (taken.contains(&info) || info.path.empty())
                         {
                             continue;
                         }
 
-                        for (const std::string & name: info.bases)
+                        for (const std::string& name : info.bases)
                         {
                             if (frontier.contains(name))
                             {
@@ -574,7 +579,7 @@ namespace heimdall
 
                 out.push_back(ns);
                 // Directives written inside `ns` make their targets visible with it.
-                for (const UsingDirective & inner: m_directives)
+                for (const UsingDirective& inner : m_directives)
                 {
                     if (inner.scope != ns)
                     {
@@ -624,7 +629,9 @@ namespace heimdall
                 bool is_scoped_enum = false;
                 bool is_inline = false;
                 std::vector<std::string> bases;
-            };
+            }
+
+            ;
 
             ScopeName ParseScopeName(std::size_t node) const
             {
@@ -887,7 +894,9 @@ namespace heimdall
                 std::size_t container = 0;
                 bool param = false;
                 bool enumerator = false;
-            };
+            }
+
+            ;
 
             Placement Place(std::size_t name_node) const
             {
@@ -1050,7 +1059,7 @@ namespace heimdall
                 {
                     bool suffix = false;
                     std::size_t suffix_node = kNone;
-                    for (const std::size_t child: m_tree.DirectChildren(declarator))
+                    for (const std::size_t child : m_tree.DirectChildren(declarator))
                     {
                         const GrammarKind kind = nodes.Kind(child);
                         if (kind == GrammarKind::NestedNameSpecifier)
@@ -1076,7 +1085,7 @@ namespace heimdall
                             owner < nodes.size() && nodes.Kind(owner) == GrammarKind::FunctionDefinition;
                         std::uint32_t count = 0;
                         std::size_t only_void = kNone;
-                        for (const std::size_t param: m_tree.DirectChildren(suffix_node))
+                        for (const std::size_t param : m_tree.DirectChildren(suffix_node))
                         {
                             if (nodes.Kind(param) == GrammarKind::ParameterDeclaration)
                             {
@@ -1290,7 +1299,7 @@ namespace heimdall
                 }
 
                 // Header scopes also make their path (and prefixes) known.
-                for (const IndexedScope & scope: *m_external)
+                for (const IndexedScope& scope : *m_external)
                 {
                     for (std::size_t length = 1; length <= scope.path.size(); ++length)
                     {
@@ -1340,7 +1349,7 @@ namespace heimdall
         bool Ambiguous(const std::vector<Candidate>& found)
         {
             std::unordered_map<std::string, bool> groups; // key -> all functions
-            for (const Candidate & candidate: found)
+            for (const Candidate& candidate : found)
             {
                 const std::string key = Joined(candidate.scope, candidate.name);
                 const auto[it, inserted] = groups.emplace(key, IsFunctionKind(candidate.kind));
@@ -1355,7 +1364,7 @@ namespace heimdall
                 return false;
             }
 
-            for (const auto &[key, all_functions]: groups)
+            for (const auto& [key, all_functions] : groups)
             {
                 if (!all_functions)
                 {
@@ -1366,19 +1375,24 @@ namespace heimdall
             return false;
         }
 
-        void CollectLevel(const Model& model, const Path& level, std::string_view name, std::size_t pos,
-            std::vector<Candidate>& out, int base_depth)
+        void CollectLevel(
+            const Model& model,
+            const Path& level,
+            std::string_view name,
+            std::size_t pos,
+            std::vector<Candidate>& out,
+            int base_depth)
         {
             model.Members(level, name, out);
             model.UsingDeclared(level, name, pos, out);
-            for (const Path & nominated: model.NominatedAt(level, pos))
+            for (const Path& nominated : model.NominatedAt(level, pos))
             {
                 model.Members(nominated, name, out);
             }
 
             if (out.empty() && base_depth < kMaxBaseDepth && !level.empty() && model.IsRecordScope(level))
             {
-                for (const Path & base: model.BaseScopes(level))
+                for (const Path& base : model.BaseScopes(level))
                 {
                     CollectLevel(model, base, name, pos, out, base_depth + 1);
                     if (!out.empty())
@@ -1530,8 +1544,11 @@ namespace heimdall
 
         // First qualifier element resolved through enclosing scopes and active
         // directives; remaining elements must exist below it.
-        std::optional<Path> ResolveQualifier(const Model& model, const Qualification& qualification,
-            std::size_t pos, const Path& elements)
+        std::optional<Path> ResolveQualifier(
+            const Model& model,
+            const Qualification& qualification,
+            std::size_t pos,
+            const Path& elements)
         {
             if (elements.empty())
             {
@@ -1553,7 +1570,7 @@ namespace heimdall
                     return candidate;
                 }
 
-                for (const Path & nominated: model.NominatedAt(level, pos))
+                for (const Path& nominated : model.NominatedAt(level, pos))
                 {
                     Path through = nominated;
                     through.insert(through.end(), elements.begin(), elements.end());
@@ -1632,7 +1649,7 @@ namespace heimdall
                     model.Members(*scope, name, out);
                     if (out.empty() && model.IsRecordScope(*scope))
                     {
-                        for (const Path & base: model.BaseScopes(*scope))
+                        for (const Path& base : model.BaseScopes(*scope))
                         {
                             model.Members(base, name, out);
                             if (!out.empty())
@@ -1661,7 +1678,7 @@ namespace heimdall
                 return Joined(candidate.scope, candidate.name) + '#' +
                     (IsFunctionKind(candidate.kind) ? std::to_string(candidate.param_count) : std::string());
             };
-            for (const Candidate & candidate: found)
+            for (const Candidate& candidate : found)
             {
                 if (candidate.is_definition)
                 {
@@ -1670,7 +1687,7 @@ namespace heimdall
             }
 
             std::vector<Candidate> out;
-            for (Candidate & candidate: found)
+            for (Candidate& candidate : found)
             {
                 if (!candidate.is_definition && has_definition.contains(key_of(candidate)))
                 {
@@ -1685,7 +1702,7 @@ namespace heimdall
 
         void AppendUnique(std::vector<NavTarget>& out, NavTarget target)
         {
-            for (const NavTarget & existing: out)
+            for (const NavTarget& existing : out)
             {
                 if (existing.file == target.file && existing.offset == target.offset)
                 {
@@ -1699,7 +1716,7 @@ namespace heimdall
         std::vector<NavTarget> ToTargets(const Model& model, const std::vector<Candidate>& candidates)
         {
             std::vector<NavTarget> out;
-            for (const Candidate & candidate: candidates)
+            for (const Candidate& candidate : candidates)
             {
                 AppendUnique(out, model.ToTarget(candidate));
             }
@@ -1724,7 +1741,7 @@ namespace heimdall
         }
 
         std::unordered_set<std::size_t> declaration_sites;
-        for (const Decl & decl: model.Decls())
+        for (const Decl& decl : model.Decls())
         {
             declaration_sites.insert(decl.offset);
         }
@@ -1739,7 +1756,7 @@ namespace heimdall
             }
         }
 
-        for (const auto & directive: tree.Directives())
+        for (const auto& directive : tree.Directives())
         {
             skip.emplace_back(directive.offset, directive.offset + directive.length);
         }
@@ -1760,7 +1777,7 @@ namespace heimdall
             }
 
             bool skipped = false;
-            for (const auto &[begin, end]: skip)
+            for (const auto& [begin, end] : skip)
             {
                 if (begin <= offset && offset < end)
                 {
@@ -1815,7 +1832,7 @@ namespace heimdall
             reference.length = tokens[t].length;
             reference.name = name;
             std::unordered_set<std::string> seen;
-            for (const Candidate & candidate: result.found)
+            for (const Candidate& candidate : result.found)
             {
                 std::string qualified = Joined(candidate.scope, candidate.name);
                 if (seen.insert(qualified).second)
@@ -1845,7 +1862,7 @@ namespace heimdall
         const std::size_t cursor_token = model.IdentifierAt(offset);
         const std::size_t cursor_offset =
             cursor_token == kNone ? kNone : model.Tree().Tokens()[cursor_token].offset;
-        for (const Candidate & candidate: found)
+        for (const Candidate& candidate : found)
         {
             if (candidate.decl != kNone && candidate.is_definition && candidate.kind == CompletionKind::Function &&
                 model.Decls()[candidate.decl].offset == cursor_offset)
@@ -1853,7 +1870,7 @@ namespace heimdall
                 std::vector<Candidate> same;
                 model.Members(candidate.scope, candidate.name, same);
                 bool declared = false;
-                for (const Candidate & other: same)
+                for (const Candidate& other : same)
                 {
                     if (!other.is_definition && other.kind == CompletionKind::Function &&
                         other.param_count == candidate.param_count)
@@ -1875,7 +1892,7 @@ namespace heimdall
                 std::vector<Candidate> same;
                 model.Members(candidate.scope, candidate.name, same);
                 bool replaced = false;
-                for (const Candidate & other: same)
+                for (const Candidate& other : same)
                 {
                     if (other.is_definition && other.kind == CompletionKind::Function &&
                         other.param_count == candidate.param_count)
@@ -1895,7 +1912,7 @@ namespace heimdall
         }
 
         std::vector<NavTarget> targets = ToTargets(model, refined);
-        for (NavTarget & target: targets)
+        for (NavTarget& target : targets)
         {
             target.back_reference = jumped_back && !target.is_definition;
         }
@@ -1910,7 +1927,7 @@ namespace heimdall
         bool ambiguous = false;
         const std::vector<Candidate> found = ResolveAt(model, offset, ambiguous);
         std::vector<NavTarget> out;
-        for (const Candidate & candidate: found)
+        for (const Candidate& candidate : found)
         {
             bool added = false;
             if (candidate.kind == CompletionKind::Function)
@@ -1918,11 +1935,11 @@ namespace heimdall
                 // Overriders in derived records.
                 if (!candidate.scope.empty() && model.IsRecordScope(candidate.scope))
                 {
-                    for (const RecordInfo * derived: model.Derived(candidate.scope.back()))
+                    for (const RecordInfo* derived : model.Derived(candidate.scope.back()))
                     {
                         std::vector<Candidate> members;
                         model.Members(derived->path, candidate.name, members);
-                        for (const Candidate & member: members)
+                        for (const Candidate& member : members)
                         {
                             if (member.kind == CompletionKind::Function && member.param_count == candidate.param_count)
                             {
@@ -1938,7 +1955,7 @@ namespace heimdall
                     // Out-of-line definition(s) of the same overload.
                     std::vector<Candidate> same;
                     model.Members(candidate.scope, candidate.name, same);
-                    for (const Candidate & other: same)
+                    for (const Candidate& other : same)
                     {
                         if (other.kind == CompletionKind::Function && other.is_definition &&
                             other.param_count == candidate.param_count)
@@ -1952,12 +1969,12 @@ namespace heimdall
 
             if (candidate.kind == CompletionKind::Type)
             {
-                for (const RecordInfo * derived: model.Derived(candidate.name))
+                for (const RecordInfo* derived : model.Derived(candidate.name))
                 {
                     std::vector<Candidate> self;
                     Path scope(derived->path.begin(), derived->path.end() - 1);
                     model.Members(scope, derived->path.back(), self);
-                    for (const Candidate & item: self)
+                    for (const Candidate& item : self)
                     {
                         if (item.kind == CompletionKind::Type)
                         {
@@ -1977,15 +1994,18 @@ namespace heimdall
         return out;
     }
 
-    std::vector<NavTarget> Navigation::FindDefinitions(const ParseTree& tree,
+    std::vector<NavTarget> Navigation::FindDefinitions(
+        const ParseTree& tree,
         const std::vector<std::string>& scope,
-        std::string_view name, bool function, std::uint32_t param_count)
+        std::string_view name,
+        bool function,
+        std::uint32_t param_count)
     {
         const Model model(tree, nullptr);
         std::vector<Candidate> members;
         model.Members(scope, name, members);
         std::vector<NavTarget> out;
-        for (const Candidate & candidate: members)
+        for (const Candidate& candidate : members)
         {
             if (!candidate.is_definition)
             {
@@ -2002,16 +2022,19 @@ namespace heimdall
         return out;
     }
 
-    std::vector<NavTarget> Navigation::FindOverriders(const ParseTree& tree, std::string_view base,
-        std::string_view name, std::uint32_t param_count)
+    std::vector<NavTarget> Navigation::FindOverriders(
+        const ParseTree& tree,
+        std::string_view base,
+        std::string_view name,
+        std::uint32_t param_count)
     {
         const Model model(tree, nullptr);
         std::vector<NavTarget> out;
-        for (const RecordInfo * derived: model.Derived(base))
+        for (const RecordInfo* derived : model.Derived(base))
         {
             std::vector<Candidate> members;
             model.Members(derived->path, name, members);
-            for (const Candidate & member: members)
+            for (const Candidate& member : members)
             {
                 if (member.kind == CompletionKind::Function && member.param_count == param_count)
                 {

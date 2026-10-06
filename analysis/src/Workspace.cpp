@@ -13,6 +13,7 @@ namespace heimdall
         {
             std::shared_ptr<const ParseTree> tree;
             SemanticModel model;
+
             explicit BoundStorage(std::shared_ptr<const ParseTree> syntax)
             : tree(std::move(syntax)), model(Binder::Bind(*tree)) {}
         };
@@ -21,6 +22,7 @@ namespace heimdall
         {
             std::shared_ptr<const SemanticModel> model;
             TypeModel types;
+
             explicit TypedStorage(std::shared_ptr<const SemanticModel> semantic)
             : model(std::move(semantic)), types(Typer::Type(*model)) {}
         };
@@ -59,11 +61,13 @@ namespace heimdall
         struct WorkspaceState
         {
             WorkspaceState() = default;
+
             WorkspaceState(const WorkspaceState& other)
             : revision(other.revision), documents(other.documents), paths(other.paths),
                 dependencies(other.dependencies), dependents(other.dependents),
                 explicit_dependencies(other.explicit_dependencies), compilation(other.compilation),
                 project(other.project) {}
+
             std::uint64_t revision = 0;
             std::vector<std::shared_ptr<const DocumentAnalysis>> documents;
             std::unordered_map<std::string, DocumentId> paths;
@@ -92,12 +96,13 @@ namespace heimdall
             auto key = (error ? path : absolute).lexically_normal().generic_string();
 #ifdef _WIN32
             // Windows paths are case-insensitive; use ASCII folding without locale.
-            for (auto & c: key)
+            for (auto& c : key)
             {
                 if (c >= 'A' && c <= 'Z')
                 {
                     c += 'a' - 'A';
-            }}
+                }
+            }
 #endif
             return key;
         }
@@ -125,7 +130,7 @@ namespace heimdall
             affected[changed] = true;
             for (std::size_t next = 0; next < queue.size(); ++next)
             {
-                for (DocumentId id: state.dependents[queue[next]])
+                for (DocumentId id : state.dependents[queue[next]])
                 {
                     if (affected[id] ||!state.documents[id])
                     {
@@ -148,7 +153,7 @@ namespace heimdall
             // Reuse the syntax preprocessor's directive recognition, including
             // inactive branches and opaque raw literals, rather than a regex.
             const auto preprocessing = Preprocessor(options.Macros()).Process(source);
-            for (const auto & directive: preprocessing.directives)
+            for (const auto& directive : preprocessing.directives)
             {
                 if (directive.kind != DirectiveKind::Include)
                 {
@@ -157,13 +162,14 @@ namespace heimdall
 
                 auto body = source.substr(directive.offset, directive.length);
                 std::vector<Token> significant;
-                for (const auto & token: Lexer(body).Lex())
+                for (const auto& token : Lexer(body).Lex())
                 {
                     if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                         token.kind != TokenKind::BlockComment)
                     {
                         significant.push_back(token);
-                }}
+                    }
+                }
 
                 if (significant.size() < 3 || body.substr(significant[1].offset,
                     significant[1].length) != "include")
@@ -201,10 +207,11 @@ namespace heimdall
             state.dependents.assign(state.documents.size(), {});
             for (DocumentId id = 0; id < state.dependencies.size(); ++id)
             {
-                for (auto dependency: state.dependencies[id])
+                for (auto dependency : state.dependencies[id])
                 {
                     state.dependents[dependency].push_back(id);
-            }}
+                }
+            }
         }
 
         void ResolveIncludes(detail::WorkspaceState& state)
@@ -220,7 +227,7 @@ namespace heimdall
                 const auto& document = *state.documents[id];
                 const auto command = state.compilation ? state.compilation->FindOrNearest(document.path) : nullptr;
                 std::vector<DocumentId> edges;
-                for (const auto & target: document.include_targets)
+                for (const auto& target : document.include_targets)
                 {
                     const auto name = target.substr(1, target.size() - 2);
                     std::vector<std::filesystem::path> directories;
@@ -240,7 +247,7 @@ namespace heimdall
                             command->include_directories.end());
                     }
 
-                    for (const auto & directory: directories)
+                    for (const auto& directory : directories)
                     {
                         const auto found = state.paths.find(PathKey(directory / name));
                         if (found != state.paths.end())
@@ -274,7 +281,7 @@ namespace heimdall
             }
 
             ReverseEdges(state);
-            for (auto id: changed)
+            for (auto id : changed)
             {
                 InvalidateDependents(state, id);
             }
@@ -285,7 +292,7 @@ namespace heimdall
             ParserOptions options;
             options.standard = command.standard;
             options.predefined_macros = command.defines;
-            for (const auto & name: command.undefines)
+            for (const auto& name : command.undefines)
             {
                 options.predefined_macros.erase(name);
             }
@@ -311,6 +318,7 @@ namespace heimdall
     {
         return m_state ? m_state->revision : 0;
     }
+
     std::int64_t AnalysisSnapshot::Version(DocumentId document) const noexcept
     {
         return Contains(document) ? m_state->documents[document]->version : -1;
@@ -326,7 +334,9 @@ namespace heimdall
                 if (Contains(id))
                 {
                     ids.push_back(id);
-        }}}
+                }
+            }
+        }
 
         return ids;
     }
@@ -351,19 +361,19 @@ namespace heimdall
         return data ? data->source : nullptr;
     }
 
-    const std::filesystem::path & AnalysisSnapshot::Path(DocumentId document) const
+    const std::filesystem::path& AnalysisSnapshot::Path(DocumentId document) const
     {
         static const std::filesystem::path empty;
         return Contains(document) ? m_state->documents[document]->path : empty;
     }
 
-    const ParserOptions & AnalysisSnapshot::Options(DocumentId document) const
+    const ParserOptions& AnalysisSnapshot::Options(DocumentId document) const
     {
         static const ParserOptions empty;
         return Contains(document) ? m_state->documents[document]->options : empty;
     }
 
-    const CompileCommand * AnalysisSnapshot::Command(DocumentId document) const
+    const CompileCommand* AnalysisSnapshot::Command(DocumentId document) const
     {
         return Contains(document) && m_state->compilation
         ? m_state->compilation->FindOrNearest(Path(document)) : nullptr;
@@ -454,15 +464,16 @@ namespace heimdall
         {
             const auto start = Clock::now();
             std::vector<std::shared_ptr<const HeaderSummary>> summaries;
-            for (auto id: Documents())
+            for (auto id : Documents())
             {
                 auto extension = Path(id).extension().string();
-                for (auto & c: extension)
+                for (auto& c : extension)
                 {
                     if (c >= 'A' && c <= 'Z')
                     {
                         c += 'a' - 'A';
-                }}
+                    }
+                }
 
                 if (extension == ".h" || extension == ".hpp" || extension == ".hh" || extension == ".hxx")
                 {
@@ -500,7 +511,7 @@ namespace heimdall
             return total;
         }
 
-        for (const auto & data: m_state->documents)
+        for (const auto& data : m_state->documents)
         {
             if (!data)
             {
@@ -543,7 +554,7 @@ namespace heimdall
         }
 
         std::unordered_set<const HeaderSummary*> counted;
-        for (const auto & data: m_state->documents)
+        for (const auto& data : m_state->documents)
         {
             if (!data)
             {
@@ -585,12 +596,14 @@ namespace heimdall
         auto project = m_state->project ? m_state->project : m_state->project_cache->index;
         if (project)
         {
-            for (const auto & summary: project->Summaries())
+            for (const auto& summary : project->Summaries())
             {
                 if (counted.insert(summary.get()).second)
                 {
                     total.project_string_bytes += summary->PoolBytes();
-        }}}
+                }
+            }
+        }
 
         return total;
     }
@@ -701,7 +714,8 @@ namespace heimdall
             if (const auto command = state->compilation->FindOrNearest(document->path))
             {
                 options = CommandOptions(*command);
-        }}
+            }
+        }
 
         document->options = std::move(options);
         document->include_targets = Includes(*document->source, document->options);
@@ -815,7 +829,7 @@ namespace heimdall
         state->documents[document].reset();
         state->project.reset();
         state->dependencies[document].clear();
-        for (auto & edges: state->dependencies)
+        for (auto& edges : state->dependencies)
         {
             std::erase(edges, document);
         }
@@ -836,12 +850,13 @@ namespace heimdall
             return std::unexpected(WorkspaceError::InvalidDocument);
         }
 
-        for (auto id: dependencies)
+        for (auto id : dependencies)
         {
             if (!snapshot.Contains(id))
             {
                 return std::unexpected(WorkspaceError::InvalidDocument);
-        }}
+            }
+        }
 
         std::vector<DocumentId> edges(dependencies.begin(), dependencies.end());
         std::sort(edges.begin(), edges.end());
@@ -894,7 +909,7 @@ namespace heimdall
         auto state = std::make_shared<detail::WorkspaceState>(*m_state);
         state->compilation = std::move(database);
         state->project.reset();
-        for (auto & document: state->documents)
+        for (auto& document : state->documents)
         {
             if (!document)
             {
@@ -908,7 +923,8 @@ namespace heimdall
                 if (auto command = state->compilation->FindOrNearest(document->path))
                 {
                     replacement->options = CommandOptions(*command);
-            }}
+                }
+            }
 
             replacement->include_targets = Includes(*replacement->source, replacement->options);
             document = std::move(replacement);
@@ -929,7 +945,7 @@ namespace heimdall
 
         auto state = std::make_shared<detail::WorkspaceState>(*m_state);
         state->project = std::move(index);
-        for (auto & document: state->documents)
+        for (auto& document : state->documents)
         {
             if (!document)
             {

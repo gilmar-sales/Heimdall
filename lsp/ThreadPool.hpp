@@ -34,7 +34,7 @@ namespace heimdall::lsp
             Background
         };
 
-        using Task = std::move_only_function<void()>;
+        using Task = std::move_only_function<void() >;
 
         explicit ThreadPool(std::size_t threads)
         {
@@ -48,8 +48,9 @@ namespace heimdall::lsp
             }
         }
 
-        ThreadPool(const ThreadPool &) = delete;
-        ThreadPool &operator= (const ThreadPool &) = delete;
+        ThreadPool(const ThreadPool&) = delete;
+
+        ThreadPool& operator= (const ThreadPool&) = delete;
 
         ~ThreadPool()
         {
@@ -91,7 +92,7 @@ namespace heimdall::lsp
             }
             m_cv.notify_all();
             m_idle_cv.notify_all();
-            for (auto & thread: m_threads)
+            for (auto& thread : m_threads)
             {
                 if (thread.joinable())
                 {
@@ -112,14 +113,14 @@ namespace heimdall::lsp
                     std::unique_lock<std::mutex> lock(m_mu);
                     m_cv.wait(lock,[&]
                         {
-                            return m_stopping || !m_interactive.empty() || !m_background.empty();
+                            return m_stopping ||!m_interactive.empty() ||!m_background.empty();
                     });
                     if (m_stopping)
                     {
                         return;
                     }
 
-                    auto &queue = m_interactive.empty() ? m_background : m_interactive;
+                    auto& queue = m_interactive.empty() ? m_background : m_interactive;
                     task = std::move(queue.front());
                     queue.pop_front();
                     ++m_active;

@@ -7,6 +7,6 @@
 namespace mylib
 {
 
-int extra_value;
+    int extra_value;
 
 }

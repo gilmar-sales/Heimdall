@@ -22,11 +22,11 @@ namespace
         return path;
     }
 
-    bool ParseArgs(std::vector<std::string> args, heimdall::cli::Options & options)
+    bool ParseArgs(std::vector<std::string> args, heimdall::cli::Options& options)
     {
-        std::vector<char * > argv;
-        argv.push_back(const_cast<char * >("heimdall"));
-        for (auto & arg: args)
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>("heimdall"));
+        for (auto& arg : args)
         {
             argv.push_back(arg.data());
         }

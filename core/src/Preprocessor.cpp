@@ -55,7 +55,7 @@ namespace heimdall
             return text;
         }
 
-        std::string_view ReadWord(std::string_view & text)
+        std::string_view ReadWord(std::string_view& text)
         {
             text = Trim(text);
             std::size_t n = 0;
@@ -74,11 +74,11 @@ namespace heimdall
         // predefined map by pointer. The predefined map is never copied.
         struct MacroScope
         {
-            const Preprocessor::MacroMap * local = nullptr;
-            const Preprocessor::ErasedSet * erased = nullptr;
-            const Preprocessor::MacroMap * predefined = nullptr;
+            const Preprocessor::MacroMap* local = nullptr;
+            const Preprocessor::ErasedSet* erased = nullptr;
+            const Preprocessor::MacroMap* predefined = nullptr;
 
-            const std::string * Find(std::string_view name) const
+            const std::string* Find(std::string_view name) const
             {
                 if (local != nullptr)
                 {
@@ -113,7 +113,7 @@ namespace heimdall
         class IfExpression
         {
         public:
-            IfExpression(std::string_view input, const MacroScope &macros) : m_input(input), m_macros(macros) {}
+            IfExpression(std::string_view input, const MacroScope& macros) : m_input(input), m_macros(macros) {}
 
             bool Evaluate()
             {
@@ -256,7 +256,7 @@ namespace heimdall
                 std::string_view atom = m_input.substr(start, m_pos - start);
                 if (IsIdentStart(atom.front()))
                 {
-                    const std::string * replacement = m_macros.Find(atom);
+                    const std::string* replacement = m_macros.Find(atom);
                     if (replacement == nullptr)
                     {
                         return 0;
@@ -300,7 +300,7 @@ namespace heimdall
             }
 
             std::string_view m_input;
-            const MacroScope &m_macros;
+            const MacroScope& m_macros;
             std::size_t m_pos = 0;
         };
 
@@ -359,7 +359,7 @@ namespace heimdall
             return DirectiveKind::Other;
         }
 
-        std::string ExpandObjectMacros(std::string_view line, const MacroScope &macros, unsigned depth = 0)
+        std::string ExpandObjectMacros(std::string_view line, const MacroScope& macros, unsigned depth = 0)
         {
             if (depth >= kMaxMacroExpansionDepth)
             {
@@ -421,7 +421,7 @@ namespace heimdall
                     }
 
                     // Heterogeneous lookup: no std::string temporary per identifier.
-                    const std::string * replacement = macros.Find(line.substr(start, i - start));
+                    const std::string* replacement = macros.Find(line.substr(start, i - start));
                     if (replacement == nullptr || replacement->empty())
                     {
                         out.append(line.substr(start, i - start));
@@ -449,7 +449,7 @@ namespace heimdall
         // Advances `in_comment` over one source line: whether the next line starts
         // inside a block comment. Strings, char literals and `//` comments are
         // skipped so that `/*` inside them does not open a comment.
-        void AdvanceCommentState(std::string_view line, bool & in_comment)
+        void AdvanceCommentState(std::string_view line, bool& in_comment)
         {
             for (std::size_t i = 0; i < line.size(); ++i)
             {
@@ -600,7 +600,7 @@ namespace heimdall
                         }
                     }
 
-                    stack.push_back({active, active &&condition, active &&condition, false});
+                    stack.push_back({active, active&& condition, active&& condition, false});
                     active = stack.back().active;
                 }
                 else if (kind == DirectiveKind::Elif)
@@ -611,7 +611,7 @@ namespace heimdall
                     }
                     else
                     {
-                        auto &frame = stack.back();
+                        auto& frame = stack.back();
                         if (frame.saw_else)
                         {
                             result.diagnostics.push_back({line_start, "#elif after #else"});
@@ -632,7 +632,7 @@ namespace heimdall
                     }
                     else
                     {
-                        auto &frame = stack.back();
+                        auto& frame = stack.back();
                         if (frame.saw_else)
                         {
                             result.diagnostics.push_back({line_start, "duplicate #else"});
@@ -711,7 +711,7 @@ namespace heimdall
         }
 
         result.local_macros.reserve(local.size());
-        for (auto & [name, value]: local)
+        for (auto& [name, value] : local)
         {
             result.local_macros.emplace(name, std::move(value));
         }

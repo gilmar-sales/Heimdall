@@ -102,8 +102,8 @@ namespace heimdall
     // order of the groups decides where each include belongs.
     enum class IncludeGroup : std::uint8_t
     {
-        Angle,  // #include <header>
-        Quote   // #include "header"
+        Angle, // #include <header>
+        Quote  // #include "header"
     };
 
     struct RuleOptions
@@ -141,9 +141,12 @@ namespace heimdall
         std::string_view summary;
     };
 
-    const std::vector<RuleInfo> & RuleCatalog();
-    const RuleInfo * FindRuleByCode(std::string_view code);
-    const RuleInfo * FindRule(RuleId id);
+    const std::vector<RuleInfo>& RuleCatalog();
+
+    const RuleInfo* FindRuleByCode(std::string_view code);
+
+    const RuleInfo* FindRule(RuleId id);
+
     bool IsKnownRuleCode(std::string_view code);
 
     // Edit that deletes the preprocessor directive at [offset, offset+length)
@@ -156,11 +159,14 @@ namespace heimdall
         explicit RuleEngine(RuleOptions options = {}) : m_options(options) {}
 
         std::vector<Diagnostic> Analyze(std::string_view source) const;
-        std::vector<Diagnostic> Analyze(const ParseTree &tree) const;
+
+        std::vector<Diagnostic> Analyze(const ParseTree& tree) const;
+
         // Severity overrides, disabled rules and suppression comments, for
         // diagnostics produced outside core (for example by the semantic layer).
         // Returns them sorted by offset.
-        std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, const ParseTree &tree) const
+        std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics,
+            const ParseTree& tree) const
         {
             return ApplyPolicy(std::move(diagnostics), tree.Source(), tree.Tokens());
         }
@@ -171,10 +177,12 @@ namespace heimdall
         {
             return RuleEnabled(code, false);
         }
+
         bool Enabled(std::string_view code, bool default_enabled = true) const
         {
             return RuleEnabled(code, default_enabled);
         }
+
         DocScope DocumentationScope() const
         {
             return m_options.doc_scope;
@@ -182,7 +190,7 @@ namespace heimdall
 
         // Applies the non-overlapping fixes. Fixes marked unsafe (editor quick fixes)
         // are only applied when include_unsafe is set.
-        static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic> & diagnostics,
+        static std::string ApplyFixes(std::string_view source, const std::vector<Diagnostic>& diagnostics,
             bool include_unsafe = false);
 
     private:
@@ -190,10 +198,13 @@ namespace heimdall
         // enabled override (config file or --rule); the last override
         // for the code wins.
         bool RuleEnabled(std::string_view code, bool default_enabled) const;
+
         std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics, std::string_view source,
-            const std::vector<Token> & tokens) const;
-        std::vector<Diagnostic> AnalyzeImpl(std::string_view source, const std::vector<Token> & tokens,
-            const std::vector<PreprocessorDirective> & directives) const;
+            const std::vector<Token>& tokens) const;
+
+        std::vector<Diagnostic> AnalyzeImpl(std::string_view source, const std::vector<Token>& tokens,
+            const std::vector<PreprocessorDirective>& directives) const;
+
         RuleOptions m_options;
     };
 

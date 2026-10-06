@@ -8,11 +8,11 @@
 namespace
 {
 
-    bool ParseArgs(std::vector<std::string> args, heimdall::cli::Options & options)
+    bool ParseArgs(std::vector<std::string> args, heimdall::cli::Options& options)
     {
-        std::vector<char *> argv;
-        argv.push_back(const_cast<char *>("heimdall"));
-        for (auto & arg: args)
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>("heimdall"));
+        for (auto& arg : args)
         {
             argv.push_back(arg.data());
         }
@@ -25,7 +25,8 @@ namespace
 TEST(CliOptionsSpec, ParsesPointerAndReferenceAlignment)
 {
     heimdall::cli::Options options{};
-    EXPECT_TRUE(ParseArgs({"format", "--pointer-alignment", "left", "--reference-alignment", "right", "a.cpp"},
+    EXPECT_TRUE(ParseArgs({"format", "--pointer-alignment", "left", "--reference-alignment", "right",
+            "a.cpp"},
         options));
     EXPECT_TRUE(options.pointer_alignment_override);
     EXPECT_EQ(options.pointer_alignment, heimdall::PointerAlignment::Left);
@@ -36,7 +37,8 @@ TEST(CliOptionsSpec, ParsesPointerAndReferenceAlignment)
 TEST(CliOptionsSpec, ParsesAlignmentEqualsForm)
 {
     heimdall::cli::Options options{};
-    EXPECT_TRUE(ParseArgs({"format", "--pointer-alignment=right", "--reference-alignment=left", "a.cpp"},
+    EXPECT_TRUE(ParseArgs({"format", "--pointer-alignment=right", "--reference-alignment=left",
+            "a.cpp"},
         options));
     EXPECT_EQ(options.pointer_alignment, heimdall::PointerAlignment::Right);
     EXPECT_EQ(options.reference_alignment, heimdall::ReferenceAlignment::Left);

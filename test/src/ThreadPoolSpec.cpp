@@ -72,12 +72,12 @@ TEST(ThreadPoolSpec, InteractiveRunsBeforeQueuedBackground)
         {
             const std::lock_guard<std::mutex> lock(mu);
             order.push_back(1);
-    }, ThreadPool::Priority::Background);
+        }, ThreadPool::Priority::Background);
     pool.Submit([&]
         {
             const std::lock_guard<std::mutex> lock(mu);
             order.push_back(2);
-    }, ThreadPool::Priority::Interactive);
+        }, ThreadPool::Priority::Interactive);
     release.set_value();
     pool.WaitIdle();
     ASSERT_EQ(order.size(), 2u);

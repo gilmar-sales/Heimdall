@@ -5,18 +5,18 @@
 namespace mylib
 {
 
-struct Widget
-{
-    int value;
-};
+    struct Widget
+    {
+        int value;
+    };
 
-void run();
+    void run();
 
-int helper_value;
+    int helper_value;
 
-namespace _impl
-{
-int hidden_helper;
-}
+    namespace _impl
+    {
+        int hidden_helper;
+    }
 
 } // namespace mylib

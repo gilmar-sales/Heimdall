@@ -27,7 +27,7 @@ namespace heimdall
         std::vector<std::string_view> SignificantTokens(std::string_view source)
         {
             std::vector<std::string_view> result;
-            for (const auto & token: Lexer(source).Lex())
+            for (const auto& token : Lexer(source).Lex())
             {
                 if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
@@ -49,7 +49,7 @@ namespace heimdall
         // Non-owning preprocessor over the command's defines: avoids the deep copy
         // of the macro map per call. A filtered copy is built only when the command
         // carries -U undefines.
-        Preprocessor MakePreprocessor(const CompileCommand *command)
+        Preprocessor MakePreprocessor(const CompileCommand* command)
         {
             static const Preprocessor::MacroMap kEmpty;
             if (command == nullptr)
@@ -63,7 +63,7 @@ namespace heimdall
             }
 
             Preprocessor::MacroMap filtered = command->defines;
-            for (const auto & name: command->undefines)
+            for (const auto& name : command->undefines)
             {
                 filtered.erase(name);
             }
@@ -72,11 +72,11 @@ namespace heimdall
         }
 
         std::vector<std::string_view> SignificantViews(std::string_view source,
-            const std::vector<Token> & tokens)
+            const std::vector<Token>& tokens)
         {
             std::vector<std::string_view> result;
             result.reserve(tokens.size());
-            for (const auto & token: tokens)
+            for (const auto& token : tokens)
             {
                 if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                     token.kind != TokenKind::BlockComment)
@@ -99,7 +99,7 @@ namespace heimdall
             return token == "if" || token == "for" || token == "while" || token == "switch" || token == "catch";
         }
 
-        bool IsClassBody(const std::vector<SignificantToken> & tokens, std::size_t open_brace)
+        bool IsClassBody(const std::vector<SignificantToken>& tokens, std::size_t open_brace)
         {
             for (std::size_t i = open_brace; i > 0; --i)
             {
@@ -118,7 +118,7 @@ namespace heimdall
             return false;
         }
 
-        bool IsFunctionBody(const std::vector<SignificantToken> & tokens, std::size_t open_brace)
+        bool IsFunctionBody(const std::vector<SignificantToken>& tokens, std::size_t open_brace)
         {
             if (open_brace == 0 || tokens[open_brace - 1].text != ")")
             {
@@ -145,13 +145,13 @@ namespace heimdall
     } // namespace
 
     std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNames(std::string_view source,
-        const CompileCommand *command) const
+        const CompileCommand* command) const
     {
         return CollectTypeNamesFromViews(SignificantViews(source, Lexer(source).Lex()), command);
     }
 
     std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNamesFromViews(
-        const std::vector<std::string_view> & tokens, const CompileCommand *command) const
+        const std::vector<std::string_view>& tokens, const CompileCommand* command) const
     {
         std::unordered_set<std::string> types = {
             "void", "bool", "char", "wchar_t", "char8_t", "char16_t", "char32_t", "short", "int", "long",
@@ -177,7 +177,7 @@ namespace heimdall
 
         if (command != nullptr)
         {
-            for (const auto &[name, value]: command->defines)
+            for (const auto& [name, value] : command->defines)
             {
                 if (types.contains(value))
                 {
@@ -190,8 +190,8 @@ namespace heimdall
     }
 
     AsteriskMeaning SemanticAnalyzer::ClassifyAsteriskStatement(
-        std::string_view statement, const std::unordered_set<std::string> & known_types,
-        const std::unordered_set<std::string> & known_values) const
+        std::string_view statement, const std::unordered_set<std::string>& known_types,
+        const std::unordered_set<std::string>& known_values) const
     {
         const auto tokens = SignificantTokens(statement);
         if (tokens.size() != 4 ||!IsWord(tokens[0]) || tokens[1] != "*" ||!IsWord(tokens[2]) || tokens[3] != ";")
@@ -213,14 +213,14 @@ namespace heimdall
     }
 
     std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(std::string_view source,
-        const CompileCommand *command) const
+        const CompileCommand* command) const
     {
         const auto preprocessing = MakePreprocessor(command).Process(source);
         return AnalyzeUnusedLocalsImpl(source, Lexer(source).Lex(), preprocessing, command);
     }
 
-    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(const ParseTree &tree,
-        const CompileCommand *command) const
+    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(const ParseTree& tree,
+        const CompileCommand* command) const
     {
         // Only the active-range mask is recomputed (a cheap line scan); the
         // tokens themselves are reused from the tree (saves 2 full lexes).
@@ -229,15 +229,17 @@ namespace heimdall
     }
 
     std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocalsImpl(
-        std::string_view source, const std::vector<Token> & lexed, const PreprocessorResult &preprocessing,
-        const CompileCommand *command) const
+        std::string_view source,
+        const std::vector<Token>& lexed,
+        const PreprocessorResult& preprocessing,
+        const CompileCommand* command) const
     {
         std::vector<SignificantToken> tokens;
         tokens.reserve(lexed.size());
         std::vector<std::string_view> views;
         views.reserve(lexed.size());
         std::size_t active_cursor = 0;
-        for (const auto & token: lexed)
+        for (const auto& token : lexed)
         {
             while (active_cursor < preprocessing.active_ranges.size() &&
                 preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <=

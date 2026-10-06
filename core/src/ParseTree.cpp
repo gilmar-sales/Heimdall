@@ -20,13 +20,17 @@ namespace heimdall
         return Parse(source, options);
     }
 
-    ParseTree ParseTree::Parse(std::string_view source, const ParserOptions &options)
+    ParseTree ParseTree::Parse(std::string_view source, const ParserOptions& options)
     {
         return Parse(source, options, std::stop_token{});
     }
 
-    ParseTree ParseTree::Parse(std::string_view source, const ParserOptions &options,
-        std::stop_token stop, const std::vector<Token> * lexed, const ParseReuse * reuse)
+    ParseTree ParseTree::Parse(
+        std::string_view source,
+        const ParserOptions& options,
+        std::stop_token stop,
+        const std::vector<Token>* lexed,
+        const ParseReuse* reuse)
     {
         ParseTree tree;
         tree.m_source = source;
@@ -36,24 +40,36 @@ namespace heimdall
         return tree;
     }
 
-    ParseTree ParseTree::ParseSnapshot(std::shared_ptr<const std::string> source,
-        const ParserOptions &options, std::stop_token stop,
-        std::shared_ptr<const std::vector<Token>> lexed, const ParseReuse *reuse)
+    ParseTree ParseTree::ParseSnapshot(
+        std::shared_ptr<const std::string> source,
+        const ParserOptions& options,
+        std::stop_token stop,
+        std::shared_ptr<const std::vector<Token>> lexed,
+        const ParseReuse* reuse)
     {
         ParseTree tree;
         tree.m_owned_source = std::move(source);
-        tree.m_source = tree.m_owned_source ? std::string_view(*tree.m_owned_source) : std::string_view{};
+        tree.m_source = tree.m_owned_source ? std::string_view(*tree.m_owned_source) : std::string_view {};
         tree.m_standard = options.standard;
         tree.m_shared_tokens = std::move(lexed);
-        if (!tree.m_shared_tokens) tree.m_tokens = Lexer(tree.m_source).Lex();
+        if (!tree.m_shared_tokens)
+        {
+            tree.m_tokens = Lexer(tree.m_source).Lex();
+        }
+
         tree.Build(options, stop, reuse);
         return tree;
     }
 
-    void ParseTree::Build(const ParserOptions &options, std::stop_token stop, const ParseReuse *reuse)
+    void ParseTree::Build(const ParserOptions& options, std::stop_token stop, const ParseReuse* reuse)
     {
-        auto &tree = *this;
-        if (stop.stop_requested()) { m_cancelled = true; return; }
+        auto& tree = *this;
+        if (stop.stop_requested())
+        {
+            m_cancelled = true;
+            return;
+        }
+
         if (reuse && reuse->previous)
         {
             // Reusing a similarly sized document avoids five independent growth
@@ -61,11 +77,22 @@ namespace heimdall
             tree.m_nodes_soa.reserve(std::min(reuse->previous->NodesSoA().size(),
                 tree.Tokens().size() * 2 + 1));
         }
+
         auto preprocessing = Preprocessor(options.Macros()).Process(tree.m_source);
-        if (stop.stop_requested()) { m_cancelled = true; return; }
-        detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse, options.type_names.get());
+        if (stop.stop_requested())
+        {
+            m_cancelled = true;
+            return;
+        }
+
+        detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse,
+            options.type_names.get());
         tree.m_directives = std::move(preprocessing.directives);
-        if (m_cancelled || stop.stop_requested()) { m_cancelled = true; return; }
+        if (m_cancelled || stop.stop_requested())
+        {
+            m_cancelled = true;
+            return;
+        }
 
         // Build subtree_end for each node (pre-order traversal property)
         const std::size_t node_count = tree.m_nodes_soa.size();
@@ -96,14 +123,18 @@ namespace heimdall
     {
         std::size_t bytes = m_nodes_soa.kind.capacity() + sizeof(std::uint32_t) *
             (m_nodes_soa.first_token.capacity() + m_nodes_soa.token_count.capacity() +
-                m_nodes_soa.parent.capacity() + m_nodes_soa.subtree_end.capacity());
+            m_nodes_soa.parent.capacity() + m_nodes_soa.subtree_end.capacity());
         bytes += Tokens().capacity() * sizeof(Token) + m_items.capacity() * sizeof(TopLevelItem)
-            + m_directives.capacity() * sizeof(PreprocessorDirective)
-            + m_diagnostics.capacity() * sizeof(GrammarDiagnostic)
-            + m_token_kind_mask.capacity() + sizeof(std::uint32_t) *
-                (m_identifier_tokens.capacity() + m_directive_tokens.capacity())
-            + (m_decoration.capacity() + 7) / 8;
-        for (const auto &diagnostic : m_diagnostics) bytes += diagnostic.message.capacity();
+        + m_directives.capacity() * sizeof(PreprocessorDirective)
+        + m_diagnostics.capacity() * sizeof(GrammarDiagnostic)
+        + m_token_kind_mask.capacity() + sizeof(std::uint32_t) *
+            (m_identifier_tokens.capacity() + m_directive_tokens.capacity())
+        +(m_decoration.capacity() + 7) / 8;
+        for (const auto& diagnostic : m_diagnostics)
+        {
+            bytes += diagnostic.message.capacity();
+        }
+
         return bytes;
     }
 
@@ -129,7 +160,11 @@ namespace heimdall
     std::vector<std::size_t> ParseTree::Children(std::size_t node_index) const
     {
         std::vector<std::size_t> children;
-        for (const auto child : DirectChildren(node_index)) children.push_back(child);
+        for (const auto child : DirectChildren(node_index))
+        {
+            children.push_back(child);
+        }
+
         return children;
     }
 
@@ -145,10 +180,13 @@ namespace heimdall
         // Expression parsing can reparent an earlier operand to a later node.
         // Such nodes are not strict pre-order: retain the parent filter instead
         // of treating every index at a subtree boundary as a direct child.
-        while (m_index < m_end && m_soa->Parent(m_index) != m_parent) ++m_index;
+        while (m_index < m_end && m_soa->Parent(m_index) != m_parent)
+        {
+            ++m_index;
+        }
     }
 
-    ParseTree::ChildRange::Iterator &ParseTree::ChildRange::Iterator::operator++() noexcept
+    ParseTree::ChildRange::Iterator & ParseTree::ChildRange::Iterator::operator++() noexcept
     {
         m_index = std::min<std::size_t>(m_soa->SubtreeEnd(m_index), m_end);
         Seek();
@@ -157,7 +195,7 @@ namespace heimdall
 
     void ParseTree::BuildAuxiliary()
     {
-        const auto &m_tokens = Tokens();
+        const auto& m_tokens = Tokens();
         // Token kind mask: 1 = trivia (whitespace/comment), 0 = significant
         m_token_kind_mask.resize(m_tokens.size());
         m_identifier_tokens.clear();
@@ -169,8 +207,8 @@ namespace heimdall
         {
             const TokenKind kind = m_tokens[i].kind;
             const bool is_trivia = (kind == TokenKind::Whitespace ||
-                                   kind == TokenKind::LineComment ||
-                                   kind == TokenKind::BlockComment);
+                kind == TokenKind::LineComment ||
+                kind == TokenKind::BlockComment);
             m_token_kind_mask[i] = is_trivia ? 1 : 0;
 
             if (kind == TokenKind::Identifier)
@@ -181,10 +219,13 @@ namespace heimdall
 
         // Directive token indices. Tokens are ordered by offset, so each
         // directive's range is found by binary search instead of a full scan.
-        for (const auto &dir : m_directives)
+        for (const auto& dir : m_directives)
         {
             const auto first = std::lower_bound(m_tokens.begin(), m_tokens.end(), dir.offset,
-                [](const Token &token, std::size_t offset) { return token.offset < offset; });
+                [](const Token& token, std::size_t offset)
+                {
+                    return token.offset < offset;
+            });
             for (auto it = first; it != m_tokens.end(); ++it)
             {
                 const std::size_t tok_end = static_cast<std::size_t>(it->offset) + it->length;
@@ -192,6 +233,7 @@ namespace heimdall
                 {
                     break;
                 }
+
                 m_directive_tokens.push_back(static_cast<std::uint32_t>(it - m_tokens.begin()));
             }
         }
@@ -216,6 +258,7 @@ namespace heimdall
                 m_nodes_soa.subtree_end[i]
             };
         }
+
         m_nodes_aos_dirty = false;
     }
 

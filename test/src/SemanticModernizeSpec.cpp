@@ -9,26 +9,26 @@
 namespace
 {
 
-    using Analysis = std::vector<heimdall::Diagnostic> (*)(const heimdall::SemanticModel &);
+    using Analysis = std::vector<heimdall::Diagnostic>(*)(const heimdall::SemanticModel&);
 
-    std::vector<heimdall::Diagnostic> Run(Analysis analysis, const std::string &source)
+    std::vector<heimdall::Diagnostic> Run(Analysis analysis, const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return analysis(model);
     }
 
-    std::vector<heimdall::Diagnostic> Nullptr(const std::string &source)
+    std::vector<heimdall::Diagnostic> Nullptr(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeNullptr, source);
     }
 
-    std::vector<heimdall::Diagnostic> Zero(const std::string &source)
+    std::vector<heimdall::Diagnostic> Zero(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeZeroAsNull, source);
     }
 
-    std::vector<heimdall::Diagnostic> Auto(const std::string &source)
+    std::vector<heimdall::Diagnostic> Auto(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeAuto, source);
     }
@@ -37,11 +37,11 @@ namespace
     std::string ApplyAll(std::string source, std::vector<heimdall::Diagnostic> diagnostics)
     {
         std::sort(diagnostics.begin(), diagnostics.end(),
-            [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+            [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
             {
                 return a.fix.offset > b.fix.offset;
-            });
-        for (const auto &diagnostic: diagnostics)
+        });
+        for (const auto& diagnostic : diagnostics)
         {
             source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
         }
@@ -49,7 +49,7 @@ namespace
         return source;
     }
 
-    std::string Flagged(const std::string &source, const heimdall::Diagnostic &diagnostic)
+    std::string Flagged(const std::string& source, const heimdall::Diagnostic& diagnostic)
     {
         return source.substr(diagnostic.offset, diagnostic.length);
     }
@@ -62,11 +62,11 @@ TEST(ModernizeNullptr, ReplacesCStyleCastsOfNullConstants)
 {
     const std::string source =
         "void f() {\n"
-        "    void* a = (void*)0;\n"
-        "    char* b = (char*)NULL;\n"
-        "    const int* c = (const int*)0L;\n"
-        "    ns::T** d = (ns::T**)0;\n"
-        "}\n";
+    "    void* a = (void*)0;\n"
+    "    char* b = (char*)NULL;\n"
+    "    const int* c = (const int*)0L;\n"
+    "    ns::T** d = (ns::T**)0;\n"
+    "}\n";
     const auto diagnostics = Nullptr(source);
     ASSERT_EQ(diagnostics.size(), 4u);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "(void*)0");
@@ -86,8 +86,8 @@ TEST(ModernizeNullptr, ReplacesNamedCasts)
 {
     const std::string source =
         "void* a = static_cast<void*>(0);\n"
-        "char* b = reinterpret_cast<char*>(NULL);\n"
-        "T* c = static_cast<std::vector<int>::value_type*>(0);\n";
+    "char* b = reinterpret_cast<char*>(NULL);\n"
+    "T* c = static_cast<std::vector<int>::value_type*>(0);\n";
     const auto diagnostics = Nullptr(source);
     ASSERT_EQ(diagnostics.size(), 3u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
@@ -150,7 +150,10 @@ TEST(ModernizeNullptr, IgnoresInactiveCodeAndDirectives)
 
 TEST(ModernizeNullptr, ToleratesBrokenInput)
 {
-    for (const char *source: {"void* a = (void*", "void* a = (void*)", "static_cast<void*>(", "(", "static_cast<", ""})
+    for (const char* source :
+        {
+            "void* a = (void*", "void* a = (void*)", "static_cast<void*>(", "(", "static_cast<", ""
+    })
     {
         EXPECT_NO_FATAL_FAILURE(Nullptr(source)) << source;
     }
@@ -162,14 +165,14 @@ TEST(NoZeroAsNull, ReportsInitializationOfPointers)
 {
     const std::string source =
         "int* g = 0;\n"
-        "void f(int* p = 0) {\n"
-        "    char *a = 0, *b = 0L;\n"
-        "    const char* c = 0u;\n"
-        "}\n"
-        "struct S { int* member = 0; };\n";
+    "void f(int* p = 0) {\n"
+    "    char *a = 0, *b = 0L;\n"
+    "    const char* c = 0u;\n"
+    "}\n"
+    "struct S { int* member = 0; };\n";
     const auto diagnostics = Zero(source);
     ASSERT_EQ(diagnostics.size(), 6u);
-    for (const auto &diagnostic: diagnostics)
+    for (const auto& diagnostic : diagnostics)
     {
         EXPECT_EQ(diagnostic.code, "cpp/no-zero-as-null");
         EXPECT_EQ(diagnostic.rule, heimdall::RuleId::NoZeroAsNull);
@@ -189,11 +192,11 @@ TEST(NoZeroAsNull, ReportsAssignmentsAndComparisons)
 {
     const std::string source =
         "void f(int* p, int* q) {\n"
-        "    p = 0;\n"
-        "    if (p == 0 && q != 0) {}\n"
-        "    if (0 == p || 0 != q) {}\n"
-        "    bool b = p == 0L;\n"
-        "}\n";
+    "    p = 0;\n"
+    "    if (p == 0 && q != 0) {}\n"
+    "    if (0 == p || 0 != q) {}\n"
+    "    bool b = p == 0L;\n"
+    "}\n";
     const auto diagnostics = Zero(source);
     ASSERT_EQ(diagnostics.size(), 6u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
@@ -209,9 +212,9 @@ TEST(NoZeroAsNull, ReportsReturnsFromPointerFunctions)
 {
     const std::string source =
         "int* a() { return 0; }\n"
-        "auto b() -> char* { return 0; }\n"
-        "struct S { const char* c() { return 0; } };\n"
-        "int* S2::d() { return 0L; }\n";
+    "auto b() -> char* { return 0; }\n"
+    "struct S { const char* c() { return 0; } };\n"
+    "int* S2::d() { return 0L; }\n";
     const auto diagnostics = Zero(source);
     ASSERT_EQ(diagnostics.size(), 4u);
     EXPECT_NE(diagnostics[0].message.find("returned"), std::string::npos);
@@ -253,11 +256,11 @@ TEST(NoZeroAsNull, RespectsShadowing)
 {
     const std::string source =
         "int* p;\n"
-        "void f() {\n"
-        "    int p = 1;\n"
-        "    p = 0;\n"
-        "}\n"
-        "void g() { p = 0; }\n";
+    "void f() {\n"
+    "    int p = 1;\n"
+    "    p = 0;\n"
+    "}\n"
+    "void g() { p = 0; }\n";
     const auto diagnostics = Zero(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].line, 6u);
@@ -290,7 +293,10 @@ TEST(NoZeroAsNull, IgnoresInactiveCode)
 
 TEST(NoZeroAsNull, ToleratesBrokenInput)
 {
-    for (const char *source: {"int* p = ", "int* p = 0", "void f(int* p) { p ==", "int* f() { return", "int* f() { return 0"})
+    for (const char* source :
+        {
+            "int* p = ", "int* p = 0", "void f(int* p) { p ==", "int* f() { return", "int* f() { return 0"
+    })
     {
         EXPECT_NO_FATAL_FAILURE(Zero(source)) << source;
     }
@@ -302,15 +308,15 @@ TEST(ModernizeAuto, ReplacesTheTypeOfNewExpressions)
 {
     const std::string source =
         "void f() {\n"
-        "    Foo* a = new Foo(1);\n"
-        "    ns::Foo* b = new ns::Foo{2};\n"
-        "    Foo* c = new Foo;\n"
-        "    int* d = new int[10];\n"
-        "    Foo** e = new Foo*[3];\n"
-        "}\n";
+    "    Foo* a = new Foo(1);\n"
+    "    ns::Foo* b = new ns::Foo{2};\n"
+    "    Foo* c = new Foo;\n"
+    "    int* d = new int[10];\n"
+    "    Foo** e = new Foo*[3];\n"
+    "}\n";
     const auto diagnostics = Auto(source);
     ASSERT_EQ(diagnostics.size(), 5u);
-    for (const auto &diagnostic: diagnostics)
+    for (const auto& diagnostic : diagnostics)
     {
         EXPECT_EQ(diagnostic.code, "cpp/modernize-auto");
         EXPECT_EQ(diagnostic.rule, heimdall::RuleId::ModernizeAuto);
@@ -332,12 +338,12 @@ TEST(ModernizeAuto, ReplacesTheTypeOfCasts)
 {
     const std::string source =
         "void f(Base* b, double d) {\n"
-        "    Derived* a = static_cast<Derived*>(b);\n"
-        "    Derived* c = dynamic_cast<Derived*>(b);\n"
-        "    int n = static_cast<int>(d);\n"
-        "    std::string s = static_cast<std::string>(d);\n"
-        "    char* r = reinterpret_cast<char*>(b);\n"
-        "}\n";
+    "    Derived* a = static_cast<Derived*>(b);\n"
+    "    Derived* c = dynamic_cast<Derived*>(b);\n"
+    "    int n = static_cast<int>(d);\n"
+    "    std::string s = static_cast<std::string>(d);\n"
+    "    char* r = reinterpret_cast<char*>(b);\n"
+    "}\n";
     const auto diagnostics = Auto(source);
     ASSERT_EQ(diagnostics.size(), 5u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
@@ -354,10 +360,10 @@ TEST(ModernizeAuto, ReplacesSmartPointerFactories)
 {
     const std::string source =
         "void f() {\n"
-        "    std::unique_ptr<Foo> a = std::make_unique<Foo>(1);\n"
-        "    std::shared_ptr<Foo> b = std::make_shared<Foo>();\n"
-        "    std::unique_ptr<std::vector<int>> c = std::make_unique<std::vector<int>>();\n"
-        "}\n";
+    "    std::unique_ptr<Foo> a = std::make_unique<Foo>(1);\n"
+    "    std::shared_ptr<Foo> b = std::make_shared<Foo>();\n"
+    "    std::unique_ptr<std::vector<int>> c = std::make_unique<std::vector<int>>();\n"
+    "}\n";
     const auto diagnostics = Auto(source);
     ASSERT_EQ(diagnostics.size(), 3u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
@@ -372,9 +378,9 @@ TEST(ModernizeAuto, KeepsStorageSpecifiers)
 {
     const std::string source =
         "void f() {\n"
-        "    static Foo* a = new Foo;\n"
-        "    constexpr int n = static_cast<int>(3.0);\n"
-        "}\n";
+    "    static Foo* a = new Foo;\n"
+    "    constexpr int n = static_cast<int>(3.0);\n"
+    "}\n";
     const auto diagnostics = Auto(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
@@ -466,8 +472,11 @@ TEST(ModernizeAuto, IgnoresInactiveCode)
 
 TEST(ModernizeAuto, ToleratesBrokenInput)
 {
-    for (const char *source: {"Foo* a = new", "Foo* a = new Foo(", "int n = static_cast<", "int n = static_cast<int>(",
-             "std::unique_ptr<Foo> p = std::make_unique<Foo>(", "Foo* a ="})
+    for (const char* source :
+        {
+            "Foo* a = new", "Foo* a = new Foo(", "int n = static_cast<", "int n = static_cast<int>(",
+            "std::unique_ptr<Foo> p = std::make_unique<Foo>(", "Foo* a ="
+    })
     {
         EXPECT_NO_FATAL_FAILURE(Auto(source)) << source;
     }
@@ -479,12 +488,12 @@ TEST(SemanticRulesAll, ReturnsEveryRuleSortedByOffset)
 {
     const std::string source =
         "struct Base { virtual void f(); virtual ~Base(); };\n"
-        "struct D : Base { void f(); };\n"
-        "void g(int* p) {\n"
-        "    p = 0;\n"
-        "    void* q = (void*)0;\n"
-        "    Foo* r = new Foo;\n"
-        "}\n";
+    "struct D : Base { void f(); };\n"
+    "void g(int* p) {\n"
+    "    p = 0;\n"
+    "    void* q = (void*)0;\n"
+    "    Foo* r = new Foo;\n"
+    "}\n";
     const auto tree = heimdall::ParseTree::Parse(source);
     const auto model = heimdall::Binder::Bind(tree);
     const auto diagnostics = heimdall::SemanticRules::Analyze(model);
@@ -504,19 +513,20 @@ TEST(SemanticRulesAll, NewRulesAreInTheCatalog)
     EXPECT_TRUE(heimdall::IsKnownRuleCode("cpp/modernize-nullptr"));
     EXPECT_TRUE(heimdall::IsKnownRuleCode("cpp/no-zero-as-null"));
     EXPECT_TRUE(heimdall::IsKnownRuleCode("cpp/modernize-auto"));
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-nullptr")->id, heimdall::RuleId::ModernizeNullptr);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-zero-as-null")->id, heimdall::RuleId::NoZeroAsNull);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-auto")->id, heimdall::RuleId::ModernizeAuto);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-nullptr") -> id,
+        heimdall::RuleId::ModernizeNullptr);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-zero-as-null") -> id, heimdall::RuleId::NoZeroAsNull);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-auto") -> id, heimdall::RuleId::ModernizeAuto);
 }
 
 TEST(SemanticRulesAll, PolicyCanDisableAndSuppressEachRule)
 {
     const std::string source =
         "void g(int* p) {\n"
-        "    p = 0; // heimdall-disable-line cpp/no-zero-as-null\n"
-        "    void* q = (void*)0;\n"
-        "    Foo* r = new Foo;\n"
-        "}\n";
+    "    p = 0; // heimdall-disable-line cpp/no-zero-as-null\n"
+    "    void* q = (void*)0;\n"
+    "    Foo* r = new Foo;\n"
+    "}\n";
     const auto tree = heimdall::ParseTree::Parse(source);
     const auto model = heimdall::Binder::Bind(tree);
     const auto raw = heimdall::SemanticRules::Analyze(model);

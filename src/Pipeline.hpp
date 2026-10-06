@@ -51,19 +51,26 @@ namespace heimdall::cli
     };
 
     std::string_view GrammarKindName(heimdall::GrammarKind kind);
+
     std::string_view StandardName(heimdall::CppStandard standard);
 
-    heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path & path,
-        const Options &options,
-        const heimdall::CompileDatabase * database);
+    heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path& path,
+        const Options& options,
+        const heimdall::CompileDatabase* database);
 
     std::vector<SyntaxDiagnostic> ToSyntaxDiagnostics(
-        std::string_view source, const std::vector<heimdall::GrammarDiagnostic> & grammar);
+        std::string_view source, const std::vector<heimdall::GrammarDiagnostic>& grammar);
 
-    void ProcessFile(const std::filesystem::path & path, const Options &options,
-        const heimdall::CompileDatabase * database, FileResult &result);
+    void ProcessFile(
+        const std::filesystem::path& path,
+        const Options& options,
+        const heimdall::CompileDatabase* database,
+        FileResult& result);
 
-    void RunParallel(const std::vector<std::filesystem::path> & files, const Options &options,
-        const heimdall::CompileDatabase * database, std::vector<FileResult> & results);
+    void RunParallel(
+        const std::vector<std::filesystem::path>& files,
+        const Options& options,
+        const heimdall::CompileDatabase* database,
+        std::vector<FileResult>& results);
 
 } // namespace heimdall::cli

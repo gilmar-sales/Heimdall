@@ -8,36 +8,36 @@
 namespace
 {
 
-    using Analyzer = std::vector<heimdall::Diagnostic> (*)(const heimdall::SemanticModel &);
+    using Analyzer = std::vector<heimdall::Diagnostic>(*)(const heimdall::SemanticModel&);
 
-    std::vector<heimdall::Diagnostic> Run(Analyzer analyzer, const std::string &source)
+    std::vector<heimdall::Diagnostic> Run(Analyzer analyzer, const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return analyzer(model);
     }
 
-    std::vector<heimdall::Diagnostic> VirtualDestructor(const std::string &source)
+    std::vector<heimdall::Diagnostic> VirtualDestructor(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeVirtualDestructor, source);
     }
 
-    std::vector<heimdall::Diagnostic> ExplicitConstructor(const std::string &source)
+    std::vector<heimdall::Diagnostic> ExplicitConstructor(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeExplicitConstructor, source);
     }
 
-    std::vector<heimdall::Diagnostic> OverloadHiding(const std::string &source)
+    std::vector<heimdall::Diagnostic> OverloadHiding(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeOverloadHiding, source);
     }
 
-    std::vector<heimdall::Diagnostic> VirtualCall(const std::string &source)
+    std::vector<heimdall::Diagnostic> VirtualCall(const std::string& source)
     {
         return Run(heimdall::SemanticRules::AnalyzeVirtualCallInConstructor, source);
     }
 
-    std::string Fixed(std::string source, const heimdall::Diagnostic &diagnostic)
+    std::string Fixed(std::string source, const heimdall::Diagnostic& diagnostic)
     {
         source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
         return source;
@@ -145,7 +145,8 @@ TEST(ApiExplicitConstructor, InsertsBeforeConstexprAndAfterTheTemplateHeader)
     const std::string templated = "struct B { template<class T> B(T t); };\n";
     const auto templated_diagnostics = ExplicitConstructor(templated);
     ASSERT_EQ(templated_diagnostics.size(), 1u);
-    EXPECT_EQ(Fixed(templated, templated_diagnostics[0]), "struct B { template<class T> explicit B(T t); };\n");
+    EXPECT_EQ(Fixed(templated, templated_diagnostics[0]),
+        "struct B { template<class T> explicit B(T t); };\n");
 }
 
 TEST(ApiExplicitConstructor, ReportsWhenTheOtherParametersHaveDefaults)
@@ -187,7 +188,7 @@ TEST(ApiOverloadHiding, ReportsADerivedOverloadThatHidesAVirtualBaseFunction)
 {
     const std::string source =
         "struct Base { virtual void f(int x); };\n"
-        "struct Derived : Base { void f(double d); };\n";
+    "struct Derived : Base { void f(double d); };\n";
     const auto diagnostics = OverloadHiding(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].code, "api/overload-hiding");
@@ -259,9 +260,9 @@ TEST(ApiVirtualCallInConstructor, ReportsAVirtualCallInAConstructor)
 {
     const std::string source =
         "struct A {\n"
-        "    virtual void init();\n"
-        "    A() { init(); }\n"
-        "};\n";
+    "    virtual void init();\n"
+    "    A() { init(); }\n"
+    "};\n";
     const auto diagnostics = VirtualCall(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].code, "api/virtual-call-in-constructor");
@@ -320,8 +321,11 @@ TEST(ApiVirtualCallInConstructor, SurvivesBrokenInput)
 
 TEST(ApiRulesCatalog, RulesAreRegisteredAndRunWithTheSemanticAnalysis)
 {
-    for (const auto code: {"api/virtual-destructor", "api/explicit-constructor", "api/overload-hiding",
-             "api/virtual-call-in-constructor"})
+    for (const auto code :
+        {
+            "api/virtual-destructor", "api/explicit-constructor", "api/overload-hiding",
+            "api/virtual-call-in-constructor"
+    })
     {
         EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
     }

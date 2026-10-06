@@ -114,17 +114,19 @@ namespace heimdall
             return refs;
         }
 
-        std::filesystem::path NormalizedAbsolute(const std::filesystem::path & path)
+        std::filesystem::path NormalizedAbsolute(const std::filesystem::path& path)
         {
             std::error_code ec;
             auto absolute = std::filesystem::absolute(path, ec);
             return (ec ? path : absolute).lexically_normal();
         }
 
-        std::filesystem::path TryResolve(const std::string & name, bool angled,
-            const std::filesystem::path & including_dir,
-            const CompileCommand *command,
-            const std::vector<std::filesystem::path> & system_dirs)
+        std::filesystem::path TryResolve(
+            const std::string& name,
+            bool angled,
+            const std::filesystem::path& including_dir,
+            const CompileCommand* command,
+            const std::vector<std::filesystem::path>& system_dirs)
         {
             std::vector<std::filesystem::path> dirs;
             if (!angled)
@@ -149,7 +151,7 @@ namespace heimdall
 
             dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
             std::error_code ec;
-            for (const auto & dir: dirs)
+            for (const auto& dir : dirs)
             {
                 if (dir.empty())
                 {
@@ -167,7 +169,7 @@ namespace heimdall
             return {};
         }
 
-        bool IsUnder(const std::filesystem::path & path, const std::filesystem::path & dir)
+        bool IsUnder(const std::filesystem::path& path, const std::filesystem::path& dir)
         {
             if (dir.empty())
             {
@@ -180,9 +182,11 @@ namespace heimdall
 
         // `#include_next`: continue the angled search after the directory that
         // supplied `current`.
-        std::filesystem::path TryResolveNext(const std::string & name,
-            const std::filesystem::path & current,
-            const CompileCommand *command, const std::vector<std::filesystem::path> & system_dirs)
+        std::filesystem::path TryResolveNext(
+            const std::string& name,
+            const std::filesystem::path& current,
+            const CompileCommand* command,
+            const std::vector<std::filesystem::path>& system_dirs)
         {
             std::vector<std::filesystem::path> dirs;
             if (command != nullptr)
@@ -221,7 +225,7 @@ namespace heimdall
             return {};
         }
 
-        std::string DriverOf(const CompileCommand *command)
+        std::string DriverOf(const CompileCommand* command)
         {
             if (command != nullptr && !command->arguments.empty() && !command->arguments.front().empty())
             {
@@ -231,7 +235,7 @@ namespace heimdall
             return "c++";
         }
 
-        std::string ReadFile(const std::filesystem::path & path, std::size_t max_bytes)
+        std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
@@ -340,8 +344,8 @@ namespace heimdall
         // so without this every `#if __cplusplus >= ...` guard in the standard
         // library selects nothing and the class bodies never reach the index.
         // Object-like macros only; empty when the compiler cannot be run.
-        Preprocessor::MacroMap CompilerMacros(const CompileCommand *command,
-            const std::vector<std::filesystem::path> & headers)
+        Preprocessor::MacroMap CompilerMacros(const CompileCommand* command,
+            const std::vector<std::filesystem::path>& headers)
         {
             Preprocessor::MacroMap macros;
             static std::atomic<unsigned> counter{0};
@@ -362,7 +366,7 @@ namespace heimdall
                     return macros;
                 }
 
-                for (const auto & header: headers)
+                for (const auto& header : headers)
                 {
                     out << "#include \"" << header.generic_string() << "\"\n";
                 }
@@ -374,7 +378,7 @@ namespace heimdall
             {
                 for (std::size_t i = 1; i < command->arguments.size(); ++i)
                 {
-                    const std::string & argument = command->arguments[i];
+                    const std::string& argument = command->arguments[i];
                     const bool takes_next = argument == "-isystem" || argument == "-iquote" ||
                         argument == "-idirafter" || argument == "-I" || argument == "-D" || argument == "-U";
                     if (takes_next && i + 1 < command->arguments.size())
@@ -461,7 +465,7 @@ namespace heimdall
             // The probe included every header, so every include guard is now
             // defined; each header is parsed on its own and must still see its
             // body. Drop the guards (`#ifndef X` / `#define X` at the top).
-            for (const auto & header: headers)
+            for (const auto& header : headers)
             {
                 const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20));
                 if (!guard.empty())
@@ -478,10 +482,10 @@ namespace heimdall
             return!name.empty() && name.front() == '_';
         }
 
-        std::string ScopePathKey(const std::vector<std::string> & path)
+        std::string ScopePathKey(const std::vector<std::string>& path)
         {
             std::string key;
-            for (const auto & element: path)
+            for (const auto& element : path)
             {
                 key += element;
                 key += '\0';
@@ -569,23 +573,25 @@ namespace heimdall
         return dirs;
     }
 
-    std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(const std::filesystem::path & base_dir,
+    std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(
+        const std::filesystem::path& base_dir,
         std::string_view text,
-        const CompileCommand *command,
-        const Limits &limits, ResolveReport *report)
+        const CompileCommand* command,
+        const Limits& limits,
+        ResolveReport* report)
     {
         const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
         std::vector<std::filesystem::path> normalized_system;
         normalized_system.reserve(system_dirs.size());
-        for (const auto & dir: system_dirs)
+        for (const auto& dir : system_dirs)
         {
             normalized_system.push_back(NormalizedAbsolute(dir));
         }
 
-        auto in_system =[&](const std::filesystem::path & file)
+        auto in_system =[&](const std::filesystem::path& file)
         {
             return std::any_of(normalized_system.begin(), normalized_system.end(),
-                [&](const std::filesystem::path & dir)
+                [&](const std::filesystem::path& dir)
                 {
                     return IsUnder(file, dir);
             });
@@ -614,16 +620,16 @@ namespace heimdall
         // with the header cap a depth-first walk spent the whole budget inside
         // the last <standard header> and never reached the project's own headers.
         std::deque<Work> stack;
-        auto enqueue =[&](const std::filesystem::path & dir, int depth, std::string_view source,
-            const std::filesystem::path & from)
+        auto enqueue =[&](const std::filesystem::path& dir, int depth, std::string_view source,
+            const std::filesystem::path& from)
         {
             const std::vector<IncludeRef> refs = ScanIncludes(source);
-            for (const bool angled:
+            for (const bool angled :
                 {
                     false, true
             })
             {
-                for (const auto & ref: refs)
+                for (const auto& ref : refs)
                 {
                     if (ref.angled != angled ||(ref.next && !limits.follow_include_next))
                     {
@@ -697,7 +703,7 @@ namespace heimdall
     namespace
     {
 
-        bool IsIncludableFile(const std::filesystem::path & path)
+        bool IsIncludableFile(const std::filesystem::path& path)
         {
             // Standard headers have no extension; skip sources and binaries.
             static const std::unordered_set<std::string> accepted = {
@@ -733,8 +739,12 @@ namespace heimdall
 
     } // namespace
 
-    std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(const std::filesystem::path & base_dir,
-        bool angled, std::string_view typed, const CompileCommand *command, std::size_t max_results)
+    std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(
+        const std::filesystem::path& base_dir,
+        bool angled,
+        std::string_view typed,
+        const CompileCommand* command,
+        std::size_t max_results)
     {
         // `typed` is what follows the opening delimiter: `dir/sub/na`.
         std::string_view directory_part;
@@ -770,7 +780,7 @@ namespace heimdall
 
                 if (command != nullptr)
                 {
-                    for (const auto & dir: command->quote_directories)
+                    for (const auto& dir : command->quote_directories)
                     {
                         roots.push_back({dir, IncludeOrigin::Quote});
                     }
@@ -779,13 +789,13 @@ namespace heimdall
 
             if (command != nullptr)
             {
-                for (const auto & dir: command->include_directories)
+                for (const auto& dir : command->include_directories)
                 {
                     roots.push_back({dir, IncludeOrigin::Include});
                 }
             }
 
-            for (const auto & dir: SystemIncludes(DriverOf(command)))
+            for (const auto& dir : SystemIncludes(DriverOf(command)))
             {
                 roots.push_back({dir, IncludeOrigin::System});
             }
@@ -793,7 +803,7 @@ namespace heimdall
 
         std::vector<IncludeCandidate> result;
         std::unordered_set<std::string> seen;
-        for (const auto & root: roots)
+        for (const auto& root : roots)
         {
             const std::filesystem::path directory = root.origin == IncludeOrigin::Absolute
             ? typed_directory
@@ -806,7 +816,7 @@ namespace heimdall
                 continue;
             }
 
-            for (const auto & entry: iterator)
+            for (const auto& entry : iterator)
             {
                 const std::string name = entry.path().filename().string();
                 if (name.empty() || name.front() == '.' ||!StartsWithNoCase(name, name_prefix))
@@ -834,7 +844,7 @@ namespace heimdall
         // Project directories before system ones (the cap must never drop a
         // project header in favour of a system one); inside an origin,
         // directories first because they lead to the rest of the tree.
-        std::sort(result.begin(), result.end(),[](const IncludeCandidate &a, const IncludeCandidate &b)
+        std::sort(result.begin(), result.end(),[](const IncludeCandidate& a, const IncludeCandidate& b)
             {
                 if (a.origin != b.origin)
                 {
@@ -904,8 +914,11 @@ namespace heimdall
         return IncludeContext{angled, line_begin + i};
     }
 
-    std::filesystem::path IncludeIndex::ResolveIncludeAt(const std::filesystem::path & base_dir,
-        std::string_view text, std::size_t offset, const CompileCommand *command)
+    std::filesystem::path IncludeIndex::ResolveIncludeAt(
+        const std::filesystem::path& base_dir,
+        std::string_view text,
+        std::size_t offset,
+        const CompileCommand* command)
     {
         offset = std::min(offset, text.size());
         const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
@@ -926,8 +939,8 @@ namespace heimdall
             SystemIncludes(DriverOf(command)));
     }
 
-    std::string IncludeIndex::IncludeFingerprint(const std::filesystem::path & base_dir,
-        std::string_view text, const CompileCommand *command)
+    std::string IncludeIndex::IncludeFingerprint(const std::filesystem::path& base_dir,
+        std::string_view text, const CompileCommand* command)
     {
         // Raw line scan: no lexer, no filesystem access. Only the file's own
         // include lines matter; nested headers are covered by CacheKey's mtimes.
@@ -977,26 +990,26 @@ namespace heimdall
         {
             fingerprint += std::to_string(static_cast<int>(command->standard));
             fingerprint += '\0';
-            for (const auto & dir: command->include_directories)
+            for (const auto& dir : command->include_directories)
             {
                 fingerprint += dir.string();
                 fingerprint += '\0';
             }
 
-            for (const auto & dir: command->quote_directories)
+            for (const auto& dir : command->quote_directories)
             {
                 fingerprint += dir.string();
                 fingerprint += '\0';
             }
 
             std::vector<std::string> defines;
-            for (const auto &[name, value]: command->defines)
+            for (const auto& [name, value] : command->defines)
             {
                 defines.push_back(name + "=" + value);
             }
 
             std::sort(defines.begin(), defines.end());
-            for (const auto & define: defines)
+            for (const auto& define : defines)
             {
                 fingerprint += define;
                 fingerprint += '\0';
@@ -1006,11 +1019,11 @@ namespace heimdall
         return fingerprint;
     }
 
-    std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path> & headers,
-        const CompileCommand *command)
+    std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
+        const CompileCommand* command)
     {
         std::string key;
-        for (const auto & header: headers)
+        for (const auto& header : headers)
         {
             std::error_code ec;
             const auto size = std::filesystem::file_size(header, ec);
@@ -1029,13 +1042,13 @@ namespace heimdall
             key += std::to_string(static_cast<int>(command->standard));
             key += '\0';
             std::vector<std::string> defines;
-            for (const auto &[name, value]: command->defines)
+            for (const auto& [name, value] : command->defines)
             {
                 defines.push_back(name + "=" + value);
             }
 
             std::sort(defines.begin(), defines.end());
-            for (const auto & define: defines)
+            for (const auto& define : defines)
             {
                 key += define;
                 key += '\0';
@@ -1045,8 +1058,8 @@ namespace heimdall
         return key;
     }
 
-    IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path> & headers,
-        const CompileCommand *command, const Limits &limits)
+    IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& headers,
+        const CompileCommand* command, const Limits& limits)
     {
         IncludeIndex index;
         // Path -> position in index.m_scopes: merging is O(1) per scope instead of
@@ -1061,7 +1074,7 @@ namespace heimdall
             if (!command->undefines.empty())
             {
                 auto filtered = std::make_shared<Preprocessor::MacroMap>(command->defines);
-                for (const auto & name: command->undefines)
+                for (const auto& name : command->undefines)
                 {
                     filtered->erase(name);
                 }
@@ -1083,12 +1096,12 @@ namespace heimdall
             // The project's own -D/-U win over what the compiler reports.
             if (command != nullptr)
             {
-                for (const auto &[name, value]: command->defines)
+                for (const auto& [name, value] : command->defines)
                 {
                     probed[name] = value;
                 }
 
-                for (const auto & name: command->undefines)
+                for (const auto& name : command->undefines)
                 {
                     probed.erase(name);
                 }
@@ -1152,15 +1165,15 @@ namespace heimdall
                                     continue;
                             }
 
-                                // An exception escaping a worker thread is std::terminate.
+                            // An exception escaping a worker thread is std::terminate.
                                 try
                                 {
                                     per_header[h] = CompletionEngine::IndexScopes(content, options);
-                                }
+                            }
                                 catch (...)
                                 {
                                     per_header[h] = {};
-                                }
+                            }
                         }
                     });
                 }
@@ -1170,10 +1183,10 @@ namespace heimdall
         index.m_files = headers;
         for (std::size_t header = 0; header < per_header.size(); ++header)
         {
-            auto &scopes = per_header[header];
-            for (auto & scope: scopes)
+            auto& scopes = per_header[header];
+            for (auto& scope : scopes)
             {
-                for (auto & member: scope.members)
+                for (auto& member : scope.members)
                 {
                     if (member.has_location)
                     {
@@ -1182,12 +1195,12 @@ namespace heimdall
                 }
             }
 
-            for (auto & scope: scopes)
+            for (auto& scope : scopes)
             {
                 if (!scope.path.empty())
                 {
                     bool reserved = false;
-                    for (const auto & element: scope.path)
+                    for (const auto& element : scope.path)
                     {
                         if (IsReservedName(element))
                         {
@@ -1210,7 +1223,7 @@ namespace heimdall
                 filtered.template_params = std::move(scope.template_params);
                 filtered.layout_unknown = scope.layout_unknown;
                 std::erase_if(filtered.members,
-                    [](const CompletionItem &member)
+                    [](const CompletionItem& member)
                     {
                         return IsReservedName(member.label);
                 });
@@ -1219,7 +1232,7 @@ namespace heimdall
                     const std::string key = ScopePathKey(filtered.path);
                     if (const auto found = positions.find(key); found != positions.end())
                     {
-                        auto &entry = index.m_scopes[found->second];
+                        auto& entry = index.m_scopes[found->second];
                         entry.layout_unknown = entry.layout_unknown || filtered.layout_unknown;
                         if (entry.template_params.empty())
                         {
@@ -1228,7 +1241,7 @@ namespace heimdall
 
                         entry.members.insert(entry.members.end(), filtered.members.begin(),
                             filtered.members.end());
-                        for (auto & base: filtered.bases)
+                        for (auto& base : filtered.bases)
                         {
                             if (std::find(entry.bases.begin(), entry.bases.end(), base) == entry.bases.end())
                             {
@@ -1249,8 +1262,11 @@ namespace heimdall
         return index;
     }
 
-    IncludeIndex IncludeIndex::Build(const std::filesystem::path & base_dir, std::string_view text,
-        const CompileCommand *command, const Limits &limits)
+    IncludeIndex IncludeIndex::Build(
+        const std::filesystem::path& base_dir,
+        std::string_view text,
+        const CompileCommand* command,
+        const Limits& limits)
     {
         return Build(ResolveHeaders(base_dir, text, command, limits, nullptr), command, limits);
     }

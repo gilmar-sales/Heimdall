@@ -9,15 +9,15 @@ TEST(RuleEngineSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
 {
     constexpr std::string_view source =
         "#define TEXT NULL\n"
-        "void f() { auto p = NULL; } // NULL\n"
-        "const char* s = \"NULL\";\n";
+    "void f() { auto p = NULL; } // NULL\n"
+    "const char* s = \"NULL\";\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-null");
     EXPECT_EQ(diagnostics[0].line, 2);
     EXPECT_EQ(diagnostics[0].column, 21);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
-              "#define TEXT NULL\nvoid f() { auto p = nullptr; } // NULL\nconst char* s = \"NULL\";\n");
+        "#define TEXT NULL\nvoid f() { auto p = nullptr; } // NULL\nconst char* s = \"NULL\";\n");
 }
 
 TEST(RuleEngineSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
@@ -33,8 +33,8 @@ TEST(RuleEngineSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
 
 TEST(RuleEngineSpec, CanDisableRulesIndependently)
 {
-    const auto diagnostics = heimdall::RuleEngine({ .null_macro = false, .trailing_whitespace = true })
-                                 .Analyze("auto p = NULL;  \n");
+    const auto diagnostics = heimdall::RuleEngine({.null_macro = false,.trailing_whitespace = true})
+    .Analyze("auto p = NULL;  \n");
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::TrailingWhitespace);
 }
@@ -50,7 +50,7 @@ TEST(RuleEngineSpec, AddsMissingFinalNewlineAndPreservesLineEndingStyle)
     const auto crlf = heimdall::RuleEngine().Analyze("int value;\r\nint other;");
     ASSERT_EQ(crlf.size(), 1);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int value;\r\nint other;", crlf),
-              "int value;\r\nint other;\r\n");
+        "int value;\r\nint other;\r\n");
 }
 
 TEST(RuleEngineSpec, DoesNotFlagEmptyFilesOrFilesAlreadyEndingInNewline)
@@ -76,9 +76,9 @@ TEST(RuleEngineSpec, SupportsInlineAndNextLineRuleSuppressions)
 {
     constexpr std::string_view source =
         "auto first = NULL; // heimdall-disable-line cpp/no-null\n"
-        "// heimdall-disable-next-line cpp/no-null\n"
-        "auto second = NULL;\n"
-        "auto third = NULL;\n";
+    "// heimdall-disable-next-line cpp/no-null\n"
+    "auto second = NULL;\n"
+    "auto third = NULL;\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].line, 4);
@@ -97,9 +97,9 @@ TEST(RuleEngineSpec, FindsEmptyCatchBlocksIncludingCommentOnlyBodies)
 {
     constexpr std::string_view source =
         "void f() {\n"
-        "    try { g(); } catch (...) {}\n"
-        "    try { g(); } catch (const std::exception& e) { /* ignored */ }\n"
-        "}\n";
+    "    try { g(); } catch (...) {}\n"
+    "    try { g(); } catch (const std::exception& e) { /* ignored */ }\n"
+    "}\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-empty-catch");
@@ -124,9 +124,9 @@ TEST(RuleEngineSpec, IgnoresCatchInCommentsStringsAndDirectives)
 {
     constexpr std::string_view source =
         "// catch (...) {}\n"
-        "const char* s = \"catch () {}\";\n"
-        "#define CATCHALL catch (...) {}\n"
-        "void f() { try { g(); } catch (...) { throw; } }\n";
+    "const char* s = \"catch () {}\";\n"
+    "#define CATCHALL catch (...) {}\n"
+    "void f() { try { g(); } catch (...) { throw; } }\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -134,10 +134,10 @@ TEST(RuleEngineSpec, FindsDuplicateIncludesOutsideConditionals)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include \"app.h\"\n"
-        "#include <vector>\n"
-        "#include \"app.h\"\n"
-        "#include <memory>\n";
+    "#include \"app.h\"\n"
+    "#include <vector>\n"
+    "#include \"app.h\"\n"
+    "#include <memory>\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-duplicate-include");
@@ -152,15 +152,15 @@ TEST(RuleEngineSpec, DoesNotFlagDistinctConditionalOrMacroIncludes)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include \"vector\"\n"
-        "#include <memory>\n"
-        "#ifdef USE_FEATURE\n"
-        "#include \"feature.h\"\n"
-        "#else\n"
-        "#include \"feature.h\"\n"
-        "#endif\n"
-        "#include HEADER_MACRO\n"
-        "#include_next \"app.h\"\n";
+    "#include \"vector\"\n"
+    "#include <memory>\n"
+    "#ifdef USE_FEATURE\n"
+    "#include \"feature.h\"\n"
+    "#else\n"
+    "#include \"feature.h\"\n"
+    "#endif\n"
+    "#include HEADER_MACRO\n"
+    "#include_next \"app.h\"\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -168,10 +168,10 @@ TEST(RuleEngineSpec, RewritesSimpleTypedefsWithUsing)
 {
     constexpr std::string_view source =
         "typedef int Count;\n"
-        "typedef unsigned long size_type;\n"
-        "typedef std::vector<int> IntVector;\n"
-        "typedef int * IntPtr;\n"
-        "typedef int arr[10];\n";
+    "typedef unsigned long size_type;\n"
+    "typedef std::vector<int> IntVector;\n"
+    "typedef int * IntPtr;\n"
+    "typedef int arr[10];\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 6);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-using");
@@ -181,11 +181,11 @@ TEST(RuleEngineSpec, RewritesSimpleTypedefsWithUsing)
     EXPECT_EQ(diagnostics[5].line, 5);
     EXPECT_FALSE(diagnostics[5].has_fix);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
-              "using Count = int;\n"
-              "using size_type = unsigned long;\n"
-              "using IntVector = std::vector<int>;\n"
-              "using IntPtr = int *;\n"
-              "using arr = int[10];\n");
+        "using Count = int;\n"
+        "using size_type = unsigned long;\n"
+        "using IntVector = std::vector<int>;\n"
+        "using IntPtr = int *;\n"
+        "using arr = int[10];\n");
 }
 
 TEST(RuleEngineSpec, RewritesTypedefsWithTemplateArguments)
@@ -194,19 +194,19 @@ TEST(RuleEngineSpec, RewritesTypedefsWithTemplateArguments)
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
-              "using IntMap = std::map<int, int>;\n");
+        "using IntMap = std::map<int, int>;\n");
 }
 
 TEST(RuleEngineSpec, DoesNotRewriteComplexTypedefs)
 {
     constexpr std::string_view source =
         "typedef void (*Callback)(int);\n"
-        "typedef int a, b;\n"
-        "typedef struct S { int x; } S;\n"
-        "typedef int Fn();\n"
-        "typedef int;\n"
-        "typedef int X [[deprecated]];\n"
-        "#define LEGACY typedef int T;\n";
+    "typedef int a, b;\n"
+    "typedef struct S { int x; } S;\n"
+    "typedef int Fn();\n"
+    "typedef int;\n"
+    "typedef int X [[deprecated]];\n"
+    "#define LEGACY typedef int T;\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -214,11 +214,11 @@ TEST(RuleEngineSpec, NewRulesCanBeDisabledIndependently)
 {
     constexpr std::string_view source =
         "typedef int T;\n"
-        "void f() { try { g(); } catch (...) {} }\n"
-        "#include <vector>\n"
-        "#include <vector>\n"
-        "// TODO: remove this\n"
-        "int timeout = 30;\n";
+    "void f() { try { g(); } catch (...) {} }\n"
+    "#include <vector>\n"
+    "#include <vector>\n"
+    "// TODO: remove this\n"
+    "int timeout = 30;\n";
     heimdall::RuleOptions options;
     options.legacy_typedef = false;
     options.empty_catch = false;
@@ -252,8 +252,8 @@ TEST(RuleEngineSpec, FindsTodoMarkersInLineAndBlockComments)
 {
     constexpr std::string_view source =
         "// TODO: refactor this\n"
-        "int x = 0; /* FIXME urgent */\n"
-        "// XXX workaround\n";
+    "int x = 0; /* FIXME urgent */\n"
+    "// XXX workaround\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 3);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-todo");
@@ -269,11 +269,11 @@ TEST(RuleEngineSpec, IgnoresTodoSubstringsProseAndCode)
 {
     constexpr std::string_view source =
         "// todo lowercase stays quiet\n"
-        "// todolist is one word\n"
-        "// TODOs is one word\n"
-        "// a method to fix things\n"
-        "const char* s = \"TODO\";\n"
-        "int todo_count = 0;\n";
+    "// todolist is one word\n"
+    "// TODOs is one word\n"
+    "// a method to fix things\n"
+    "const char* s = \"TODO\";\n"
+    "int todo_count = 0;\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -281,10 +281,10 @@ TEST(RuleEngineSpec, FlagsMagicNumbersOutsideDirectives)
 {
     constexpr std::string_view source =
         "#define LIMIT 42\n"
-        "int retry = 3;\n"
-        "double ratio = 0.5;\n"
-        "const char* s = \"42\";\n"
-        "// 42 in a comment\n";
+    "int retry = 3;\n"
+    "double ratio = 0.5;\n"
+    "const char* s = \"42\";\n"
+    "// 42 in a comment\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-magic-numbers");
@@ -299,13 +299,13 @@ TEST(RuleEngineSpec, AllowsTrivialZeroAndOneSpellings)
 {
     constexpr std::string_view source =
         "int a = 0;\n"
-        "int b = 1;\n"
-        "unsigned c = 1u;\n"
-        "long d = 0L;\n"
-        "double e = 0.0;\n"
-        "float f = 1.0f;\n"
-        "int g = 0x0;\n"
-        "int h = 0b1;\n";
+    "int b = 1;\n"
+    "unsigned c = 1u;\n"
+    "long d = 0L;\n"
+    "double e = 0.0;\n"
+    "float f = 1.0f;\n"
+    "int g = 0x0;\n"
+    "int h = 0b1;\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -313,14 +313,14 @@ TEST(RuleEngineSpec, DoesNotFlagValuesThatNameAConstant)
 {
     constexpr std::string_view source =
         "constexpr std::size_t kTableSize = 512; // power of two, load factor < 0.4\n"
-        "const int kMax = 100;\n"
-        "constexpr double kHalf{0.5};\n"
-        "constexpr int kNeg = -42;\n"
-        "constexpr int kParen = (64);\n"
-        "constinit int kEpoch = 42;\n"
-        "enum Kind { A = 3, B };\n"
-        "int plain = 7;\n"
-        "const int mixed = 8 + 1;\n";
+    "const int kMax = 100;\n"
+    "constexpr double kHalf{0.5};\n"
+    "constexpr int kNeg = -42;\n"
+    "constexpr int kParen = (64);\n"
+    "constinit int kEpoch = 42;\n"
+    "enum Kind { A = 3, B };\n"
+    "int plain = 7;\n"
+    "const int mixed = 8 + 1;\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 2);
     EXPECT_EQ(diagnostics[0].code, "cpp/no-magic-numbers");
@@ -349,9 +349,9 @@ TEST(RuleEngineSpec, SuppressionsCoverNewRules)
 {
     constexpr std::string_view source =
         "typedef int T; // heimdall-disable-line cpp/modernize-using\n"
-        "void f() { try { g(); } catch (...) {} } // heimdall-disable-line cpp/no-empty-catch\n"
-        "#include <vector>\n"
-        "#include <vector> // heimdall-disable-line cpp/no-duplicate-include\n";
+    "void f() { try { g(); } catch (...) {} } // heimdall-disable-line cpp/no-empty-catch\n"
+    "#include <vector>\n"
+    "#include <vector> // heimdall-disable-line cpp/no-duplicate-include\n";
     EXPECT_TRUE(heimdall::RuleEngine().Analyze(source).empty());
 }
 
@@ -366,7 +366,10 @@ namespace
         {
             auto diagnostics = heimdall::RuleEngine().Analyze(text);
             auto it = std::find_if(diagnostics.begin(), diagnostics.end(),
-                [](const heimdall::Diagnostic &d) { return d.has_fix; });
+                [](const heimdall::Diagnostic& d)
+                {
+                    return d.has_fix;
+            });
             if (it == diagnostics.end())
             {
                 break;
@@ -401,14 +404,15 @@ TEST(RuleEngineSpec, DuplicateIncludeQuickFixRemovesTheWholeLine)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include <memory>\n"
-        "#  include <vector>\n"
-        "int x;\n";
+    "#include <memory>\n"
+    "#  include <vector>\n"
+    "int x;\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
     EXPECT_EQ(ApplyQuickFixes(source), "#include <vector>\n#include <memory>\nint x;\n");
-    EXPECT_EQ(ApplyQuickFixes("#include <a>\r\n#include <a>\r\nint x;\r\n"), "#include <a>\r\nint x;\r\n");
+    EXPECT_EQ(ApplyQuickFixes("#include <a>\r\n#include <a>\r\nint x;\r\n"),
+        "#include <a>\r\nint x;\r\n");
     EXPECT_EQ(ApplyQuickFixes("#include <a>\n#include <a>"), "#include <a>\n");
 }
 
@@ -421,7 +425,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 {
     const auto diagnostics = heimdall::RuleEngine().Analyze("typedef int T;\nvoid* p = NULL;\n");
     ASSERT_EQ(diagnostics.size(), 2);
-    for (const auto & diagnostic: diagnostics)
+    for (const auto& diagnostic : diagnostics)
     {
         EXPECT_TRUE(diagnostic.fix_is_safe);
     }
@@ -429,36 +433,37 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
-    const auto & catalog = heimdall::RuleCatalog();
+    const auto& catalog = heimdall::RuleCatalog();
     ASSERT_EQ(catalog.size(), 31);
-    for (const auto & info: catalog)
+    for (const auto& info : catalog)
     {
         EXPECT_FALSE(info.code.empty());
         EXPECT_FALSE(info.category.empty());
         EXPECT_FALSE(info.layer.empty());
         EXPECT_FALSE(info.summary.empty());
         ASSERT_NE(heimdall::FindRuleByCode(info.code), nullptr);
-        EXPECT_EQ(heimdall::FindRuleByCode(info.code)->id, info.id);
+        EXPECT_EQ(heimdall::FindRuleByCode(info.code) -> id, info.id);
         ASSERT_NE(heimdall::FindRule(info.id), nullptr);
-        EXPECT_EQ(heimdall::FindRule(info.id)->code, info.code);
+        EXPECT_EQ(heimdall::FindRule(info.id) -> code, info.code);
         EXPECT_TRUE(heimdall::IsKnownRuleCode(info.code));
     }
 
     EXPECT_FALSE(heimdall::IsKnownRuleCode("cpp/not-real"));
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-null")->autofix, true);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-empty-catch")->autofix, false);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include")->autofix, false);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->autofix, true);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->autofix, true);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->layer, "diretivas");
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-override")->autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-null") -> autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-empty-catch") -> autofix, false);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include") -> autofix, false);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using") -> autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using") -> layer, "sintática");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes") -> autofix, true);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes") -> layer, "diretivas");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-override") -> autofix, true);
 }
 
 TEST(RuleEngineSpec, RemoveDirectiveLineTakesIndentationAndLineTerminator)
 {
     constexpr std::string_view source = "int a;\n  #include <x>  \r\nint b;\n";
-    const auto edit = heimdall::RemoveDirectiveLine(source, source.find('#'), std::string_view("#include <x>").size());
+    const auto edit = heimdall::RemoveDirectiveLine(source, source.find('#'),
+        std::string_view("#include <x>").size());
     std::string text(source);
     text.replace(edit.offset, edit.length, edit.replacement);
     EXPECT_EQ(text, "int a;\nint b;\n");
@@ -473,9 +478,11 @@ TEST(RuleEngineSpec, ApplyPolicyFiltersExternalDiagnosticsAndSortsThem)
     heimdall::RuleOptions options;
     options.overrides.push_back({"cpp/no-unused-include", false, heimdall::Severity::Warning});
     const auto tree = heimdall::ParseTree::Parse("int a;\n", {});
-    heimdall::Diagnostic late{heimdall::RuleId::UnusedInclude, heimdall::Severity::Warning, "cpp/no-unused-include",
+    heimdall::Diagnostic late{heimdall::RuleId::UnusedInclude, heimdall::Severity::Warning,
+        "cpp/no-unused-include",
         "m", 5, 1, 1, 6, false, {}};
-    heimdall::Diagnostic early{heimdall::RuleId::NullMacro, heimdall::Severity::Warning, "cpp/no-null", "m", 1, 1,
+    heimdall::Diagnostic early{heimdall::RuleId::NullMacro, heimdall::Severity::Warning, "cpp/no-null",
+        "m", 1, 1,
         1, 2, false, {}};
     const auto kept = heimdall::RuleEngine().ApplyPolicy({late, early}, tree);
     ASSERT_EQ(kept.size(), 2);
@@ -493,8 +500,8 @@ TEST(RuleEngineSpec, SortsIncludesWithinAdjacentBlocks)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include <map>\n"
-        "#include <algorithm>\n";
+    "#include <map>\n"
+    "#include <algorithm>\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
@@ -524,10 +531,10 @@ TEST(RuleEngineSpec, SortIncludesReordersBlocksIndependently)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include <map>\n"
-        "\n"
-        "#include \"z.h\"\n"
-        "#include \"a.h\"\n";
+    "#include <map>\n"
+    "\n"
+    "#include \"z.h\"\n"
+    "#include \"a.h\"\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
@@ -568,7 +575,7 @@ TEST(RuleEngineSpec, SortIncludesRespectsConfiguredGroupOrder)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include \"app.h\"\n";
+    "#include \"app.h\"\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     options.include_order = {heimdall::IncludeGroup::Quote, heimdall::IncludeGroup::Angle};
@@ -583,8 +590,8 @@ TEST(RuleEngineSpec, SortIncludesSeparatesConfiguredGroups)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include \"app.h\"\n"
-        "#include <map>\n";
+    "#include \"app.h\"\n"
+    "#include <map>\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
@@ -599,7 +606,7 @@ TEST(RuleEngineSpec, SortIncludesIsCaseInsensitiveByDefault)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
-        "#include <Array>\n";
+    "#include <Array>\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
@@ -613,7 +620,7 @@ TEST(RuleEngineSpec, SortIncludesCaseSensitivityIsConfigurable)
 {
     constexpr std::string_view source =
         "#include <apple>\n"
-        "#include <Zebra>\n";
+    "#include <Zebra>\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
@@ -647,7 +654,7 @@ TEST(RuleEngineSpec, SortIncludesHonorsSuppressionsAndOverrides)
 {
     constexpr std::string_view source =
         "#include <vector> // heimdall-disable-line cpp/sort-includes\n"
-        "#include <map>\n";
+    "#include <map>\n";
     heimdall::RuleOptions options;
     options.sort_includes = true;
     EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
@@ -694,12 +701,14 @@ TEST(RuleEngineSpec, ApplyFixesSkipsUnsafeFixesUnlessRequested)
 TEST(RuleEngineSpec, ApplyFixesLetsRequestedUnsafeFixesEditOutsideTheirDiagnostic)
 {
     heimdall::Diagnostic diagnostic{
-        heimdall::RuleId::ModernizeConstexpr, heimdall::Severity::Warning, "cpp/modernize-constexpr", "constexpr",
+        heimdall::RuleId::ModernizeConstexpr, heimdall::Severity::Warning, "cpp/modernize-constexpr",
+        "constexpr",
         4, 1, 1, 5, true, {0, 0, "constexpr "}
     };
     diagnostic.fix_is_safe = false;
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}), "int n = 3;");
-    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true), "constexpr int n = 3;");
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true),
+        "constexpr int n = 3;");
 
     diagnostic.fix = {100, 0, "x"};
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true), "int n = 3;");

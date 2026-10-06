@@ -12,6 +12,7 @@ namespace heimdall::cli
 {
 
     std::string JsonEscape(std::string_view text);
+
     bool WriteFile(const std::filesystem::path& path, std::string_view data);
 
     // Prints diagnostics / parse trees and performs --fix/--write side effects.

@@ -157,9 +157,9 @@ namespace heimdall::cli
         return "c++20";
     }
 
-    heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path & path,
-        const Options &options,
-        const heimdall::CompileDatabase * database)
+    heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path& path,
+        const Options& options,
+        const heimdall::CompileDatabase* database)
     {
         heimdall::ParserOptions parser_options;
         if (options.std_override)
@@ -179,7 +179,7 @@ namespace heimdall::cli
                 // Shared ownership (one copy per file): the tree borrows it without
                 // further copies, and -U undefines are honored here as well.
                 auto macros = std::make_shared<heimdall::Preprocessor::MacroMap>(command->defines);
-                for (const auto & name: command->undefines)
+                for (const auto& name : command->undefines)
                 {
                     macros->erase(name);
                 }
@@ -192,13 +192,13 @@ namespace heimdall::cli
     }
 
     std::vector<SyntaxDiagnostic> ToSyntaxDiagnostics(
-        std::string_view source, const std::vector<heimdall::GrammarDiagnostic> & grammar)
+        std::string_view source, const std::vector<heimdall::GrammarDiagnostic>& grammar)
     {
         heimdall::LineTable lines;
         lines.Build(source);
         std::vector<SyntaxDiagnostic> out;
         out.reserve(grammar.size());
-        for (const auto & diagnostic: grammar)
+        for (const auto& diagnostic : grammar)
         {
             const auto position = lines.Lookup(diagnostic.offset);
             out.push_back({position.line, position.column, "syntax/parse-error", diagnostic.message});
@@ -207,8 +207,11 @@ namespace heimdall::cli
         return out;
     }
 
-    void ProcessFile(const std::filesystem::path & path, const Options &options,
-        const heimdall::CompileDatabase * database, FileResult &result)
+    void ProcessFile(
+        const std::filesystem::path& path,
+        const Options& options,
+        const heimdall::CompileDatabase* database,
+        FileResult& result)
     {
         result.path = path;
         auto buffer = heimdall::MappedBuffer::Open(path.string());
@@ -232,7 +235,7 @@ namespace heimdall::cli
             if (options.command == Command::Parse)
             {
                 result.nodes.reserve(tree->Nodes().size());
-                for (const auto & node: tree->Nodes())
+                for (const auto& node : tree->Nodes())
                 {
                     std::size_t offset = source.size();
                     std::size_t length = 0;
@@ -241,7 +244,7 @@ namespace heimdall::cli
                         const std::size_t last_index =
                             std::min<std::size_t>(node.first_token + node.token_count, tree->Tokens().size()) - 1;
                         offset = tree->Tokens()[node.first_token].offset;
-                        const auto &last_token = tree->Tokens()[last_index];
+                        const auto& last_token = tree->Tokens()[last_index];
                         length = last_token.offset + last_token.length - offset;
                     }
 
@@ -257,7 +260,7 @@ namespace heimdall::cli
 
         if (options.semantic && database != nullptr)
         {
-            const auto *command = database->Find(path);
+            const auto* command = database->Find(path);
             if (command != nullptr)
             {
                 result.has_semantic_context = true;
@@ -328,7 +331,7 @@ namespace heimdall::cli
             }
 
             result.output = tree ? heimdall::Formatter(format_options).Format(*tree) :
-                                   heimdall::Formatter(format_options).Format(source);
+            heimdall::Formatter(format_options).Format(source);
             result.changed = result.output != source;
         }
         else
@@ -355,7 +358,10 @@ namespace heimdall::cli
 
             const heimdall::RuleEngine rule_engine(rule_options);
             if (!(tree && options.semantic && database != nullptr))
+            {
                 result.diagnostics = tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
+            }
+
             if (tree && options.semantic && database != nullptr)
             {
                 // cpp/no-unused-include needs the headers on disk, so like the
@@ -364,7 +370,7 @@ namespace heimdall::cli
                 // language server does.
                 std::vector<heimdall::Diagnostic> semantic;
                 std::shared_ptr<const heimdall::IncludeProfile> profile;
-                const auto *command = database->FindOrNearest(path);
+                const auto* command = database->FindOrNearest(path);
                 if (command != nullptr)
                 {
                     profile = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
@@ -374,12 +380,15 @@ namespace heimdall::cli
                 // Rules on the bound semantic model need no compile command; the
                 // project-level ones (include-what-you-use, modernize-final) see the
                 // included headers only when there is a profile.
-                const heimdall::ProjectContext context{path, profile.get(), command};
+                const heimdall::ProjectContext context
+                {
+                    path, profile.get(), command
+                };
                 // Batch analysis borrows the mapped buffer and tree for this
                 // scope only; it does not allocate a project Workspace or copy
                 // the source just to use the same analysis entry point as LSP.
-                const auto borrowed = std::shared_ptr<const heimdall::ParseTree>(&*tree,
-                    [](const heimdall::ParseTree *) {});
+                const auto borrowed = std::shared_ptr<const heimdall::ParseTree>(& *tree,
+                    [](const heimdall::ParseTree*) {});
                 const heimdall::AnalysisContext analysis(heimdall::AnalysisSnapshot::FromSyntax(
                     borrowed, ParserOptionsForFile(path, options, database), path), 0);
                 result.diagnostics = heimdall::AnalysisFeatures::Diagnostics(analysis, rule_engine, true, context);
@@ -387,7 +396,7 @@ namespace heimdall::cli
                 result.diagnostics.insert(result.diagnostics.end(), std::make_move_iterator(semantic.begin()),
                     std::make_move_iterator(semantic.end()));
                 std::stable_sort(result.diagnostics.begin(), result.diagnostics.end(),
-                    [](const heimdall::Diagnostic &a, const heimdall::Diagnostic &b)
+                    [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
                     {
                         return a.offset < b.offset;
                 });
@@ -401,8 +410,11 @@ namespace heimdall::cli
         }
     }
 
-    void RunParallel(const std::vector<std::filesystem::path> & files, const Options &options,
-        const heimdall::CompileDatabase * database, std::vector<FileResult> & results)
+    void RunParallel(
+        const std::vector<std::filesystem::path>& files,
+        const Options& options,
+        const heimdall::CompileDatabase* database,
+        std::vector<FileResult>& results)
     {
         results.resize(files.size());
         std::atomic_size_t next{0};

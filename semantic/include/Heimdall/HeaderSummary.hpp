@@ -36,31 +36,40 @@ namespace heimdall
     public:
         // Process-wide cache keyed by path and validated by size and mtime: the
         // same header is bound once however many documents include it.
-        static std::shared_ptr<const HeaderSummary> Load(const std::filesystem::path & path);
+        static std::shared_ptr<const HeaderSummary> Load(const std::filesystem::path& path);
+
         // Uncached summary of `source`, for tests and for headers not on disk.
         static std::shared_ptr<const HeaderSummary> FromSource(std::string_view source,
             std::filesystem::path path = {});
+
         // Reuses an already-bound model instead of parsing/binding a second AST.
-        static std::shared_ptr<const HeaderSummary> FromModel(const SemanticModel &model,
+        static std::shared_ptr<const HeaderSummary> FromModel(const SemanticModel& model,
             std::filesystem::path path = {});
+
         // Conservative semantic fingerprint: all source bytes participate, since
         // inline bodies, macros and __LINE__ can change the exported meaning.
-        std::uint64_t SemanticFingerprint() const noexcept { return m_fingerprint; }
+        std::uint64_t SemanticFingerprint() const noexcept
+        {
+            return m_fingerprint;
+        }
 
-        const std::filesystem::path & Path() const noexcept
+        const std::filesystem::path& Path() const noexcept
         {
             return m_path;
         }
+
         // False when the file could not be read (missing, over the size limit).
         bool Readable() const noexcept
         {
             return m_readable;
         }
+
         // Carries `// IWYU pragma: private`: not meant to be included directly.
         bool IsPrivate() const noexcept
         {
             return m_private;
         }
+
         // The header is a textual include (`.inc`, `.def`, `.inl`, `.tpp`...):
         // it cannot stand on its own, so it is never suggested as an include.
         bool IsTextual() const noexcept
@@ -73,15 +82,18 @@ namespace heimdall
         {
             return m_export_name.size();
         }
+
         std::string_view ExportName(std::size_t i) const noexcept
         {
             return Text(m_export_name[i]);
         }
+
         // Enclosing namespaces as written, `a::b`; empty for the global namespace.
         std::string_view ExportNamespace(std::size_t i) const noexcept
         {
             return Text(m_export_ns[i]);
         }
+
         ExportKind Kind(std::size_t i) const noexcept
         {
             return m_export_kind[i];
@@ -92,11 +104,13 @@ namespace heimdall
         {
             return m_include_target.size();
         }
+
         // Header name with its delimiters, as written: `<vector>` or `"a.h"`.
         std::string_view IncludeTarget(std::size_t i) const noexcept
         {
             return Text(m_include_target[i]);
         }
+
         // Marked `// IWYU pragma: export`: includers may rely on it.
         bool IncludeReexported(std::size_t i) const noexcept
         {
@@ -110,31 +124,38 @@ namespace heimdall
         {
             return m_class_name.size();
         }
+
         std::string_view ClassName(std::size_t c) const noexcept
         {
             return Text(m_class_name[c]);
         }
+
         std::string_view ClassNamespace(std::size_t c) const noexcept
         {
             return Text(m_class_ns[c]);
         }
+
         // Declares a virtual, override, final or pure member function.
         bool ClassHasVirtual(std::size_t c) const noexcept
         {
             return (m_class_flags[c] & kClassVirtual) != 0;
         }
+
         bool ClassIsFinal(std::size_t c) const noexcept
         {
             return (m_class_flags[c] & kClassFinal) != 0;
         }
+
         bool ClassIsTemplate(std::size_t c) const noexcept
         {
             return (m_class_flags[c] & kClassTemplate) != 0;
         }
+
         std::size_t BaseCount(std::size_t c) const noexcept
         {
             return m_class_base_count[c];
         }
+
         // Last identifier of the written base name (`ns::Base<T>` gives `Base`).
         std::string_view BaseName(std::size_t c, std::size_t k) const noexcept
         {

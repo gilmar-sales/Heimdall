@@ -24,11 +24,11 @@ namespace heimdall
     namespace
     {
 
-        std::expected<std::string, std::string> ReadAll(const char *path)
+        std::expected<std::string, std::string> ReadAll(const char* path)
         {
             constexpr std::size_t kReadChunkSize = 65536; // 64 KiB
             std::string out;
-            FILE *file = std::fopen(path, "rb");
+            FILE* file = std::fopen(path, "rb");
             if (file == nullptr)
             {
                 return std::unexpected(std::string("cannot open file: ") + path);
@@ -53,7 +53,7 @@ namespace heimdall
 
 #if defined(_WIN32)
 
-        std::expected<std::wstring, std::string> ToWide(const char *path)
+        std::expected<std::wstring, std::string> ToWide(const char* path)
         {
             const int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
             if (needed <= 0)
@@ -90,7 +90,7 @@ namespace heimdall
 #else
         if (m_data != nullptr && m_data != m_owned.data() && m_size > 0)
         {
-            munmap(const_cast<char * >(m_data), m_size);
+            munmap(const_cast<char*>(m_data), m_size);
         }
 
         if (m_file_handle != nullptr)
@@ -106,12 +106,12 @@ namespace heimdall
         m_map_handle = nullptr;
     }
 
-    MappedBuffer::MappedBuffer(MappedBuffer &&other) noexcept
+    MappedBuffer::MappedBuffer(MappedBuffer&& other) noexcept
     {
         *this = std::move(other);
     }
 
-    MappedBuffer & MappedBuffer::operator= (MappedBuffer &&other) noexcept
+    MappedBuffer& MappedBuffer::operator= (MappedBuffer&& other) noexcept
     {
         if (this != &other)
         {
@@ -137,12 +137,12 @@ namespace heimdall
         Release();
     }
 
-    std::expected<MappedBuffer, std::string> MappedBuffer::Open(const std::string & path)
+    std::expected<MappedBuffer, std::string> MappedBuffer::Open(const std::string& path)
     {
         return Open(path.c_str());
     }
 
-    std::expected<MappedBuffer, std::string> MappedBuffer::Open(const char *path)
+    std::expected<MappedBuffer, std::string> MappedBuffer::Open(const char* path)
     {
         if (path == nullptr)
         {
@@ -184,7 +184,7 @@ namespace heimdall
             return OpenBuffered(path);
         }
 
-        const char *data = static_cast<const char * >(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0));
+        const char* data = static_cast<const char*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0));
         if (data == nullptr)
         {
             CloseHandle(mapping);
@@ -205,8 +205,8 @@ namespace heimdall
             return std::unexpected(std::string("cannot open file: ") + path);
         }
 
-        struct stat st
-        {};
+        struct stat st {};
+
         if (fstat(fd, &st) != 0)
         {
             close(fd);
@@ -219,7 +219,7 @@ namespace heimdall
             return MappedBuffer{};
         }
 
-        void *data = mmap(nullptr, static_cast<std::size_t>(st.st_size), PROT_READ, MAP_PRIVATE, fd, 0);
+        void* data = mmap(nullptr, static_cast<std::size_t>(st.st_size), PROT_READ, MAP_PRIVATE, fd, 0);
         if (data == MAP_FAILED)
         {
             close(fd);
@@ -227,14 +227,14 @@ namespace heimdall
         }
 
         MappedBuffer out;
-        out.m_data = static_cast<const char * >(data);
+        out.m_data = static_cast<const char*>(data);
         out.m_size = static_cast<std::size_t>(st.st_size);
-        out.m_file_handle = reinterpret_cast<void * >(static_cast<std::intptr_t>(fd));
+        out.m_file_handle = reinterpret_cast<void*>(static_cast<std::intptr_t>(fd));
         return out;
 #endif
     }
 
-    std::expected<MappedBuffer, std::string> MappedBuffer::OpenBuffered(const char *path)
+    std::expected<MappedBuffer, std::string> MappedBuffer::OpenBuffered(const char* path)
     {
         auto contents = ReadAll(path);
         if (!contents)

@@ -9,7 +9,7 @@
 namespace
 {
     namespace fs = std::filesystem;
-    std::string Read(const fs::path &path)
+    std::string Read(const fs::path& path)
     {
         std::ifstream input(path);
         std::ostringstream output;
@@ -17,27 +17,43 @@ namespace
         return output.str();
     }
 
-    std::vector<std::string> Headers(const fs::path &directory)
+    std::vector<std::string> Headers(const fs::path& directory)
     {
         std::vector<std::string> result;
-        for (const auto &entry : fs::directory_iterator(directory))
-            if (entry.path().extension() == ".hpp") result.push_back(entry.path().filename().string());
+        for (const auto& entry : fs::directory_iterator(directory))
+        {
+            if (entry.path().extension() == ".hpp")
+            {
+                result.push_back(entry.path().filename().string());
+            }
+        }
+
         return result;
     }
 
-    void NoIncludes(const fs::path &directory, const std::vector<std::string> &forbidden)
+    void NoIncludes(const fs::path& directory, const std::vector<std::string>& forbidden)
     {
-        for (const auto &entry : fs::recursive_directory_iterator(directory))
+        for (const auto& entry : fs::recursive_directory_iterator(directory))
         {
-            if (entry.path().extension() != ".cpp" && entry.path().extension() != ".hpp") continue;
+            if (entry.path().extension() != ".cpp" && entry.path().extension() != ".hpp")
+            {
+                continue;
+            }
+
             std::istringstream code(Read(entry.path()));
             std::string line;
             while (std::getline(code, line))
             {
                 const auto first = line.find_first_not_of(" \t");
-                if (first == std::string::npos || line.compare(first, 8, "#include") != 0) continue;
-                for (const auto &header : forbidden)
+                if (first == std::string::npos || line.compare(first, 8, "#include") != 0)
+                {
+                    continue;
+                }
+
+                for (const auto& header : forbidden)
+                {
                     EXPECT_EQ(line.find("Heimdall/" + header), std::string::npos) << entry.path() << ": " << line;
+                }
             }
         }
     }

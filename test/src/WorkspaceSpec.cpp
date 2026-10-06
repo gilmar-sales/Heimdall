@@ -10,7 +10,10 @@
 namespace
 {
     using namespace heimdall;
-    auto Text(std::string text) { return std::make_shared<const std::string>(std::move(text)); }
+    auto Text(std::string text)
+    {
+        return std::make_shared<const std::string>(std::move(text));
+    }
 
     TEST(WorkspaceSpec, OldSnapshotKeepsSourceSyntaxAndSemanticAlive)
     {
@@ -39,7 +42,7 @@ namespace
         Workspace workspace;
         auto a = workspace.Open("a.cpp", Text("int a;\n"), 1);
         auto b = workspace.Open("b.cpp", Text("int b;\n"), 1);
-        ASSERT_TRUE(a && b);
+        ASSERT_TRUE(a&& b);
         auto before = workspace.Snapshot();
         auto syntax = before.Syntax(*b);
         auto semantic = before.Semantic(*b);
@@ -109,10 +112,21 @@ namespace
         ASSERT_TRUE(id);
         auto snapshot = workspace.Snapshot();
         std::vector<std::future<std::shared_ptr<const TypeModel>>> workers;
-        for (int i = 0; i < 8; ++i) workers.push_back(std::async(std::launch::async,
-            [snapshot, id = *id] { return snapshot.Types(id); }));
+        for (int i = 0; i < 8; ++i)
+        {
+            workers.push_back(std::async(std::launch::async,
+                [snapshot, id = *id]
+                {
+                    return snapshot.Types(id);
+            }));
+        }
+
         auto first = workers.front().get();
-        for (std::size_t i = 1; i < workers.size(); ++i) EXPECT_EQ(workers[i].get(), first);
+        for (std::size_t i = 1; i < workers.size(); ++i)
+        {
+            EXPECT_EQ(workers[i].get(), first);
+        }
+
         auto metrics = snapshot.Metrics();
         EXPECT_EQ(metrics.parse_count, 1);
         EXPECT_EQ(metrics.bind_count, 1);
@@ -207,7 +221,8 @@ namespace
     TEST(WorkspaceSpec, WorkspaceUpdatesReuseUnchangedTopLevelItems)
     {
         Workspace workspace;
-        auto id = workspace.Open("incremental.cpp", Text("int a() { return 1; }\nint b() { return 2; }\n"), 1);
+        auto id = workspace.Open("incremental.cpp", Text("int a() { return 1; }\nint b() { return 2; }\n"),
+            1);
         ASSERT_TRUE(id);
         auto before = workspace.Snapshot().Syntax(*id);
         ASSERT_TRUE(workspace.Update(*id, Text("int a() { return 3; }\nint b() { return 2; }\n"), 2));
@@ -222,7 +237,8 @@ namespace
     TEST(WorkspaceSpec, RegisteredQuotedIncludesBuildAndUpdateDependencyGraph)
     {
         Workspace workspace;
-        auto source = workspace.Open("project/source.cpp", Text("#include /* \"misleading.hpp\" */ \"header.hpp\"\nint x;"), 1);
+        auto source = workspace.Open("project/source.cpp",
+            Text("#include /* \"misleading.hpp\" */ \"header.hpp\"\nint x;"), 1);
         ASSERT_TRUE(source);
         EXPECT_TRUE(workspace.Snapshot().Dependencies(*source).empty());
         auto header = workspace.Open("project/header.hpp", Text("struct S {};"), 1);
@@ -262,7 +278,7 @@ namespace
         {
             std::ofstream file(path);
             file << "[{\"directory\":\"" << root.generic_string()
-                << "\",\"file\":\"project/source.cpp\",\"arguments\":[\"g++\",\"-std=c++26\",\"-DVALUE=42\",\"-Iproject/include\"]}]";
+            << "\",\"file\":\"project/source.cpp\",\"arguments\":[\"g++\",\"-std=c++26\",\"-DVALUE=42\",\"-Iproject/include\"]}]";
         }
         auto loaded = CompileDatabase::Load(path);
         std::filesystem::remove(path);
@@ -270,9 +286,10 @@ namespace
         Workspace workspace;
         auto database = std::make_shared<const CompileDatabase>(std::move(*loaded));
         workspace.SetCompilationDatabase(database);
-        auto source = workspace.Open(root / "project/source.cpp", Text("#include <header.hpp>\nint x = VALUE;"));
+        auto source = workspace.Open(root / "project/source.cpp",
+            Text("#include <header.hpp>\nint x = VALUE;"));
         auto header = workspace.Open(root / "project/include/header.hpp", Text("struct S {};"));
-        ASSERT_TRUE(source && header);
+        ASSERT_TRUE(source&& header);
         auto pinned = workspace.Snapshot();
         ASSERT_NE(pinned.Command(*source), nullptr);
         EXPECT_EQ(pinned.Command(*source), database->Find(root / "project/source.cpp"));

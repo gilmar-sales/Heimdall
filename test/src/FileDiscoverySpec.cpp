@@ -10,13 +10,13 @@ namespace
 
     std::filesystem::path MakeGlobDir(std::string_view suffix)
     {
-        const auto path = std::filesystem::temp_directory_path() / ("heimdall_glob_" + std::string(suffix));
+        const auto path = std::filesystem::temp_directory_path() /("heimdall_glob_" + std::string(suffix));
         std::error_code ec;
         std::filesystem::remove_all(path, ec);
         std::filesystem::create_directories(path / "src" / "sub", ec);
         std::filesystem::create_directories(path / "other", ec);
 
-        const auto touch = [](const std::filesystem::path &file)
+        const auto touch =[](const std::filesystem::path& file)
         {
             std::ofstream out(file, std::ios::binary | std::ios::trunc);
             out << "int x = 0;\n";
@@ -30,7 +30,8 @@ namespace
         return path;
     }
 
-    bool Collect(const std::vector<std::filesystem::path> &inputs, std::vector<std::filesystem::path> &files)
+    bool Collect(const std::vector<std::filesystem::path>& inputs,
+        std::vector<std::filesystem::path>& files)
     {
         return heimdall::cli::CollectFiles(inputs, files);
     }

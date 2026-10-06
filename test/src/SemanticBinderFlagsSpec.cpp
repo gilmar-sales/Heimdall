@@ -11,12 +11,13 @@ namespace
     struct Bound
     {
         explicit Bound(std::string source)
-        : text(std::make_shared<const std::string>(std::move(source))), tree(heimdall::ParseTree::Parse(*text)),
-          model(heimdall::Binder::Bind(tree))
-        {
-        }
-        Bound(const Bound &) = delete;
-        Bound &operator= (const Bound &) = delete;
+        : text(std::make_shared<const std::string>(std::move(source))),
+            tree(heimdall::ParseTree::Parse(*text)),
+            model(heimdall::Binder::Bind(tree)) {}
+
+        Bound(const Bound&) = delete;
+
+        Bound& operator= (const Bound&) = delete;
 
         std::shared_ptr<const std::string> text;
         heimdall::ParseTree tree;
@@ -24,7 +25,7 @@ namespace
 
         heimdall::SymbolId Find(std::string_view name) const
         {
-            const auto &symbols = model.Symbols();
+            const auto& symbols = model.Symbols();
             for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
             {
                 if (model.Names().Text(symbols.name[i]) == name)
@@ -45,7 +46,7 @@ namespace
         // Index of the first token spelled `text`.
         std::uint32_t Token(std::string_view spelled) const
         {
-            const auto &tokens = tree.Tokens();
+            const auto& tokens = tree.Tokens();
             for (std::uint32_t i = 0; i < tokens.size(); ++i)
             {
                 if (tree.Text(tokens[i]) == spelled)
@@ -139,11 +140,11 @@ TEST(BinderCode, SignificantTokensAreCodeOnlyAndAscending)
         "#if 0\n"
         "int c;\n"
         "#endif\n");
-    const auto &significant = bound.model.Significant();
+    const auto& significant = bound.model.Significant();
     ASSERT_FALSE(significant.empty());
     for (std::size_t i = 0; i < significant.size(); ++i)
     {
-        const auto &token = bound.tree.Tokens()[significant[i]];
+        const auto& token = bound.tree.Tokens()[significant[i]];
         EXPECT_NE(token.kind, heimdall::TokenKind::Whitespace);
         EXPECT_NE(token.kind, heimdall::TokenKind::LineComment);
         EXPECT_NE(token.kind, heimdall::TokenKind::BlockComment);
@@ -154,7 +155,7 @@ TEST(BinderCode, SignificantTokensAreCodeOnlyAndAscending)
         }
     }
 
-    for (const auto token: significant)
+    for (const auto token : significant)
     {
         EXPECT_NE(bound.tree.Text(bound.tree.Tokens()[token]), "c");
     }
@@ -163,11 +164,11 @@ TEST(BinderCode, SignificantTokensAreCodeOnlyAndAscending)
 TEST(BinderNodes, ChildrenOfListsEveryNodeUnderItsParent)
 {
     Bound bound("namespace n { int a; int b; }\nint c;\n");
-    const auto &nodes = bound.tree.Nodes();
+    const auto& nodes = bound.tree.Nodes();
     std::size_t total = 0;
     for (std::uint32_t node = 0; node < nodes.size(); ++node)
     {
-        for (const auto child: bound.model.ChildrenOf(node))
+        for (const auto child : bound.model.ChildrenOf(node))
         {
             EXPECT_EQ(nodes[child].parent, node);
             ++total;
@@ -182,8 +183,8 @@ TEST(BinderNodes, ChildrenOfListsEveryNodeUnderItsParent)
 TEST(BinderNodes, ScopeOfNodeFollowsTheEnclosingDefinition)
 {
     Bound bound("namespace n { struct S { int m; }; }\nint g;\n");
-    const auto &nodes = bound.tree.Nodes();
-    const auto &scopes = bound.model.Scopes();
+    const auto& nodes = bound.tree.Nodes();
+    const auto& scopes = bound.model.Scopes();
     const auto m = bound.Find("m");
     const auto g = bound.Find("g");
     ASSERT_NE(m, heimdall::kNone);

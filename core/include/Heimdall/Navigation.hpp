@@ -65,31 +65,37 @@ namespace heimdall
     class Navigation
     {
     public:
-        static std::vector<UsingDirective> UsingDirectives(const ParseTree &tree);
+        static std::vector<UsingDirective> UsingDirectives(const ParseTree& tree);
 
-        static std::vector<AmbiguousReference> FindAmbiguities(const ParseTree &tree,
-            const ScopeIndex *external = nullptr);
+        static std::vector<AmbiguousReference> FindAmbiguities(const ParseTree& tree,
+            const ScopeIndex* external = nullptr);
 
         // Where the symbol under `offset` is defined (body for functions when
         // known, else the declaration). An ambiguous name yields every candidate.
-        static std::vector<NavTarget> Definition(const ParseTree &tree, std::size_t offset,
-            const ScopeIndex *external = nullptr);
+        static std::vector<NavTarget> Definition(const ParseTree& tree, std::size_t offset,
+            const ScopeIndex* external = nullptr);
 
         // Where the symbol under `offset` is implemented: overriders / derived
         // types, else out-of-line definitions, else the definition itself.
-        static std::vector<NavTarget> Implementation(const ParseTree &tree, std::size_t offset,
-            const ScopeIndex *external = nullptr);
+        static std::vector<NavTarget> Implementation(const ParseTree& tree, std::size_t offset,
+            const ScopeIndex* external = nullptr);
 
         // Definitions inside `tree` of the function (`function`) or type declared
         // elsewhere as `scope::name`; used to follow a header declaration into
         // its source file. `param_count` selects the overload for functions.
-        static std::vector<NavTarget> FindDefinitions(const ParseTree &tree,
-            const std::vector<std::string> & scope, std::string_view name, bool function,
+        static std::vector<NavTarget> FindDefinitions(
+            const ParseTree& tree,
+            const std::vector<std::string>& scope,
+            std::string_view name,
+            bool function,
             std::uint32_t param_count);
 
         // Methods `name` declared in types (transitively) derived from `base`.
-        static std::vector<NavTarget> FindOverriders(const ParseTree &tree, std::string_view base,
-            std::string_view name, std::uint32_t param_count);
+        static std::vector<NavTarget> FindOverriders(
+            const ParseTree& tree,
+            std::string_view base,
+            std::string_view name,
+            std::uint32_t param_count);
     };
 
 } // namespace heimdall
