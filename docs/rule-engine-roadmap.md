@@ -45,19 +45,21 @@ Este documento reúne regras candidatas para qualidade de vida, modernização d
 | `cpp/modernize-nullptr` | Literal nulo legado | Lexical/sintática | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-override` | Método sobrescrito sem `override` | Semântica | Quick fix (não em lote) | Implementada (parcial) |
 | `cpp/modernize-using` | `typedef` legado | Sintática | Possível | Implementada |
-| `cpp/modernize-emplace` | Construção temporária em `push_back` potencialmente substituível por `emplace_back` | Semântica | Condicional | Não implementada |
-| `cpp/modernize-make-unique` | Construção manual de `unique_ptr` | Semântica | Condicional | Não implementada |
-| `cpp/modernize-make-shared` | Construção manual de `shared_ptr` | Semântica | Condicional | Não implementada |
-| `cpp/modernize-smart-ptr` | Ownership representado por ponteiro cru | Semântica/fluxo | Condicional | Não implementada |
-| `cpp/no-new-delete` | Uso direto de `new`/`delete` em código comum | Sintática/semântica | Não por padrão | Não implementada |
-| `cpp/modernize-span` | Ponteiro e tamanho usados como faixa de dados | Semântica | Condicional | Não implementada |
-| `cpp/modernize-string-view` | Parâmetro de leitura que copia `std::string` sem necessidade | Semântica | Condicional | Não implementada |
-| `cpp/modernize-algorithms` | Laços substituíveis por algoritmos da biblioteca | Semântica | Condicional | Não implementada |
-| `cpp/modernize-structured-bindings` | Acesso repetido a campos de pares/tuplas | Sintática | Condicional | Não implementada |
-| `cpp/modernize-attributes` | Oportunidades para atributos como `[[nodiscard]]` | Semântica/API | Condicional | Não implementada |
-| `cpp/modernize-consteval-constexpr` | Oportunidades para avaliação em tempo de compilação | Semântica | Cauteloso | Não implementada |
+| `cpp/modernize-emplace` | Construção temporária em `push_back`/`push_front` substituível por `emplace_back`/`emplace_front` | Sintática | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-make-unique` | `unique_ptr` construído de `new` em vez de `std::make_unique` | Sintática | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-make-shared` | `shared_ptr` construído de `new` em vez de `std::make_shared` | Sintática | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-smart-ptr` | Ownership em ponteiro cru (`T* p = new T`, `reset(new T)`) | Sintática | Quick fix (não em lote; `reset` sem fix) | Implementada |
+| `cpp/no-new-delete` | Uso direto de `new`/`delete` fora dos padrões acima | Sintática | Não | Implementada |
+| `cpp/modernize-span` | Parâmetros consecutivos ponteiro + tamanho substituíveis por `std::span` | Semântica | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-string-view` | Parâmetro `const std::string` copiado por valor em vez de `std::string_view` | Semântica | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-algorithms` | Laços de acumulação, contagem condicional e `push_back` condicional | Sintática | Não (transformação exige prova semântica) | Implementada |
+| `cpp/modernize-structured-bindings` | `std::tie(a, b) = expr` e acessos repetidos a `.first`/`.second` | Sintática | Quick fix (não em lote; só `tie`) | Implementada |
+| `cpp/modernize-attributes` | Função de consulta com retorno não-`void` sem `[[nodiscard]]` | Semântica | Quick fix (não em lote) | Implementada |
+| `cpp/modernize-consteval-constexpr` | Constante de namespace `const T x = lit` que pode ser `constexpr` | Semântica | Seguro (aplica em lote) | Implementada |
 
 `new` e `delete` não devem ser proibidos sem exceções: alocadores, placement new, interoperabilidade e infraestrutura podem precisar deles. Regras para `auto`, `const`, range-for e includes também precisam evitar alterações em overload resolution, cópias e vida útil.
+
+Notas das regras de modernização: `make-unique`/`make-shared` só oferecem fix quando o tipo do `unique_ptr`/`shared_ptr` é idêntico ao do `new` (`Base`/`Derived` diverge) e calam arrays; `no-new-delete` não repete um `new` já coberto por elas ou por `smart-ptr` (placement `new`, `operator new`/`delete` e `reset(new)` sem dono conhecido ficam de fora do fix). `smart-ptr` só reescreve `T* p = new T(args)` com tipos iguais e sem `constexpr` (escalar `new T` sem parênteses não ganha fix: `make_unique<T>()` inicializa por valor). `emplace` exige construção explícita (`push_back(x)` e `push_back(new X)` ficam de fora). `tie` exige 2+ identificadores simples; `.first`/`.second` diagnostica sem fix. `algorithms` nunca tem fix. `span` exige par consecutivo (ponteiro `*` + inteiro de tamanho), sem `void*`/default/template/virtual para o fix, e só fora de classes. `string-view` cobre apenas `const std::string` por valor com `std::` explícito (o idioma sink `std::string value` fica de fora). `attributes` usa heurística de nome (`get/is/has/...`) e não sugere `consteval` (exigiria prova de call-graph). `consteval-constexpr` cobre só constantes de namespace de tipo aritmético com inicializador literal (sem `extern`/`thread_local`); o fix é seguro e aplica em `--fix`.
 
 ## Segurança de memória e ownership
 

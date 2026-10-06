@@ -4,6 +4,7 @@
 #include "detail/TokenView.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1725,6 +1726,598 @@ namespace heimdall
         return diagnostics;
     }
 
+    std::vector<Diagnostic> SemanticRules::AnalyzeSpan(const TypeModel& types)
+    {
+        const auto& model = types.Model();
+        const auto& symbols = model.Symbols();
+        const auto& scopes = model.Scopes();
+        const detail::TokenView view(model);
+        Reporter reporter(model);
+
+        static constexpr std::string_view kSizeNames[] = {
+            "size", "length", "len", "count", "num", "n", "extent",
+        };
+        auto is_size_name = [](std::string_view name)
+        {
+            std::string lower(name);
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                [](unsigned char c)
+                {
+                    return static_cast<char>(std::tolower(c));
+            });
+            for (const auto candidate : kSizeNames)
+            {
+                if (lower == candidate)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        // Parameters grouped by function scope, in declaration order.
+        std::vector<SymbolId> ordered;
+        for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+        {
+            if (symbols.kind[symbol] == SymbolKind::Parameter && symbols.name[symbol] != kNone)
+            {
+                ordered.push_back(symbol);
+            }
+        }
+
+        std::sort(ordered.begin(), ordered.end(),
+            [&](SymbolId left, SymbolId right)
+            {
+                if (symbols.scope[left] != symbols.scope[right])
+                {
+                    return symbols.scope[left] < symbols.scope[right];
+                }
+
+                return symbols.decl_token[left] < symbols.decl_token[right];
+            });
+        for (std::size_t i = 0; i + 1 < ordered.size(); ++i)
+        {
+            const SymbolId first = ordered[i];
+            const SymbolId second = ordered[i + 1];
+            if (symbols.scope[first] != symbols.scope[second])
+            {
+                continue;
+            }
+
+            if ((symbols.flags[first] & SymbolFlag::Pointer) == 0)
+            {
+                continue;
+            }
+
+            const std::string_view second_name = model.Names().Text(symbols.name[second]);
+            if (!is_size_name(second_name))
+            {
+                continue;
+            }
+
+            const TypeId second_type = types.SymbolType(second);
+            if (!types.Types().IsInteger(second_type))
+            {
+                continue;
+            }
+
+            // The owning function must be one a span can replace: templates,
+            // virtuals and overrides would break callers or overriders, and
+            // both types must be model-resolved. Free functions and lambdas
+            // (owner kNone) are eligible; anything inside a class is not: a
+            // definition fixed without its declaration (or an overrider)
+            // breaks the build.
+            const ScopeId scope = symbols.scope[first];
+            bool inside_class = false;
+            bool inside_template = false;
+            for (ScopeId ancestor = scope; ancestor < scopes.parent.size() && ancestor != kNone;)
+            {
+                if (scopes.kind[ancestor] == ScopeKind::Class)
+                {
+                    inside_class = true;
+                    break;
+                }
+
+                const ScopeId parent = scopes.parent[ancestor];
+                if (parent == ancestor)
+                {
+                    break;
+                }
+
+                ancestor = parent;
+            }
+
+            {
+                const auto& nodes = model.Tree().NodesSoA();
+                std::uint32_t node = scope < scopes.node.size() ? scopes.node[scope] : 0;
+                for (std::size_t steps = 0; steps <= nodes.size(); ++steps)
+                {
+                    if (nodes.Kind(node) == GrammarKind::TemplateDeclaration)
+                    {
+                        inside_template = true;
+                        break;
+                    }
+
+                    if (node == 0)
+                    {
+                        break;
+                    }
+
+                    const std::uint32_t parent = nodes.Parent(node);
+                    if (parent >= nodes.size() || parent == node)
+                    {
+                        break;
+                    }
+
+                    node = parent;
+                }
+            }
+
+            const SymbolId owner =
+                scope < scopes.owner.size() ? scopes.owner[scope] : kNone;
+            if (inside_class || inside_template ||
+                (owner != kNone && symbols.kind[owner] == SymbolKind::Function &&
+                (symbols.flags[owner] &
+                (SymbolFlag::Template | SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final |
+                    SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0))
+            {
+                continue;
+            }
+
+            // The pointee spelling: plain names, `::`, cv-qualifiers and
+            // arithmetic keywords back from the `*`. (Keywords carry a Tok,
+            // so IsWord rejects them; match by text here.) References,
+            // templates and anything else get the diagnostic without a fix.
+            const std::size_t name_position = view.PositionOf(symbols.decl_token[first]);
+            std::size_t cursor = name_position;
+            std::size_t star = view.Size();
+            while (cursor > 0)
+            {
+                --cursor;
+                if (view.Text(cursor) == "*")
+                {
+                    star = cursor;
+                    break;
+                }
+
+                if (!view.IsWord(cursor))
+                {
+                    break;
+                }
+            }
+
+            if (star >= view.Size())
+            {
+                continue;
+            }
+
+            auto is_spelling_word = [](std::string_view text)
+            {
+                return text == "const" || text == "volatile" || text == "unsigned" || text == "signed" ||
+                    text == "int" || text == "char" || text == "short" || text == "long" ||
+                    text == "float" || text == "double" || text == "bool" || text == "void" ||
+                    text == "size_t" || text == "wchar_t";
+            };
+
+            std::size_t type_begin = star;
+            bool saw_word = false;
+            cursor = star;
+            while (cursor > 0)
+            {
+                --cursor;
+                const auto text = view.Text(cursor);
+                if (view.IsWord(cursor) || is_spelling_word(text))
+                {
+                    saw_word = true;
+                    type_begin = cursor;
+                    continue;
+                }
+
+                if (text == "::")
+                {
+                    type_begin = cursor;
+                    continue;
+                }
+
+                break;
+            }
+
+            const bool type_ok = saw_word;
+            // A default argument on either parameter would be dropped by the
+            // merge: diagnose, but offer no fix.
+            bool has_default = false;
+            {
+                const std::size_t second_end =
+                    view.PositionOf(symbols.decl_token[second]) + 1;
+                for (std::size_t k = type_begin; k < second_end && k < view.Size(); ++k)
+                {
+                    if (view.Text(k) == "=")
+                    {
+                        has_default = true;
+                        break;
+                    }
+                }
+            }
+
+            const std::size_t fix_begin = view.Offset(type_begin);
+            const std::size_t span_end = view.End(view.PositionOf(symbols.decl_token[second]));
+            // Rebuild the pointee spelling from the token range.
+            std::string pointee_spelling;
+            for (std::size_t k = type_begin; k < star; ++k)
+            {
+                const auto text = view.Text(k);
+                if (text == "*" || text.empty())
+                {
+                    continue;
+                }
+
+                if (!pointee_spelling.empty() && text != "::" && !pointee_spelling.ends_with("::"))
+                {
+                    pointee_spelling += ' ';
+                }
+
+                pointee_spelling += text;
+            }
+
+            const std::string first_name(model.Names().Text(symbols.name[first]));
+            const bool void_pointee = pointee_spelling == "void";
+            if (type_ok && !void_pointee && !has_default && !pointee_spelling.empty())
+            {
+                reporter.Report(RuleId::ModernizeSpan, "cpp/modernize-span",
+                    "pointer and size parameters '" + first_name + "' and '" + std::string(second_name) +
+                        "' can be a single std::span",
+                    fix_begin, span_end - fix_begin, fix_begin, span_end - fix_begin,
+                    "std::span<" + pointee_spelling + "> " + first_name, false,
+                    "Replace '" + first_name + "' and '" + std::string(second_name) + "' with std::span");
+            }
+            else
+            {
+                reporter.ReportNoFix(RuleId::ModernizeSpan, "cpp/modernize-span",
+                    "pointer and size parameters '" + first_name + "' and '" + std::string(second_name) +
+                        "' can be a single std::span",
+                    fix_begin, span_end - fix_begin);
+            }
+        }
+
+        return reporter.Take();
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeStringView(const SemanticModel& model)
+    {
+        const auto& symbols = model.Symbols();
+        const auto& scopes = model.Scopes();
+        const detail::TokenView view(model);
+        Reporter reporter(model);
+        for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+        {
+            if (symbols.kind[symbol] != SymbolKind::Parameter || symbols.name[symbol] == kNone)
+            {
+                continue;
+            }
+
+            const ScopeId scope = symbols.scope[symbol];
+            const SymbolId owner =
+                scope < scopes.owner.size() ? scopes.owner[scope] : kNone;
+            if (owner != kNone && symbols.kind[owner] == SymbolKind::Function &&
+                (symbols.flags[owner] & SymbolFlag::Template) != 0)
+            {
+                continue;
+            }
+
+            // The type slice back from the name: `const`, `std`, `::`,
+            // `string` only. Any `*`, `&`, `<` or other token means the
+            // parameter is not a by-value string.
+            const std::size_t name_position = view.PositionOf(symbols.decl_token[symbol]);
+            std::size_t type_begin = name_position;
+            bool has_const = false;
+            bool has_std = false;
+            bool has_scope = false;
+            bool has_string = false;
+            bool shape_ok = true;
+            std::size_t cursor = name_position;
+            while (cursor > 0)
+            {
+                --cursor;
+                const auto text = view.Text(cursor);
+                if (text == "const")
+                {
+                    has_const = true;
+                    type_begin = cursor;
+                    continue;
+                }
+
+                if (view.IsWord(cursor))
+                {
+                    if (text == "std")
+                    {
+                        has_std = true;
+                    }
+                    else if (text == "string")
+                    {
+                        has_string = true;
+                    }
+                    else
+                    {
+                        shape_ok = false;
+                        break;
+                    }
+
+                    type_begin = cursor;
+                    continue;
+                }
+
+                if (text == "::")
+                {
+                    has_scope = true;
+                    type_begin = cursor;
+                    continue;
+                }
+
+                break;
+            }
+
+            if (!shape_ok || !has_const || !has_std || !has_scope || !has_string)
+            {
+                continue;
+            }
+
+            // An array parameter (`const std::string s[]`) is not a copy.
+            const std::size_t after_name = name_position + 1;
+            if (after_name < view.Size() && view.Text(after_name) == "[")
+            {
+                continue;
+            }
+
+            const std::size_t fix_begin = view.Offset(type_begin);
+            const std::size_t name_end = view.End(name_position);
+            const std::string name(model.Names().Text(symbols.name[symbol]));
+            reporter.Report(RuleId::ModernizeStringView, "cpp/modernize-string-view",
+                "parameter '" + name + "' copies a const std::string; take std::string_view",
+                fix_begin, name_end - fix_begin, fix_begin, name_end - fix_begin, "std::string_view " + name,
+                false, "Take std::string_view for '" + name + '\'');
+        }
+
+        return reporter.Take();
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeAttributes(const TypeModel& types)
+    {
+        const auto& model = types.Model();
+        const auto& symbols = model.Symbols();
+        const detail::TokenView view(model);
+        Reporter reporter(model);
+        static constexpr std::string_view kQueryPrefixes[] = {
+            "get", "is", "has", "have", "can", "could", "should", "would", "may", "empty", "size", "count",
+            "length", "find", "contains", "front", "back", "top", "data", "at", "value", "make", "create",
+            "clone", "copy", "exists", "equal", "compare", "starts", "ends", "first", "last", "peek",
+        };
+        auto is_query_name = [](std::string_view name)
+        {
+            std::string lower(name);
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                [](unsigned char c)
+                {
+                    return static_cast<char>(std::tolower(c));
+            });
+            for (const auto prefix : kQueryPrefixes)
+            {
+                if (lower.size() >= prefix.size() && lower.compare(0, prefix.size(), prefix) == 0 &&
+                    (lower.size() == prefix.size() || !(lower[prefix.size()] >= 'a' &&
+                    lower[prefix.size()] <= 'z')))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        const std::string_view source = model.Tree().Source();
+        for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+        {
+            if (symbols.kind[symbol] != SymbolKind::Function || symbols.name[symbol] == kNone)
+            {
+                continue;
+            }
+
+            if ((symbols.flags[symbol] & (SymbolFlag::Constructor | SymbolFlag::Destructor |
+                SymbolFlag::Operator | SymbolFlag::Template)) != 0)
+            {
+                continue;
+            }
+
+            const std::string name(model.Names().Text(symbols.name[symbol]));
+            if (name == "main" || !is_query_name(name))
+            {
+                continue;
+            }
+
+            const TypeId returned = types.SymbolType(symbol);
+            if (returned == TypeTable::Unknown ||
+                types.Types().IsBuiltin(returned, BuiltinType::Void))
+            {
+                continue;
+            }
+
+            const auto& name_token = model.Tree().Tokens()[symbols.decl_token[symbol]];
+            // Already annotated: `[[nodiscard]]` (or the GNU spelling) in the
+            // declaration prefix.
+            const std::size_t window_begin =
+                name_token.offset > 300 ? name_token.offset - 300 : 0;
+            if (source.substr(window_begin, name_token.offset - window_begin).find("nodiscard") !=
+                std::string_view::npos)
+            {
+                continue;
+            }
+
+            // Front placement (`[[nodiscard]] int f();`) when the declaration
+            // prefix back from the name is only type material; otherwise the
+            // attribute goes right before the name (`int [[nodiscard]] f()`,
+            // also valid). A `,` on the way means a shared declaration
+            // (`int a, f();`), where front placement would mistarget.
+            const std::size_t name_position = view.PositionOf(symbols.decl_token[symbol]);
+            std::size_t insert = name_position;
+            std::size_t cursor = name_position;
+            bool front = true;
+            while (cursor > 0)
+            {
+                --cursor;
+                const auto text = view.Text(cursor);
+                const bool accept = view.IsWord(cursor) || text == "::" || text == "*" || text == "&" ||
+                    text == "<" || text == ">" || text == "const" || text == "constexpr" ||
+                    text == "static" || text == "inline" || text == "virtual" || text == "explicit" ||
+                    text == "friend" || text == "noexcept" || text == "unsigned" || text == "signed" ||
+                    text == "int" || text == "char" || text == "short" || text == "long" ||
+                    text == "float" || text == "double" || text == "bool" || text == "void" ||
+                    text == "wchar_t" || text == "size_t" || text == "auto";
+                if (!accept)
+                {
+                    front = text == ";" || text == "{" || text == "}" || text == ":" ||
+                        text == "public" || text == "private" || text == "protected";
+                    break;
+                }
+
+                insert = cursor;
+            }
+
+            const std::size_t fix_offset = front ? view.Offset(insert) : name_token.offset;
+            reporter.Report(RuleId::ModernizeAttributes, "cpp/modernize-attributes",
+                "'" + name + "' returns a value that should not be discarded; add [[nodiscard]]",
+                name_token.offset, name_token.length, fix_offset, 0, "[[nodiscard]] ", false,
+                "Add [[nodiscard]] to " + name);
+        }
+
+        return reporter.Take();
+    }
+
+    std::vector<Diagnostic> SemanticRules::AnalyzeConstevalConstexpr(const SemanticModel& model)
+    {
+        const auto& symbols = model.Symbols();
+        const auto& scopes = model.Scopes();
+        const detail::TokenView view(model);
+        Reporter reporter(model);
+        auto is_arithmetic_word = [](std::string_view word)
+        {
+            return word == "int" || word == "char" || word == "short" || word == "long" ||
+                word == "signed" || word == "unsigned" || word == "float" || word == "double" ||
+                word == "bool" || word == "size_t";
+        };
+
+        for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+        {
+            if (symbols.kind[symbol] != SymbolKind::Variable || symbols.name[symbol] == kNone)
+            {
+                continue;
+            }
+
+            const ScopeId scope = symbols.scope[symbol];
+            if (scope >= scopes.kind.size() ||
+                (scopes.kind[scope] != ScopeKind::TranslationUnit && scopes.kind[scope] != ScopeKind::Namespace))
+            {
+                continue;
+            }
+
+            // Shape: [static|inline] const TYPE name = literal, with TYPE one
+            // or two arithmetic words (`unsigned int`). `extern`,
+            // `thread_local`, `mutable`, `volatile` and an existing
+            // `constexpr` stay out.
+            const std::size_t name_position = view.PositionOf(symbols.decl_token[symbol]);
+            std::size_t cursor = name_position;
+            std::vector<std::size_t> type_words;
+            std::size_t const_position = view.Size();
+            bool shape_ok = true;
+            bool boundary = false;
+            while (type_words.size() < 4)
+            {
+                if (cursor == 0)
+                {
+                    // The whole prefix was consumed: start of file.
+                    boundary = true;
+                    break;
+                }
+
+                --cursor;
+                const auto text = view.Text(cursor);
+                if (text == "const")
+                {
+                    if (const_position < view.Size())
+                    {
+                        shape_ok = false;
+                        break;
+                    }
+
+                    const_position = cursor;
+                    continue;
+                }
+
+                if (text == "static" || text == "inline")
+                {
+                    continue;
+                }
+
+                // Arithmetic keywords (`int`, `unsigned`) carry a Tok, so
+                // match by text; an identifier can never spell them.
+                if (is_arithmetic_word(text))
+                {
+                    type_words.push_back(cursor);
+                    continue;
+                }
+
+                // Anything else ends the declaration prefix; it must be a
+                // statement boundary for this to be a plain declaration.
+                boundary = text == ";" || text == "{" || text == "}" || text == ":" ||
+                    text == "if" || text == "else" || text == "for" || text == "while" || text == "do" ||
+                    text == "case" || text == "return";
+                break;
+            }
+
+            if (!shape_ok || const_position >= view.Size() || type_words.empty() || type_words.size() > 2)
+            {
+                continue;
+            }
+
+            // The token where the walk stopped must be a boundary.
+            if (!boundary)
+            {
+                continue;
+            }
+
+            const std::size_t equal = name_position + 1;
+            if (equal >= view.Size() || view.Text(equal) != "=")
+            {
+                continue;
+            }
+
+            const std::size_t init = equal + 1;
+            if (init >= view.Size())
+            {
+                continue;
+            }
+
+            const auto init_text = view.Text(init);
+            const bool literal_init = view.KindAt(init) == TokenKind::Number || init_text == "true" ||
+                init_text == "false" || init_text == "nullptr";
+            if (!literal_init)
+            {
+                continue;
+            }
+
+            const std::string name(model.Names().Text(symbols.name[symbol]));
+            const std::size_t const_offset = view.Offset(const_position);
+            const std::size_t const_end = view.End(const_position);
+            // Namespace-scope `const` already has internal linkage, and the
+            // initializer is a literal: `constexpr` changes neither linkage
+            // nor value, so the fix is safe in batch.
+            reporter.Report(RuleId::ModernizeConstevalConstexpr, "cpp/modernize-consteval-constexpr",
+                "constant '" + name + "' can be constexpr", const_offset, const_end - const_offset,
+                const_offset, const_end - const_offset, "constexpr", true,
+                "Make '" + name + "' constexpr");
+        }
+
+        return reporter.Take();
+    }
+
     std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel& model)
     {
         return Analyze(model, Typer::Type(model));
@@ -1738,7 +2331,8 @@ namespace heimdall
             {
                 AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
                 AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
-                AnalyzeConstexpr(flow), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
+                AnalyzeConstexpr(flow), AnalyzeSpan(types), AnalyzeStringView(model), AnalyzeAttributes(types),
+                AnalyzeConstevalConstexpr(model), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
                 AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
                 AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)
         })

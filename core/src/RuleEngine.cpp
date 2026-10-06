@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace heimdall
@@ -165,6 +166,131 @@ namespace heimdall
             }
 
             return tokens.size();
+        }
+
+        bool IsWord(std::string_view source, const Token& token, std::string_view word)
+        {
+            return token.kind == TokenKind::Identifier && source.substr(token.offset, token.length) == word;
+        }
+
+        bool IsPunct(std::string_view source, const Token& token, std::string_view punct)
+        {
+            return token.kind == TokenKind::Punctuation && source.substr(token.offset, token.length) == punct;
+        }
+
+        // Index of the bracket closing the one at `open`, or tokens.size().
+        // `open_text`/`close_text` are single-character punctuators; anything
+        // unbalanced gives up so fixes never come from half-parsed code.
+        std::size_t MatchBracket(const std::vector<Token>& tokens, std::string_view source,
+            std::size_t open, std::string_view open_text, std::string_view close_text)
+        {
+            std::size_t depth = 0;
+            for (std::size_t i = open; i < tokens.size(); ++i)
+            {
+                const auto& token = tokens[i];
+                if (token.kind != TokenKind::Punctuation)
+                {
+                    continue;
+                }
+
+                const auto text = source.substr(token.offset, token.length);
+                if (text == open_text)
+                {
+                    ++depth;
+                }
+                else if (text == close_text && --depth == 0)
+                {
+                    return i;
+                }
+            }
+
+            return tokens.size();
+        }
+
+        std::string_view Trimmed(std::string_view text)
+        {
+            while (!text.empty() &&
+                (text.front() == ' ' || text.front() == '\t' || text.front() == '\n' || text.front() == '\r'))
+            {
+                text.remove_prefix(1);
+            }
+
+            while (!text.empty() &&
+                (text.back() == ' ' || text.back() == '\t' || text.back() == '\n' || text.back() == '\r'))
+            {
+                text.remove_suffix(1);
+            }
+
+            return text;
+        }
+
+        // A `new T(args)` / `new T` / `new T[n]` starting at the `new` keyword.
+        struct NewExpression
+        {
+            std::size_t new_index = 0;
+            std::string_view type;
+            std::string_view args;
+            bool has_parens = false;
+            bool is_array = false;
+            std::size_t end_index = 0; // last token of the expression
+        };
+
+        bool ParseNewExpression(const std::vector<Token>& tokens, std::string_view source,
+            std::size_t new_index, NewExpression& out)
+        {
+            std::size_t i = NextSignificant(tokens, new_index + 1);
+            const std::size_t type_begin = i;
+            bool has_ident = false;
+            while (i < tokens.size() && tokens[i].kind == TokenKind::Identifier)
+            {
+                has_ident = true;
+                const std::size_t after = NextSignificant(tokens, i + 1);
+                if (after < tokens.size() && IsPunct(source, tokens[after], "::"))
+                {
+                    i = NextSignificant(tokens, after + 1);
+                    continue;
+                }
+
+                break;
+            }
+
+            if (!has_ident)
+            {
+                return false;
+            }
+
+            const std::size_t type_end = i;
+            out.new_index = new_index;
+            out.type = Trimmed(source.substr(tokens[type_begin].offset,
+                tokens[type_end].offset + tokens[type_end].length - tokens[type_begin].offset));
+            out.args = {};
+            out.has_parens = false;
+            out.is_array = false;
+            const std::size_t after = NextSignificant(tokens, type_end + 1);
+            if (after < tokens.size() && IsPunct(source, tokens[after], "["))
+            {
+                out.is_array = true;
+                out.end_index = MatchBracket(tokens, source, after, "[", "]");
+                return out.end_index < tokens.size();
+            }
+
+            if (after < tokens.size() && IsPunct(source, tokens[after], "("))
+            {
+                const std::size_t close = MatchBracket(tokens, source, after, "(", ")");
+                if (close >= tokens.size())
+                {
+                    return false;
+                }
+
+                out.has_parens = true;
+                out.end_index = close;
+                const std::size_t args_begin = tokens[after].offset + tokens[after].length;
+                out.args = Trimmed(source.substr(args_begin, tokens[close].offset - args_begin));
+                return true;
+            }
+
+            out.end_index = type_end;
+            return true;
         }
 
         std::string_view PunctuationText(std::string_view source, const Token& token)
@@ -598,6 +724,28 @@ namespace heimdall
                 "semântica", true, "0 used as a null pointer"},
             {RuleId::ModernizeAuto, "cpp/modernize-auto", "cpp", Severity::Warning,
                 "semântica", true, "explicit type that repeats the initializer"},
+            {RuleId::ModernizeEmplace, "cpp/modernize-emplace", "cpp", Severity::Warning,
+                "sintática", true, "push_back of a temporary that emplace_back can build in place"},
+            {RuleId::ModernizeMakeUnique, "cpp/modernize-make-unique", "cpp", Severity::Warning,
+                "sintática", true, "unique_ptr built from new instead of std::make_unique"},
+            {RuleId::ModernizeMakeShared, "cpp/modernize-make-shared", "cpp", Severity::Warning,
+                "sintática", true, "shared_ptr built from new instead of std::make_shared"},
+            {RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr", "cpp", Severity::Warning,
+                "sintática", true, "ownership held in a raw pointer instead of a smart pointer"},
+            {RuleId::NoNewDelete, "cpp/no-new-delete", "cpp", Severity::Warning,
+                "sintática", false, "direct use of new or delete instead of RAII"},
+            {RuleId::ModernizeSpan, "cpp/modernize-span", "cpp", Severity::Warning,
+                "semântica", true, "pointer and size parameters that std::span can replace"},
+            {RuleId::ModernizeStringView, "cpp/modernize-string-view", "cpp", Severity::Warning,
+                "semântica", true, "const std::string parameter copied by value instead of std::string_view"},
+            {RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms", "cpp", Severity::Warning,
+                "sintática", false, "loop that a standard algorithm can replace"},
+            {RuleId::ModernizeStructuredBindings, "cpp/modernize-structured-bindings", "cpp", Severity::Warning,
+                "sintática", true, "pair or tuple unpacked without structured bindings"},
+            {RuleId::ModernizeAttributes, "cpp/modernize-attributes", "cpp", Severity::Warning,
+                "semântica", true, "query function whose result should be [[nodiscard]]"},
+            {RuleId::ModernizeConstevalConstexpr, "cpp/modernize-consteval-constexpr", "cpp", Severity::Warning,
+                "semântica", true, "constant that could be constexpr"},
             {RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion", "cpp", Severity::Warning,
                 "semântica", false, "integer, floating-point or pointer used as a condition"},
             {RuleId::ModernizeRangeLoop, "cpp/modernize-range-loop", "cpp", Severity::Warning,
@@ -1125,6 +1273,1103 @@ namespace heimdall
                     "replace typedef with a using alias", offset, length,
                     lines.Lookup(offset),
                     {offset, length, std::move(replacement)}));
+            }
+        }
+
+        // The new/delete family shares one scan so a `new` claimed by a
+        // modernize rule (which names the better fix) is never also reported
+        // by cpp/no-new-delete: one diagnostic per token.
+        std::unordered_set<std::size_t> claimed_new;
+
+        const bool make_unique_on =
+            RuleEnabled("cpp/modernize-make-unique", m_options.modernize_make_unique);
+        const bool make_shared_on =
+            RuleEnabled("cpp/modernize-make-shared", m_options.modernize_make_shared);
+        if (make_unique_on || make_shared_on)
+        {
+            struct SmartFactory
+            {
+                const char* code;
+                RuleId id;
+                bool enabled;
+                const char* smart;
+                const char* maker;
+            };
+
+            const SmartFactory factories[] = {
+                {"cpp/modernize-make-unique", RuleId::ModernizeMakeUnique, make_unique_on,
+                    "unique_ptr", "make_unique"},
+                {"cpp/modernize-make-shared", RuleId::ModernizeMakeShared, make_shared_on,
+                    "shared_ptr", "make_shared"},
+            };
+            std::size_t directive_cursor = 0;
+            for (const auto& factory : factories)
+            {
+                if (!factory.enabled)
+                {
+                    continue;
+                }
+
+                for (std::size_t i = 0; i < tokens.size(); ++i)
+                {
+                    if (!IsWord(source, tokens[i], factory.smart) ||
+                        IsInDirective(tokens[i].offset, directives, directive_cursor))
+                    {
+                        continue;
+                    }
+
+                    // `std::unique_ptr`: keep the qualification for the fix.
+                    bool qualified = false;
+                    std::size_t start = i;
+                    const std::size_t maybe_scope = PrevSignificant(tokens, i);
+                    if (maybe_scope < tokens.size() && IsPunct(source, tokens[maybe_scope], "::"))
+                    {
+                        const std::size_t maybe_std = PrevSignificant(tokens, maybe_scope);
+                        if (maybe_std < tokens.size() && IsWord(source, tokens[maybe_std], "std"))
+                        {
+                            qualified = true;
+                            start = maybe_std;
+                        }
+                    }
+
+                    const std::size_t open_angle = NextSignificant(tokens, i + 1);
+                    if (open_angle >= tokens.size() || !IsPunct(source, tokens[open_angle], "<"))
+                    {
+                        continue;
+                    }
+
+                    // Template arguments: plain nesting only. Anything fancier
+                    // (`>>`, parens, braces, `;`) gives up silently and the
+                    // `new` falls through to cpp/no-new-delete.
+                    std::size_t depth = 0;
+                    std::size_t close_angle = tokens.size();
+                    for (std::size_t k = open_angle; k < tokens.size(); ++k)
+                    {
+                        if (tokens[k].kind != TokenKind::Punctuation)
+                        {
+                            continue;
+                        }
+
+                        const auto text = source.substr(tokens[k].offset, tokens[k].length);
+                        if (text == "<")
+                        {
+                            ++depth;
+                        }
+                        else if (text == ">")
+                        {
+                            if (--depth == 0)
+                            {
+                                close_angle = k;
+                                break;
+                            }
+                        }
+                        else if (text == ";" || text == "{" || text == "}" || text == "(" || text == ")" ||
+                            (text.size() > 1 && text.front() == '>'))
+                        {
+                            break;
+                        }
+                    }
+
+                    if (close_angle >= tokens.size())
+                    {
+                        continue;
+                    }
+
+                    const auto template_args = Trimmed(source.substr(
+                        tokens[open_angle].offset + tokens[open_angle].length,
+                        tokens[close_angle].offset -
+                            (tokens[open_angle].offset + tokens[open_angle].length)));
+                    const std::size_t after = NextSignificant(tokens, close_angle + 1);
+                    if (after >= tokens.size())
+                    {
+                        continue;
+                    }
+
+                    // Declaration form: `unique_ptr<T> name(new T(args))`.
+                    bool is_declaration = false;
+                    std::string_view declared_name;
+                    std::size_t open_paren = after;
+                    if (tokens[after].kind == TokenKind::Identifier && !IsWord(source, tokens[after], "new"))
+                    {
+                        const std::size_t maybe_paren = NextSignificant(tokens, after + 1);
+                        if (maybe_paren < tokens.size() && IsPunct(source, tokens[maybe_paren], "("))
+                        {
+                            is_declaration = true;
+                            declared_name =
+                                source.substr(tokens[after].offset, tokens[after].length);
+                            open_paren = maybe_paren;
+                        }
+                        else
+                        {
+                            continue;
+                        }
+                    }
+                    else if (!IsPunct(source, tokens[after], "("))
+                    {
+                        continue;
+                    }
+
+                    const std::size_t maybe_new = NextSignificant(tokens, open_paren + 1);
+                    if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new") ||
+                        IsInDirective(tokens[maybe_new].offset, directives, directive_cursor))
+                    {
+                        continue;
+                    }
+
+                    NewExpression created;
+                    if (!ParseNewExpression(tokens, source, maybe_new, created) || created.is_array)
+                    {
+                        continue;
+                    }
+
+                    const std::size_t outer_close = NextSignificant(tokens, created.end_index + 1);
+                    if (outer_close >= tokens.size() || !IsPunct(source, tokens[outer_close], ")"))
+                    {
+                        continue;
+                    }
+
+                    claimed_new.insert(maybe_new);
+                    const std::size_t fix_begin = tokens[start].offset;
+                    const std::size_t fix_end =
+                        tokens[outer_close].offset + tokens[outer_close].length;
+                    const std::string qualified_maker =
+                        (qualified ? "std::" : "") + std::string(factory.maker);
+                    const bool same_type = created.type == template_args;
+                    if (same_type)
+                    {
+                        std::string replacement;
+                        if (is_declaration)
+                        {
+                            replacement = "auto ";
+                            replacement += declared_name;
+                            replacement += " = ";
+                        }
+
+                        replacement += qualified_maker;
+                        replacement += '<';
+                        replacement += template_args;
+                        replacement += ">(";
+                        replacement += created.args;
+                        replacement += ')';
+                        Diagnostic diagnostic = MakeDiagnostic(factory.id, factory.code,
+                            std::string("use ") + qualified_maker + " instead of " +
+                                factory.smart + "(new ...)",
+                            fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
+                            {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                        // make_unique changes overload/exception behavior for
+                        // exotic types: offered as a quick fix, not in batch.
+                        diagnostic.fix_is_safe = false;
+                        diagnostic.fix_title = std::string("Replace with ") + qualified_maker + "<" +
+                            std::string(template_args) + ">(...)";
+                        diagnostics.push_back(std::move(diagnostic));
+                    }
+                    else
+                    {
+                        // `unique_ptr<Base>(new Derived)`: make_unique<Base>(args)
+                        // would build the wrong object, so only the direction.
+                        diagnostics.push_back(MakeDiagnostic(factory.id, factory.code,
+                            std::string("use ") + qualified_maker + " instead of " +
+                                factory.smart + "(new ...)",
+                            fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
+                            {0, 0, std::string()}, false));
+                    }
+                }
+            }
+        }
+
+        if (RuleEnabled("cpp/modernize-smart-ptr", m_options.modernize_smart_ptr))
+        {
+            std::size_t directive_cursor = 0;
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                if (!IsWord(source, tokens[i], "reset") ||
+                    IsInDirective(tokens[i].offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                // `holder.reset(new T(args))`: unique vs shared is unknowable
+                // here, so the direction only, without a fix.
+                const std::size_t dot = PrevSignificant(tokens, i);
+                if (dot >= tokens.size() || !IsPunct(source, tokens[dot], "."))
+                {
+                    continue;
+                }
+
+                const std::size_t holder = PrevSignificant(tokens, dot);
+                if (holder >= tokens.size() || tokens[holder].kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                const std::size_t open = NextSignificant(tokens, i + 1);
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                {
+                    continue;
+                }
+
+                const std::size_t maybe_new = NextSignificant(tokens, open + 1);
+                if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new"))
+                {
+                    continue;
+                }
+
+                NewExpression created;
+                if (!ParseNewExpression(tokens, source, maybe_new, created) || created.is_array)
+                {
+                    continue;
+                }
+
+                const std::size_t close = NextSignificant(tokens, created.end_index + 1);
+                if (close >= tokens.size() || !IsPunct(source, tokens[close], ")"))
+                {
+                    continue;
+                }
+
+                claimed_new.insert(maybe_new);
+                const std::size_t begin = tokens[holder].offset;
+                const std::size_t end = tokens[close].offset + tokens[close].length;
+                diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeSmartPtr,
+                    "cpp/modernize-smart-ptr",
+                    "resetting a smart pointer with new; assign std::make_unique/std::make_shared instead",
+                    begin, end - begin, lines.Lookup(begin), {0, 0, std::string()}, false));
+            }
+
+            for (std::size_t m = 0; m < tokens.size(); ++m)
+            {
+                // Ownership taken in a raw pointer: `T *name = new T(args)`.
+                if (!IsWord(source, tokens[m], "new") ||
+                    IsInDirective(tokens[m].offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                const std::size_t equal = PrevSignificant(tokens, m);
+                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
+                {
+                    continue;
+                }
+
+                const std::size_t name = PrevSignificant(tokens, equal);
+                if (name >= tokens.size() || tokens[name].kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                const std::size_t star = PrevSignificant(tokens, name);
+                if (star >= tokens.size() || !IsPunct(source, tokens[star], "*"))
+                {
+                    continue;
+                }
+
+                // The declared type: identifiers, `::`, cv-qualifiers and
+                // simple `<...>` only. Anything else (notably a second `*`,
+                // `&`, or an expression) is not a plain owning declaration.
+                std::size_t run_begin = star;
+                {
+                    std::size_t cursor = PrevSignificant(tokens, star);
+                    std::size_t angle_depth = 0;
+                    bool ok = false;
+                    while (cursor < tokens.size())
+                    {
+                        const auto& token = tokens[cursor];
+                        if (token.kind == TokenKind::Identifier || IsWord(source, token, "const") ||
+                            IsWord(source, token, "volatile"))
+                        {
+                            ok = true;
+                            run_begin = cursor;
+                            cursor = PrevSignificant(tokens, cursor);
+                            continue;
+                        }
+
+                        if (IsPunct(source, token, "::"))
+                        {
+                            run_begin = cursor;
+                            cursor = PrevSignificant(tokens, cursor);
+                            continue;
+                        }
+
+                        if (IsPunct(source, token, ">"))
+                        {
+                            ++angle_depth;
+                            run_begin = cursor;
+                            cursor = PrevSignificant(tokens, cursor);
+                            continue;
+                        }
+
+                        if (IsPunct(source, token, "<"))
+                        {
+                            if (angle_depth == 0)
+                            {
+                                break;
+                            }
+
+                            --angle_depth;
+                            run_begin = cursor;
+                            cursor = PrevSignificant(tokens, cursor);
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    if (!ok || angle_depth != 0)
+                    {
+                        continue;
+                    }
+                }
+
+                // A boundary must precede the type: `;` `{` `}` `(` `,` `:`
+                // or a control keyword. Anything else (an identifier, `*`,
+                // `&`, `>`, `]`, `)`) continues a larger declarator or an
+                // expression, so this is not a declaration.
+                const std::size_t before = PrevSignificant(tokens, run_begin);
+                bool boundary = before >= tokens.size();
+                if (!boundary && before < tokens.size())
+                {
+                    if (tokens[before].kind == TokenKind::Punctuation)
+                    {
+                        const auto text = source.substr(tokens[before].offset, tokens[before].length);
+                        boundary = text == ";" || text == "{" || text == "}" || text == "(" ||
+                            text == "," || text == ":";
+                    }
+                    else if (tokens[before].kind == TokenKind::Identifier)
+                    {
+                        const auto text = source.substr(tokens[before].offset, tokens[before].length);
+                        boundary = text == "if" || text == "else" || text == "for" || text == "while" ||
+                            text == "do" || text == "case" || text == "return";
+                    }
+                }
+
+                if (!boundary)
+                {
+                    continue;
+                }
+
+                NewExpression created;
+                if (!ParseNewExpression(tokens, source, m, created) || created.is_array)
+                {
+                    continue;
+                }
+
+                claimed_new.insert(m);
+                const std::size_t fix_begin = tokens[run_begin].offset;
+                const std::size_t fix_end =
+                    tokens[created.end_index].offset + tokens[created.end_index].length;
+                const auto declared_type = Trimmed(source.substr(fix_begin,
+                    tokens[star].offset - fix_begin));
+                const auto variable =
+                    source.substr(tokens[name].offset, tokens[name].length);
+                const bool same_type = created.type == declared_type;
+                const bool has_constexpr = declared_type.find("constexpr") != std::string_view::npos;
+                const bool is_builtin_new =
+                    created.type == "int" || created.type == "char" || created.type == "short" ||
+                    created.type == "long" || created.type == "float" || created.type == "double" ||
+                    created.type == "bool" || created.type == "unsigned" || created.type == "signed";
+                // `new T` without parens leaves scalars uninitialized while
+                // `make_unique<T>()` value-initializes: only class types get
+                // the fix there. `Base* p = new Derived` would build the wrong
+                // object; constexpr cannot call make_unique here either.
+                const bool fixable =
+                    same_type && !has_constexpr && (created.has_parens || !is_builtin_new);
+                if (fixable)
+                {
+                    const bool is_const = declared_type.find("const") != std::string_view::npos;
+                    std::string replacement(is_const ? "const auto " : "auto ");
+                    replacement += variable;
+                    replacement += " = std::make_unique<";
+                    replacement += created.type;
+                    replacement += ">(";
+                    replacement += created.args;
+                    replacement += ')';
+                    Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeSmartPtr,
+                        "cpp/modernize-smart-ptr",
+                        "ownership held in raw pointer '" + std::string(variable) +
+                            "'; use std::unique_ptr",
+                        fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
+                        {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                    diagnostic.fix_is_safe = false;
+                    diagnostic.fix_title =
+                        "Use std::make_unique for '" + std::string(variable) + '\'';
+                    diagnostics.push_back(std::move(diagnostic));
+                }
+                else
+                {
+                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeSmartPtr,
+                        "cpp/modernize-smart-ptr",
+                        "ownership held in raw pointer '" + std::string(variable) +
+                            "'; use a smart pointer",
+                        fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
+                        {0, 0, std::string()}, false));
+                }
+            }
+        }
+
+        if (RuleEnabled("cpp/no-new-delete", m_options.no_new_delete))
+        {
+            std::size_t directive_cursor = 0;
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                const auto& token = tokens[i];
+                const bool is_new = token.tok == Tok::KwNew ||
+                    (token.kind == TokenKind::Identifier &&
+                    source.substr(token.offset, token.length) == "new");
+                const bool is_delete = !is_new &&
+                    (token.tok == Tok::KwDelete ||
+                    (token.kind == TokenKind::Identifier &&
+                    source.substr(token.offset, token.length) == "delete"));
+                if ((!is_new && !is_delete) ||
+                    IsInDirective(token.offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                // `operator new` / `operator delete` overloads are the
+                // customization point, not manual memory management.
+                const std::size_t previous = PrevSignificant(tokens, i);
+                if (previous < tokens.size() && IsWord(source, tokens[previous], "operator"))
+                {
+                    continue;
+                }
+
+                if (is_new)
+                {
+                    // Placement-new is an allocator building block, and a
+                    // claimed `new` already has a better rule on it.
+                    const std::size_t next = NextSignificant(tokens, i + 1);
+                    if (next < tokens.size() && IsPunct(source, tokens[next], "("))
+                    {
+                        continue;
+                    }
+
+                    if (claimed_new.contains(i))
+                    {
+                        continue;
+                    }
+
+                    diagnostics.push_back(MakeDiagnostic(RuleId::NoNewDelete, "cpp/no-new-delete",
+                        "direct use of 'new'; prefer RAII (std::make_unique, containers, values)",
+                        token.offset, token.length, lines.Lookup(token.offset),
+                        {0, 0, std::string()}, false));
+                }
+                else
+                {
+                    std::size_t end = i;
+                    const std::size_t maybe_bracket = NextSignificant(tokens, i + 1);
+                    if (maybe_bracket < tokens.size() && IsPunct(source, tokens[maybe_bracket], "["))
+                    {
+                        const std::size_t close = MatchBracket(tokens, source, maybe_bracket, "[", "]");
+                        if (close < tokens.size())
+                        {
+                            end = close;
+                        }
+                    }
+
+                    const std::size_t length =
+                        tokens[end].offset + tokens[end].length - token.offset;
+                    diagnostics.push_back(MakeDiagnostic(RuleId::NoNewDelete, "cpp/no-new-delete",
+                        "direct use of 'delete'; ownership belongs in a smart pointer",
+                        token.offset, length, lines.Lookup(token.offset),
+                        {0, 0, std::string()}, false));
+                }
+            }
+        }
+
+        if (RuleEnabled("cpp/modernize-emplace", m_options.modernize_emplace))
+        {
+            std::size_t directive_cursor = 0;
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                if (tokens[i].kind != TokenKind::Punctuation ||
+                    IsInDirective(tokens[i].offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                const auto dot = source.substr(tokens[i].offset, tokens[i].length);
+                if (dot != "." && dot != "->")
+                {
+                    continue;
+                }
+
+                const std::size_t method = NextSignificant(tokens, i + 1);
+                if (method >= tokens.size() || tokens[method].kind != TokenKind::Identifier)
+                {
+                    continue;
+                }
+
+                const auto method_name = source.substr(tokens[method].offset, tokens[method].length);
+                std::string_view emplacer;
+                if (method_name == "push_back")
+                {
+                    emplacer = "emplace_back";
+                }
+                else if (method_name == "push_front")
+                {
+                    emplacer = "emplace_front";
+                }
+                else
+                {
+                    continue;
+                }
+
+                const std::size_t open = NextSignificant(tokens, method + 1);
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                {
+                    continue;
+                }
+
+                const std::size_t first = NextSignificant(tokens, open + 1);
+                if (first >= tokens.size())
+                {
+                    continue;
+                }
+
+                std::string_view inner;
+                std::size_t fix_end = tokens.size();
+                if (IsPunct(source, tokens[first], "{"))
+                {
+                    // `v.push_back({a, b})` -> `v.emplace_back(a, b)`.
+                    const std::size_t close_brace = MatchBracket(tokens, source, first, "{", "}");
+                    if (close_brace >= tokens.size())
+                    {
+                        continue;
+                    }
+
+                    const std::size_t close_paren = NextSignificant(tokens, close_brace + 1);
+                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
+                    {
+                        continue;
+                    }
+
+                    const std::size_t inner_begin = tokens[first].offset + tokens[first].length;
+                    inner = Trimmed(source.substr(inner_begin, tokens[close_brace].offset - inner_begin));
+                    fix_end = tokens[close_paren].offset + tokens[close_paren].length;
+                }
+                else
+                {
+                    // `v.push_back(T(a, b))` -> `v.emplace_back(a, b)`: a type
+                    // run (identifiers, `::`, balanced `<...>`) then `(args)`.
+                    std::size_t cursor = first;
+                    std::size_t angle_depth = 0;
+                    bool saw_ident = false;
+                    bool shape_ok = true;
+                    while (cursor < tokens.size())
+                    {
+                        const auto& token = tokens[cursor];
+                        if (token.kind == TokenKind::Identifier)
+                        {
+                            saw_ident = true;
+                            cursor = NextSignificant(tokens, cursor + 1);
+                            continue;
+                        }
+
+                        if (token.kind != TokenKind::Punctuation)
+                        {
+                            shape_ok = false;
+                            break;
+                        }
+
+                        const auto text = source.substr(token.offset, token.length);
+                        if (text == "::")
+                        {
+                            cursor = NextSignificant(tokens, cursor + 1);
+                            continue;
+                        }
+
+                        if (text == "<")
+                        {
+                            ++angle_depth;
+                            cursor = NextSignificant(tokens, cursor + 1);
+                            continue;
+                        }
+
+                        if (text == ">")
+                        {
+                            if (angle_depth == 0)
+                            {
+                                shape_ok = false;
+                                break;
+                            }
+
+                            --angle_depth;
+                            cursor = NextSignificant(tokens, cursor + 1);
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    if (!shape_ok || !saw_ident || angle_depth != 0 || cursor >= tokens.size() ||
+                        !IsPunct(source, tokens[cursor], "("))
+                    {
+                        continue;
+                    }
+
+                    // A lone `push_back(x)` is not a construction.
+                    if (cursor == first)
+                    {
+                        continue;
+                    }
+
+                    // `push_back(new X)` stays with the memory rules.
+                    if (IsWord(source, tokens[first], "new"))
+                    {
+                        continue;
+                    }
+
+                    const std::size_t close_ctor = MatchBracket(tokens, source, cursor, "(", ")");
+                    if (close_ctor >= tokens.size())
+                    {
+                        continue;
+                    }
+
+                    const std::size_t close_paren = NextSignificant(tokens, close_ctor + 1);
+                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
+                    {
+                        continue;
+                    }
+
+                    const std::size_t inner_begin =
+                        tokens[cursor].offset + tokens[cursor].length;
+                    inner = Trimmed(source.substr(inner_begin, tokens[close_ctor].offset - inner_begin));
+                    fix_end = tokens[close_paren].offset + tokens[close_paren].length;
+                }
+
+                const std::size_t fix_begin = tokens[method].offset;
+                std::string replacement(emplacer);
+                replacement += '(';
+                replacement += inner;
+                replacement += ')';
+                Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeEmplace,
+                    "cpp/modernize-emplace",
+                    std::string("use ") + std::string(emplacer) + " instead of " +
+                        std::string(method_name) + " with a temporary",
+                    fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
+                    {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                // Explicit constructors, narrowing and initializer_list
+                // overloads differ: quick fix only.
+                diagnostic.fix_is_safe = false;
+                diagnostic.fix_title = std::string("Replace with ") + std::string(emplacer);
+                diagnostics.push_back(std::move(diagnostic));
+            }
+        }
+
+        if (RuleEnabled("cpp/modernize-structured-bindings", m_options.modernize_structured_bindings))
+        {
+            std::size_t directive_cursor = 0;
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                // `std::tie(a, b) = expr;` -> `auto [a, b] = expr;`.
+                if (!IsWord(source, tokens[i], "tie") ||
+                    IsInDirective(tokens[i].offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                std::size_t start = i;
+                const std::size_t maybe_scope = PrevSignificant(tokens, i);
+                if (maybe_scope < tokens.size() && IsPunct(source, tokens[maybe_scope], "::"))
+                {
+                    const std::size_t maybe_std = PrevSignificant(tokens, maybe_scope);
+                    if (maybe_std < tokens.size() && IsWord(source, tokens[maybe_std], "std"))
+                    {
+                        start = maybe_std;
+                    }
+                }
+
+                const std::size_t open = NextSignificant(tokens, i + 1);
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                {
+                    continue;
+                }
+
+                const std::size_t close = MatchBracket(tokens, source, open, "(", ")");
+                if (close >= tokens.size())
+                {
+                    continue;
+                }
+
+                // Bindings only: plain identifiers, at least two.
+                std::vector<std::string_view> bound;
+                bool shape_ok = true;
+                for (std::size_t k = NextSignificant(tokens, open + 1); k < close;)
+                {
+                    if (tokens[k].kind != TokenKind::Identifier)
+                    {
+                        shape_ok = false;
+                        break;
+                    }
+
+                    bound.push_back(source.substr(tokens[k].offset, tokens[k].length));
+                    const std::size_t after = NextSignificant(tokens, k + 1);
+                    if (after == close)
+                    {
+                        break;
+                    }
+
+                    if (!IsPunct(source, tokens[after], ","))
+                    {
+                        shape_ok = false;
+                        break;
+                    }
+
+                    k = NextSignificant(tokens, after + 1);
+                }
+
+                if (!shape_ok || bound.size() < 2)
+                {
+                    continue;
+                }
+
+                const std::size_t equal = NextSignificant(tokens, close + 1);
+                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
+                {
+                    continue;
+                }
+
+                // The assigned expression runs to `;` without braces.
+                const std::size_t value_begin = NextSignificant(tokens, equal + 1);
+                std::size_t semi = value_begin;
+                bool expr_ok = value_begin < tokens.size();
+                while (expr_ok && semi < tokens.size())
+                {
+                    if (tokens[semi].kind != TokenKind::Punctuation)
+                    {
+                        semi = NextSignificant(tokens, semi + 1);
+                        continue;
+                    }
+
+                    const auto text = source.substr(tokens[semi].offset, tokens[semi].length);
+                    if (text == ";")
+                    {
+                        break;
+                    }
+
+                    if (text == "{" || text == "}")
+                    {
+                        expr_ok = false;
+                        break;
+                    }
+
+                    semi = NextSignificant(tokens, semi + 1);
+                }
+
+                if (!expr_ok || semi >= tokens.size())
+                {
+                    continue;
+                }
+
+                const std::size_t fix_begin = tokens[start].offset;
+                const std::size_t fix_end = tokens[semi].offset + tokens[semi].length;
+                std::string replacement = "auto [";
+                for (std::size_t b = 0; b < bound.size(); ++b)
+                {
+                    replacement += bound[b];
+                    if (b + 1 < bound.size())
+                    {
+                        replacement += ", ";
+                    }
+                }
+
+                replacement += "] = ";
+                replacement += Trimmed(source.substr(tokens[value_begin].offset,
+                    tokens[semi].offset - tokens[value_begin].offset));
+                replacement += ';';
+                Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeStructuredBindings,
+                    "cpp/modernize-structured-bindings",
+                    "unpack with a structured binding instead of std::tie", fix_begin,
+                    fix_end - fix_begin, lines.Lookup(fix_begin),
+                    {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                // `tie` assigns to existing variables while `auto [...]`
+                // declares copies: the user confirms the change.
+                diagnostic.fix_is_safe = false;
+                diagnostic.fix_title = "Replace std::tie with a structured binding";
+                diagnostics.push_back(std::move(diagnostic));
+            }
+
+            // Repeated `.first` / `.second` on the same object: suggest one
+            // decomposition. Reported once per object, on the second access.
+            {
+                std::unordered_map<std::string_view, bool> saw_first;
+                std::unordered_map<std::string_view, bool> saw_second;
+                std::unordered_set<std::string_view> reported;
+                std::size_t cursor = 0;
+                for (std::size_t i = 0; i < tokens.size(); ++i)
+                {
+                    if (tokens[i].kind != TokenKind::Punctuation ||
+                        IsInDirective(tokens[i].offset, directives, cursor))
+                    {
+                        continue;
+                    }
+
+                    const auto access = source.substr(tokens[i].offset, tokens[i].length);
+                    if (access != "." && access != "->")
+                    {
+                        continue;
+                    }
+
+                    const std::size_t member = NextSignificant(tokens, i + 1);
+                    if (member >= tokens.size() || tokens[member].kind != TokenKind::Identifier)
+                    {
+                        continue;
+                    }
+
+                    const auto member_name =
+                        source.substr(tokens[member].offset, tokens[member].length);
+                    const bool is_first = member_name == "first";
+                    if (!is_first && member_name != "second")
+                    {
+                        continue;
+                    }
+
+                    const std::size_t object = PrevSignificant(tokens, i);
+                    if (object >= tokens.size() || tokens[object].kind != TokenKind::Identifier)
+                    {
+                        continue;
+                    }
+
+                    const auto name = source.substr(tokens[object].offset, tokens[object].length);
+                    if (is_first)
+                    {
+                        saw_first[name] = true;
+                    }
+                    else
+                    {
+                        saw_second[name] = true;
+                    }
+
+                    const bool both = saw_first.contains(name) && saw_second.contains(name);
+                    if (!both || reported.contains(name))
+                    {
+                        continue;
+                    }
+
+                    reported.insert(name);
+                    const std::size_t begin = tokens[object].offset;
+                    const std::size_t end = tokens[member].offset + tokens[member].length;
+                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeStructuredBindings,
+                        "cpp/modernize-structured-bindings",
+                        "member access to '" + std::string(name) +
+                            ".first/.second; consider a structured binding",
+                        begin, end - begin, lines.Lookup(begin), {0, 0, std::string()}, false));
+                }
+            }
+        }
+
+        if (RuleEnabled("cpp/modernize-algorithms", m_options.modernize_algorithms))
+        {
+            std::size_t directive_cursor = 0;
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                if (!IsWord(source, tokens[i], "for") ||
+                    IsInDirective(tokens[i].offset, directives, directive_cursor))
+                {
+                    continue;
+                }
+
+                const std::size_t open = NextSignificant(tokens, i + 1);
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                {
+                    continue;
+                }
+
+                const std::size_t close = MatchBracket(tokens, source, open, "(", ")");
+                if (close >= tokens.size())
+                {
+                    continue;
+                }
+
+                // Range-based `for` has a top-level `:` and no `;`.
+                bool has_colon = false;
+                bool has_semi = false;
+                {
+                    std::size_t depth = 0;
+                    for (std::size_t k = open; k <= close; ++k)
+                    {
+                        if (tokens[k].kind != TokenKind::Punctuation)
+                        {
+                            continue;
+                        }
+
+                        const auto text = source.substr(tokens[k].offset, tokens[k].length);
+                        if (text == "(" || text == "[" || text == "{")
+                        {
+                            ++depth;
+                        }
+                        else if (text == ")" || text == "]" || text == "}")
+                        {
+                            --depth;
+                        }
+                        else if (depth == 1 && text == ":")
+                        {
+                            has_colon = true;
+                        }
+                        else if (depth == 1 && text == ";")
+                        {
+                            has_semi = true;
+                        }
+                    }
+                }
+
+                const bool is_range_for = has_colon && !has_semi;
+                // Loop variable: last identifier before the `:` of a range-for.
+                std::string_view loop_variable;
+                if (is_range_for)
+                {
+                    for (std::size_t k = open; k <= close; ++k)
+                    {
+                        if (tokens[k].kind == TokenKind::Identifier)
+                        {
+                            loop_variable =
+                                source.substr(tokens[k].offset, tokens[k].length);
+                        }
+                        else if (tokens[k].kind == TokenKind::Punctuation &&
+                            source.substr(tokens[k].offset, tokens[k].length) == ":")
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                const std::size_t body_begin = NextSignificant(tokens, close + 1);
+                if (body_begin >= tokens.size())
+                {
+                    continue;
+                }
+
+                std::size_t body_end = tokens.size();
+                if (IsPunct(source, tokens[body_begin], "{"))
+                {
+                    body_end = MatchBracket(tokens, source, body_begin, "{", "}");
+                    if (body_end >= tokens.size())
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    // Single-statement body: runs to `;` at nesting depth 0.
+                    std::size_t paren = 0;
+                    std::size_t bracket = 0;
+                    std::size_t brace = 0;
+                    for (std::size_t k = body_begin; k < tokens.size(); ++k)
+                    {
+                        if (tokens[k].kind != TokenKind::Punctuation)
+                        {
+                            continue;
+                        }
+
+                        const auto text = source.substr(tokens[k].offset, tokens[k].length);
+                        if (text == "(")
+                        {
+                            ++paren;
+                        }
+                        else if (text == ")")
+                        {
+                            if (paren == 0)
+                            {
+                                break;
+                            }
+
+                            --paren;
+                        }
+                        else if (text == "[")
+                        {
+                            ++bracket;
+                        }
+                        else if (text == "]" && bracket > 0)
+                        {
+                            --bracket;
+                        }
+                        else if (text == "{")
+                        {
+                            ++brace;
+                        }
+                        else if (text == "}" && brace > 0)
+                        {
+                            --brace;
+                        }
+                        else if (text == ";" && paren == 0 && bracket == 0 && brace == 0)
+                        {
+                            body_end = k;
+                            break;
+                        }
+                    }
+
+                    if (body_end >= tokens.size())
+                    {
+                        continue;
+                    }
+                }
+
+                bool has_plus_equal = false;
+                bool plus_equal_on_loop_variable = false;
+                bool has_if = false;
+                bool has_increment = false;
+                bool has_push_back = false;
+                bool has_escape = false;
+                for (std::size_t k = body_begin; k <= body_end && k < tokens.size(); ++k)
+                {
+                    if (tokens[k].kind == TokenKind::Identifier)
+                    {
+                        const auto text = source.substr(tokens[k].offset, tokens[k].length);
+                        has_if = has_if || text == "if";
+                        has_push_back = has_push_back || text == "push_back";
+                        has_escape = has_escape || text == "break" || text == "return" ||
+                            text == "goto" || text == "throw";
+                    }
+                    else if (tokens[k].kind == TokenKind::Punctuation)
+                    {
+                        const auto text = source.substr(tokens[k].offset, tokens[k].length);
+                        if (text == "++" || text == "--")
+                        {
+                            has_increment = true;
+                        }
+                        else if (text == "+=")
+                        {
+                            has_plus_equal = true;
+                            const std::size_t target = PrevSignificant(tokens, k);
+                            if (target < tokens.size() && !loop_variable.empty() &&
+                                IsWord(source, tokens[target], loop_variable))
+                            {
+                                plus_equal_on_loop_variable = true;
+                            }
+                        }
+                    }
+                }
+
+                if (has_escape)
+                {
+                    continue;
+                }
+
+                const std::size_t loop_begin = tokens[i].offset;
+                const std::size_t loop_end =
+                    tokens[body_end].offset + tokens[body_end].length;
+                const std::size_t loop_length = loop_end - loop_begin;
+                if (is_range_for && has_plus_equal && !plus_equal_on_loop_variable)
+                {
+                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
+                        "cpp/modernize-algorithms",
+                        "loop accumulates a value; consider std::accumulate", loop_begin,
+                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                }
+
+                if (has_if && has_push_back)
+                {
+                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
+                        "cpp/modernize-algorithms",
+                        "conditional push_back in a loop; consider std::copy_if", loop_begin,
+                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                }
+                else if (has_if && has_increment)
+                {
+                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
+                        "cpp/modernize-algorithms",
+                        "conditional increment in a loop; consider std::count_if", loop_begin,
+                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                }
             }
         }
 

@@ -87,6 +87,29 @@ namespace
                 continue;
             }
 
+            // Purely syntactic rules run in RuleEngine::Analyze and never
+            // request semantic models.
+            const bool syntax_only = rule.id == RuleId::ModernizeEmplace ||
+                rule.id == RuleId::ModernizeMakeUnique || rule.id == RuleId::ModernizeMakeShared ||
+                rule.id == RuleId::ModernizeSmartPtr || rule.id == RuleId::NoNewDelete ||
+                rule.id == RuleId::ModernizeAlgorithms || rule.id == RuleId::ModernizeStructuredBindings;
+            if (syntax_only)
+            {
+                SCOPED_TRACE(rule.code);
+                Workspace workspace;
+                auto id = workspace.Open("requirements.cpp",
+                    std::make_shared<const std::string>("int f(int x) { return x; }\n"));
+                ASSERT_TRUE(id);
+                auto options = DisabledRules();
+                options.overrides.push_back({std::string(rule.code), true, rule.default_severity});
+                AnalysisContext context(workspace.Snapshot(), *id);
+                (void) AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+                EXPECT_EQ(context.Snapshot().Metrics().bind_count, 0);
+                EXPECT_EQ(context.Snapshot().Metrics().type_count, 0);
+                EXPECT_EQ(context.Snapshot().Metrics().project_index_count, 0);
+                continue;
+            }
+
             SCOPED_TRACE(rule.code);
             Workspace workspace;
             auto id = workspace.Open("requirements.cpp",
@@ -98,7 +121,8 @@ namespace
             (void) AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
             const bool typed = rule.id == RuleId::NoImplicitBoolConversion ||
                 rule.id == RuleId::ModernizeRangeLoop || rule.id == RuleId::ModernizeLoopConvert ||
-                rule.id == RuleId::ModernizeConst || rule.id == RuleId::ModernizeConstexpr;
+                rule.id == RuleId::ModernizeConst || rule.id == RuleId::ModernizeConstexpr ||
+                rule.id == RuleId::ModernizeSpan || rule.id == RuleId::ModernizeAttributes;
             EXPECT_EQ(context.Snapshot().Metrics().bind_count, 1);
             EXPECT_EQ(context.Snapshot().Metrics().type_count, typed ? 1 : 0);
             EXPECT_EQ(context.Snapshot().Metrics().project_index_count, 0);

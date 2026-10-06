@@ -141,6 +141,83 @@
             "error"
           ]
         },
+        "cpp/modernize-emplace": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-make-unique": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-make-shared": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-smart-ptr": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/no-new-delete": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-span": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-string-view": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-algorithms": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-structured-bindings": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-attributes": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "cpp/modernize-consteval-constexpr": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "api/virtual-destructor": {
           "enum": [
             "off",

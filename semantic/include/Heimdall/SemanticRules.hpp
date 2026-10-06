@@ -88,6 +88,31 @@ namespace heimdall
         // is a quick fix only.
         static std::vector<Diagnostic> AnalyzeConstexpr(const FlowModel& flow);
 
+        // cpp/modernize-span: consecutive function parameters where the first is
+        // a pointer and the second is an integer size (`data`, `size`, `count`,
+        // ...). The fix (quick fix only: it changes the signature) merges them
+        // into `std::span<T>`. Virtuals, overrides, templates and `void*`
+        // stay silent, as do pairs the model cannot type.
+        static std::vector<Diagnostic> AnalyzeSpan(const TypeModel& types);
+
+        // cpp/modernize-string-view: a `const std::string` parameter taken by
+        // value: every call copies. The fix (quick fix only: lifetime and
+        // overload effects) takes `std::string_view`. Plain by-value
+        // `std::string` (the sink idiom) and references stay silent.
+        static std::vector<Diagnostic> AnalyzeStringView(const SemanticModel& model);
+
+        // cpp/modernize-attributes: a query-like function (get/is/has/...) with
+        // a known non-void return type and no `[[nodiscard]]`. The fix (quick
+        // fix only) adds the attribute. Constructors, destructors, operators,
+        // templates and `main` stay silent.
+        static std::vector<Diagnostic> AnalyzeAttributes(const TypeModel& types);
+
+        // cpp/modernize-consteval-constexpr: a namespace-scope `const T x = c;`
+        // of arithmetic type with a literal initializer, where `constexpr`
+        // keeps linkage and value. The fix replaces `const` and is safe in
+        // batch. Suggesting `consteval` needs call-graph proof and stays out.
+        static std::vector<Diagnostic> AnalyzeConstevalConstexpr(const SemanticModel& model);
+
         // cpp/include-what-you-use: a name the file uses whose declaration comes
         // from a header the file only reaches through another include (a project
         // header found through the HeaderSummary of each header in the include

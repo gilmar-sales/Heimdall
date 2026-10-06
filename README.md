@@ -184,7 +184,17 @@ outside the extension) still needs to be closed before relinking.
   than `0`/`1` (any base or suffix spelling) outside comments, literals and
   directives (no autofix); `cpp/sort-includes` (opt-in) flags include blocks out of the
   configured order (`include-order` in `.heimdall.json`) and safely
-  reorders each block in batch; `doc/require-comment` and `doc/doxygen-style`
+  reorders each block in batch; `cpp/modernize-emplace` rewrites
+  `push_back(T(...))`/`push_back({...})` as `emplace_back(...)` (quick fix);
+  `cpp/modernize-make-unique`/`cpp/modernize-make-shared` rewrite
+  `unique_ptr<T>(new T(...))` as `make_unique<T>(...)`; `cpp/modernize-smart-ptr`
+  rewrites `T* p = new T(...)` as `make_unique` (quick fixes);
+  `cpp/no-new-delete` flags remaining direct `new`/`delete` (no fix; placement
+  new and `operator new`/`delete` stay out); `cpp/modernize-structured-bindings`
+  rewrites `std::tie(a, b) = expr` as `auto [a, b] = expr` and suggests
+  bindings for repeated `.first`/`.second` (no fix there);
+  `cpp/modernize-algorithms` suggests `accumulate`/`count_if`/`copy_if` for
+  matching loops (no fix); `doc/require-comment` and `doc/doxygen-style`
   (both opt-in, `--semantic`) require a Doxygen comment on classes, enums and
   functions, and check it against good practice: a one-sentence `@brief` apart from
   the details, an `@param` per named parameter, `@tparam` per template parameter,
@@ -199,6 +209,11 @@ outside the extension) still needs to be closed before relinking.
   run with `--semantic --compile-commands ...`. It only covers basic declarations
   in function bodies (built-in/current-file types); complex declarators, parameters,
   captures, shadowing and include-provided types are outside the current subset.
+  With `--semantic`, the modernize set also runs: `cpp/modernize-span` (pointer +
+  size parameters to `std::span`), `cpp/modernize-string-view` (`const std::string`
+  by value to `std::string_view`), `cpp/modernize-attributes` (`[[nodiscard]]` for
+  query functions) as editor quick fixes, and `cpp/modernize-consteval-constexpr`
+  (namespace constants to `constexpr`, safe in `--fix`).
 - **Formatter foundation**: brace-depth indentation using lexer tokens, configurable
   spaces/tabs, with scope-aware dedents for access specifiers (`public:`),
   switch labels (`case:`/`default:`) and goto labels, collapsing blank-line

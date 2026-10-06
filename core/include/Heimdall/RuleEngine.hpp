@@ -36,6 +36,17 @@ namespace heimdall
         ModernizeNullptr,
         NoZeroAsNull,
         ModernizeAuto,
+        ModernizeEmplace,
+        ModernizeMakeUnique,
+        ModernizeMakeShared,
+        ModernizeSmartPtr,
+        NoNewDelete,
+        ModernizeSpan,
+        ModernizeStringView,
+        ModernizeAlgorithms,
+        ModernizeStructuredBindings,
+        ModernizeAttributes,
+        ModernizeConstevalConstexpr,
         NoImplicitBoolConversion,
         ModernizeRangeLoop,
         ModernizeLoopConvert,
@@ -116,6 +127,13 @@ namespace heimdall
         bool legacy_typedef = true;
         bool todo_comment = true;
         bool magic_numbers = true;
+        bool modernize_emplace = true;
+        bool modernize_make_unique = true;
+        bool modernize_make_shared = true;
+        bool modernize_smart_ptr = true;
+        bool no_new_delete = true;
+        bool modernize_structured_bindings = true;
+        bool modernize_algorithms = true;
         // Opt-in: the order is a project convention, so the rule only
         // runs when enabled together with a configured order.
         bool sort_includes = false;

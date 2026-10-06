@@ -30,6 +30,7 @@ add_executable(Tests_run
   src/DesignatedInitSpec.cpp
   src/DocumentationSpec.cpp
   src/SemanticModernizeSpec.cpp
+  src/ModernizeCxxSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
   src/SemanticTyperSpec.cpp
   src/SemanticFlowSpec.cpp

@@ -162,7 +162,7 @@ Adotado: **motor próprio com política `Unknown`**.
 
 ## 13. Estado da implementação
 
-**F1 (Binder): concluída.** Regras entregues: `cpp/modernize-override`, `cpp/modernize-nullptr`, `cpp/no-zero-as-null` e `cpp/modernize-auto`.
+**F1 (Binder): concluída.** Regras entregues: `cpp/modernize-override`, `cpp/modernize-nullptr`, `cpp/no-zero-as-null`, `cpp/modernize-auto`, `cpp/modernize-string-view` e `cpp/modernize-consteval-constexpr` (mais as sintáticas `cpp/modernize-emplace`, `cpp/modernize-make-unique`, `cpp/modernize-make-shared`, `cpp/modernize-smart-ptr`, `cpp/no-new-delete`, `cpp/modernize-algorithms` e `cpp/modernize-structured-bindings`, que rodam em `RuleEngine::Analyze` sem modelo).
 
 | Peça | Onde |
 |---|---|
@@ -189,7 +189,7 @@ Decisões e limites desta fase:
 - Um conflito entre regras foi resolvido de propósito: `modernize-auto` não reporta cast de constante nula, porque depois do fix de `modernize-nullptr` não sobraria nada para o `auto` deduzir.
 - Ainda não há reuso incremental por `TopLevelItem` (seção 6) nem `HeaderSummary` (seção 8): o modelo é refeito a cada versão do documento, como o `ParseTree`.
 
-**F2 (Typer): concluída.** Regras entregues: `cpp/no-implicit-bool-conversion`, `cpp/modernize-range-loop` e `cpp/modernize-loop-convert`.
+**F2 (Typer): concluída.** Regras entregues: `cpp/no-implicit-bool-conversion`, `cpp/modernize-range-loop`, `cpp/modernize-loop-convert`, `cpp/modernize-span` e `cpp/modernize-attributes`.
 
 | Peça | Onde |
 |---|---|

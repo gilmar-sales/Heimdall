@@ -288,14 +288,14 @@ no caminho real de análise, equivalência funcional e validação do custo.
 
 ## 9. Entrega: seleção antecipada e adaptação semântica
 
-Implementadas as partes de B/C relativas aos 19 entry points de `SemanticRules`.
+Implementadas as partes de B/C relativas aos 23 entry points de `SemanticRules`.
 Os checklists das etapas continuam descrevendo a migração completa de todas as
 famílias; não significam que profiles, scheduler e cancelamento estejam concluídos.
 
 | Requisitos | Regras adaptadas (códigos existentes) |
 |---|---|
-| Binding | `cpp/modernize-override`, `cpp/modernize-nullptr`, `cpp/no-zero-as-null`, `cpp/modernize-auto`, `api/virtual-destructor`, `api/explicit-constructor`, `api/overload-hiding`, `api/virtual-call-in-constructor`, `cpp/designated-init-order`, `cpp/no-integer-to-pointer` |
-| Binding + typing | `cpp/no-implicit-bool-conversion`, `cpp/modernize-range-loop`, `cpp/modernize-loop-convert` |
+| Binding | `cpp/modernize-override`, `cpp/modernize-nullptr`, `cpp/no-zero-as-null`, `cpp/modernize-auto`, `cpp/modernize-string-view`, `cpp/modernize-consteval-constexpr`, `api/virtual-destructor`, `api/explicit-constructor`, `api/overload-hiding`, `api/virtual-call-in-constructor`, `cpp/designated-init-order`, `cpp/no-integer-to-pointer` |
+| Binding + typing | `cpp/no-implicit-bool-conversion`, `cpp/modernize-range-loop`, `cpp/modernize-loop-convert`, `cpp/modernize-span`, `cpp/modernize-attributes` |
 | Binding + typing + fluxo | `cpp/modernize-const`, `cpp/modernize-constexpr` |
 | Binding + contexto de projeto | `cpp/modernize-final`, `cpp/include-what-you-use` |
 | Binding + DocScope (opt-in) | `doc/require-comment`, `doc/doxygen-style` |
