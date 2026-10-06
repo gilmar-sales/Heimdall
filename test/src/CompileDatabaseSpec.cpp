@@ -115,6 +115,9 @@ TEST(CompileDatabaseSpec, FindOrNearestFallsBackToClosestDirectoryForHeaders)
 // driver was invalid and system include directories (<vector>) never resolved.
 TEST(CompileDatabaseSpec, CommandStringKeepsWindowsPathSeparators)
 {
+#if !defined(_WIN32)
+    GTEST_SKIP() << "Windows path separators require Windows std::filesystem semantics.";
+#endif
     const auto path = WriteDatabase("heimdall_compile_commands_winpath_test.json",
         R"({"directory":"C:/proj/build","file":"C:/proj/a.cpp","command":"C:\\mingw64\\bin\\g++.exe -IC:\\proj\\inc -DNAME=\\\"x\\\" -c C:\\proj\\a.cpp"})");
     auto database = heimdall::CompileDatabase::Load(path);
