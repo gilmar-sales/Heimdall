@@ -21,6 +21,10 @@ endif ()
 
 project(Heimdall VERSION 0.1.0 LANGUAGES C CXX)
 
+if (MINGW)
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+endif ()
+
 include(FetchContent)
 
 set(SIMDJSON_STATIC_REFLECTION_MODE ON CACHE STRING "Enable simdjson C++26 reflection support" FORCE)
