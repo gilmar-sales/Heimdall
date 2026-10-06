@@ -159,6 +159,52 @@ namespace heimdall
         // `final` classes and functions, lambdas and qualified calls are skipped.
         static std::vector<Diagnostic> AnalyzeVirtualCallInConstructor(const SemanticModel& model);
 
+        // api/missing-nodiscard: a function returning a resource-like type
+        // (pointer, class, library type or enum) whose name is not already a
+        // query covered by cpp/modernize-attributes and that lacks
+        // `[[nodiscard]]`. Query-like names stay with the attributes rule so the
+        // two rules never report the same declaration. The fix (quick fix only)
+        // adds the attribute.
+        static std::vector<Diagnostic> AnalyzeMissingNodiscard(const TypeModel& types);
+
+        // api/pass-by-value: a `const T&` parameter of class or library type
+        // that the body copies (`m_ = p`, `T x = p`, `: m_(p)`). Taking `T` by
+        // value and moving lets the caller move instead of always copying. The
+        // fix (quick fix only: it changes the signature) takes `T` by value.
+        static std::vector<Diagnostic> AnalyzePassByValue(const TypeModel& types);
+
+        // api/pass-by-const-reference: a by-value parameter of class or library
+        // type (cheap views like `std::string_view`/`std::span` excluded) that
+        // the body only reads. Every copy is wasted. The fix (quick fix only:
+        // it changes the signature) takes `const T&`.
+        static std::vector<Diagnostic> AnalyzePassByConstReference(const FlowModel& flow);
+
+        // api/const-correctness: a `T&` parameter that nothing modifies
+        // (suggest `const T&`) and a non-const member function with a body that
+        // provably touches no member and calls no non-const member (suggest
+        // `const`). Anything unknown keeps the rule silent. Fixes are quick
+        // fixes only.
+        static std::vector<Diagnostic> AnalyzeConstCorrectness(const FlowModel& flow);
+
+        // api/unsafe-downcast: `static_cast<Derived*>(base)` or
+        // `static_cast<Derived&>(base)` where the target class derives from the
+        // source class. The cast is unchecked: a wrong dynamic type is undefined
+        // behavior. No fix: `dynamic_cast` needs a polymorphic type and the
+        // author decides.
+        static std::vector<Diagnostic> AnalyzeUnsafeDowncast(const TypeModel& types);
+
+        // api/slicing: an object of a derived class stored by value in a base
+        // variable (`Base b = derived;`, `b = derived;`) or returned by value as
+        // a base. The derived part is lost. No fix: the author decides between
+        // a reference, a pointer or a deliberate slice.
+        static std::vector<Diagnostic> AnalyzeSlicing(const TypeModel& types);
+
+        // api/implicit-conversion: a conversion operator (`operator T()`) that
+        // is not `explicit`. Single-argument constructors are
+        // api/explicit-constructor's. No fix: removing the operator changes the
+        // interface and the replacement depends on intent.
+        static std::vector<Diagnostic> AnalyzeImplicitConversion(const SemanticModel& model);
+
         // cpp/designated-init-order: `T{.b = 1, .a = 2}` where the members are declared
         // `a` then `b`. C++20 requires the declaration order. Needs the class to be
         // defined in this file with no bases; silent for anything unresolved. The quick

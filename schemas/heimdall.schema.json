@@ -225,6 +225,55 @@
             "error"
           ]
         },
+        "api/missing-nodiscard": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/pass-by-value": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/pass-by-const-reference": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/const-correctness": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/unsafe-downcast": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/slicing": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
+        "api/implicit-conversion": {
+          "enum": [
+            "off",
+            "warning",
+            "error"
+          ]
+        },
         "api/explicit-constructor": {
           "enum": [
             "off",

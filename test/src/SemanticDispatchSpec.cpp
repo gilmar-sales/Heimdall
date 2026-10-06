@@ -122,7 +122,10 @@ namespace
             const bool typed = rule.id == RuleId::NoImplicitBoolConversion ||
                 rule.id == RuleId::ModernizeRangeLoop || rule.id == RuleId::ModernizeLoopConvert ||
                 rule.id == RuleId::ModernizeConst || rule.id == RuleId::ModernizeConstexpr ||
-                rule.id == RuleId::ModernizeSpan || rule.id == RuleId::ModernizeAttributes;
+                rule.id == RuleId::ModernizeSpan || rule.id == RuleId::ModernizeAttributes ||
+                rule.id == RuleId::ApiMissingNodiscard || rule.id == RuleId::ApiPassByValue ||
+                rule.id == RuleId::ApiPassByConstReference || rule.id == RuleId::ApiConstCorrectness ||
+                rule.id == RuleId::ApiUnsafeDowncast || rule.id == RuleId::ApiSlicing;
             EXPECT_EQ(context.Snapshot().Metrics().bind_count, 1);
             EXPECT_EQ(context.Snapshot().Metrics().type_count, typed ? 1 : 0);
             EXPECT_EQ(context.Snapshot().Metrics().project_index_count, 0);

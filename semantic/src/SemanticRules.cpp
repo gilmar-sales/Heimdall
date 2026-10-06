@@ -2334,7 +2334,9 @@ namespace heimdall
                 AnalyzeConstexpr(flow), AnalyzeSpan(types), AnalyzeStringView(model), AnalyzeAttributes(types),
                 AnalyzeConstevalConstexpr(model), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
                 AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
-                AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)
+                AnalyzeMissingNodiscard(types), AnalyzePassByValue(types), AnalyzePassByConstReference(flow),
+                AnalyzeConstCorrectness(flow), AnalyzeUnsafeDowncast(types), AnalyzeSlicing(types),
+                AnalyzeImplicitConversion(model), AnalyzeDesignatedInitOrder(model), AnalyzeIntegerToPointer(model)
         })
         {
             all.insert(all.end(), part.begin(), part.end());
