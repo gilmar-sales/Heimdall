@@ -13,7 +13,7 @@ messages = [
         "initializationOptions": {"enableSemantic": True, "compileCommands": compile_commands}}},
     {"jsonrpc": "2.0", "method": "initialized", "params": {}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
-        "uri": uri, "languageId": "cpp", "version": 1, "text": "void f()\n{\nint value=NULL;\n    int unused;\n}\n"}}},
+        "uri": uri, "languageId": "cpp", "version": 1, "text": "void f()\n{\nint value=NULL;\n    int unused = NULL;\n}\n"}}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
         "uri": broken_uri, "languageId": "cpp", "version": 1,
         "text": "int broken()\n{\n    int value = 1\n    return value;\n}\n"}}},
@@ -34,6 +34,18 @@ messages = [
     {"jsonrpc": "2.0", "id": 6, "method": "shutdown", "params": {}},
     {"jsonrpc": "2.0", "method": "exit"},
 ]
+
+# Request quick fixes with the cursor away from the diagnostic's column,
+# on a clean line, and across a selection ending at the next line's start.
+for request_id, start, end in [(8, (2, 0), (2, 0)), (9, (3, 0), (3, 0)),
+                               (10, (0, 0), (0, 0)), (11, (2, 0), (3, 0)),
+                               (12, (2, 0), (3, 15))]:
+    messages.insert(-2, {"jsonrpc": "2.0", "id": request_id,
+                        "method": "textDocument/codeAction", "params": {
+                            "textDocument": {"uri": uri},
+                            "range": {"start": {"line": start[0], "character": start[1]},
+                                      "end": {"line": end[0], "character": end[1]}},
+                            "context": {"diagnostics": []}}})
 
 wire = bytearray()
 for message in messages:
@@ -63,7 +75,7 @@ diagnostics = next(item for item in responses
 codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
 assert {"cpp/modernize-const", "cpp/no-null", "semantic/no-unused-local"} <= codes, diagnostics
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
-assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused;\n}\n"
+assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused = NULL;\n}\n"
 broken = next(item for item in responses
               if item.get("method") == "textDocument/publishDiagnostics"
               and item["params"]["uri"] == broken_uri)
@@ -77,7 +89,24 @@ fix_all_texts = [e["newText"] for e in actions[0]["edit"]["changes"][uri]]
 assert "nullptr" in fix_all_texts, actions
 null_actions = [a for a in actions if a["edit"]["changes"][uri][0]["newText"] == "nullptr"]
 assert null_actions, actions
-# Line 2 is "    int unused;": (2,11) sits after "unu", so "unused" must be
+
+def quick_fixes(request_id):
+    return [a for a in next(r for r in responses if r.get("id") == request_id)["result"]
+            if a["kind"] == "quickfix"]
+
+
+line_two = quick_fixes(8)
+line_three = quick_fixes(9)
+assert line_two and line_three, (line_two, line_three)
+assert any(a["edit"]["changes"][uri][0]["newText"] == "nullptr" for a in line_two), line_two
+for expected_line, fixes in [(2, line_two), (3, line_three)]:
+    assert all(e["range"]["start"]["line"] == expected_line
+               for a in fixes for e in a["edit"]["changes"][uri]), fixes
+assert quick_fixes(10) == [], quick_fixes(10)
+assert quick_fixes(11) == line_two, quick_fixes(11)
+assert quick_fixes(3) == line_two, quick_fixes(3)
+assert {a["title"] for a in quick_fixes(12)} == {a["title"] for a in line_two + line_three}, quick_fixes(12)
+# Line 3 is "    int unused = NULL;": (3,11) sits after "unu", so "unused" must be
 # offered with a textEdit replacing just the typed prefix.
 completion = next(item for item in responses if item.get("id") == 4)["result"]
 assert completion["isIncomplete"] is False

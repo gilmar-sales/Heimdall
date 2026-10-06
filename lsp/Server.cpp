@@ -28,6 +28,8 @@ namespace heimdall::lsp
     namespace
     {
 
+        std::uint64_t PositionNumber(simdjson::dom::object position, const char* key);
+
         // Interactive handlers + two for background work (compiler probing).
         // HEIMDALL_LSP_THREADS overrides the default when set (clamped to 2..16),
         // so constrained CI boxes and large workstations can both meet <50ms.
@@ -1558,6 +1560,24 @@ namespace heimdall::lsp
             return;
         }
 
+        simdjson::dom::object params;
+        simdjson::dom::object range;
+        simdjson::dom::object start_object;
+        simdjson::dom::object end_object;
+        if (!GetObject(request, "params", params) || !GetObject(params, "range", range) ||
+            !GetObject(range, "start", start_object) || !GetObject(range, "end", end_object))
+        {
+            Respond(id, "[]");
+            return;
+        }
+
+        const auto start_line = static_cast<std::size_t>(PositionNumber(start_object, "line"));
+        auto end_line = static_cast<std::size_t>(PositionNumber(end_object, "line"));
+        if (PositionNumber(end_object, "character") == 0 && end_line > start_line)
+        {
+            --end_line;
+        }
+
         const std::string uri_string(uri);
         const auto document = GetDocument(uri_string);
         if (!document)
@@ -1661,6 +1681,16 @@ namespace heimdall::lsp
         for (const auto& diagnostic : diagnostics)
         {
             if (!diagnostic.has_fix)
+            {
+                continue;
+            }
+
+            // Filter by the diagnostic, since its fix may edit another line
+            // (for example, inserting an include for a symbol used here).
+            const auto diagnostic_start = lines->ToPosition(diagnostic.offset).line;
+            const auto diagnostic_end = lines->ToPosition(diagnostic.offset +
+                (diagnostic.length == 0 ? 0 : diagnostic.length - 1)).line;
+            if (diagnostic_start > end_line || diagnostic_end < start_line)
             {
                 continue;
             }
