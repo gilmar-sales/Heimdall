@@ -50,6 +50,122 @@ namespace
 
 } // namespace
 
+TEST(DocFix, GeneratesACompleteTemplateAndRequiresReview)
+{
+    const std::string source = "template<class T>\nT convert(T value);\n";
+    const auto diagnostics = Comments(source);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+    const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
+    EXPECT_NE(fixed.find("@brief TODO:"), std::string::npos);
+    EXPECT_NE(fixed.find("@tparam T TODO:"), std::string::npos);
+    EXPECT_NE(fixed.find("@param value TODO:"), std::string::npos);
+    EXPECT_NE(fixed.find("@return TODO:"), std::string::npos);
+    EXPECT_TRUE(Comments(fixed).empty());
+    EXPECT_TRUE(Style(fixed).empty());
+}
+
+TEST(DocFix, RepairsStyleWithoutLosingDocumentation)
+{
+    for (const std::string source : {
+        "//! @brief Runs.\nvoid run();\n",
+        "/** @brief Runs. \\note Keep this. */\nvoid run();\n",
+        "/** @brief Runs. More details. */\nvoid run();\n",
+        "/**\n * @brief Runs.\n * More details.\n */\nvoid run();\n",
+        "/// @brief Runs.\n/// More details.\nvoid run();\n",
+        "/**\n * @brief Runs\n * with input. More details.\n */\nvoid run();\n",
+        "void run(); //!< @brief Runs.\n"})
+    {
+        SCOPED_TRACE(source);
+        const auto diagnostics = Style(source);
+        ASSERT_FALSE(diagnostics.empty());
+        for (const auto& diagnostic : diagnostics)
+        {
+            ASSERT_TRUE(diagnostic.has_fix);
+            EXPECT_TRUE(diagnostic.fix_is_safe);
+        }
+        const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics);
+        EXPECT_NE(fixed, source);
+        EXPECT_TRUE(Style(fixed).empty()) << fixed;
+        EXPECT_NE(fixed.find("Runs"), std::string::npos);
+        if (source.find("More details.") != std::string::npos)
+            EXPECT_NE(fixed.find("More details."), std::string::npos);
+        if (source.find("Keep this.") != std::string::npos)
+            EXPECT_NE(fixed.find("Keep this."), std::string::npos);
+        EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(fixed, Style(fixed)), fixed);
+    }
+}
+
+TEST(DocFix, RepairsMissingAndInvalidTagsTogether)
+{
+    for (const std::string source : {
+        "/** text */\nint f(int x);\n",
+        "/** @brief */\nvoid f();\n",
+        "/** @brief Runs. @param x */\nvoid f(int x);\n",
+        "/** @brief Runs. @param old Keep prose. */\nvoid f(int x);\n",
+        "/** @brief Runs. @param x First. @param x Duplicate. */\nvoid f(int x);\n",
+        "/** @brief Runs. @param x,x Duplicate. */\nvoid f(int x);\n",
+        "/** @brief Runs. @param[in] x @return */\nint f(int x);\n",
+        "/** @brief Runs. @param */\nvoid f(int x);\n",
+        "/** @brief Runs. @return Keep prose. */\nvoid f();\n",
+        "/** @brief Runs. @return */\nint f();\n",
+        "/** @brief Runs. */\nvoid f() { throw Error{}; }\n",
+        "/** @brief Runs. @throws Error */\nvoid f();\n",
+        "/** @brief Runs. @throws */\nvoid f();\n",
+        "/** @brief Container. */\ntemplate<class T> struct Container {};\n",
+        "int f(int x); ///< @brief Calculates.\n"})
+    {
+        SCOPED_TRACE(source);
+        const auto diagnostics = Style(source);
+        ASSERT_FALSE(diagnostics.empty());
+        for (const auto& diagnostic : diagnostics)
+        {
+            EXPECT_TRUE(diagnostic.has_fix);
+            EXPECT_FALSE(diagnostic.fix_is_safe);
+        }
+        EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
+        const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
+        EXPECT_NE(fixed, source);
+        EXPECT_TRUE(Style(fixed).empty()) << fixed;
+        if (source.find("Keep prose.") != std::string::npos)
+            EXPECT_NE(fixed.find("Keep prose."), std::string::npos);
+        if (source.find("Duplicate.") != std::string::npos)
+            EXPECT_NE(fixed.find("Duplicate."), std::string::npos);
+    }
+}
+
+TEST(DocFix, PreservesCodeIndentationAndInlineCommands)
+{
+    const std::string source =
+        "//! @brief Runs.\n"
+        "//!\n"
+        "//! @code\n"
+        "//! if (ready) {\n"
+        "//!     run();\n"
+        "//! }\n"
+        "//! @endcode\n"
+        "//! @note Uses \\p ready.\n"
+        "void run();\n";
+    const auto fixed = heimdall::RuleEngine::ApplyFixes(source, Style(source));
+    EXPECT_NE(fixed.find(" *     run();"), std::string::npos);
+    EXPECT_NE(fixed.find("Uses \\p ready."), std::string::npos);
+    EXPECT_TRUE(Style(fixed).empty());
+}
+
+TEST(DocFix, PreservesIndentationCrlfAndDetachedDocumentation)
+{
+    const std::string source = "/** @file widget.hpp */\r\nstruct Widget\r\n{\r\n\tint get(int x);\r\n};\r\n";
+    const auto diagnostics = Comments(source);
+    const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
+    EXPECT_TRUE(fixed.starts_with("/** @file widget.hpp */\r\n"));
+    EXPECT_NE(fixed.find("\t * @param x"), std::string::npos);
+    EXPECT_NE(fixed.find("\t */\r\n\tint get"), std::string::npos);
+    EXPECT_TRUE(Comments(fixed).empty());
+    EXPECT_TRUE(Style(fixed).empty());
+    for (std::size_t i = 0; i < fixed.size(); ++i)
+        if (fixed[i] == '\n') EXPECT_TRUE(i > 0 && fixed[i - 1] == '\r');
+}
+
 // ---- doc/require-comment ---------------------------------------------------
 
 TEST(DocRequireComment, ReportsAnUndocumentedFunctionClassAndEnum)
@@ -64,7 +180,8 @@ TEST(DocRequireComment, ReportsAnUndocumentedFunctionClassAndEnum)
     {
         EXPECT_EQ(diagnostic.code, "doc/require-comment");
         EXPECT_EQ(diagnostic.rule, heimdall::RuleId::DocRequireComment);
-        EXPECT_FALSE(diagnostic.has_fix);
+        EXPECT_TRUE(diagnostic.has_fix);
+        EXPECT_FALSE(diagnostic.fix_is_safe);
     }
 
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "run");
@@ -496,7 +613,7 @@ TEST(DocRules, AreInTheCatalogAndOffByDefault)
     {
         ASSERT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
         EXPECT_EQ(heimdall::FindRuleByCode(code) -> category, "doc");
-        EXPECT_FALSE(heimdall::FindRuleByCode(code)->autofix);
+        EXPECT_TRUE(heimdall::FindRuleByCode(code)->autofix);
     }
 
     const std::string source = "void f(int a);\n";

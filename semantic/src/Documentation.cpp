@@ -111,6 +111,9 @@ namespace heimdall
         {
             bool present = false;
             bool qt_style = false; // `//!` or `/*! */`
+            bool trailing = false;
+            std::size_t begin = kNpos;
+            std::size_t end = 0;
             std::vector<DocLine> lines;
         };
 
@@ -141,6 +144,9 @@ namespace heimdall
 
         void AddLineComment(Doc& doc, std::string_view source, const Token& token)
         {
+            doc.begin = std::min(doc.begin, static_cast<std::size_t>(token.offset));
+            doc.end = token.offset + token.length;
+            doc.trailing = IsTrailingDoc(source.substr(token.offset, token.length));
             std::string_view text = source.substr(token.offset, token.length);
             const bool qt = text.starts_with("//!");
             if (doc.lines.empty())
@@ -159,6 +165,9 @@ namespace heimdall
 
         void AddBlockComment(Doc& doc, std::string_view source, const Token& token)
         {
+            doc.begin = token.offset;
+            doc.end = token.offset + token.length;
+            doc.trailing = IsTrailingDoc(source.substr(token.offset, token.length));
             std::string_view text = source.substr(token.offset, token.length);
             doc.qt_style = text.starts_with("/*!");
             std::size_t cursor = 3;
@@ -1261,6 +1270,287 @@ namespace heimdall
             std::unordered_map<SymbolId, ClassInfo> m_classes;
         };
 
+        // Build one coordinated edit per declaration, so fix-all cannot apply
+        // conflicting edits for several missing tags in the same comment.
+        TextEdit DocumentationFix(DocAnalysis& analysis, const Entity& entity,
+            const Doc& doc, bool& safe)
+        {
+            const auto source = analysis.Model().Tree().Source();
+            const auto start = doc.present ? doc.begin : analysis.View().Offset(entity.start);
+            const auto newline = source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
+            const auto previous = start == 0 ? std::string_view::npos : source.rfind('\n', start - 1);
+            const auto line_start = previous == std::string_view::npos ? 0 : previous + 1;
+            auto indent_end = line_start;
+            while (indent_end < start && (source[indent_end] == ' ' || source[indent_end] == '\t'))
+            {
+                ++indent_end;
+            }
+            const std::string indent(source.substr(line_start, indent_end - line_start));
+            std::vector<std::string> lines;
+            for (const auto& line : doc.lines)
+            {
+                lines.push_back(line.text);
+            }
+            const auto commands = ParseCommands(doc);
+            struct Change
+            {
+                std::size_t line;
+                std::size_t begin;
+                std::size_t length;
+                std::string text;
+            };
+            std::vector<Change> changes;
+            std::vector<std::string> additions;
+            std::vector<std::string> params;
+            std::vector<std::string> tparams;
+            std::size_t search_line = kNpos;
+            std::size_t search_from = 0;
+            for (const auto& command : commands)
+            {
+                if (command.line != search_line)
+                {
+                    search_line = command.line;
+                    search_from = 0;
+                }
+                const std::string marker = std::string(command.at ? "@" : "\\") + command.name;
+                const auto begin = lines[command.line].find(marker, search_from);
+                if (begin == std::string::npos)
+                {
+                    continue;
+                }
+                const auto length = marker.size() + command.parts.front().size();
+                search_from = begin + length;
+                std::string replacement = "@" + command.name + command.parts.front();
+                const auto joined = Joined(command);
+                if ((entity.function && command.name == "param") || command.name == "tparam")
+                {
+                    std::string_view rest = joined;
+                    if (rest.starts_with('['))
+                    {
+                        const auto close = rest.find(']');
+                        rest = close == std::string_view::npos ? std::string_view{} : rest.substr(close + 1);
+                    }
+                    rest = Trim(rest);
+                    const auto stop = rest.find_first_of(" \t");
+                    const auto names = rest.substr(0, stop);
+                    const auto description = stop == std::string_view::npos ? std::string_view{} : Trim(rest.substr(stop));
+                    auto& seen = command.name == "param" ? params : tparams;
+                    const auto& declared = command.name == "param" ? entity.params : entity.tparams;
+                    const bool known = command.name == "param" ? entity.params_known : entity.tparams_known;
+                    bool invalid = names.empty();
+                    std::vector<std::string> listed;
+                    std::size_t cursor = 0;
+                    while (cursor < names.size())
+                    {
+                        const auto comma = names.find(',', cursor);
+                        const std::string name(names.substr(cursor, comma == std::string_view::npos ? names.size() - cursor : comma - cursor));
+                        invalid |= std::find(seen.begin(), seen.end(), name) != seen.end() ||
+                            std::find(listed.begin(), listed.end(), name) != listed.end() ||
+                            (known && std::none_of(declared.begin(), declared.end(),
+                                [&](const Named& item) { return item.name == name; }));
+                        listed.push_back(name);
+                        if (comma == std::string_view::npos) break;
+                        cursor = comma + 1;
+                    }
+                    if (invalid)
+                    {
+                        // Preserve obsolete/duplicate prose as a note rather than
+                        // silently discarding documentation written by the author.
+                        replacement = "@note " + command.name + command.parts.front();
+                        safe = false;
+                    }
+                    else
+                    {
+                        seen.insert(seen.end(), listed.begin(), listed.end());
+                        if (description.empty())
+                        {
+                            replacement += " TODO: Describe this parameter.";
+                            safe = false;
+                        }
+                    }
+                }
+                else if (command.name == "brief" || command.name == "short")
+                {
+                    if (joined.empty())
+                    {
+                        replacement += " TODO: Describe " + analysis.NameOf(entity) + ".";
+                        safe = false;
+                    }
+                    else
+                    {
+                        // Separate continued details and additional sentences,
+                        // keeping their text and inline Doxygen commands intact.
+                        for (std::size_t part = 0; part < command.parts.size(); ++part)
+                        {
+                            const auto& text = command.parts[part];
+                            if (HasSecondSentence(text))
+                            {
+                                for (std::size_t i = 0; i < text.size(); ++i)
+                                {
+                                    if (HasSecondSentence(std::string_view(text).substr(0, i + 1)))
+                                    {
+                                        auto split = i;
+                                        while (split > 0 && !IsSpace(text[split - 1])) --split;
+                                        if (part == 0)
+                                        {
+                                            replacement = "@" + command.name + std::string(Trim(std::string_view(text).substr(0, split))) +
+                                                "\n\n" + std::string(Trim(std::string_view(text).substr(split)));
+                                            // Keep a space after the command name.
+                                            replacement.insert(command.name.size() + 1, " ");
+                                        }
+                                        else
+                                        {
+                                            const auto line = command.line + part;
+                                            changes.push_back({line, 0, lines[line].size(),
+                                                std::string(Trim(std::string_view(text).substr(0, split))) + "\n\n" +
+                                                std::string(Trim(std::string_view(text).substr(split)))});
+                                        }
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                            const auto trimmed = Trim(text);
+                            if (part + 1 < command.parts.size() && !trimmed.empty() &&
+                                (trimmed.back() == '.' || trimmed.back() == '!' || trimmed.back() == '?'))
+                            {
+                                const auto line = command.line + part + 1;
+                                changes.push_back({line, 0, 0, "\n"});
+                                break;
+                            }
+                        }
+                    }
+                }
+                else if (entity.function && (command.name == "return" || command.name == "returns" ||
+                    command.name == "result" || command.name == "retval"))
+                {
+                    if (entity.returns == Tri::No)
+                    {
+                        replacement = "@note " + command.name + command.parts.front();
+                        safe = false;
+                    }
+                    else if (command.name != "retval" && joined.empty())
+                    {
+                        replacement += " TODO: Describe the returned value.";
+                        safe = false;
+                    }
+                }
+                else if (entity.function && (command.name == "throw" || command.name == "throws" || command.name == "exception"))
+                {
+                    if (joined.find(' ') == std::string::npos)
+                    {
+                        replacement += joined.empty() ? " TODO TODO: Describe the exception and condition." :
+                            " TODO: Describe when it is thrown.";
+                        safe = false;
+                    }
+                }
+                if (search_from < lines[command.line].size() && !replacement.empty() &&
+                    !IsSpace(replacement.back()))
+                {
+                    replacement += ' ';
+                }
+                changes.push_back({command.line, begin, length, std::move(replacement)});
+            }
+            if (Find(commands, {"brief", "short", "copybrief"}) == nullptr)
+            {
+                additions.push_back("@brief TODO: Describe " + analysis.NameOf(entity) + ".");
+                safe = false;
+            }
+            const auto add_named = [&](std::string_view tag, const std::vector<Named>& declared,
+                const std::vector<std::string>& seen, bool known)
+            {
+                if (!known) return;
+                for (const auto& item : declared)
+                {
+                    if (std::find(seen.begin(), seen.end(), item.name) == seen.end())
+                    {
+                        additions.push_back("@" + std::string(tag) + " " + std::string(item.name) + " TODO: Describe this parameter.");
+                        safe = false;
+                    }
+                }
+            };
+            add_named("tparam", entity.tparams, tparams, entity.tparams_known);
+            if (entity.function)
+            {
+                add_named("param", entity.params, params, entity.params_known);
+                if (entity.returns == Tri::Yes && Find(commands, {"return", "returns", "result", "retval"}) == nullptr)
+                {
+                    additions.push_back("@return TODO: Describe the returned value.");
+                    safe = false;
+                }
+                if (entity.throws && Find(commands, {"throw", "throws", "exception"}) == nullptr)
+                {
+                    additions.push_back("@throws TODO TODO: Describe the exception and condition.");
+                    safe = false;
+                }
+            }
+            std::stable_sort(changes.begin(), changes.end(), [](const Change& a, const Change& b)
+            {
+                return a.line != b.line ? a.line > b.line : a.begin > b.begin;
+            });
+            for (const auto& change : changes)
+            {
+                lines[change.line].replace(change.begin, change.length, change.text);
+            }
+            if (!additions.empty() && additions.front().starts_with("@brief"))
+            {
+                lines.insert(lines.begin(), additions.front());
+                lines.insert(lines.begin() + 1, "");
+                additions.erase(additions.begin());
+            }
+            lines.insert(lines.end(), additions.begin(), additions.end());
+            std::string replacement = doc.trailing ? "/**<" : "/**";
+            replacement += newline;
+            for (const auto& line : lines)
+            {
+                std::size_t cursor = 0;
+                do
+                {
+                    const auto end = line.find('\n', cursor);
+                    const auto piece = std::string_view(line).substr(cursor,
+                        end == std::string::npos ? line.size() - cursor : end - cursor);
+                    replacement += indent + " *";
+                    if (!piece.empty()) replacement += " " + std::string(piece);
+                    replacement += newline;
+                    if (end == std::string::npos) break;
+                    cursor = end + 1;
+                } while (cursor <= line.size());
+            }
+            replacement += indent + " */";
+            if (!doc.present)
+            {
+                replacement += newline;
+                replacement += indent;
+            }
+            return {start, doc.present ? doc.end - doc.begin : 0, std::move(replacement)};
+        }
+
+        void AttachDocumentationFix(DocAnalysis& analysis, const Entity& entity, const Doc& doc,
+            std::vector<Diagnostic>& diagnostics, std::size_t first)
+        {
+            if (first == diagnostics.size()) return;
+            bool safe = doc.present;
+            const auto fix = DocumentationFix(analysis, entity, doc, safe);
+            for (auto i = first; i < diagnostics.size(); ++i)
+            {
+                auto& diagnostic = diagnostics[i];
+                diagnostic.has_fix = true;
+                diagnostic.fix = fix;
+                diagnostic.fix_is_safe = safe;
+                diagnostic.fix_title = safe ? "Normalize Doxygen comment" : "Repair documentation (review TODOs and notes)";
+                if (safe)
+                {
+                    // Batch fixes must be contained by their diagnostic range.
+                    const auto where = analysis.Make(diagnostic.rule, diagnostic.code, diagnostic.message,
+                        fix.offset, fix.length);
+                    diagnostic.offset = where.offset;
+                    diagnostic.length = where.length;
+                    diagnostic.line = where.line;
+                    diagnostic.column = where.column;
+                }
+            }
+        }
+
         void Append(std::vector<Diagnostic>& all, std::vector<Diagnostic> part)
         {
             all.insert(all.end(), std::make_move_iterator(part.begin()), std::make_move_iterator(part.end()));
@@ -1433,6 +1723,8 @@ namespace heimdall
                 std::string(analysis.KindWord(entity)) + " '" + analysis.NameOf(entity) +
                 "' has no documentation comment; add a /** */ or /// block with a @brief",
                 entity.name));
+            // Detached file/group documentation must not be replaced.
+            AttachDocumentationFix(analysis, entity, Doc{}, diagnostics, diagnostics.size() - 1);
         }
 
         SortByOffset(diagnostics);
@@ -1464,6 +1756,8 @@ namespace heimdall
             {
                 continue;
             }
+
+            const auto first = diagnostics.size();
 
             const auto report =[&](std::string message, std::size_t line = 0)
             {
@@ -1535,6 +1829,7 @@ namespace heimdall
                 "template parameter");
             if (!entity.function)
             {
+                AttachDocumentationFix(analysis, entity, doc, diagnostics, first);
                 continue;
             }
 
@@ -1572,6 +1867,7 @@ namespace heimdall
                     report("@" + throws->name + " needs the exception type and when it is thrown", throws->line);
                 }
             }
+            AttachDocumentationFix(analysis, entity, doc, diagnostics, first);
         }
 
         SortByOffset(diagnostics);

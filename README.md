@@ -199,7 +199,10 @@ outside the extension) still needs to be closed before relinking.
   functions, and check it against good practice: a one-sentence `@brief` apart from
   the details, an `@param` per named parameter, `@tparam` per template parameter,
   `@return` for non-void functions, `@throws` when the body throws, no stale or
-  repeated tags, Javadoc style (`///`, `/** */`). `"doc": {"scope": "public" |
+  repeated tags, Javadoc style (`///`, `/** */`). Both offer editor quick fixes:
+  syntax-only repairs also run with `--fix`; missing documentation is filled with
+  explicit `TODO` templates and requires `--fix-unsafe`. Obsolete or duplicate
+  tags are preserved as `@note` text for review. `"doc": {"scope": "public" |
   "private" | "all"}` picks which declarations they cover (default `public`: public
   and protected members and external linkage; `private`: private members, `static`
   and anonymous-namespace entities). Diagnostics
