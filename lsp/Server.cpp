@@ -1580,6 +1580,84 @@ namespace heimdall::lsp
         const auto diagnostics = RuleDiagnostics(uri_string, tree, command);
         std::string response = "[";
         bool first = true;
+
+        // "Fix all" comes first so it is the default pick in the lightbulb.
+        // Batch semantics mirror `RuleEngine::ApplyFixes` without unsafe
+        // edits: safe, in-bounds and non-overlapping fixes only.
+        {
+            std::vector<const heimdall::Diagnostic*> safe;
+            safe.reserve(diagnostics.size());
+            for (const auto& diagnostic : diagnostics)
+            {
+                if (diagnostic.has_fix && diagnostic.fix_is_safe)
+                {
+                    safe.push_back(&diagnostic);
+                }
+            }
+
+            std::sort(safe.begin(), safe.end(), [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
+                {
+                    return a->fix.offset > b->fix.offset;
+            });
+
+            std::vector<const heimdall::Diagnostic*> selected;
+            selected.reserve(safe.size());
+            std::size_t previous_start = text->size();
+            for (const auto* diagnostic : safe)
+            {
+                const auto& fix = diagnostic->fix;
+                // Safe fixes must stay within their diagnostic (same rule as
+                // ApplyFixes), be bounds-checked and not overlap a later fix.
+                const bool in_range = fix.offset >= diagnostic->offset &&
+                    fix.offset - diagnostic->offset <= diagnostic->length &&
+                    fix.length <= diagnostic->length - (fix.offset - diagnostic->offset);
+                if (!in_range || fix.offset > text->size() || fix.length > text->size() - fix.offset ||
+                    fix.offset + fix.length > previous_start)
+                {
+                    continue;
+                }
+
+                selected.push_back(diagnostic);
+                previous_start = fix.offset;
+            }
+
+            if (!selected.empty())
+            {
+                std::sort(selected.begin(), selected.end(),
+                    [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
+                    {
+                        return a->fix.offset < b->fix.offset;
+                });
+
+                first = false;
+                response += "{\"title\":";
+                const std::string fix_all_title = "Fix all Heimdall issues (" + std::to_string(selected.size()) +
+                    (selected.size() == 1 ? " fix)" : " fixes)");
+                QuoteJson(fix_all_title, response);
+                response += ",\"kind\":\"source.fixAll\",\"edit\":{\"changes\":{";
+                QuoteJson(uri_string, response);
+                response += ":[";
+                for (std::size_t i = 0; i < selected.size(); ++i)
+                {
+                    if (i != 0)
+                    {
+                        response += ',';
+                    }
+
+                    const auto& fix = selected[i]->fix;
+                    response += "{\"range\":{\"start\":";
+                    AppendPosition(lines->ToPosition(fix.offset), response);
+                    response += ",\"end\":";
+                    AppendPosition(lines->ToPosition(fix.offset + fix.length), response);
+                    response += "},\"newText\":";
+                    QuoteJson(fix.replacement, response);
+                    response += '}';
+                }
+
+                response += "]}}}";
+            }
+        }
+
         for (const auto& diagnostic : diagnostics)
         {
             if (!diagnostic.has_fix)

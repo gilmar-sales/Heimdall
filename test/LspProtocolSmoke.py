@@ -70,6 +70,11 @@ broken = next(item for item in responses
 assert any(item["code"] == "syntax/parse-error" and item["severity"] == 1
            for item in broken["params"]["diagnostics"]), broken
 actions = next(item for item in responses if item.get("id") == 3)["result"]
+# "Fix all" is the default pick: it comes first and batches the safe fixes.
+assert actions[0]["kind"] == "source.fixAll", actions
+assert actions[0]["title"].startswith("Fix all Heimdall issues"), actions
+fix_all_texts = [e["newText"] for e in actions[0]["edit"]["changes"][uri]]
+assert "nullptr" in fix_all_texts, actions
 null_actions = [a for a in actions if a["edit"]["changes"][uri][0]["newText"] == "nullptr"]
 assert null_actions, actions
 # Line 2 is "    int unused;": (2,11) sits after "unu", so "unused" must be

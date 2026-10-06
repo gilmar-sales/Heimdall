@@ -32,6 +32,14 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_completion_") as t
     for number in range(1200):
         (root / "inc" / "big").mkdir(parents=True, exist_ok=True)
         (root / "inc" / "big" / f"file{number:04d}.hpp").write_text("//\n", encoding="utf-8")
+    # Overflow the 1000-item page with project headers alone: system directory
+    # size varies by toolchain (MinGW exceeds one page, Ubuntu GCC does not),
+    # so the empty-prefix `angled` case must not depend on it. `zpad_` sorts
+    # after `shared.hpp`, keeping the membership assertions below inside the
+    # first page (directories first, then files by label; project origins sort
+    # before system ones, so the cap drops system entries first).
+    for number in range(1010):
+        (root / "inc" / f"zpad_{number:04d}.hpp").write_text("//\n", encoding="utf-8")
     source = root / "src" / "main.cpp"
     database = root / "compile_commands.json"
     database.write_text(json.dumps([{
@@ -122,4 +130,4 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_completion_") as t
     assert len(items("big")) == 1000
     assert incomplete("big_prefix") is False
     assert labels("big_prefix") == [f"file11{n:02d}.hpp" for n in range(100)], labels("big_prefix")
-    assert incomplete("angled") is True  # system directories alone exceed one page
+    assert incomplete("angled") is True  # project headers alone exceed one page
