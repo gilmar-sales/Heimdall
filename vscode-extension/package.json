@@ -2,7 +2,7 @@
   "name": "heimdall-vscode",
   "displayName": "Heimdall - C++ Lint and Format",
   "description": "C++ diagnostics, quick fixes, formatting, and code completion powered by Heimdall.",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "publisher": "gilmar-sales",
   "license": "MIT",
   "engines": {
