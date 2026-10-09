@@ -21,7 +21,7 @@ namespace heimdall
 
         using detail::TokenView;
 
-        constexpr std::size_t kNpos = ~std::size_t{0};
+        constexpr std::size_t kNpos = ~std::size_t { 0 };
 
         // Where a declaration stands, for the DocScope option: Skip for anything
         // local to a function, Private for private members and internal linkage.
@@ -76,10 +76,11 @@ namespace heimdall
         {
             if (text.starts_with("//!"))
             {
-                return!text.starts_with("//!<");
+                return !text.starts_with("//!<");
             }
 
-            return text.starts_with("///") && !text.starts_with("////") && !text.starts_with("///<");
+            return text.starts_with("///") && !text.starts_with("////") &&
+                   !text.starts_with("///<");
         }
 
         // `/** */` and `/*! */`, but not `/**/`, `/***` banners and `/**<`.
@@ -87,17 +88,17 @@ namespace heimdall
         {
             if (text.starts_with("/*!"))
             {
-                return!text.starts_with("/*!<");
+                return !text.starts_with("/*!<");
             }
 
-            return text.starts_with("/**") && !text.starts_with("/***") && !text.starts_with("/**/") &&
-                !text.starts_with("/**<");
+            return text.starts_with("/**") && !text.starts_with("/***") &&
+                   !text.starts_with("/**/") && !text.starts_with("/**<");
         }
 
         bool IsTrailingDoc(std::string_view text)
         {
-            return text.starts_with("///<") || text.starts_with("//!<") || text.starts_with("/**<") ||
-                text.starts_with("/*!<");
+            return text.starts_with("///<") || text.starts_with("//!<") ||
+                   text.starts_with("/**<") || text.starts_with("/*!<");
         }
 
         struct DocLine
@@ -109,20 +110,19 @@ namespace heimdall
 
         struct Doc
         {
-            bool present = false;
-            bool qt_style = false; // `//!` or `/*! */`
-            bool trailing = false;
-            std::size_t begin = kNpos;
-            std::size_t end = 0;
+            bool                 present  = false;
+            bool                 qt_style = false; // `//!` or `/*! */`
+            bool                 trailing = false;
+            std::size_t          begin    = kNpos;
+            std::size_t          end      = 0;
             std::vector<DocLine> lines;
         };
 
-        void AddLine(
-            Doc& doc,
-            std::string_view source,
-            std::size_t begin,
-            std::size_t end,
-            std::string_view content)
+        void AddLine(Doc&             doc,
+                     std::string_view source,
+                     std::size_t      begin,
+                     std::size_t      end,
+                     std::string_view content)
         {
             while (begin < end && IsSpace(source[begin]))
             {
@@ -139,16 +139,16 @@ namespace heimdall
                 content.remove_prefix(1);
             }
 
-            doc.lines.push_back({std::string(content), begin, end - begin});
+            doc.lines.push_back({ std::string(content), begin, end - begin });
         }
 
         void AddLineComment(Doc& doc, std::string_view source, const Token& token)
         {
-            doc.begin = std::min(doc.begin, static_cast<std::size_t>(token.offset));
-            doc.end = token.offset + token.length;
-            doc.trailing = IsTrailingDoc(source.substr(token.offset, token.length));
+            doc.begin             = std::min(doc.begin, static_cast<std::size_t>(token.offset));
+            doc.end               = token.offset + token.length;
+            doc.trailing          = IsTrailingDoc(source.substr(token.offset, token.length));
             std::string_view text = source.substr(token.offset, token.length);
-            const bool qt = text.starts_with("//!");
+            const bool       qt   = text.starts_with("//!");
             if (doc.lines.empty())
             {
                 doc.qt_style = qt;
@@ -165,12 +165,12 @@ namespace heimdall
 
         void AddBlockComment(Doc& doc, std::string_view source, const Token& token)
         {
-            doc.begin = token.offset;
-            doc.end = token.offset + token.length;
-            doc.trailing = IsTrailingDoc(source.substr(token.offset, token.length));
+            doc.begin             = token.offset;
+            doc.end               = token.offset + token.length;
+            doc.trailing          = IsTrailingDoc(source.substr(token.offset, token.length));
             std::string_view text = source.substr(token.offset, token.length);
-            doc.qt_style = text.starts_with("/*!");
-            std::size_t cursor = 3;
+            doc.qt_style          = text.starts_with("/*!");
+            std::size_t cursor    = 3;
             if (cursor < text.size() && text[cursor] == '<')
             {
                 ++cursor;
@@ -201,14 +201,15 @@ namespace heimdall
                 if (!first)
                 {
                     const auto indent = content.find_first_not_of(" \t");
-                    content = indent == std::string_view::npos ? std::string_view{}: content.substr(indent);
+                    content           = indent == std::string_view::npos ? std::string_view {}
+                                                                         : content.substr(indent);
                     if (content.starts_with('*'))
                     {
                         content.remove_prefix(1);
                     }
                 }
 
-                const auto begin = token.offset +(first ? 0 : cursor);
+                const auto begin = token.offset + (first ? 0 : cursor);
                 AddLine(doc, source, begin, token.offset + piece_end, content);
                 first = false;
                 if (line_end >= body_end)
@@ -225,19 +226,21 @@ namespace heimdall
 
         struct Command
         {
-            std::string name;
-            bool at = true;                 // `@name`, as opposed to `\name`
-            std::vector<std::string> parts; // text after the name, then continuation lines
-            std::size_t line = 0;           // index in Doc::lines
+            std::string              name;
+            bool                     at = true; // `@name`, as opposed to `\name`
+            std::vector<std::string> parts;     // text after the name, then continuation lines
+            std::size_t              line = 0;  // index in Doc::lines
         };
 
-        constexpr std::array<std::string_view, 40> kCommands = {"brief", "short", "details", "param",
-            "tparam",
-            "return", "returns", "result", "retval", "throw", "throws", "exception", "copydoc", "copybrief",
-            "copydetails", "inheritdoc", "overload", "file", "defgroup", "page", "mainpage", "dir", "see", "sa",
-            "note", "warning", "remark", "remarks", "pre", "post", "since", "deprecated", "todo", "bug",
-            "author",
-            "version", "date", "attention", "par", "invariant"};
+        constexpr std::array<std::string_view, 40> kCommands = {
+            "brief",    "short",      "details",     "param",      "tparam",   "return",
+            "returns",  "result",     "retval",      "throw",      "throws",   "exception",
+            "copydoc",  "copybrief",  "copydetails", "inheritdoc", "overload", "file",
+            "defgroup", "page",       "mainpage",    "dir",        "see",      "sa",
+            "note",     "warning",    "remark",      "remarks",    "pre",      "post",
+            "since",    "deprecated", "todo",        "bug",        "author",   "version",
+            "date",     "attention",  "par",         "invariant"
+        };
 
         bool IsKnownCommand(std::string_view name)
         {
@@ -272,7 +275,7 @@ namespace heimdall
         std::vector<Command> ParseCommands(const Doc& doc)
         {
             std::vector<Command> commands;
-            bool open = false; // the last command still takes continuation lines
+            bool                 open = false; // the last command still takes continuation lines
             for (std::size_t line = 0; line < doc.lines.size(); ++line)
             {
                 const std::string_view text = doc.lines[line].text;
@@ -287,7 +290,7 @@ namespace heimdall
                     std::size_t begin;
                     std::size_t name_begin;
                     std::size_t name_end;
-                    bool at;
+                    bool        at;
                 };
 
                 std::vector<Span> spans;
@@ -305,14 +308,15 @@ namespace heimdall
                     }
 
                     std::size_t end = i + 1;
-                    while (end < text.size() && std::isalpha(static_cast<unsigned char>(text[end])) != 0)
+                    while (end < text.size() &&
+                           std::isalpha(static_cast<unsigned char>(text[end])) != 0)
                     {
                         ++end;
                     }
 
                     if (end > i + 1 && IsKnownCommand(text.substr(i + 1, end - i - 1)))
                     {
-                        spans.push_back({i, i + 1, end, c == '@'});
+                        spans.push_back({ i, i + 1, end, c == '@' });
                         i = end - 1;
                     }
                 }
@@ -335,12 +339,13 @@ namespace heimdall
                 for (std::size_t k = 0; k < spans.size(); ++k)
                 {
                     const auto stop = k + 1 < spans.size() ? spans[k + 1].begin : text.size();
-                    Command command;
-                    command.name = std::string(text.substr(spans[k].name_begin,
-                        spans[k].name_end - spans[k].name_begin));
-                    command.at = spans[k].at;
+                    Command    command;
+                    command.name = std::string(
+                        text.substr(spans[k].name_begin, spans[k].name_end - spans[k].name_begin));
+                    command.at   = spans[k].at;
                     command.line = line;
-                    command.parts.emplace_back(text.substr(spans[k].name_end, stop - spans[k].name_end));
+                    command.parts.emplace_back(
+                        text.substr(spans[k].name_end, stop - spans[k].name_end));
                     commands.push_back(std::move(command));
                 }
 
@@ -350,8 +355,8 @@ namespace heimdall
             return commands;
         }
 
-        const Command* Find(const std::vector<Command>& commands,
-            std::initializer_list<std::string_view> names)
+        const Command* Find(
+            const std::vector<Command>& commands, std::initializer_list<std::string_view> names)
         {
             for (const auto& command : commands)
             {
@@ -367,13 +372,14 @@ namespace heimdall
         // A comment that describes a file, group or page, not the declaration under it.
         bool IsDetached(const std::vector<Command>& commands)
         {
-            return Find(commands, {"file", "defgroup", "page", "mainpage", "dir"}) != nullptr;
+            return Find(commands, { "file", "defgroup", "page", "mainpage", "dir" }) != nullptr;
         }
 
         // The text is somewhere else: nothing to check here.
         bool IsInherited(const std::vector<Command>& commands)
         {
-            return Find(commands, {"copydoc", "copydetails", "inheritdoc", "overload"}) != nullptr;
+            return Find(commands, { "copydoc", "copydetails", "inheritdoc", "overload" }) !=
+                   nullptr;
         }
 
         // `.`, `!` or `?` followed by a capitalized word: a second sentence.
@@ -381,7 +387,7 @@ namespace heimdall
         {
             for (std::size_t i = 0; i + 2 < text.size(); ++i)
             {
-                if ((text[i] != '.' && text[i] != '!' && text[i] != '?') ||!IsSpace(text[i + 1]))
+                if ((text[i] != '.' && text[i] != '!' && text[i] != '?') || !IsSpace(text[i + 1]))
                 {
                     continue;
                 }
@@ -392,7 +398,8 @@ namespace heimdall
                     ++next;
                 }
 
-                if (next >= text.size() || std::isupper(static_cast<unsigned char>(text[next])) == 0)
+                if (next >= text.size() ||
+                    std::isupper(static_cast<unsigned char>(text[next])) == 0)
                 {
                     continue;
                 }
@@ -400,7 +407,8 @@ namespace heimdall
                 if (text[i] == '.')
                 {
                     std::size_t begin = i;
-                    while (begin > 0 && std::isalpha(static_cast<unsigned char>(text[begin - 1])) != 0)
+                    while (begin > 0 &&
+                           std::isalpha(static_cast<unsigned char>(text[begin - 1])) != 0)
                     {
                         --begin;
                     }
@@ -424,50 +432,46 @@ namespace heimdall
         struct Named
         {
             std::string_view name;
-            std::size_t position = 0; // of the name token, in significant tokens
+            std::size_t      position = 0; // of the name token, in significant tokens
         };
 
         struct Entity
         {
-            SymbolId symbol = kNone;
-            bool function = false;
-            std::size_t name = 0;  // position of the name token
-            std::size_t start = 0; // position of the first token of the declaration
-            std::size_t semi = kNpos;
+            SymbolId           symbol   = kNone;
+            bool               function = false;
+            std::size_t        name     = 0; // position of the name token
+            std::size_t        start    = 0; // position of the first token of the declaration
+            std::size_t        semi     = kNpos;
             std::vector<Named> params;
             std::vector<Named> tparams;
-            bool params_known = false;
-            bool tparams_known = true;
-            bool specialization = false; // `template<>`
-            Tri returns = Tri::Unknown;
-            bool throws = false;
+            bool               params_known   = false;
+            bool               tparams_known  = true;
+            bool               specialization = false; // `template<>`
+            Tri                returns        = Tri::Unknown;
+            bool               throws         = false;
         };
 
         struct ClassInfo
         {
-            bool valid = false;
-            bool is_class = false;
-            std::size_t open = 0;
-            std::size_t close = 0;
+            bool                                        valid    = false;
+            bool                                        is_class = false;
+            std::size_t                                 open     = 0;
+            std::size_t                                 close    = 0;
             std::vector<std::pair<std::size_t, Access>> markers;
         };
 
         class DocAnalysis
         {
-        public:
-            DocAnalysis(const SemanticModel& model, DocScope scope)
-            : m_model(model), m_view(model), m_symbols(model.Symbols()), m_scopes(model.Scopes()),
-                m_tree(model.Tree()), m_scope(scope) {}
-
-            const SemanticModel& Model() const
+          public:
+            DocAnalysis(const SemanticModel& model, DocScope scope) :
+                m_model(model), m_view(model), m_symbols(model.Symbols()), m_scopes(model.Scopes()),
+                m_tree(model.Tree()), m_scope(scope)
             {
-                return m_model;
             }
 
-            const TokenView& View() const
-            {
-                return m_view;
-            }
+            const SemanticModel& Model() const { return m_model; }
+
+            const TokenView& View() const { return m_view; }
 
             // Fills `entity` when `symbol` is something the doc rules look at. With
             // `for_comment` (doc/require-comment) declarations documented elsewhere
@@ -475,7 +479,8 @@ namespace heimdall
             bool Describe(SymbolId symbol, Entity& entity, bool for_comment)
             {
                 const auto kind = m_symbols.kind[symbol];
-                if (kind != SymbolKind::Function && kind != SymbolKind::Class && kind != SymbolKind::Enum)
+                if (kind != SymbolKind::Function && kind != SymbolKind::Class &&
+                    kind != SymbolKind::Enum)
                 {
                     return false;
                 }
@@ -486,16 +491,17 @@ namespace heimdall
                 }
 
                 const auto vis = Classify(symbol);
-                if (vis == Visibility::Skip ||(m_scope == DocScope::Public && vis != Visibility::Public) ||
+                if (vis == Visibility::Skip ||
+                    (m_scope == DocScope::Public && vis != Visibility::Public) ||
                     (m_scope == DocScope::Private && vis != Visibility::Private))
                 {
                     return false;
                 }
 
-                entity = Entity{};
+                entity        = Entity {};
                 entity.symbol = symbol;
-                entity.name = m_view.PositionOf(m_symbols.decl_token[symbol]);
-                entity.start = DeclarationStart(entity.name);
+                entity.name   = m_view.PositionOf(m_symbols.decl_token[symbol]);
+                entity.start  = DeclarationStart(entity.name);
                 if (kind == SymbolKind::Function)
                 {
                     entity.function = true;
@@ -508,32 +514,33 @@ namespace heimdall
                 }
 
                 DescribeTemplateHeader(entity, entity.name);
-                return!(for_comment && IsSpecialization(entity));
+                return !(for_comment && IsSpecialization(entity));
             }
 
             Doc DocOf(const Entity& entity) const
             {
-                Doc doc;
-                const auto& tokens = m_tree.Tokens();
-                const auto source = m_tree.Source();
+                Doc         doc;
+                const auto& tokens   = m_tree.Tokens();
+                const auto  source   = m_tree.Source();
                 std::size_t newlines = 0;
-                const auto previous = Previous(m_view.TokenAt(entity.start), newlines);
+                const auto  previous = Previous(m_view.TokenAt(entity.start), newlines);
                 if (previous != kNpos && newlines <= 1)
                 {
                     const auto& token = tokens[previous];
-                    const auto text = m_tree.Text(token);
+                    const auto  text  = m_tree.Text(token);
                     if (token.kind == TokenKind::BlockComment && IsLeadingDocBlock(text))
                     {
                         AddBlockComment(doc, source, token);
                     }
                     else if (token.kind == TokenKind::LineComment && IsLeadingDocLine(text))
                     {
-                        std::vector<std::size_t> run{previous};
+                        std::vector<std::size_t> run { previous };
                         for (;;)
                         {
-                            std::size_t gap = 0;
-                            const auto before = Previous(run.back(), gap);
-                            if (before == kNpos || gap != 1 || tokens[before].kind != TokenKind::LineComment ||
+                            std::size_t gap    = 0;
+                            const auto  before = Previous(run.back(), gap);
+                            if (before == kNpos || gap != 1 ||
+                                tokens[before].kind != TokenKind::LineComment ||
                                 !IsLeadingDocLine(m_tree.Text(tokens[before])))
                             {
                                 break;
@@ -557,7 +564,8 @@ namespace heimdall
 
                 if (entity.semi != kNpos)
                 {
-                    for (auto i = static_cast<std::size_t>(m_view.TokenAt(entity.semi)) + 1; i < tokens.size(); ++i)
+                    for (auto i = static_cast<std::size_t>(m_view.TokenAt(entity.semi)) + 1;
+                         i < tokens.size(); ++i)
                     {
                         const auto& token = tokens[i];
                         if (token.kind == TokenKind::Whitespace)
@@ -570,15 +578,17 @@ namespace heimdall
                             continue;
                         }
 
-                        if (token.kind == TokenKind::LineComment && IsTrailingDoc(m_tree.Text(token)))
+                        if (token.kind == TokenKind::LineComment &&
+                            IsTrailingDoc(m_tree.Text(token)))
                         {
                             AddLineComment(doc, source, token);
                             doc.present = true;
                         }
-                        else if (token.kind == TokenKind::BlockComment && IsTrailingDoc(m_tree.Text(token)))
+                        else if (token.kind == TokenKind::BlockComment &&
+                                 IsTrailingDoc(m_tree.Text(token)))
                         {
                             AddBlockComment(doc, source, token);
-                            doc.present =!doc.lines.empty();
+                            doc.present = !doc.lines.empty();
                         }
 
                         break;
@@ -588,12 +598,11 @@ namespace heimdall
                 return doc;
             }
 
-            Diagnostic Make(
-                RuleId rule,
-                std::string_view code,
-                std::string message,
-                std::size_t offset,
-                std::size_t length)
+            Diagnostic Make(RuleId           rule,
+                            std::string_view code,
+                            std::string      message,
+                            std::size_t      offset,
+                            std::size_t      length)
             {
                 if (!m_lines_built)
                 {
@@ -602,15 +611,22 @@ namespace heimdall
                 }
 
                 const auto position = m_lines.Lookup(offset);
-                return Diagnostic{rule, Severity::Warning, std::string(code), std::move(message), offset, length,
-                    position.line, position.column, false, TextEdit{}};
+                return Diagnostic {
+                    rule,
+                    Severity::Warning,
+                    std::string(code),
+                    std::move(message),
+                    offset,
+                    length,
+                    position.line,
+                    position.column,
+                    false,
+                    TextEdit {}
+                };
             }
 
             Diagnostic MakeAtName(
-                RuleId rule,
-                std::string_view code,
-                std::string message,
-                std::size_t name)
+                RuleId rule, std::string_view code, std::string message, std::size_t name)
             {
                 const auto offset = m_view.Offset(name);
                 return Make(rule, code, std::move(message), offset, m_view.End(name) - offset);
@@ -631,13 +647,13 @@ namespace heimdall
                 return m_symbols.kind[entity.symbol] == SymbolKind::Enum ? "enum" : "class";
             }
 
-        private:
+          private:
             // Index of the nearest earlier token that is not blank or a decoration
             // macro, and how many line breaks lay between.
             std::size_t Previous(std::size_t index, std::size_t& newlines) const
             {
                 const auto& tokens = m_tree.Tokens();
-                newlines = 0;
+                newlines           = 0;
                 while (index > 0)
                 {
                     --index;
@@ -712,29 +728,29 @@ namespace heimdall
                 ClassInfo info;
                 if (m_symbols.kind[klass] == SymbolKind::Class)
                 {
-                    const auto[begin, end] = m_view.Range(m_symbols.decl_node[klass]);
-                    const auto name = m_view.PositionOf(m_symbols.decl_token[klass]);
-                    bool keyword = false;
+                    const auto [begin, end] = m_view.Range(m_symbols.decl_node[klass]);
+                    const auto name         = m_view.PositionOf(m_symbols.decl_token[klass]);
+                    bool       keyword      = false;
                     for (auto i = begin; i < name && i < end; ++i)
                     {
                         const Tok tok = m_view.At(i);
                         if (tok == Tok::KwClass || tok == Tok::KwStruct || tok == Tok::KwUnion)
                         {
                             info.is_class = tok == Tok::KwClass;
-                            keyword = true;
+                            keyword       = true;
                         }
                     }
 
                     std::size_t open = name;
                     while (keyword && open < m_view.Size() && m_view.At(open) != Tok::LBrace &&
-                        m_view.At(open) != Tok::Semi)
+                           m_view.At(open) != Tok::Semi)
                     {
                         ++open;
                     }
 
                     if (keyword && m_view.At(open) == Tok::LBrace)
                     {
-                        info.open = open;
+                        info.open  = open;
                         info.close = m_view.Match(open, m_view.Size());
                         info.valid = info.close < m_view.Size();
                     }
@@ -747,11 +763,13 @@ namespace heimdall
                             i = m_view.Match(i, m_view.Size());
                         }
                         else if (m_view.At(i + 1) == Tok::Colon &&
-                            (tok == Tok::KwPublic || tok == Tok::KwProtected || tok == Tok::KwPrivate))
+                                 (tok == Tok::KwPublic || tok == Tok::KwProtected ||
+                                  tok == Tok::KwPrivate))
                         {
-                            info.markers.emplace_back(i, tok == Tok::KwPublic ? Access::Public
-                                : tok == Tok::KwProtected ? Access::Protected
-                                : Access::Private);
+                            info.markers.emplace_back(
+                                i, tok == Tok::KwPublic      ? Access::Public
+                                   : tok == Tok::KwProtected ? Access::Protected
+                                                             : Access::Private);
                         }
                     }
                 }
@@ -769,7 +787,7 @@ namespace heimdall
                 }
 
                 const auto position = m_view.PositionOf(m_symbols.decl_token[member]);
-                Access access = info.is_class ? Access::Private : Access::Public;
+                Access     access   = info.is_class ? Access::Private : Access::Public;
                 for (const auto& [marker, level] : info.markers)
                 {
                     if (marker >= position)
@@ -785,31 +803,33 @@ namespace heimdall
 
             Visibility Classify(SymbolId symbol)
             {
-                const auto flags = m_symbols.flags[symbol];
-                bool internal = m_symbols.kind[symbol] == SymbolKind::Function && (flags& SymbolFlag::Static) != 0 &&
-                    m_scopes.kind[m_symbols.scope[symbol]] != ScopeKind::Class;
-                SymbolId item = symbol;
-                for (ScopeId scope = m_symbols.scope[symbol]; scope != kNone && scope < m_scopes.Size();
-                    scope = m_scopes.parent[scope])
+                const auto flags    = m_symbols.flags[symbol];
+                bool       internal = m_symbols.kind[symbol] == SymbolKind::Function &&
+                                      (flags & SymbolFlag::Static) != 0 &&
+                                      m_scopes.kind[m_symbols.scope[symbol]] != ScopeKind::Class;
+                SymbolId   item     = symbol;
+                for (ScopeId scope = m_symbols.scope[symbol];
+                     scope != kNone && scope < m_scopes.Size();
+                     scope = m_scopes.parent[scope])
                 {
                     switch (m_scopes.kind[scope])
                     {
-                    case ScopeKind::Function:
-                    case ScopeKind::Block:
-                        return Visibility::Skip;
-                    case ScopeKind::Namespace:
-                        internal = internal || m_scopes.owner[scope] == kNone;
-                        break;
-                    case ScopeKind::Class:
-                        if (const auto owner = m_scopes.owner[scope]; owner != kNone)
-                        {
-                            internal = internal || AccessOf(owner, item) == Access::Private;
-                            item = owner;
-                        }
+                        case ScopeKind::Function:
+                        case ScopeKind::Block:
+                            return Visibility::Skip;
+                        case ScopeKind::Namespace:
+                            internal = internal || m_scopes.owner[scope] == kNone;
+                            break;
+                        case ScopeKind::Class:
+                            if (const auto owner = m_scopes.owner[scope]; owner != kNone)
+                            {
+                                internal = internal || AccessOf(owner, item) == Access::Private;
+                                item     = owner;
+                            }
 
-                        break;
-                    default:
-                        break;
+                            break;
+                        default:
+                            break;
                     }
 
                     if (scope == SemanticModel::TranslationUnitScope)
@@ -862,23 +882,23 @@ namespace heimdall
             // Names in the comma-separated list between `open` and `close`: function
             // parameters or template parameters.
             void SplitList(
-                std::size_t open,
-                std::size_t close,
-                std::vector<Named>& out,
-                bool templates) const
+                std::size_t open, std::size_t close, std::vector<Named>& out, bool templates) const
             {
                 std::size_t segment = open + 1;
-                int depth = 0;
+                int         depth   = 0;
                 for (std::size_t i = open + 1; i <= close; ++i)
                 {
                     const Tok tok = i < close ? m_view.At(i) : Tok::Comma;
                     if (i < close)
                     {
-                        if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace || tok == Tok::Lt)
+                        if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace ||
+                            tok == Tok::Lt)
                         {
                             if (tok == Tok::LParen && i > segment &&
-                                (m_view.At(i - 1) == Tok::KwDecltype || m_view.At(i - 1) == Tok::KwAlignas ||
-                                m_view.At(i - 1) == Tok::KwNoexcept || m_view.At(i - 1) == Tok::KwSizeof))
+                                (m_view.At(i - 1) == Tok::KwDecltype ||
+                                 m_view.At(i - 1) == Tok::KwAlignas ||
+                                 m_view.At(i - 1) == Tok::KwNoexcept ||
+                                 m_view.At(i - 1) == Tok::KwSizeof))
                             {
                                 i = m_view.Match(i, close);
                                 continue;
@@ -888,7 +908,8 @@ namespace heimdall
                             continue;
                         }
 
-                        if (tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::RBrace || tok == Tok::Gt)
+                        if (tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::RBrace ||
+                            tok == Tok::Gt)
                         {
                             depth = std::max(0, depth - 1);
                             continue;
@@ -913,22 +934,21 @@ namespace heimdall
 
             // The declared name of one parameter in [begin, end), when it has one.
             void NameOfSegment(
-                std::size_t begin,
-                std::size_t end,
-                std::vector<Named>& out,
-                bool templates) const
+                std::size_t begin, std::size_t end, std::vector<Named>& out, bool templates) const
             {
                 // Default argument or default template argument.
-                int depth = 0;
-                std::size_t stop = end;
+                int         depth = 0;
+                std::size_t stop  = end;
                 for (auto i = begin; i < end; ++i)
                 {
                     const Tok tok = m_view.At(i);
-                    if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace || tok == Tok::Lt)
+                    if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace ||
+                        tok == Tok::Lt)
                     {
                         ++depth;
                     }
-                    else if (tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::RBrace || tok == Tok::Gt)
+                    else if (tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::RBrace ||
+                             tok == Tok::Gt)
                     {
                         depth = std::max(0, depth - 1);
                     }
@@ -939,7 +959,7 @@ namespace heimdall
                     }
                 }
 
-                if (stop <= begin ||(stop == begin + 1 && m_view.At(begin) == Tok::KwVoid))
+                if (stop <= begin || (stop == begin + 1 && m_view.At(begin) == Tok::KwVoid))
                 {
                     return;
                 }
@@ -950,8 +970,10 @@ namespace heimdall
                     for (auto i = begin; i < stop; ++i)
                     {
                         const Tok tok = m_view.At(i);
-                        if (tok == Tok::LParen && i > begin && (m_view.At(i - 1) == Tok::KwDecltype ||
-                            m_view.At(i - 1) == Tok::KwAlignas || m_view.At(i - 1) == Tok::KwNoexcept))
+                        if (tok == Tok::LParen && i > begin &&
+                            (m_view.At(i - 1) == Tok::KwDecltype ||
+                             m_view.At(i - 1) == Tok::KwAlignas ||
+                             m_view.At(i - 1) == Tok::KwNoexcept))
                         {
                             i = m_view.Match(i, stop);
                             continue;
@@ -972,9 +994,10 @@ namespace heimdall
                         if (tok == Tok::LParen)
                         {
                             const auto group = m_view.Match(i, stop);
-                            if (group < stop && group > i + 1 && m_view.IsWord(group - 1) && m_view.At(group - 2) != Tok::LParen)
+                            if (group < stop && group > i + 1 && m_view.IsWord(group - 1) &&
+                                m_view.At(group - 2) != Tok::LParen)
                             {
-                                out.push_back({m_view.Text(group - 1), group - 1});
+                                out.push_back({ m_view.Text(group - 1), group - 1 });
                             }
 
                             return;
@@ -989,7 +1012,8 @@ namespace heimdall
                 }
                 else
                 {
-                    // A `template<...>` parameter of a template template parameter has its own list.
+                    // A `template<...>` parameter of a template template parameter has its own
+                    // list.
                     for (auto i = begin; i < stop; ++i)
                     {
                         if (m_view.At(i) == Tok::KwTemplate && m_view.At(i + 1) == Tok::Lt)
@@ -1005,19 +1029,21 @@ namespace heimdall
                     }
                 }
 
-                if (stop < begin + 2 ||!m_view.IsWord(stop - 1))
+                if (stop < begin + 2 || !m_view.IsWord(stop - 1))
                 {
                     return;
                 }
 
-                const Tok before = m_view.At(stop - 2);
-                const bool type_only = IsQualifierToken(before) ||
-                    (!templates && (before == Tok::KwConst || before == Tok::KwVolatile || before == Tok::KwStruct ||
-                    before == Tok::KwClass || before == Tok::KwEnum || before == Tok::KwUnion ||
-                    before == Tok::KwTypename));
+                const Tok  before = m_view.At(stop - 2);
+                const bool type_only =
+                    IsQualifierToken(before) ||
+                    (!templates &&
+                     (before == Tok::KwConst || before == Tok::KwVolatile ||
+                      before == Tok::KwStruct || before == Tok::KwClass || before == Tok::KwEnum ||
+                      before == Tok::KwUnion || before == Tok::KwTypename));
                 if (!type_only)
                 {
-                    out.push_back({m_view.Text(stop - 1), stop - 1});
+                    out.push_back({ m_view.Text(stop - 1), stop - 1 });
                 }
             }
 
@@ -1026,8 +1052,8 @@ namespace heimdall
                 const auto flags = m_symbols.flags[symbol];
                 if (for_comment)
                 {
-                    if ((flags & (SymbolFlag::Qualified | SymbolFlag::Friend | SymbolFlag::Defaulted |
-                        SymbolFlag::Override)) != 0)
+                    if ((flags & (SymbolFlag::Qualified | SymbolFlag::Friend |
+                                  SymbolFlag::Defaulted | SymbolFlag::Override)) != 0)
                     {
                         return false;
                     }
@@ -1039,11 +1065,14 @@ namespace heimdall
                     }
 
                     // The first declaration carries the comment.
-                    for (auto other = m_model.LookupLocal(m_symbols.scope[symbol], m_symbols.name[symbol]);
-                        other != kNone; other = m_symbols.next_same_name[other])
+                    for (auto other =
+                             m_model.LookupLocal(m_symbols.scope[symbol], m_symbols.name[symbol]);
+                         other != kNone;
+                         other = m_symbols.next_same_name[other])
                     {
                         if (other != symbol && m_symbols.kind[other] == SymbolKind::Function &&
-                            m_symbols.signature[other] != 0 && m_symbols.signature[other] == m_symbols.signature[symbol] &&
+                            m_symbols.signature[other] != 0 &&
+                            m_symbols.signature[other] == m_symbols.signature[symbol] &&
                             m_symbols.decl_token[other] < m_symbols.decl_token[symbol])
                         {
                             return false;
@@ -1056,7 +1085,7 @@ namespace heimdall
                     return false;
                 }
 
-                const auto open = entity.name + 1;
+                const auto open  = entity.name + 1;
                 const auto close = m_view.Match(open, m_view.Size());
                 if (close >= m_view.Size())
                 {
@@ -1064,7 +1093,7 @@ namespace heimdall
                 }
 
                 std::size_t name_start = entity.name;
-                if ((flags& SymbolFlag::Operator) != 0)
+                if ((flags & SymbolFlag::Operator) != 0)
                 {
                     for (std::size_t back = 1; back <= 5 && back <= entity.name; ++back)
                     {
@@ -1075,13 +1104,15 @@ namespace heimdall
                         }
                     }
                 }
-                else if ((flags& SymbolFlag::Destructor) != 0 && entity.name > 0)
+                else if ((flags & SymbolFlag::Destructor) != 0 && entity.name > 0)
                 {
                     name_start = entity.name - 1;
                 }
 
-                const bool qualified_names = name_start >= 2 && m_view.At(name_start - 1) == Tok::ColonColon;
-                while (name_start >= 2 && m_view.At(name_start - 1) == Tok::ColonColon && m_view.IsWord(name_start - 2))
+                const bool qualified_names =
+                    name_start >= 2 && m_view.At(name_start - 1) == Tok::ColonColon;
+                while (name_start >= 2 && m_view.At(name_start - 1) == Tok::ColonColon &&
+                       m_view.IsWord(name_start - 2))
                 {
                     name_start -= 2;
                 }
@@ -1095,7 +1126,8 @@ namespace heimdall
                     return false;
                 }
 
-                entity.returns = ReturnKind(flags, after_header, name_start, close, qualified_names);
+                entity.returns =
+                    ReturnKind(flags, after_header, name_start, close, qualified_names);
                 for (auto i = close + 1; i < m_view.Size(); ++i)
                 {
                     const Tok tok = m_view.At(i);
@@ -1117,7 +1149,7 @@ namespace heimdall
                     }
                 }
 
-                if ((flags& SymbolFlag::Definition) != 0)
+                if ((flags & SymbolFlag::Definition) != 0)
                 {
                     entity.throws = BodyThrows(m_symbols.decl_node[symbol], close);
                 }
@@ -1152,12 +1184,11 @@ namespace heimdall
                 return false;
             }
 
-            Tri ReturnKind(
-                std::uint32_t flags,
-                std::size_t after_header,
-                std::size_t name_start,
-                std::size_t close,
-                bool qualified) const
+            Tri ReturnKind(std::uint32_t flags,
+                           std::size_t   after_header,
+                           std::size_t   name_start,
+                           std::size_t   close,
+                           bool          qualified) const
             {
                 if ((flags & (SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
                 {
@@ -1182,9 +1213,10 @@ namespace heimdall
                     {
                         p = m_view.Match(p, name_start) + 1;
                     }
-                    else if (tok == Tok::KwStatic || tok == Tok::KwInline || tok == Tok::KwVirtual ||
-                        tok == Tok::KwConstexpr || tok == Tok::KwConsteval || tok == Tok::KwExplicit ||
-                        tok == Tok::KwFriend || tok == Tok::KwThreadLocal)
+                    else if (tok == Tok::KwStatic || tok == Tok::KwInline ||
+                             tok == Tok::KwVirtual || tok == Tok::KwConstexpr ||
+                             tok == Tok::KwConsteval || tok == Tok::KwExplicit ||
+                             tok == Tok::KwFriend || tok == Tok::KwThreadLocal)
                     {
                         ++p;
                     }
@@ -1207,15 +1239,15 @@ namespace heimdall
                     return Tri::No; // constructors, conversion operators, deduction guides
                 }
 
-                bool deduced = false;
-                bool angle = false;
+                bool        deduced     = false;
+                bool        angle       = false;
                 std::size_t significant = 0;
-                bool is_void = false;
+                bool        is_void     = false;
                 for (auto i = p; i < name_start; ++i)
                 {
                     const Tok tok = m_view.At(i);
-                    deduced = deduced || tok == Tok::KwAuto || tok == Tok::KwDecltype;
-                    angle = angle || tok == Tok::Gt || tok == Tok::Shr;
+                    deduced       = deduced || tok == Tok::KwAuto || tok == Tok::KwDecltype;
+                    angle         = angle || tok == Tok::Gt || tok == Tok::Shr;
                     if (tok != Tok::KwConst && tok != Tok::KwVolatile)
                     {
                         ++significant;
@@ -1244,12 +1276,16 @@ namespace heimdall
                         else if (tok == Tok::Arrow)
                         {
                             return m_view.At(i + 1) == Tok::KwVoid &&
-                                (m_view.At(i + 2) == Tok::LBrace || m_view.At(i + 2) == Tok::Semi ||
-                                m_view.At(i + 2) == Tok::KwNoexcept || m_view.At(i + 2) == Tok::KwRequires ||
-                                m_view.At(i + 2) == Tok::Eq || m_view.At(i + 2) == Tok::KwConst ||
-                                m_view.At(i + 2) == Tok::KwOverride || m_view.At(i + 2) == Tok::KwFinal)
-                            ? Tri::No
-                            : Tri::Yes;
+                                           (m_view.At(i + 2) == Tok::LBrace ||
+                                            m_view.At(i + 2) == Tok::Semi ||
+                                            m_view.At(i + 2) == Tok::KwNoexcept ||
+                                            m_view.At(i + 2) == Tok::KwRequires ||
+                                            m_view.At(i + 2) == Tok::Eq ||
+                                            m_view.At(i + 2) == Tok::KwConst ||
+                                            m_view.At(i + 2) == Tok::KwOverride ||
+                                            m_view.At(i + 2) == Tok::KwFinal)
+                                       ? Tri::No
+                                       : Tri::Yes;
                         }
                     }
 
@@ -1259,37 +1295,35 @@ namespace heimdall
                 return significant == 1 && is_void ? Tri::No : Tri::Yes;
             }
 
-            const SemanticModel& m_model;
-            TokenView m_view;
-            const SymbolTable& m_symbols;
-            const ScopeTable& m_scopes;
-            const ParseTree& m_tree;
-            DocScope m_scope;
-            LineTable m_lines;
-            bool m_lines_built = false;
+            const SemanticModel&                    m_model;
+            TokenView                               m_view;
+            const SymbolTable&                      m_symbols;
+            const ScopeTable&                       m_scopes;
+            const ParseTree&                        m_tree;
+            DocScope                                m_scope;
+            LineTable                               m_lines;
+            bool                                    m_lines_built = false;
             std::unordered_map<SymbolId, ClassInfo> m_classes;
         };
 
         // Build one coordinated edit per declaration, so fix-all cannot apply
         // conflicting edits for several missing tags in the same comment.
         TextEdit DocumentationFix(
-            DocAnalysis& analysis,
-            const Entity& entity,
-            const Doc& doc,
-            bool& safe)
+            DocAnalysis& analysis, const Entity& entity, const Doc& doc, bool& safe)
         {
-            const auto source = analysis.Model().Tree().Source();
-            const auto start = doc.present ? doc.begin : analysis.View().Offset(entity.start);
+            const auto source  = analysis.Model().Tree().Source();
+            const auto start   = doc.present ? doc.begin : analysis.View().Offset(entity.start);
             const auto newline = source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
-            const auto previous = start == 0 ? std::string_view::npos : source.rfind('\n', start - 1);
+            const auto previous =
+                start == 0 ? std::string_view::npos : source.rfind('\n', start - 1);
             const auto line_start = previous == std::string_view::npos ? 0 : previous + 1;
-            auto indent_end = line_start;
+            auto       indent_end = line_start;
             while (indent_end < start && (source[indent_end] == ' ' || source[indent_end] == '\t'))
             {
                 ++indent_end;
             }
 
-            const std::string indent(source.substr(line_start, indent_end - line_start));
+            const std::string        indent(source.substr(line_start, indent_end - line_start));
             std::vector<std::string> lines;
             for (const auto& line : doc.lines)
             {
@@ -1305,12 +1339,12 @@ namespace heimdall
                 std::string text;
             };
 
-            std::vector<Change> changes;
+            std::vector<Change>      changes;
             std::vector<std::string> additions;
             std::vector<std::string> params;
             std::vector<std::string> tparams;
-            std::size_t search_line = kNpos;
-            std::size_t search_from = 0;
+            std::size_t              search_line = kNpos;
+            std::size_t              search_from = 0;
             for (const auto& command : commands)
             {
                 if (command.line != search_line)
@@ -1320,47 +1354,52 @@ namespace heimdall
                 }
 
                 const std::string marker = std::string(command.at ? "@" : "\\") + command.name;
-                const auto begin = lines[command.line].find(marker, search_from);
+                const auto        begin  = lines[command.line].find(marker, search_from);
                 if (begin == std::string::npos)
                 {
                     continue;
                 }
 
-                const auto length = marker.size() + command.parts.front().size();
-                search_from = begin + length;
+                const auto length       = marker.size() + command.parts.front().size();
+                search_from             = begin + length;
                 std::string replacement = "@" + command.name + command.parts.front();
-                const auto joined = Joined(command);
+                const auto  joined      = Joined(command);
                 if ((entity.function && command.name == "param") || command.name == "tparam")
                 {
                     std::string_view rest = joined;
                     if (rest.starts_with('['))
                     {
                         const auto close = rest.find(']');
-                        rest = close == std::string_view::npos ? std::string_view{}: rest.substr(close + 1);
+                        rest             = close == std::string_view::npos ? std::string_view {}
+                                                                           : rest.substr(close + 1);
                     }
 
-                    rest = Trim(rest);
-                    const auto stop = rest.find_first_of(" \t");
+                    rest             = Trim(rest);
+                    const auto stop  = rest.find_first_of(" \t");
                     const auto names = rest.substr(0, stop);
-                    const auto description = stop == std::string_view::npos ? std::string_view{}: Trim(rest.substr(stop));
-                    auto& seen = command.name == "param" ? params : tparams;
+                    const auto description =
+                        stop == std::string_view::npos ? std::string_view {}
+                                                       : Trim(rest.substr(stop));
+                    auto&       seen     = command.name == "param" ? params : tparams;
                     const auto& declared = command.name == "param" ? entity.params : entity.tparams;
-                    const bool known = command.name == "param" ? entity.params_known : entity.tparams_known;
-                    bool invalid = names.empty();
+                    const bool  known =
+                        command.name == "param" ? entity.params_known : entity.tparams_known;
+                    bool                     invalid = names.empty();
                     std::vector<std::string> listed;
-                    std::size_t cursor = 0;
+                    std::size_t              cursor = 0;
                     while (cursor < names.size())
                     {
-                        const auto comma = names.find(',', cursor);
-                        const std::string name(names.substr(cursor,
-                            comma == std::string_view::npos ? names.size() - cursor : comma - cursor));
-                        invalid |= std::find(seen.begin(), seen.end(), name) != seen.end() ||
+                        const auto        comma = names.find(',', cursor);
+                        const std::string name(names.substr(
+                            cursor,
+                            comma == std::string_view::npos ? names.size() - cursor
+                                                            : comma - cursor));
+                        invalid |=
+                            std::find(seen.begin(), seen.end(), name) != seen.end() ||
                             std::find(listed.begin(), listed.end(), name) != listed.end() ||
-                            (known && std::none_of(declared.begin(), declared.end(),
-                            [&](const Named& item)
-                            {
-                                return item.name == name;
-                        }));
+                            (known &&
+                             std::none_of(declared.begin(), declared.end(),
+                                          [&](const Named& item) { return item.name == name; }));
                         listed.push_back(name);
                         if (comma == std::string_view::npos)
                         {
@@ -1375,7 +1414,7 @@ namespace heimdall
                         // Preserve obsolete/duplicate prose as a note rather than
                         // silently discarding documentation written by the author.
                         replacement = "@note " + command.name + command.parts.front();
-                        safe = false;
+                        safe        = false;
                     }
                     else
                     {
@@ -1415,17 +1454,26 @@ namespace heimdall
 
                                         if (part == 0)
                                         {
-                                            replacement = "@" + command.name + std::string(Trim(std::string_view(text).substr(0, split))) +
-                                                "\n\n" + std::string(Trim(std::string_view(text).substr(split)));
+                                            replacement =
+                                                "@" + command.name +
+                                                std::string(
+                                                    Trim(std::string_view(text).substr(0, split))) +
+                                                "\n\n" +
+                                                std::string(
+                                                    Trim(std::string_view(text).substr(split)));
                                             // Keep a space after the command name.
                                             replacement.insert(command.name.size() + 1, " ");
                                         }
                                         else
                                         {
                                             const auto line = command.line + part;
-                                            changes.push_back({line, 0, lines[line].size(),
-                                                    std::string(Trim(std::string_view(text).substr(0, split))) + "\n\n" +
-                                                    std::string(Trim(std::string_view(text).substr(split)))});
+                                            changes.push_back(
+                                                { line, 0, lines[line].size(),
+                                                  std::string(Trim(
+                                                      std::string_view(text).substr(0, split))) +
+                                                      "\n\n" +
+                                                      std::string(Trim(
+                                                          std::string_view(text).substr(split))) });
                                         }
 
                                         break;
@@ -1437,22 +1485,24 @@ namespace heimdall
 
                             const auto trimmed = Trim(text);
                             if (part + 1 < command.parts.size() && !trimmed.empty() &&
-                                (trimmed.back() == '.' || trimmed.back() == '!' || trimmed.back() == '?'))
+                                (trimmed.back() == '.' || trimmed.back() == '!' ||
+                                 trimmed.back() == '?'))
                             {
                                 const auto line = command.line + part + 1;
-                                changes.push_back({line, 0, 0, "\n"});
+                                changes.push_back({ line, 0, 0, "\n" });
                                 break;
                             }
                         }
                     }
                 }
-                else if (entity.function && (command.name == "return" || command.name == "returns" ||
-                    command.name == "result" || command.name == "retval"))
+                else if (entity.function &&
+                         (command.name == "return" || command.name == "returns" ||
+                          command.name == "result" || command.name == "retval"))
                 {
                     if (entity.returns == Tri::No)
                     {
                         replacement = "@note " + command.name + command.parts.front();
-                        safe = false;
+                        safe        = false;
                     }
                     else if (command.name != "retval" && joined.empty())
                     {
@@ -1460,12 +1510,14 @@ namespace heimdall
                         safe = false;
                     }
                 }
-                else if (entity.function && (command.name == "throw" || command.name == "throws" || command.name == "exception"))
+                else if (entity.function && (command.name == "throw" || command.name == "throws" ||
+                                             command.name == "exception"))
                 {
                     if (joined.find(' ') == std::string::npos)
                     {
-                        replacement += joined.empty() ? " TODO TODO: Describe the exception and condition." :
-                        " TODO: Describe when it is thrown.";
+                        replacement +=
+                            joined.empty() ? " TODO TODO: Describe the exception and condition."
+                                           : " TODO: Describe when it is thrown.";
                         safe = false;
                     }
                 }
@@ -1476,18 +1528,17 @@ namespace heimdall
                     replacement += ' ';
                 }
 
-                changes.push_back({command.line, begin, length, std::move(replacement)});
+                changes.push_back({ command.line, begin, length, std::move(replacement) });
             }
 
-            if (Find(commands, {"brief", "short", "copybrief"}) == nullptr)
+            if (Find(commands, { "brief", "short", "copybrief" }) == nullptr)
             {
                 additions.push_back("@brief TODO: Describe " + analysis.NameOf(entity) + ".");
                 safe = false;
             }
 
-            const auto add_named =[&](std::string_view tag, const std::vector<Named>& declared,
-                const std::vector<std::string>& seen, bool known)
-            {
+            const auto add_named = [&](std::string_view tag, const std::vector<Named>& declared,
+                                       const std::vector<std::string>& seen, bool known) {
                 if (!known)
                 {
                     return;
@@ -1497,7 +1548,8 @@ namespace heimdall
                 {
                     if (std::find(seen.begin(), seen.end(), item.name) == seen.end())
                     {
-                        additions.push_back("@" + std::string(tag) + " " + std::string(item.name) + " TODO: Describe this parameter.");
+                        additions.push_back("@" + std::string(tag) + " " + std::string(item.name) +
+                                            " TODO: Describe this parameter.");
                         safe = false;
                     }
                 }
@@ -1506,23 +1558,22 @@ namespace heimdall
             if (entity.function)
             {
                 add_named("param", entity.params, params, entity.params_known);
-                if (entity.returns == Tri::Yes && Find(commands, {"return", "returns", "result",
-                        "retval"}) == nullptr)
+                if (entity.returns == Tri::Yes &&
+                    Find(commands, { "return", "returns", "result", "retval" }) == nullptr)
                 {
                     additions.push_back("@return TODO: Describe the returned value.");
                     safe = false;
                 }
 
-                if (entity.throws && Find(commands, {"throw", "throws", "exception"}) == nullptr)
+                if (entity.throws && Find(commands, { "throw", "throws", "exception" }) == nullptr)
                 {
                     additions.push_back("@throws TODO TODO: Describe the exception and condition.");
                     safe = false;
                 }
             }
 
-            std::stable_sort(changes.begin(), changes.end(),[](const Change& a, const Change& b)
-                {
-                    return a.line != b.line ? a.line > b.line : a.begin > b.begin;
+            std::stable_sort(changes.begin(), changes.end(), [](const Change& a, const Change& b) {
+                return a.line != b.line ? a.line > b.line : a.begin > b.begin;
             });
             for (const auto& change : changes)
             {
@@ -1544,8 +1595,9 @@ namespace heimdall
                 std::size_t cursor = 0;
                 do
                 {
-                    const auto end = line.find('\n', cursor);
-                    const auto piece = std::string_view(line).substr(cursor,
+                    const auto end   = line.find('\n', cursor);
+                    const auto piece = std::string_view(line).substr(
+                        cursor,
                         end == std::string::npos ? line.size() - cursor : end - cursor);
                     replacement += indent + " *";
                     if (!piece.empty())
@@ -1570,38 +1622,38 @@ namespace heimdall
                 replacement += indent;
             }
 
-            return {start, doc.present ? doc.end - doc.begin : 0, std::move(replacement)};
+            return { start, doc.present ? doc.end - doc.begin : 0, std::move(replacement) };
         }
 
-        void AttachDocumentationFix(
-            DocAnalysis& analysis,
-            const Entity& entity,
-            const Doc& doc,
-            std::vector<Diagnostic>& diagnostics,
-            std::size_t first)
+        void AttachDocumentationFix(DocAnalysis&             analysis,
+                                    const Entity&            entity,
+                                    const Doc&               doc,
+                                    std::vector<Diagnostic>& diagnostics,
+                                    std::size_t              first)
         {
             if (first == diagnostics.size())
             {
                 return;
             }
 
-            bool safe = doc.present;
-            const auto fix = DocumentationFix(analysis, entity, doc, safe);
+            bool       safe = doc.present;
+            const auto fix  = DocumentationFix(analysis, entity, doc, safe);
             for (auto i = first; i < diagnostics.size(); ++i)
             {
-                auto& diagnostic = diagnostics[i];
-                diagnostic.has_fix = true;
-                diagnostic.fix = fix;
+                auto& diagnostic       = diagnostics[i];
+                diagnostic.has_fix     = true;
+                diagnostic.fix         = fix;
                 diagnostic.fix_is_safe = safe;
-                diagnostic.fix_title = safe ? "Normalize Doxygen comment" : "Repair documentation (review TODOs and notes)";
+                diagnostic.fix_title   = safe ? "Normalize Doxygen comment"
+                                              : "Repair documentation (review TODOs and notes)";
                 if (safe)
                 {
                     // Batch fixes must be contained by their diagnostic range.
-                    const auto where = analysis.Make(diagnostic.rule, diagnostic.code, diagnostic.message,
-                        fix.offset, fix.length);
+                    const auto where  = analysis.Make(diagnostic.rule, diagnostic.code,
+                                                      diagnostic.message, fix.offset, fix.length);
                     diagnostic.offset = where.offset;
                     diagnostic.length = where.length;
-                    diagnostic.line = where.line;
+                    diagnostic.line   = where.line;
                     diagnostic.column = where.column;
                 }
             }
@@ -1609,28 +1661,26 @@ namespace heimdall
 
         void Append(std::vector<Diagnostic>& all, std::vector<Diagnostic> part)
         {
-            all.insert(all.end(), std::make_move_iterator(part.begin()), std::make_move_iterator(part.end()));
+            all.insert(all.end(), std::make_move_iterator(part.begin()),
+                       std::make_move_iterator(part.end()));
         }
 
         void SortByOffset(std::vector<Diagnostic>& diagnostics)
         {
-            std::stable_sort(diagnostics.begin(), diagnostics.end(),
-                [](const Diagnostic& a, const Diagnostic& b)
-                {
-                    return a.offset < b.offset;
-            });
+            std::stable_sort(
+                diagnostics.begin(), diagnostics.end(),
+                [](const Diagnostic& a, const Diagnostic& b) { return a.offset < b.offset; });
         }
 
         // The `@param`/`@tparam` commands against what the signature declares.
-        void CheckNamed(
-            DocAnalysis& analysis,
-            std::vector<Diagnostic>& out,
-            const Doc& doc,
-            const std::vector<Command>& commands,
-            std::string_view tag,
-            const std::vector<Named>& declared,
-            bool known,
-            std::string_view what)
+        void CheckNamed(DocAnalysis&                analysis,
+                        std::vector<Diagnostic>&    out,
+                        const Doc&                  doc,
+                        const std::vector<Command>& commands,
+                        std::string_view            tag,
+                        const std::vector<Named>&   declared,
+                        bool                        known,
+                        std::string_view            what)
         {
             std::vector<std::string> seen;
             for (const auto& command : commands)
@@ -1640,27 +1690,29 @@ namespace heimdall
                     continue;
                 }
 
-                std::string text = Joined(command);
+                std::string      text = Joined(command);
                 std::string_view rest = text;
                 if (rest.starts_with('['))
                 {
                     const auto close = rest.find(']');
-                    rest = close == std::string_view::npos ? std::string_view{}: rest.substr(close + 1);
+                    rest             = close == std::string_view::npos ? std::string_view {}
+                                                                       : rest.substr(close + 1);
                 }
 
-                rest = Trim(rest);
+                rest            = Trim(rest);
                 std::size_t end = 0;
                 while (end < rest.size() && !IsSpace(rest[end]))
                 {
                     ++end;
                 }
 
-                const auto names = rest.substr(0, end);
-                const auto description = Trim(rest.substr(end));
-                const auto& line = doc.lines[command.line];
+                const auto  names       = rest.substr(0, end);
+                const auto  description = Trim(rest.substr(end));
+                const auto& line        = doc.lines[command.line];
                 if (names.empty())
                 {
-                    out.push_back(analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style",
+                    out.push_back(analysis.Make(
+                        RuleId::DocDoxygenStyle, "doc/doxygen-style",
                         "@" + std::string(tag) + " without a name", line.offset, line.length));
                     continue;
                 }
@@ -1683,29 +1735,30 @@ namespace heimdall
 
                     const bool repeated = std::find(seen.begin(), seen.end(), name) != seen.end();
                     seen.push_back(name);
-                    const bool exists = std::any_of(declared.begin(), declared.end(),
-                        [&](const Named& item)
-                        {
-                            return item.name == name;
-                    });
+                    const bool exists =
+                        std::any_of(declared.begin(), declared.end(),
+                                    [&](const Named& item) { return item.name == name; });
                     if (repeated)
                     {
-                        out.push_back(analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                            "@" + std::string(tag) + " '" + name + "' is documented more than once", line.offset,
-                            line.length));
+                        out.push_back(analysis.Make(
+                            RuleId::DocDoxygenStyle, "doc/doxygen-style",
+                            "@" + std::string(tag) + " '" + name + "' is documented more than once",
+                            line.offset, line.length));
                     }
                     else if (known && !exists)
                     {
                         out.push_back(analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                            "@" + std::string(tag) + " '" + name + "' does not match any " + std::string(what),
-                            line.offset, line.length));
+                                                    "@" + std::string(tag) + " '" + name +
+                                                        "' does not match any " + std::string(what),
+                                                    line.offset, line.length));
                     }
                     else if (description.empty())
                     {
                         out.push_back(analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                            "@" + std::string(tag) + " '" + name +
-                            "' has no description; say what it is, its unit and its valid range",
-                            line.offset, line.length));
+                                                    "@" + std::string(tag) + " '" + name +
+                                                        "' has no description; say what it is, its "
+                                                        "unit and its valid range",
+                                                    line.offset, line.length));
                     }
                 }
             }
@@ -1717,37 +1770,42 @@ namespace heimdall
 
             for (const auto& item : declared)
             {
-                const bool documented = std::any_of(commands.begin(), commands.end(),
-                    [&](const Command& command)
-                    {
+                const bool documented =
+                    std::any_of(commands.begin(), commands.end(), [&](const Command& command) {
                         if (command.name != tag)
                         {
                             return false;
-                    }
+                        }
 
-                    // The name can be anywhere in a `@param[in] a, b` list.
+                        // The name can be anywhere in a `@param[in] a, b` list.
                         const auto text = Joined(command);
                         for (std::size_t at = text.find(item.name); at != std::string::npos;
-                        at = text.find(item.name, at + 1))
+                             at             = text.find(item.name, at + 1))
                         {
-                            const bool left = at == 0 ||!(std::isalnum(static_cast<unsigned char>(text[at - 1])) != 0 ||
-                            text[at - 1] == '_');
+                            const bool left =
+                                at == 0 ||
+                                !(std::isalnum(static_cast<unsigned char>(text[at - 1])) != 0 ||
+                                  text[at - 1] == '_');
                             const auto stop = at + item.name.size();
-                            const bool right = stop >= text.size() ||
-                            !(std::isalnum(static_cast<unsigned char>(text[stop])) != 0 || text[stop] == '_');
+                            const bool right =
+                                stop >= text.size() ||
+                                !(std::isalnum(static_cast<unsigned char>(text[stop])) != 0 ||
+                                  text[stop] == '_');
                             if (left && right)
                             {
                                 return true;
+                            }
                         }
-                    }
 
                         return false;
-                });
+                    });
                 if (!documented)
                 {
-                    out.push_back(analysis.MakeAtName(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                        std::string(what) + " '" + std::string(item.name) + "' is not documented; add @" +
-                        std::string(tag) + " " + std::string(item.name),
+                    out.push_back(analysis.MakeAtName(
+                        RuleId::DocDoxygenStyle, "doc/doxygen-style",
+                        std::string(what) + " '" + std::string(item.name) +
+                            "' is not documented; add @" + std::string(tag) + " " +
+                            std::string(item.name),
                         item.position));
                 }
             }
@@ -1756,12 +1814,12 @@ namespace heimdall
     } // namespace
 
     std::vector<Diagnostic> SemanticRules::AnalyzeRequireDocComment(const SemanticModel& model,
-        DocScope scope)
+                                                                    DocScope             scope)
     {
-        DocAnalysis analysis(model, scope);
+        DocAnalysis             analysis(model, scope);
         std::vector<Diagnostic> diagnostics;
-        const auto& symbols = model.Symbols();
-        Entity entity;
+        const auto&             symbols = model.Symbols();
+        Entity                  entity;
         for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
         {
             if (!analysis.Describe(symbol, entity, true))
@@ -1775,12 +1833,13 @@ namespace heimdall
                 continue;
             }
 
-            diagnostics.push_back(analysis.MakeAtName(RuleId::DocRequireComment, "doc/require-comment",
+            diagnostics.push_back(analysis.MakeAtName(
+                RuleId::DocRequireComment, "doc/require-comment",
                 std::string(analysis.KindWord(entity)) + " '" + analysis.NameOf(entity) +
-                "' has no documentation comment; add a /** */ or /// block with a @brief",
+                    "' has no documentation comment; add a /** */ or /// block with a @brief",
                 entity.name));
             // Detached file/group documentation must not be replaced.
-            AttachDocumentationFix(analysis, entity, Doc{}, diagnostics, diagnostics.size() - 1);
+            AttachDocumentationFix(analysis, entity, Doc {}, diagnostics, diagnostics.size() - 1);
         }
 
         SortByOffset(diagnostics);
@@ -1788,12 +1847,12 @@ namespace heimdall
     }
 
     std::vector<Diagnostic> SemanticRules::AnalyzeDoxygenStyle(const SemanticModel& model,
-        DocScope scope)
+                                                               DocScope             scope)
     {
-        DocAnalysis analysis(model, scope);
+        DocAnalysis             analysis(model, scope);
         std::vector<Diagnostic> diagnostics;
-        const auto& symbols = model.Symbols();
-        Entity entity;
+        const auto&             symbols = model.Symbols();
+        Entity                  entity;
         for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
         {
             if (!analysis.Describe(symbol, entity, false))
@@ -1815,12 +1874,11 @@ namespace heimdall
 
             const auto first = diagnostics.size();
 
-            const auto report =[&](std::string message, std::size_t line = 0)
-            {
+            const auto report = [&](std::string message, std::size_t line = 0) {
                 const auto& where = doc.lines[std::min(line, doc.lines.size() - 1)];
-                diagnostics.push_back(analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                    std::move(message),
-                    where.offset, where.length));
+                diagnostics.push_back(
+                    analysis.Make(RuleId::DocDoxygenStyle, "doc/doxygen-style", std::move(message),
+                                  where.offset, where.length));
             };
 
             if (doc.qt_style)
@@ -1828,26 +1886,20 @@ namespace heimdall
                 report("use Javadoc style (/** */ or ///) instead of /*! */ and //!");
             }
 
-            const bool at = std::any_of(commands.begin(), commands.end(),
-                [](const Command& command)
-                {
-                    return command.at;
-            });
+            const bool at    = std::any_of(commands.begin(), commands.end(),
+                                           [](const Command& command) { return command.at; });
             const bool slash = std::any_of(commands.begin(), commands.end(),
-                [](const Command& command)
-                {
-                    return!command.at;
-            });
+                                           [](const Command& command) { return !command.at; });
             if (at && slash)
             {
                 report("comment mixes @command and \\command spellings; pick one");
             }
 
             // Brief: one sentence, then a blank line.
-            const auto* brief = Find(commands, {"brief", "short"});
+            const auto* brief = Find(commands, { "brief", "short" });
             if (brief == nullptr)
             {
-                if (Find(commands, {"copybrief"}) == nullptr)
+                if (Find(commands, { "copybrief" }) == nullptr)
                 {
                     report("no @brief; start with a one-sentence summary");
                 }
@@ -1863,44 +1915,48 @@ namespace heimdall
                 for (std::size_t k = 0; k + 1 < brief->parts.size() && !broke; ++k)
                 {
                     const auto part = Trim(brief->parts[k]);
-                    broke =!part.empty() && (part.back() == '.' || part.back() == '!' || part.back() == '?');
+                    broke = !part.empty() &&
+                            (part.back() == '.' || part.back() == '!' || part.back() == '?');
                 }
 
                 if (broke)
                 {
-                    report("separate the @brief from the detailed description with a blank line", brief->line);
+                    report("separate the @brief from the detailed description with a blank line",
+                           brief->line);
                 }
-                else if (std::any_of(brief->parts.begin(), brief->parts.end(),
-                    [](const std::string& part)
-                    {
-                        return HasSecondSentence(part);
-                }))
+                else if (std::any_of(
+                             brief->parts.begin(), brief->parts.end(),
+                             [](const std::string& part) { return HasSecondSentence(part); }))
                 {
-                    report("@brief should be a single sentence; move the rest to the detailed description",
-                        brief->line);
+                    report("@brief should be a single sentence; move the rest to the detailed "
+                           "description",
+                           brief->line);
                 }
             }
 
-            CheckNamed(analysis, diagnostics, doc, commands, "tparam", entity.tparams, entity.tparams_known,
-                "template parameter");
+            CheckNamed(analysis, diagnostics, doc, commands, "tparam", entity.tparams,
+                       entity.tparams_known, "template parameter");
             if (!entity.function)
             {
                 AttachDocumentationFix(analysis, entity, doc, diagnostics, first);
                 continue;
             }
 
-            CheckNamed(analysis, diagnostics, doc, commands, "param", entity.params, entity.params_known,
-                "parameter");
+            CheckNamed(analysis, diagnostics, doc, commands, "param", entity.params,
+                       entity.params_known, "parameter");
 
-            const auto* returns = Find(commands, {"return", "returns", "result", "retval"});
+            const auto* returns = Find(commands, { "return", "returns", "result", "retval" });
             if (entity.returns == Tri::Yes && returns == nullptr)
             {
-                diagnostics.push_back(analysis.MakeAtName(RuleId::DocDoxygenStyle, "doc/doxygen-style",
-                    "'" + analysis.NameOf(entity) + "' returns a value but has no @return", entity.name));
+                diagnostics.push_back(analysis.MakeAtName(
+                    RuleId::DocDoxygenStyle, "doc/doxygen-style",
+                    "'" + analysis.NameOf(entity) + "' returns a value but has no @return",
+                    entity.name));
             }
             else if (entity.returns == Tri::No && returns != nullptr)
             {
-                report("'" + analysis.NameOf(entity) + "' returns nothing; remove @" + returns->name,
+                report(
+                    "'" + analysis.NameOf(entity) + "' returns nothing; remove @" + returns->name,
                     returns->line);
             }
             else if (returns != nullptr && returns->name != "retval" && Joined(*returns).empty())
@@ -1908,19 +1964,22 @@ namespace heimdall
                 report("@" + returns->name + " has no description", returns->line);
             }
 
-            const auto* throws = Find(commands, {"throw", "throws", "exception"});
+            const auto* throws = Find(commands, { "throw", "throws", "exception" });
             if (throws == nullptr && entity.throws)
             {
-                diagnostics.push_back(analysis.MakeAtName(RuleId::DocDoxygenStyle, "doc/doxygen-style",
+                diagnostics.push_back(analysis.MakeAtName(
+                    RuleId::DocDoxygenStyle, "doc/doxygen-style",
                     "'" + analysis.NameOf(entity) + "' can throw but has no @throws", entity.name));
             }
             else if (throws != nullptr)
             {
-                const auto text = Joined(*throws);
+                const auto text  = Joined(*throws);
                 const auto space = text.find(' ');
-                if (space == std::string::npos || Trim(std::string_view(text).substr(space)).empty())
+                if (space == std::string::npos ||
+                    Trim(std::string_view(text).substr(space)).empty())
                 {
-                    report("@" + throws->name + " needs the exception type and when it is thrown", throws->line);
+                    report("@" + throws->name + " needs the exception type and when it is thrown",
+                           throws->line);
                 }
             }
 
@@ -1932,10 +1991,10 @@ namespace heimdall
     }
 
     std::vector<Diagnostic> SemanticRules::AnalyzeDocumentation(const SemanticModel& model,
-        const RuleEngine& engine)
+                                                                const RuleEngine&    engine)
     {
         std::vector<Diagnostic> all;
-        const auto scope = engine.DocumentationScope();
+        const auto              scope = engine.DocumentationScope();
         if (engine.OptInEnabled("doc/require-comment"))
         {
             Append(all, AnalyzeRequireDocComment(model, scope));

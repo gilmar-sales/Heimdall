@@ -7,7 +7,7 @@
 TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 {
     constexpr std::string_view source = "int f(int x) { return values[x + (1)]; }\n";
-    const auto tree = heimdall::SyntaxTree::Parse(source);
+    const auto                 tree   = heimdall::SyntaxTree::Parse(source);
 
     std::string reconstructed;
     for (const auto& token : tree.Tokens())
@@ -20,9 +20,9 @@ TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
     EXPECT_TRUE(tree.Diagnostics().empty());
 
-    std::size_t parens = 0;
+    std::size_t parens   = 0;
     std::size_t brackets = 0;
-    std::size_t braces = 0;
+    std::size_t braces   = 0;
     for (const auto& node : tree.Nodes())
     {
         parens += node.kind == heimdall::SyntaxKind::ParenthesizedGroup;
@@ -38,7 +38,7 @@ TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 TEST(SyntaxTreeSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
 {
     constexpr std::string_view source = "([)] {";
-    const auto tree = heimdall::SyntaxTree::Parse(source);
+    const auto                 tree   = heimdall::SyntaxTree::Parse(source);
     EXPECT_EQ(tree.Tokens().size(), 6);
     ASSERT_EQ(tree.Diagnostics().size(), 3);
     EXPECT_EQ(tree.Diagnostics()[0].message, "unmatched closing delimiter");
@@ -57,11 +57,8 @@ TEST(SyntaxTreeSpec, EnforcesNestingLimitAndStillProducesTree)
 TEST(SyntaxTreeSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
 {
     constexpr std::string_view source = "int f() { return 0; }";
-    for (const auto standard :
-        {
-            heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,
-            heimdall::CppStandard::Cpp26
-    })
+    for (const auto standard : { heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,
+                                 heimdall::CppStandard::Cpp26 })
     {
         const auto tree = heimdall::SyntaxTree::Parse(source, standard);
         EXPECT_EQ(tree.Standard(), standard);

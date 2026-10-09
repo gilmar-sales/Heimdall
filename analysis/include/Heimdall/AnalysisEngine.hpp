@@ -59,7 +59,8 @@ namespace heimdall
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(scheduled.diagnostics.begin()),
                 std::make_move_iterator(scheduled.diagnostics.end()));
-            std::stable_sort(result.diagnostics.begin(), result.diagnostics.end(),
+            std::stable_sort(
+                result.diagnostics.begin(), result.diagnostics.end(),
                 [](const Diagnostic& a, const Diagnostic& b)
                 {
                     return a.offset < b.offset;
@@ -71,4 +72,4 @@ namespace heimdall
         RuleEngine m_engine;
         PluginHost m_host;
     };
-}
+} // namespace heimdall

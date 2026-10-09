@@ -16,9 +16,9 @@ namespace heimdall
 
     struct IncludeLimits
     {
-        std::size_t max_headers = 256;
+        std::size_t max_headers    = 256;
         std::size_t max_file_bytes = 1 << 20;
-        int max_depth = 16;
+        int         max_depth      = 16;
         // Also follow `#include_next` (searching the directories after the one
         // that supplied the including header). Off by default: completion only
         // needs the first definition of each name.
@@ -39,9 +39,9 @@ namespace heimdall
     // path segment; directories end in `/`.
     struct IncludeCandidate
     {
-        std::string label;
-        bool directory = false;
-        IncludeOrigin origin = IncludeOrigin::Include;
+        std::string           label;
+        bool                  directory = false;
+        IncludeOrigin         origin    = IncludeOrigin::Include;
         std::filesystem::path location;
     };
 
@@ -69,17 +69,17 @@ namespace heimdall
     // disk contents. The including buffer is scanned for `#include` lines.
     class IncludeIndex
     {
-    public:
+      public:
         using Limits = IncludeLimits;
 
         // Fast path (scan + stat, no parsing) for cache-key computation.
         static std::vector<std::filesystem::path> ResolveHeaders(
             const std::filesystem::path& base_dir,
-            std::string_view text,
-            const CompileCommand* command,
-            const Limits& limits = Limits{},
-            ResolveReport* report = nullptr,
-            const SourceOverlay* overlay = nullptr);
+            std::string_view             text,
+            const CompileCommand*        command,
+            const Limits&                limits  = Limits {},
+            ResolveReport*               report  = nullptr,
+            const SourceOverlay*         overlay = nullptr);
 
         // Completion of the path typed after `#include "` (angled = false) or
         // `#include <` (angled = true). `typed` is the text between the opening
@@ -89,54 +89,50 @@ namespace heimdall
         // first one found; sources, binaries and dotfiles are skipped.
         static std::vector<IncludeCandidate> CompleteIncludePath(
             const std::filesystem::path& base_dir,
-            bool angled,
-            std::string_view typed,
-            const CompileCommand* command,
-            std::size_t max_results = 1000);
+            bool                         angled,
+            std::string_view             typed,
+            const CompileCommand*        command,
+            std::size_t                  max_results = 1000);
 
         // Include context when `offset` is after `#include <` / `#include "` (also
         // `#include_next`) and before any closing delimiter on that line.
-        static std::optional<IncludeContext> IncludeContextAt(std::string_view text, std::size_t offset);
+        static std::optional<IncludeContext> IncludeContextAt(std::string_view text,
+                                                              std::size_t      offset);
 
         static std::string CacheKey(const std::vector<std::filesystem::path>& headers,
-            const CompileCommand* command, const SourceOverlay* overlay = nullptr);
+                                    const CompileCommand*                     command,
+                                    const SourceOverlay*                      overlay = nullptr);
 
         // Cheap fingerprint of the file's own `#include` lines plus the search
         // configuration. Lets the LSP skip ResolveHeaders (which stats + reads +
         // lexes every transitive header) when the including file's include block
         // did not change: no disk I/O at all on the fast path.
         static std::string IncludeFingerprint(const std::filesystem::path& base_dir,
-            std::string_view text, const CompileCommand* command);
+                                              std::string_view text, const CompileCommand* command);
 
         // Header named by the `#include` line containing `offset`, or empty when
         // that line is not an include or the header cannot be found.
-        static std::filesystem::path ResolveIncludeAt(
-            const std::filesystem::path& base_dir,
-            std::string_view text,
-            std::size_t offset,
-            const CompileCommand* command);
+        static std::filesystem::path ResolveIncludeAt(const std::filesystem::path& base_dir,
+                                                      std::string_view             text,
+                                                      std::size_t                  offset,
+                                                      const CompileCommand*        command);
 
-        static IncludeIndex Build(
-            const std::vector<std::filesystem::path>& headers,
-            const CompileCommand* command,
-            const Limits& limits = Limits{},
-            const SourceOverlay* overlay = nullptr);
+        static IncludeIndex Build(const std::vector<std::filesystem::path>& headers,
+                                  const CompileCommand*                     command,
+                                  const Limits&                             limits  = Limits {},
+                                  const SourceOverlay*                      overlay = nullptr);
 
-        static IncludeIndex Build(
-            const std::filesystem::path& base_dir,
-            std::string_view text,
-            const CompileCommand* command,
-            const Limits& limits = Limits{},
-            const SourceOverlay* overlay = nullptr);
+        static IncludeIndex Build(const std::filesystem::path& base_dir,
+                                  std::string_view             text,
+                                  const CompileCommand*        command,
+                                  const Limits&                limits  = Limits {},
+                                  const SourceOverlay*         overlay = nullptr);
 
         // Default compiler system include directories, cached per compiler
         // executable. Empty when undiscoverable (unknown driver, spawn failure).
         static std::vector<std::filesystem::path> SystemIncludes(std::string_view compiler);
 
-        const ScopeIndex& Scopes() const noexcept
-        {
-            return m_scopes;
-        }
+        const ScopeIndex& Scopes() const noexcept { return m_scopes; }
 
         // Type names of the headers, for ParserOptions::type_names; never null.
         const std::shared_ptr<const TypeNameOracle>& TypeNames() const noexcept
@@ -144,16 +140,10 @@ namespace heimdall
             return m_type_names;
         }
 
-        bool Empty() const noexcept
-        {
-            return m_scopes.empty();
-        }
+        bool Empty() const noexcept { return m_scopes.empty(); }
 
         // Header files in index order; CompletionItem::file indexes into this.
-        const std::vector<std::filesystem::path>& Files() const noexcept
-        {
-            return m_files;
-        }
+        const std::vector<std::filesystem::path>& Files() const noexcept { return m_files; }
 
         // Exact content used to compute locations, including older overlays
         // temporarily served while an asynchronous rebuild is pending.
@@ -162,10 +152,10 @@ namespace heimdall
             return file < m_sources.size() ? m_sources[file] : nullptr;
         }
 
-    private:
-        ScopeIndex m_scopes;
-        std::shared_ptr<const TypeNameOracle> m_type_names;
-        std::vector<std::filesystem::path> m_files;
+      private:
+        ScopeIndex                                      m_scopes;
+        std::shared_ptr<const TypeNameOracle>           m_type_names;
+        std::vector<std::filesystem::path>              m_files;
         std::vector<std::shared_ptr<const std::string>> m_sources;
     };
 

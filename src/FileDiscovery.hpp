@@ -15,6 +15,6 @@ namespace heimdall::cli
     bool MatchGlobPattern(std::string_view pattern, std::string_view text);
 
     bool CollectFiles(const std::vector<std::filesystem::path>& inputs,
-        std::vector<std::filesystem::path>& files);
+                      std::vector<std::filesystem::path>&       files);
 
 } // namespace heimdall::cli

@@ -22,8 +22,8 @@ namespace heimdall
         std::string PathKey(const std::filesystem::path& path)
         {
             std::error_code error;
-            auto absolute = std::filesystem::absolute(path, error);
-            auto text = (error ? path : absolute).lexically_normal().generic_string();
+            auto            absolute = std::filesystem::absolute(path, error);
+            auto            text = (error ? path : absolute).lexically_normal().generic_string();
 #ifdef _WIN32
             for (auto& c : text)
             {
@@ -75,7 +75,8 @@ namespace heimdall
                 for (std::size_t i = 0; i < command->arguments.size(); ++i)
                 {
                     const auto& argument = command->arguments[i];
-                    if (argument == "-o" || argument == "-MF" || argument == "-MT" || argument == "-MQ")
+                    if (argument == "-o" || argument == "-MF" || argument == "-MT" ||
+                        argument == "-MQ")
                     {
                         if (i + 1 < command->arguments.size())
                         {
@@ -85,8 +86,9 @@ namespace heimdall
                         continue;
                     }
 
-                    if (argument == "-c" || argument == "-MD" || argument == "-MMD" || argument == "-MP" ||
-                        argument.starts_with("-o") || argument.starts_with("-MF") || argument.starts_with("-MT") ||
+                    if (argument == "-c" || argument == "-MD" || argument == "-MMD" ||
+                        argument == "-MP" || argument.starts_with("-o") ||
+                        argument.starts_with("-MF") || argument.starts_with("-MT") ||
                         argument.starts_with("-MQ") || argument.starts_with("-fdeps-"))
                     {
                         continue;
@@ -94,7 +96,8 @@ namespace heimdall
 
                     const auto path = std::filesystem::path(argument);
                     if (i > 0 && !argument.starts_with('-') &&
-                        PathKey(path.is_absolute() ? path : command->directory / path) == PathKey(command->file))
+                        PathKey(path.is_absolute() ? path : command->directory / path) ==
+                            PathKey(command->file))
                     {
                         continue;
                     }
@@ -109,20 +112,21 @@ namespace heimdall
         bool Trivia(const Token& token)
         {
             return token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
-                token.kind == TokenKind::BlockComment;
+                   token.kind == TokenKind::BlockComment;
         }
 
         struct ScopeName
         {
             std::string text;
-            bool local = false, internal = false, member = false;
+            bool        local = false, internal = false, member = false;
         };
 
-        ScopeName QualifiedScope(const SemanticModel& model, ScopeId scope, bool lexical_only = false)
+        ScopeName QualifiedScope(const SemanticModel& model, ScopeId scope,
+                                 bool lexical_only = false)
         {
-            ScopeName result;
+            ScopeName                     result;
             std::vector<std::string_view> components;
-            const auto& scopes = model.Scopes();
+            const auto&                   scopes = model.Scopes();
             while (scope < scopes.Size() && scope != SemanticModel::TranslationUnitScope)
             {
                 const auto kind = scopes.kind[scope];
@@ -135,7 +139,8 @@ namespace heimdall
                     result.internal = true;
                 }
 
-                if (owner != kNone && (!lexical_only || kind == ScopeKind::Namespace || kind == ScopeKind::Class))
+                if (owner != kNone &&
+                    (!lexical_only || kind == ScopeKind::Namespace || kind == ScopeKind::Class))
                 {
                     components.push_back(model.Names().Text(model.Symbols().name[owner]));
                 }
@@ -151,18 +156,18 @@ namespace heimdall
 
             for (auto it = components.rbegin(); it != components.rend(); ++it)
                 if (!it->empty())
-            {
-                result.text += *it;
-                result.text += "::";
-            }
+                {
+                    result.text += *it;
+                    result.text += "::";
+                }
 
             return result;
         }
 
         std::optional<std::string> ScalarParameter(const SemanticModel& model, NodeId parameter)
         {
-            const auto& tree = model.Tree();
-            const auto& soa = tree.NodesSoA();
+            const auto&                       tree = model.Tree();
+            const auto&                       soa  = tree.NodesSoA();
             std::unordered_set<std::uint32_t> names;
             for (auto i = parameter; i < soa.SubtreeEnd(parameter); ++i)
             {
@@ -173,7 +178,8 @@ namespace heimdall
             }
 
             std::string type;
-            for (auto i = soa.FirstToken(parameter); i < soa.FirstToken(parameter) + soa.TokenCount(parameter); ++i)
+            for (auto i = soa.FirstToken(parameter);
+                 i < soa.FirstToken(parameter) + soa.TokenCount(parameter); ++i)
             {
                 const auto& token = tree.Tokens()[i];
                 if (token.tok == Tok::Eq)
@@ -188,21 +194,23 @@ namespace heimdall
 
                 switch (token.tok)
                 {
-                case Tok::KwVoid: case Tok::KwBool:
-                case Tok::KwChar:
-                case Tok::KwWchar:
-                case Tok::KwChar8:
-                case Tok::KwChar16:
-                case Tok::KwChar32:
-                case Tok::KwShort: case Tok::KwInt:
-                case Tok::KwLong:
-                case Tok::KwSigned:
-                case Tok::KwUnsigned:
-                case Tok::KwFloat:
-                case Tok::KwDouble:
-                    break;
-                default:
-                    return std::nullopt;
+                    case Tok::KwVoid:
+                    case Tok::KwBool:
+                    case Tok::KwChar:
+                    case Tok::KwWchar:
+                    case Tok::KwChar8:
+                    case Tok::KwChar16:
+                    case Tok::KwChar32:
+                    case Tok::KwShort:
+                    case Tok::KwInt:
+                    case Tok::KwLong:
+                    case Tok::KwSigned:
+                    case Tok::KwUnsigned:
+                    case Tok::KwFloat:
+                    case Tok::KwDouble:
+                        break;
+                    default:
+                        return std::nullopt;
                 }
 
                 if (!type.empty())
@@ -244,7 +252,8 @@ namespace heimdall
             {
                 type = "unsigned long";
             }
-            else if (type == "long long int" || type == "signed long long" || type == "signed long long int")
+            else if (type == "long long int" || type == "signed long long" ||
+                     type == "signed long long int")
             {
                 type = "long long";
             }
@@ -253,18 +262,24 @@ namespace heimdall
                 type = "unsigned long long";
             }
 
-            constexpr std::string_view builtin[] = {"bool", "char", "signed char", "unsigned char", "wchar_t",
-                "char8_t", "char16_t", "char32_t", "short", "unsigned short", "int", "unsigned int",
-                "long", "unsigned long", "long long", "unsigned long long", "float", "double", "long double"};
-            return std::ranges::find(builtin, type) == std::end(builtin) ? std::nullopt : std::optional(type);
+            constexpr std::string_view builtin[] = {
+                "bool",    "char",           "signed char", "unsigned char",
+                "wchar_t", "char8_t",        "char16_t",    "char32_t",
+                "short",   "unsigned short", "int",         "unsigned int",
+                "long",    "unsigned long",  "long long",   "unsigned long long",
+                "float",   "double",         "long double"
+            };
+            return std::ranges::find(builtin, type) == std::end(builtin)
+                       ? std::nullopt
+                       : std::optional(type);
         }
 
         bool Signature(const SemanticModel& model, SymbolId symbol, std::string& result)
         {
-            const auto& tree = model.Tree();
-            const auto& soa = tree.NodesSoA();
-            const auto node = model.Symbols().decl_node[symbol];
-            NodeId suffix = InvalidNode;
+            const auto& tree   = model.Tree();
+            const auto& soa    = tree.NodesSoA();
+            const auto  node   = model.Symbols().decl_node[symbol];
+            NodeId      suffix = InvalidNode;
             for (auto i = node; i < soa.SubtreeEnd(node); ++i)
             {
                 if (soa.Kind(i) == GrammarKind::CompoundStatement)
@@ -284,7 +299,8 @@ namespace heimdall
                 return false;
             }
 
-            for (auto token = soa.FirstToken(suffix); token < soa.FirstToken(suffix) + soa.TokenCount(suffix); ++token)
+            for (auto token = soa.FirstToken(suffix);
+                 token < soa.FirstToken(suffix) + soa.TokenCount(suffix); ++token)
             {
                 if (tree.Tokens()[token].tok == Tok::Ellipsis)
                 {
@@ -318,11 +334,11 @@ namespace heimdall
 
         struct UnitData
         {
-            std::shared_ptr<const SemanticModel> model;
-            std::shared_ptr<const TypeModel> types;
-            std::vector<NodeId> nodes;
-            std::vector<SymbolId> declarations;
-            std::vector<EntityId> prototype_parameters;
+            std::shared_ptr<const SemanticModel>            model;
+            std::shared_ptr<const TypeModel>                types;
+            std::vector<NodeId>                             nodes;
+            std::vector<SymbolId>                           declarations;
+            std::vector<EntityId>                           prototype_parameters;
             std::vector<std::pair<DocumentId, std::size_t>> includes;
         };
 
@@ -334,7 +350,8 @@ namespace heimdall
                 return symbols.flags[symbol] & SymbolFlag::Definition;
             }
 
-            if (symbols.kind[symbol] == SymbolKind::Namespace || symbols.kind[symbol] == SymbolKind::Class)
+            if (symbols.kind[symbol] == SymbolKind::Namespace ||
+                symbols.kind[symbol] == SymbolKind::Class)
             {
                 return true;
             }
@@ -344,19 +361,20 @@ namespace heimdall
                 return false;
             }
 
-            const auto& tree = model.Tree();
-            const auto& soa = tree.NodesSoA();
-            const auto node = symbols.decl_node[symbol];
-            bool external = false, initialized = false;
-            for (auto token = soa.FirstToken(node); token < soa.FirstToken(node) + soa.TokenCount(node); ++token)
+            const auto& tree     = model.Tree();
+            const auto& soa      = tree.NodesSoA();
+            const auto  node     = symbols.decl_node[symbol];
+            bool        external = false, initialized = false;
+            for (auto token = soa.FirstToken(node);
+                 token < soa.FirstToken(node) + soa.TokenCount(node); ++token)
             {
                 external |= tree.Tokens()[token].tok == Tok::KwExtern;
                 initialized |= tree.Tokens()[token].tok == Tok::Eq;
             }
 
-            return!external || initialized;
+            return !external || initialized;
         }
-    }
+    } // namespace
 
     std::expected<ProjectSymbolIndex, SymbolIndexError> ProjectSymbolIndex::Build(
         const AnalysisSnapshot& snapshot, SymbolIndexLimits limits, std::stop_token stop)
@@ -366,40 +384,40 @@ namespace heimdall
             return std::unexpected(SymbolIndexError::Cancelled);
         }
 
-        limits.symbols = std::min(limits.symbols, static_cast<std::size_t>(InvalidEntity));
+        limits.symbols     = std::min(limits.symbols, static_cast<std::size_t>(InvalidEntity));
         limits.occurrences = std::min(limits.occurrences, static_cast<std::size_t>(kNone));
-        auto documents = snapshot.Documents();
+        auto documents     = snapshot.Documents();
         if (documents.size() > limits.documents)
         {
             return std::unexpected(SymbolIndexError::LimitReached);
         }
 
-        std::ranges::sort(documents,[&](auto a, auto b)
-            {
-                return PathKey(snapshot.Path(a)) < PathKey(snapshot.Path(b));
+        std::ranges::sort(documents, [&](auto a, auto b) {
+            return PathKey(snapshot.Path(a)) < PathKey(snapshot.Path(b));
         });
         ProjectSymbolIndex result;
         result.m_revision = snapshot.Revision();
-        std::vector<UnitData> data;
-        std::unordered_map<DocumentId, std::size_t> unit_for;
-        std::unordered_map<std::string, EntityId> identities;
+        std::vector<UnitData>                                      data;
+        std::unordered_map<DocumentId, std::size_t>                unit_for;
+        std::unordered_map<std::string, EntityId>                  identities;
         std::vector<std::vector<std::pair<std::size_t, SymbolId>>> declarations;
-        const auto issue =[&](std::size_t unit, SymbolIndexIssue kind, std::filesystem::path path = {})
-        {
-            auto& entry = result.m_units[unit];
-            const bool first = std::ranges::find(entry.issues, kind) == entry.issues.end();
-            if (first)
-            {
-                entry.issues.push_back(kind);
-            }
+        const auto                                                 issue =
+            [&](std::size_t unit, SymbolIndexIssue kind, std::filesystem::path path = {}) {
+                auto&      entry = result.m_units[unit];
+                const bool first = std::ranges::find(entry.issues, kind) == entry.issues.end();
+                if (first)
+                {
+                    entry.issues.push_back(kind);
+                }
 
-            if (!first && path.empty())
-            {
-                return;
-            }
+                if (!first && path.empty())
+                {
+                    return;
+                }
 
-            result.m_issues.push_back({kind, entry.document, path.empty() ? entry.path : std::move(path)});
-        };
+                result.m_issues.push_back(
+                    { kind, entry.document, path.empty() ? entry.path : std::move(path) });
+            };
         std::size_t symbol_count = 0;
         for (auto document : documents)
         {
@@ -411,13 +429,13 @@ namespace heimdall
             const auto unit = result.m_units.size();
             unit_for.emplace(document, unit);
             IndexedUnit entry;
-            entry.document = document;
-            entry.path = snapshot.Path(document);
-            entry.version = snapshot.Version(document);
-            entry.source = snapshot.Source(document);
+            entry.document      = document;
+            entry.path          = snapshot.Path(document);
+            entry.version       = snapshot.Version(document);
+            entry.source        = snapshot.Source(document);
             entry.configuration = Configuration(snapshot, document);
             entry.dependencies.assign(snapshot.Dependencies(document).begin(),
-                snapshot.Dependencies(document).end());
+                                      snapshot.Dependencies(document).end());
             if (const auto command = snapshot.Command(document))
             {
                 entry.command = command->arguments;
@@ -425,11 +443,11 @@ namespace heimdall
 
             result.m_units.push_back(std::move(entry));
             UnitData current;
-            current.model = snapshot.Semantic(document);
-            current.types = snapshot.Types(document);
-            const auto& model = *current.model;
-            const auto& tree = model.Tree();
-            const auto& soa = tree.NodesSoA();
+            current.model       = snapshot.Semantic(document);
+            current.types       = snapshot.Types(document);
+            const auto& model   = *current.model;
+            const auto& tree    = model.Tree();
+            const auto& soa     = tree.NodesSoA();
             const auto& symbols = model.Symbols();
             if (symbols.Size() > limits.symbols - symbol_count)
             {
@@ -445,7 +463,7 @@ namespace heimdall
                 issue(unit, SymbolIndexIssue::ParseErrors);
             }
 
-            if (tree.Cancelled() ||!result.m_units[unit].source)
+            if (tree.Cancelled() || !result.m_units[unit].source)
             {
                 issue(unit, SymbolIndexIssue::UnsupportedSyntax);
             }
@@ -468,16 +486,20 @@ namespace heimdall
                 }
 
                 const auto kind = soa.Kind(node);
-                if (kind == GrammarKind::TemplateDeclaration || kind == GrammarKind::LambdaExpression ||
-                    kind == GrammarKind::RequiresExpression || kind == GrammarKind::RequiresClause ||
-                    kind == GrammarKind::RecordDefinition || kind == GrammarKind::UsingDeclaration ||
-                    kind == GrammarKind::ModuleDeclaration || kind == GrammarKind::ImportDeclaration ||
+                if (kind == GrammarKind::TemplateDeclaration ||
+                    kind == GrammarKind::LambdaExpression ||
+                    kind == GrammarKind::RequiresExpression ||
+                    kind == GrammarKind::RequiresClause || kind == GrammarKind::RecordDefinition ||
+                    kind == GrammarKind::UsingDeclaration ||
+                    kind == GrammarKind::ModuleDeclaration ||
+                    kind == GrammarKind::ImportDeclaration ||
                     kind == GrammarKind::LanguageLinkageSpec)
                 {
                     issue(unit, SymbolIndexIssue::UnsupportedSyntax);
                 }
 
-                for (auto token = soa.FirstToken(node); token < soa.FirstToken(node) + soa.TokenCount(node); ++token)
+                for (auto token = soa.FirstToken(node);
+                     token < soa.FirstToken(node) + soa.TokenCount(node); ++token)
                 {
                     if (token < current.nodes.size())
                     {
@@ -497,7 +519,8 @@ namespace heimdall
                 for (NodeId node = 0; node < soa.size(); ++node)
                 {
                     if (soa.Kind(node) != GrammarKind::NamespaceDefinition &&
-                        soa.Kind(node) != GrammarKind::FunctionDefinition && soa.Kind(node) != GrammarKind::RecordDefinition)
+                        soa.Kind(node) != GrammarKind::FunctionDefinition &&
+                        soa.Kind(node) != GrammarKind::RecordDefinition)
                     {
                         continue;
                     }
@@ -505,13 +528,14 @@ namespace heimdall
                     const auto first = soa.FirstToken(node);
                     const auto count = soa.TokenCount(node);
                     if (count && directive.offset >= tree.Tokens()[first].offset &&
-                        directive.offset < tree.Tokens()[first + count - 1].offset + tree.Tokens()[first + count - 1].length)
+                        directive.offset < tree.Tokens()[first + count - 1].offset +
+                                               tree.Tokens()[first + count - 1].length)
                     {
                         issue(unit, SymbolIndexIssue::UnsupportedSyntax);
                     }
                 }
 
-                const auto body = tree.Source().substr(directive.offset, directive.length);
+                const auto         body = tree.Source().substr(directive.offset, directive.length);
                 std::vector<Token> tokens;
                 for (const auto& token : Lexer(body).Lex())
                 {
@@ -522,7 +546,7 @@ namespace heimdall
                 }
 
                 std::string header;
-                bool quoted = false;
+                bool        quoted = false;
                 if (tokens.size() >= 3)
                 {
                     const auto text = body.substr(tokens[2].offset, tokens[2].length);
@@ -557,20 +581,21 @@ namespace heimdall
                     if (quoted)
                     {
                         directories.insert(directories.end(), command->quote_directories.begin(),
-                            command->quote_directories.end());
+                                           command->quote_directories.end());
                     }
 
                     directories.insert(directories.end(), command->include_directories.begin(),
-                        command->include_directories.end());
+                                       command->include_directories.end());
                 }
 
                 DocumentId dependency = InvalidDocument;
                 for (const auto& directory : directories)
                 {
                     const auto candidate = directory / header;
-                    dependency = snapshot.Find(candidate);
+                    dependency           = snapshot.Find(candidate);
                     std::error_code error;
-                    if (dependency != InvalidDocument || std::filesystem::is_regular_file(candidate, error))
+                    if (dependency != InvalidDocument ||
+                        std::filesystem::is_regular_file(candidate, error))
                     {
                         break;
                     }
@@ -600,23 +625,32 @@ namespace heimdall
                     continue;
                 }
 
-                const auto scope = QualifiedScope(model, symbols.scope[symbol]);
+                const auto    scope = QualifiedScope(model, symbols.scope[symbol]);
                 IndexedEntity entity;
-                entity.qualified_name = scope.text + std::string(model.Names().Text(symbols.name[symbol]));
-                entity.kind = symbols.kind[symbol];
+                entity.qualified_name =
+                    scope.text + std::string(model.Names().Text(symbols.name[symbol]));
+                entity.kind          = symbols.kind[symbol];
                 entity.configuration = result.m_units[unit].configuration;
-                entity.type = current.types->Spell(current.types->SymbolType(symbol));
-                entity.linkage = scope.local ? EntityLinkage::Local : scope.internal ||
-                    (!scope.member && (symbols.flags[symbol] & SymbolFlag::Static)) ? EntityLinkage::Internal : EntityLinkage::External;
+                entity.type          = current.types->Spell(current.types->SymbolType(symbol));
+                entity.linkage =
+                    scope.local ? EntityLinkage::Local
+                    : scope.internal ||
+                            (!scope.member && (symbols.flags[symbol] & SymbolFlag::Static))
+                        ? EntityLinkage::Internal
+                        : EntityLinkage::External;
                 const auto type = current.types->SymbolType(symbol);
-                entity.supported =!scope.member && !(symbols.flags[symbol] & (SymbolFlag::Template |
-                    SymbolFlag::Qualified | SymbolFlag::Constructor | SymbolFlag::Destructor | SymbolFlag::Operator));
+                entity.supported =
+                    !scope.member &&
+                    !(symbols.flags[symbol] &
+                      (SymbolFlag::Template | SymbolFlag::Qualified | SymbolFlag::Constructor |
+                       SymbolFlag::Destructor | SymbolFlag::Operator));
                 if (entity.kind == SymbolKind::Function)
                 {
-                    entity.supported &= Signature(model, symbol,
-                        entity.signature) && current.types->Types().Kind(type) == TypeKind::Builtin;
+                    entity.supported &= Signature(model, symbol, entity.signature) &&
+                                        current.types->Types().Kind(type) == TypeKind::Builtin;
                     const auto node = symbols.decl_node[symbol];
-                    for (auto i = soa.FirstToken(node); i < soa.FirstToken(node) + soa.TokenCount(node); ++i)
+                    for (auto i = soa.FirstToken(node);
+                         i < soa.FirstToken(node) + soa.TokenCount(node); ++i)
                     {
                         const auto tok = tree.Tokens()[i].tok;
                         if (tok == Tok::LBrace)
@@ -630,18 +664,22 @@ namespace heimdall
                         }
                     }
                 }
-                else if (entity.kind == SymbolKind::Variable || entity.kind == SymbolKind::Parameter)
+                else if (entity.kind == SymbolKind::Variable ||
+                         entity.kind == SymbolKind::Parameter)
                 {
-                    entity.supported &= current.types->Types().IsKnown(type) &&
-                        current.types->Types().Kind(current.types->Types().Strip(type)) == TypeKind::Builtin;
-                    bool external = false;
-                    const auto node = symbols.decl_node[symbol];
+                    entity.supported &=
+                        current.types->Types().IsKnown(type) &&
+                        current.types->Types().Kind(current.types->Types().Strip(type)) ==
+                            TypeKind::Builtin;
+                    bool       external = false;
+                    const auto node     = symbols.decl_node[symbol];
                     for (auto i = soa.FirstToken(node); i < token; ++i)
                     {
                         external |= tree.Tokens()[i].tok == Tok::KwExtern;
                     }
 
-                    if (!scope.local && current.types->Types().Kind(type) == TypeKind::Const && !external)
+                    if (!scope.local && current.types->Types().Kind(type) == TypeKind::Const &&
+                        !external)
                     {
                         entity.linkage = EntityLinkage::Internal;
                         // A prior extern declaration in an included header can
@@ -667,7 +705,8 @@ namespace heimdall
 
                     // Header-internal entities have a distinct identity in each
                     // including TU, which a file-local binder cannot certify.
-                    if (extension == ".h" || extension == ".hpp" || extension == ".hh" || extension == ".hxx")
+                    if (extension == ".h" || extension == ".hpp" || extension == ".hh" ||
+                        extension == ".hxx")
                     {
                         entity.supported = false;
                     }
@@ -677,17 +716,18 @@ namespace heimdall
                 Part(entity.identity, entity.qualified_name);
                 Part(entity.identity, entity.signature);
                 Part(entity.identity, entity.configuration);
-                if (entity.linkage != EntityLinkage::External ||!entity.supported)
+                if (entity.linkage != EntityLinkage::External || !entity.supported)
                 {
                     Part(entity.identity, PathKey(snapshot.Path(document)));
-                    if (entity.linkage == EntityLinkage::Local ||!entity.supported)
+                    if (entity.linkage == EntityLinkage::Local || !entity.supported)
                     {
                         Part(entity.identity, std::to_string(tree.Tokens()[token].offset));
                     }
                 }
 
-                auto[found, inserted] = identities.try_emplace(entity.identity,
-                    static_cast<EntityId>(result.m_entities.size()));
+                auto [found, inserted] =
+                    identities.try_emplace(entity.identity,
+                                           static_cast<EntityId>(result.m_entities.size()));
                 const auto id = found->second;
                 if (inserted)
                 {
@@ -722,13 +762,15 @@ namespace heimdall
                 }
 
                 auto function = soa.Parent(node);
-                while (function != 0 && function < soa.size() && soa.Kind(function) != GrammarKind::FunctionDeclaration &&
-                    soa.Kind(function) != GrammarKind::FunctionDefinition)
+                while (function != 0 && function < soa.size() &&
+                       soa.Kind(function) != GrammarKind::FunctionDeclaration &&
+                       soa.Kind(function) != GrammarKind::FunctionDefinition)
                 {
                     function = soa.Parent(function);
                 }
 
-                if (function >= soa.size() || soa.Kind(function) != GrammarKind::FunctionDeclaration)
+                if (function >= soa.size() ||
+                    soa.Kind(function) != GrammarKind::FunctionDeclaration)
                 {
                     continue;
                 }
@@ -736,7 +778,8 @@ namespace heimdall
                 EntityId owner = InvalidEntity;
                 for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
                 {
-                    if (symbols.kind[symbol] == SymbolKind::Function && symbols.decl_node[symbol] == function)
+                    if (symbols.kind[symbol] == SymbolKind::Function &&
+                        symbols.decl_node[symbol] == function)
                     {
                         owner = result.EntityFor(document, symbol);
                     }
@@ -755,7 +798,8 @@ namespace heimdall
                         continue;
                     }
 
-                    if (current.declarations[token] != kNone || current.prototype_parameters[token] != InvalidEntity)
+                    if (current.declarations[token] != kNone ||
+                        current.prototype_parameters[token] != InvalidEntity)
                     {
                         continue;
                     }
@@ -767,14 +811,18 @@ namespace heimdall
 
                     ++symbol_count;
                     IndexedEntity parameter;
-                    parameter.kind = SymbolKind::Parameter;
-                    parameter.linkage = EntityLinkage::Local;
+                    parameter.kind          = SymbolKind::Parameter;
+                    parameter.linkage       = EntityLinkage::Local;
                     parameter.configuration = result.m_units[unit].configuration;
-                    parameter.qualified_name = owner == InvalidEntity ? std::string(tree.Text(tree.Tokens()[token])) :
-                    result.m_entities[owner].qualified_name + "::" + std::string(tree.Text(tree.Tokens()[token]));
-                    parameter.supported = owner != InvalidEntity && result.m_entities[owner].supported;
+                    parameter.qualified_name =
+                        owner == InvalidEntity
+                            ? std::string(tree.Text(tree.Tokens()[token]))
+                            : result.m_entities[owner].qualified_name +
+                                  "::" + std::string(tree.Text(tree.Tokens()[token]));
+                    parameter.supported =
+                        owner != InvalidEntity && result.m_entities[owner].supported;
                     const auto type = ScalarParameter(model, node);
-                    parameter.type = type ? *type : "?";
+                    parameter.type  = type ? *type : "?";
                     parameter.supported &= type.has_value();
                     Part(parameter.identity, "prototype-parameter");
                     Part(parameter.identity, parameter.qualified_name);
@@ -794,31 +842,33 @@ namespace heimdall
 
         for (std::size_t unit = 0; unit < data.size(); ++unit)
             for (const auto& [dependency, at] : data[unit].includes)
-        {
-            const auto target = unit_for.find(dependency);
-            if (target != unit_for.end() && result.m_units[unit].configuration != result.m_units[target->second].configuration)
             {
-                // One header model cannot stand in for two distinct TU
-                // contexts, even when a name happens to be unique.
-                issue(unit, SymbolIndexIssue::ConfigurationVariants, result.m_units[target->second].path);
-                issue(target->second, SymbolIndexIssue::ConfigurationVariants);
+                const auto target = unit_for.find(dependency);
+                if (target != unit_for.end() && result.m_units[unit].configuration !=
+                                                    result.m_units[target->second].configuration)
+                {
+                    // One header model cannot stand in for two distinct TU
+                    // contexts, even when a name happens to be unique.
+                    issue(unit, SymbolIndexIssue::ConfigurationVariants,
+                          result.m_units[target->second].path);
+                    issue(target->second, SymbolIndexIssue::ConfigurationVariants);
+                }
             }
-        }
 
         // Compilation database entries outside the pinned set are explicit gaps,
         // not evidence that their references do not exist.
         std::unordered_set<std::string> commands;
         for (auto document : documents)
             if (const auto command = snapshot.Command(document))
-        {
-            std::string key = PathKey(command->file);
-            for (const auto& argument : command->arguments)
             {
-                Part(key, argument);
-            }
+                std::string key = PathKey(command->file);
+                for (const auto& argument : command->arguments)
+                {
+                    Part(key, argument);
+                }
 
-            commands.insert(std::move(key));
-        }
+                commands.insert(std::move(key));
+            }
 
         for (const auto& command : snapshot.CompilationCommands())
         {
@@ -836,8 +886,8 @@ namespace heimdall
             const auto document = snapshot.Find(command.file);
             if (document == InvalidDocument)
             {
-                result.m_issues.push_back({SymbolIndexIssue::MissingTranslationUnit, InvalidDocument,
-                        command.file});
+                result.m_issues.push_back(
+                    { SymbolIndexIssue::MissingTranslationUnit, InvalidDocument, command.file });
             }
             else if (!commands.contains(key))
             {
@@ -848,7 +898,8 @@ namespace heimdall
         for (EntityId id = 0; id < result.m_entities.size(); ++id)
         {
             const auto& entity = result.m_entities[id];
-            if (entity.linkage == EntityLinkage::Local ||(entity.kind != SymbolKind::Variable && entity.kind != SymbolKind::Function))
+            if (entity.linkage == EntityLinkage::Local ||
+                (entity.kind != SymbolKind::Variable && entity.kind != SymbolKind::Function))
             {
                 continue;
             }
@@ -856,15 +907,15 @@ namespace heimdall
             bool defined = false;
             for (const auto& [unit, symbol] : declarations[id])
                 if (Definition(*data[unit].model, symbol))
-            {
-                if (defined)
                 {
-                    result.m_entities[id].supported = false;
-                    issue(unit, SymbolIndexIssue::ConflictingDeclarations);
-                }
+                    if (defined)
+                    {
+                        result.m_entities[id].supported = false;
+                        issue(unit, SymbolIndexIssue::ConflictingDeclarations);
+                    }
 
-                defined = true;
-            }
+                    defined = true;
+                }
         }
 
         // Compare exact keys in insertion order: no quadratic all-pairs scan
@@ -882,24 +933,25 @@ namespace heimdall
             Part(key, entity.qualified_name);
             Part(key, std::to_string(static_cast<unsigned>(entity.kind)));
             Part(key, entity.signature);
-            const auto[found, inserted] = variants.try_emplace(std::move(key), id);
+            const auto [found, inserted] = variants.try_emplace(std::move(key), id);
             if (!inserted && result.m_entities[found->second].configuration != entity.configuration)
             {
                 entity.supported = result.m_entities[found->second].supported = false;
-                result.m_issues.push_back({SymbolIndexIssue::ConfigurationVariants, InvalidDocument, {}});
+                result.m_issues.push_back(
+                    { SymbolIndexIssue::ConfigurationVariants, InvalidDocument, {} });
             }
         }
 
         for (std::size_t unit = 0; unit < data.size(); ++unit)
         {
-            auto& coverage = result.m_units[unit];
-            const auto& current = data[unit];
-            const auto& model = *current.model;
-            const auto& tree = model.Tree();
-            const auto& tokens = tree.Tokens();
-            const auto& soa = tree.NodesSoA();
-            const auto& sig = model.Significant();
-            const auto occurrence_begin = result.m_occurrences.size();
+            auto&       coverage         = result.m_units[unit];
+            const auto& current          = data[unit];
+            const auto& model            = *current.model;
+            const auto& tree             = model.Tree();
+            const auto& tokens           = tree.Tokens();
+            const auto& soa              = tree.NodesSoA();
+            const auto& sig              = model.Significant();
+            const auto  occurrence_begin = result.m_occurrences.size();
             for (std::size_t position = 0; position < sig.size(); ++position)
             {
                 if (stop.stop_requested())
@@ -919,24 +971,27 @@ namespace heimdall
                 }
 
                 IndexedOccurrence occurrence;
-                occurrence.document = coverage.document;
-                occurrence.token = token;
-                occurrence.offset = tokens[token].offset;
-                occurrence.length = tokens[token].length;
-                occurrence.name = tree.Text(tokens[token]);
+                occurrence.document    = coverage.document;
+                occurrence.token       = token;
+                occurrence.offset      = tokens[token].offset;
+                occurrence.length      = tokens[token].length;
+                occurrence.name        = tree.Text(tokens[token]);
                 const auto declaration = current.declarations[token];
-                bool dependent = false, member = false;
-                NodeId call = InvalidNode;
+                bool       dependent = false, member = false;
+                NodeId     call = InvalidNode;
                 for (auto node = current.nodes[token]; node < soa.size(); node = soa.Parent(node))
                 {
-                    dependent |= soa.Kind(node) == GrammarKind::TemplateDeclaration || soa.Kind(node) == GrammarKind::TemplateIdExpression ||
-                        soa.Kind(node) == GrammarKind::RequiresExpression;
-                    member |= soa.Kind(node) == GrammarKind::MemberExpression || soa.Kind(node) == GrammarKind::LambdaExpression;
+                    dependent |= soa.Kind(node) == GrammarKind::TemplateDeclaration ||
+                                 soa.Kind(node) == GrammarKind::TemplateIdExpression ||
+                                 soa.Kind(node) == GrammarKind::RequiresExpression;
+                    member |= soa.Kind(node) == GrammarKind::MemberExpression ||
+                              soa.Kind(node) == GrammarKind::LambdaExpression;
                     if (soa.Kind(node) == GrammarKind::CallExpression)
                     {
                         const auto children = model.ChildrenOf(node);
                         if (!children.empty() && token >= soa.FirstToken(children.front()) &&
-                            token < soa.FirstToken(children.front()) + soa.TokenCount(children.front()))
+                            token <
+                                soa.FirstToken(children.front()) + soa.TokenCount(children.front()))
                         {
                             call = node;
                         }
@@ -950,19 +1005,23 @@ namespace heimdall
 
                 if (declaration != kNone || current.prototype_parameters[token] != InvalidEntity)
                 {
-                    occurrence.entity = declaration == kNone ? current.prototype_parameters[token] : result.EntityFor(coverage.document,
-                        declaration);
-                    const auto& entity = result.m_entities[occurrence.entity];
-                    occurrence.resolution = dependent ? OccurrenceResolution::Dependent :
-                    entity.supported ? OccurrenceResolution::Resolved : OccurrenceResolution::Unsupported;
-                    occurrence.role = declaration != kNone && Definition(model,
-                        declaration) ? OccurrenceRole::Definition : OccurrenceRole::Declaration;
+                    occurrence.entity =
+                        declaration == kNone ? current.prototype_parameters[token]
+                                             : result.EntityFor(coverage.document, declaration);
+                    const auto& entity    = result.m_entities[occurrence.entity];
+                    occurrence.resolution = dependent          ? OccurrenceResolution::Dependent
+                                            : entity.supported ? OccurrenceResolution::Resolved
+                                                               : OccurrenceResolution::Unsupported;
+                    occurrence.role       = declaration != kNone && Definition(model, declaration)
+                                                ? OccurrenceRole::Definition
+                                                : OccurrenceRole::Declaration;
                 }
                 else
                 {
-                    occurrence.role = call == InvalidNode ? OccurrenceRole::Reference : OccurrenceRole::Call;
-                    std::unordered_set<DocumentId> visible{coverage.document};
-                    std::vector<DocumentId> queue;
+                    occurrence.role =
+                        call == InvalidNode ? OccurrenceRole::Reference : OccurrenceRole::Call;
+                    std::unordered_set<DocumentId> visible { coverage.document };
+                    std::vector<DocumentId>        queue;
                     for (const auto& [dependency, at] : current.includes)
                     {
                         if (at < occurrence.offset && visible.insert(dependency).second)
@@ -989,10 +1048,9 @@ namespace heimdall
                     }
 
                     const auto bound = model.ResolveToken(token);
-                    const auto bound_entity = bound == kNone ? InvalidEntity : result.EntityFor(coverage.document,
-                        bound);
-                    const auto available =[&](EntityId id)
-                    {
+                    const auto bound_entity =
+                        bound == kNone ? InvalidEntity : result.EntityFor(coverage.document, bound);
+                    const auto available = [&](EntityId id) {
                         for (const auto& [declared_unit, symbol] : declarations[id])
                         {
                             const auto doc = result.m_units[declared_unit].document;
@@ -1002,7 +1060,8 @@ namespace heimdall
                             }
 
                             const auto& declared = *data[declared_unit].model;
-                            if (doc != coverage.document || declared.Symbols().decl_token[symbol] < token)
+                            if (doc != coverage.document ||
+                                declared.Symbols().decl_token[symbol] < token)
                             {
                                 return true;
                             }
@@ -1010,20 +1069,24 @@ namespace heimdall
 
                         return false;
                     };
-                    if (bound_entity != InvalidEntity && result.m_entities[bound_entity].linkage == EntityLinkage::Local &&
+                    if (bound_entity != InvalidEntity &&
+                        result.m_entities[bound_entity].linkage == EntityLinkage::Local &&
                         (position == 0 || tokens[sig[position - 1]].tok != Tok::ColonColon))
                     {
                         occurrence.candidates.push_back(bound_entity);
                     }
                     else
                     {
-                        auto scope = QualifiedScope(model, model.ScopeOfNode(current.nodes[token]), true).text;
+                        auto scope =
+                            QualifiedScope(model, model.ScopeOfNode(current.nodes[token]), true)
+                                .text;
                         std::string qualified = occurrence.name;
-                        std::size_t first = position;
+                        std::size_t first     = position;
                         while (first >= 2 && tokens[sig[first - 1]].tok == Tok::ColonColon &&
-                            tokens[sig[first - 2]].kind == TokenKind::Identifier)
+                               tokens[sig[first - 2]].kind == TokenKind::Identifier)
                         {
-                            qualified = std::string(tree.Text(tokens[sig[first - 2]])) + "::" + qualified;
+                            qualified =
+                                std::string(tree.Text(tokens[sig[first - 2]])) + "::" + qualified;
                             first -= 2;
                         }
 
@@ -1039,12 +1102,15 @@ namespace heimdall
                             // namespace with the same qualifier spelling.
                             bool owner_found = false;
                             if (first != position)
-                                for (auto owner : result.Named(scope + std::string(tree.Text(tokens[sig[first]]))))
-                                    if (result.m_entities[owner].linkage != EntityLinkage::Local && available(owner))
-                            {
-                                owner_found = true;
-                                member |= result.m_entities[owner].kind != SymbolKind::Namespace;
-                            }
+                                for (auto owner : result.Named(
+                                         scope + std::string(tree.Text(tokens[sig[first]]))))
+                                    if (result.m_entities[owner].linkage != EntityLinkage::Local &&
+                                        available(owner))
+                                    {
+                                        owner_found = true;
+                                        member |=
+                                            result.m_entities[owner].kind != SymbolKind::Namespace;
+                                    }
 
                             for (auto id : result.Named(scope + qualified))
                             {
@@ -1060,7 +1126,7 @@ namespace heimdall
                                 }
                             }
 
-                            if (owner_found ||!occurrence.candidates.empty() || scope.empty())
+                            if (owner_found || !occurrence.candidates.empty() || scope.empty())
                             {
                                 break;
                             }
@@ -1078,20 +1144,27 @@ namespace heimdall
                         for (std::size_t argument = 1; argument < children.size(); ++argument)
                         {
                             const auto type = current.types->NodeType(children[argument]);
-                            unsupported_call |= current.types->Types().Kind(current.types->Types().Strip(type)) != TypeKind::Builtin;
+                            unsupported_call |=
+                                current.types->Types().Kind(current.types->Types().Strip(type)) !=
+                                TypeKind::Builtin;
                         }
                     }
 
-                    occurrence.resolution = dependent ? OccurrenceResolution::Dependent : member || unsupported_call ?
-                        OccurrenceResolution::Unsupported : occurrence.candidates.empty() ? OccurrenceResolution::Unresolved :
-                    occurrence.candidates.size() > 1 ? OccurrenceResolution::Ambiguous :
-                    result.m_entities[occurrence.candidates.front()].supported ? OccurrenceResolution::Resolved : OccurrenceResolution::Unsupported;
+                    occurrence.resolution =
+                        dependent                          ? OccurrenceResolution::Dependent
+                        : member || unsupported_call       ? OccurrenceResolution::Unsupported
+                        : occurrence.candidates.empty()    ? OccurrenceResolution::Unresolved
+                        : occurrence.candidates.size() > 1 ? OccurrenceResolution::Ambiguous
+                        : result.m_entities[occurrence.candidates.front()].supported
+                            ? OccurrenceResolution::Resolved
+                            : OccurrenceResolution::Unsupported;
                     if (occurrence.resolution == OccurrenceResolution::Resolved)
                     {
                         occurrence.entity = occurrence.candidates.front();
                     }
 
-                    if (occurrence.entity != InvalidEntity && result.m_entities[occurrence.entity].kind == SymbolKind::Namespace)
+                    if (occurrence.entity != InvalidEntity &&
+                        result.m_entities[occurrence.entity].kind == SymbolKind::Namespace)
                     {
                         occurrence.role = OccurrenceRole::Reference;
                     }
@@ -1099,33 +1172,35 @@ namespace heimdall
 
                 switch (occurrence.resolution)
                 {
-                case OccurrenceResolution::Resolved:
-                    ++coverage.resolved;
-                    break;
-                case OccurrenceResolution::Unresolved:
-                    ++coverage.unresolved;
-                    break;
-                case OccurrenceResolution::Ambiguous:
-                    ++coverage.ambiguous;
-                    break;
-                case OccurrenceResolution::Dependent:
-                    ++coverage.dependent;
-                    break;
-                case OccurrenceResolution::Unsupported:
-                    ++coverage.unsupported;
-                    break;
+                    case OccurrenceResolution::Resolved:
+                        ++coverage.resolved;
+                        break;
+                    case OccurrenceResolution::Unresolved:
+                        ++coverage.unresolved;
+                        break;
+                    case OccurrenceResolution::Ambiguous:
+                        ++coverage.ambiguous;
+                        break;
+                    case OccurrenceResolution::Dependent:
+                        ++coverage.dependent;
+                        break;
+                    case OccurrenceResolution::Unsupported:
+                        ++coverage.unsupported;
+                        break;
                 }
 
                 if (occurrence.entity != InvalidEntity)
                 {
-                    result.m_entities[occurrence.entity].occurrences.push_back(static_cast<std::uint32_t>(result.m_occurrences.size()));
+                    result.m_entities[occurrence.entity].occurrences.push_back(
+                        static_cast<std::uint32_t>(result.m_occurrences.size()));
                 }
 
                 result.m_occurrences.push_back(std::move(occurrence));
             }
 
-            result.m_document_ranges.emplace(coverage.document,
-                std::pair{occurrence_begin, result.m_occurrences.size() - occurrence_begin});
+            result.m_document_ranges.emplace(
+                coverage.document,
+                std::pair { occurrence_begin, result.m_occurrences.size() - occurrence_begin });
         }
 
         if (stop.stop_requested())
@@ -1139,7 +1214,7 @@ namespace heimdall
     std::span<const EntityId> ProjectSymbolIndex::Named(std::string_view name) const
     {
         const auto found = m_names.find(std::string(name));
-        return found == m_names.end() ? std::span<const EntityId> {}: found->second;
+        return found == m_names.end() ? std::span<const EntityId> {} : found->second;
     }
 
     const IndexedOccurrence* ProjectSymbolIndex::At(DocumentId document, std::size_t offset) const
@@ -1151,10 +1226,9 @@ namespace heimdall
         }
 
         const auto begin = m_occurrences.begin() + range->second.first;
-        const auto end = begin + range->second.second;
-        auto found = std::upper_bound(begin, end, offset,[](auto at, const auto& occurrence)
-            {
-                return at < occurrence.offset;
+        const auto end   = begin + range->second.second;
+        auto found = std::upper_bound(begin, end, offset, [](auto at, const auto& occurrence) {
+            return at < occurrence.offset;
         });
         if (found == begin)
         {
@@ -1162,7 +1236,7 @@ namespace heimdall
         }
 
         --found;
-        return offset - found->offset < found->length ? & *found : nullptr;
+        return offset - found->offset < found->length ? &*found : nullptr;
     }
 
     EntityId ProjectSymbolIndex::EntityFor(DocumentId document, SymbolId symbol) const
@@ -1173,10 +1247,10 @@ namespace heimdall
 
     bool ProjectSymbolIndex::Complete() const noexcept
     {
-        return m_issues.empty() && std::ranges::all_of(m_units,[](const auto& unit)
-            {
-                return unit.unresolved == 0 && unit.ambiguous == 0 && unit.dependent == 0 && unit.unsupported == 0;
-        });
+        return m_issues.empty() && std::ranges::all_of(m_units, [](const auto& unit) {
+                   return unit.unresolved == 0 && unit.ambiguous == 0 && unit.dependent == 0 &&
+                          unit.unsupported == 0;
+               });
     }
 
     bool ProjectSymbolIndex::HasCompleteCoverageFor(EntityId entity) const noexcept
@@ -1186,22 +1260,28 @@ namespace heimdall
 
     std::size_t ProjectSymbolIndex::StorageBytes() const noexcept
     {
-        std::size_t bytes = m_entities.capacity() * sizeof(IndexedEntity) + m_occurrences.capacity() * sizeof(IndexedOccurrence);
+        std::size_t bytes = m_entities.capacity() * sizeof(IndexedEntity) +
+                            m_occurrences.capacity() * sizeof(IndexedOccurrence);
         for (const auto& entity : m_entities)
         {
-            bytes += entity.identity.capacity() + entity.qualified_name.capacity() + entity.signature.capacity() +
-                entity.type.capacity() + entity.configuration.capacity() + entity.occurrences.capacity() * sizeof(std::uint32_t);
+            bytes += entity.identity.capacity() + entity.qualified_name.capacity() +
+                     entity.signature.capacity() + entity.type.capacity() +
+                     entity.configuration.capacity() +
+                     entity.occurrences.capacity() * sizeof(std::uint32_t);
         }
 
         for (const auto& occurrence : m_occurrences)
         {
-            bytes += occurrence.name.capacity() + occurrence.candidates.capacity() * sizeof(EntityId);
+            bytes +=
+                occurrence.name.capacity() + occurrence.candidates.capacity() * sizeof(EntityId);
         }
 
-        bytes += m_units.capacity() * sizeof(IndexedUnit) + m_issues.capacity() * sizeof(SymbolCoverageIssue);
+        bytes += m_units.capacity() * sizeof(IndexedUnit) +
+                 m_issues.capacity() * sizeof(SymbolCoverageIssue);
         for (const auto& unit : m_units)
         {
-            bytes += unit.configuration.capacity() + unit.dependencies.capacity() * sizeof(DocumentId) +
+            bytes +=
+                unit.configuration.capacity() + unit.dependencies.capacity() * sizeof(DocumentId) +
                 unit.issues.capacity() * sizeof(SymbolIndexIssue);
             for (const auto& argument : unit.command)
             {
@@ -1210,15 +1290,17 @@ namespace heimdall
         }
 
         bytes += m_names.bucket_count() * sizeof(void*) + m_local.bucket_count() * sizeof(void*) +
-            m_document_ranges.bucket_count() * sizeof(void*);
+                 m_document_ranges.bucket_count() * sizeof(void*);
         for (const auto& [name, ids] : m_names)
         {
-            bytes += sizeof(std::string) + name.capacity() + sizeof(std::vector<EntityId>) + ids.capacity() * sizeof(EntityId);
+            bytes += sizeof(std::string) + name.capacity() + sizeof(std::vector<EntityId>) +
+                     ids.capacity() * sizeof(EntityId);
         }
 
-        bytes += m_local.size() * (sizeof(std::uint64_t) + sizeof(EntityId) + sizeof(void*)) +
-            m_document_ranges.size() * (sizeof(DocumentId) + sizeof(std::pair<std::size_t,
-            std::size_t>) + sizeof(void*));
+        bytes +=
+            m_local.size() * (sizeof(std::uint64_t) + sizeof(EntityId) + sizeof(void*)) +
+            m_document_ranges.size() *
+                (sizeof(DocumentId) + sizeof(std::pair<std::size_t, std::size_t>) + sizeof(void*));
         return bytes;
     }
-}
+} // namespace heimdall

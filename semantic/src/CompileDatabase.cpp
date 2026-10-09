@@ -2,9 +2,9 @@
 
 #include <simdjson.h>
 
-#include <system_error>
 #include <algorithm>
 #include <cctype>
+#include <system_error>
 
 namespace heimdall
 {
@@ -15,7 +15,7 @@ namespace heimdall
         std::filesystem::path AbsoluteNormalized(const std::filesystem::path& path)
         {
             std::error_code ec;
-            auto absolute = std::filesystem::absolute(path, ec);
+            auto            absolute = std::filesystem::absolute(path, ec);
             return (ec ? path : absolute).lexically_normal();
         }
 
@@ -26,34 +26,31 @@ namespace heimdall
             auto text = AbsoluteNormalized(path).generic_string();
 #if defined(_WIN32)
             std::transform(text.begin(), text.end(), text.begin(),
-                [](unsigned char c)
-                {
-                    return static_cast<char>(std::tolower(c));
-            });
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 #endif
             return std::filesystem::path(text);
         }
 
-        void ParseOption(
-            CompileCommand& command,
-            std::string_view arg,
-            std::string_view next,
-            bool& consume_next)
+        void ParseOption(CompileCommand&  command,
+                         std::string_view arg,
+                         std::string_view next,
+                         bool&            consume_next)
         {
-            consume_next = false;
-            auto parse_define =[&command](std::string_view value)
-            {
-                const auto equal = value.find('=');
+            consume_next      = false;
+            auto parse_define = [&command](std::string_view value) {
+                const auto        equal = value.find('=');
                 const std::string name(value.substr(0, equal));
                 if (!name.empty())
                 {
-                    command.undefines.erase(std::remove(command.undefines.begin(), command.undefines.end(), name),
+                    command.undefines.erase(
+                        std::remove(command.undefines.begin(), command.undefines.end(), name),
                         command.undefines.end());
-                    command.defines[name] = equal == std::string_view::npos ? "1" : std::string(value.substr(equal + 1));
+                    command.defines[name] =
+                        equal == std::string_view::npos ? "1"
+                                                        : std::string(value.substr(equal + 1));
                 }
             };
-            auto parse_undef =[&command](std::string_view value)
-            {
+            auto parse_undef = [&command](std::string_view value) {
                 if (!value.empty())
                 {
                     const std::string name(value);
@@ -61,8 +58,7 @@ namespace heimdall
                     command.undefines.push_back(name);
                 }
             };
-            auto parse_include =[&command](std::string_view value)
-            {
+            auto parse_include = [&command](std::string_view value) {
                 if (value.empty())
                 {
                     return;
@@ -76,8 +72,7 @@ namespace heimdall
 
                 command.include_directories.push_back(include.lexically_normal());
             };
-            auto parse_quote =[&command](std::string_view value)
-            {
+            auto parse_quote = [&command](std::string_view value) {
                 if (value.empty())
                 {
                     return;
@@ -92,18 +87,19 @@ namespace heimdall
                 command.quote_directories.push_back(quote.lexically_normal());
             };
 
-            auto parse_standard =[&command](std::string_view value)
-            {
-                if (value == "c++23" || value == "gnu++23" || value == "c++2b" || value == "gnu++2b")
+            auto parse_standard = [&command](std::string_view value) {
+                if (value == "c++23" || value == "gnu++23" || value == "c++2b" ||
+                    value == "gnu++2b")
                 {
                     command.standard = CppStandard::Cpp23;
                 }
-                else if (value == "c++26" || value == "gnu++26" || value == "c++2c" || value == "gnu++2c" ||
-                    value == "c++latest")
+                else if (value == "c++26" || value == "gnu++26" || value == "c++2c" ||
+                         value == "gnu++2c" || value == "c++latest")
                 {
                     command.standard = CppStandard::Cpp26;
                 }
-                else if (value == "c++20" || value == "gnu++20" || value == "c++2a" || value == "gnu++2a")
+                else if (value == "c++20" || value == "gnu++20" || value == "c++2a" ||
+                         value == "gnu++2a")
                 {
                     command.standard = CppStandard::Cpp20;
                 }
@@ -188,9 +184,9 @@ namespace heimdall
         std::vector<std::string> SplitCommand(std::string_view command)
         {
             std::vector<std::string> args;
-            std::string current;
-            char quote = '\0';
-            bool escaped = false;
+            std::string              current;
+            char                     quote   = '\0';
+            bool                     escaped = false;
             for (std::size_t i = 0; i < command.size(); ++i)
             {
                 const char c = command[i];
@@ -269,16 +265,16 @@ namespace heimdall
 
     } // namespace
 
-    std::expected<CompileDatabase,
-        std::string> CompileDatabase::Load(const std::filesystem::path& path)
+    std::expected<CompileDatabase, std::string> CompileDatabase::Load(
+        const std::filesystem::path& path)
     {
-        simdjson::dom::parser parser;
+        simdjson::dom::parser  parser;
         simdjson::dom::element document;
-        const auto parse_error = parser.load(path.string()).get(document);
+        const auto             parse_error = parser.load(path.string()).get(document);
         if (parse_error)
         {
-            return std::unexpected("cannot parse compile database '" + path.string() + "': " +
-                std::string(simdjson::error_message(parse_error)));
+            return std::unexpected("cannot parse compile database '" + path.string() +
+                                   "': " + std::string(simdjson::error_message(parse_error)));
         }
 
         simdjson::dom::array entries;
@@ -298,12 +294,13 @@ namespace heimdall
 
             std::string directory_text;
             std::string file_text;
-            if (!GetString(entry, "directory", directory_text) ||!GetString(entry, "file", file_text))
+            if (!GetString(entry, "directory", directory_text) ||
+                !GetString(entry, "file", file_text))
             {
                 continue;
             }
 
-            CompileCommand command;
+            CompileCommand        command;
             std::filesystem::path directory(directory_text);
             if (directory.is_relative())
             {
@@ -311,7 +308,7 @@ namespace heimdall
             }
 
             command.directory = AbsoluteNormalized(directory);
-            command.file = file_text;
+            command.file      = file_text;
             if (command.file.is_relative())
             {
                 command.file = command.directory / command.file;
@@ -347,8 +344,10 @@ namespace heimdall
 
             for (std::size_t i = 0; i < command.arguments.size(); ++i)
             {
-                bool consume_next = false;
-                const std::string_view next = i + 1 < command.arguments.size() ? command.arguments[i + 1] : std::string_view {};
+                bool                   consume_next = false;
+                const std::string_view next =
+                    i + 1 < command.arguments.size() ? command.arguments[i + 1]
+                                                     : std::string_view {};
                 ParseOption(command, command.arguments[i], next, consume_next);
                 if (consume_next)
                 {
@@ -378,27 +377,27 @@ namespace heimdall
 
     const CompileCommand* CompileDatabase::FindOrNearest(std::filesystem::path file) const
     {
-        if (const auto * exact = Find(file))
+        if (const auto* exact = Find(file))
         {
             return exact;
         }
 
-        file = ComparableKey(file);
-        const CompileCommand* best = nullptr;
-        std::size_t best_score = 0;
+        file                             = ComparableKey(file);
+        const CompileCommand* best       = nullptr;
+        std::size_t           best_score = 0;
         for (const auto& command : m_commands)
         {
-            const auto other = ComparableKey(command.file);
+            const auto  other = ComparableKey(command.file);
             std::size_t score = 0;
-            for (auto a = file.begin(), b = other.begin(); a != file.end() && b != other.end() && *a == *b; ++a,
-                ++b)
+            for (auto a = file.begin(), b = other.begin();
+                 a != file.end() && b != other.end() && *a == *b; ++a, ++b)
             {
                 ++score;
             }
 
             if (best == nullptr || score > best_score)
             {
-                best = &command;
+                best       = &command;
                 best_score = score;
             }
         }

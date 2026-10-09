@@ -16,32 +16,32 @@ namespace heimdall::lsp
         {
             switch (c)
             {
-            case '"':
-                out += "\\\"";
-                break;
-            case '\\':
-                out += "\\\\";
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            case '\r':
-                out += "\\r";
-                break;
-            case '\t':
-                out += "\\t";
-                break;
-            default:
-                if (c < 0x20)
-                {
-                    out += "\\u00";
-                    out += hex[c >> 4];
-                    out += hex[c & 0x0f];
-                }
-                else
-                {
-                    out += static_cast<char>(c);
-                }
+                case '"':
+                    out += "\\\"";
+                    break;
+                case '\\':
+                    out += "\\\\";
+                    break;
+                case '\n':
+                    out += "\\n";
+                    break;
+                case '\r':
+                    out += "\\r";
+                    break;
+                case '\t':
+                    out += "\\t";
+                    break;
+                default:
+                    if (c < 0x20)
+                    {
+                        out += "\\u00";
+                        out += hex[c >> 4];
+                        out += hex[c & 0x0f];
+                    }
+                    else
+                    {
+                        out += static_cast<char>(c);
+                    }
             }
         }
 
@@ -50,7 +50,7 @@ namespace heimdall::lsp
 
     void Send(std::string_view body)
     {
-        static std::mutex send_mutex;
+        static std::mutex                 send_mutex;
         const std::lock_guard<std::mutex> lock(send_mutex);
 
         std::cout << "Content-Length: " << body.size() << "\r\n\r\n";
@@ -61,8 +61,8 @@ namespace heimdall::lsp
     bool ReadMessage(std::string& body)
     {
         std::string line;
-        std::size_t length = 0;
-        bool got_length = false;
+        std::size_t length     = 0;
+        bool        got_length = false;
 
         while (std::getline(std::cin, line))
         {
@@ -82,7 +82,7 @@ namespace heimdall::lsp
                 const auto value = std::string_view(line).substr(prefix.size());
                 try
                 {
-                    length = static_cast<std::size_t>(std::stoull(std::string(value)));
+                    length     = static_cast<std::size_t>(std::stoull(std::string(value)));
                     got_length = true;
                 }
                 catch (...)
@@ -92,7 +92,7 @@ namespace heimdall::lsp
             }
         }
 
-        if (!std::cin ||!got_length)
+        if (!std::cin || !got_length)
         {
             return false;
         }
@@ -105,12 +105,12 @@ namespace heimdall::lsp
 
     bool GetString(simdjson::dom::object object, const char* key, std::string_view& output)
     {
-        return!object[key].get_string().get(output);
+        return !object[key].get_string().get(output);
     }
 
     bool GetObject(simdjson::dom::element element, const char* key, simdjson::dom::object& output)
     {
-        return!element[key].get_object().get(output);
+        return !element[key].get_object().get(output);
     }
 
 } // namespace heimdall::lsp

@@ -29,7 +29,7 @@ namespace heimdall
     // knows for certain: any unresolved name, base or signature keeps it silent.
     class SemanticRules
     {
-    public:
+      public:
         // cpp/modernize-override: a member function that overrides a virtual
         // function of a base class declared in this translation unit but does not
         // say `override` (or `final`). Destructors are not reported yet.
@@ -119,8 +119,8 @@ namespace heimdall
         // closure, or a standard-library name with a well-known header). The
         // quick fix adds the include. Needs context.profile; silent without it,
         // when some include was not found, or when the name is ambiguous.
-        static std::vector<Diagnostic> AnalyzeIncludeWhatYouUse(const SemanticModel& model,
-            const ProjectContext& context);
+        static std::vector<Diagnostic> AnalyzeIncludeWhatYouUse(const SemanticModel&  model,
+                                                                const ProjectContext& context);
 
         // cpp/modernize-final: a polymorphic class that nothing derives from, and
         // an `override` that nothing overrides, in code whose derived classes are
@@ -130,8 +130,8 @@ namespace heimdall
         // defined there decides whether the class is polymorphic. Header classes
         // outside an anonymous namespace are never reported: any other file may
         // derive from them. The fix (quick fix only) adds `final`.
-        static std::vector<Diagnostic> AnalyzeFinal(const SemanticModel& model,
-            const ProjectContext& context);
+        static std::vector<Diagnostic> AnalyzeFinal(const SemanticModel&  model,
+                                                    const ProjectContext& context);
 
         // api/virtual-destructor: a struct/class that declares virtual functions
         // whose destructor is not virtual and is public (a protected one is the
@@ -216,7 +216,8 @@ namespace heimdall
         static std::vector<Diagnostic> AnalyzeDesignatedZeroAsNull(const SemanticModel& model);
 
         // The `T{.ptr = 20}` part of AnalyzeIntegerToPointer.
-        static std::vector<Diagnostic> AnalyzeDesignatedIntegerToPointer(const SemanticModel& model);
+        static std::vector<Diagnostic> AnalyzeDesignatedIntegerToPointer(
+            const SemanticModel& model);
 
         // cpp/no-integer-to-pointer: a non-zero integer literal used as a pointer
         // (`T* p = 20;`, `p = 20;`, `T{.ptr = 20}`), which does not compile: only a null
@@ -231,7 +232,7 @@ namespace heimdall
         // friends, forward declarations, `main` and explicit specializations are left
         // alone: their documentation lives elsewhere. No fix: the text is the author's.
         static std::vector<Diagnostic> AnalyzeRequireDocComment(const SemanticModel& model,
-            DocScope scope = DocScope::Public);
+                                                                DocScope scope = DocScope::Public);
 
         // doc/doxygen-style (opt-in): a function, class or enum inside `scope` whose
         // Doxygen comment breaks good practice:
@@ -247,14 +248,14 @@ namespace heimdall
         //    convention), or `@` and `\` command spellings mixed in one comment.
         // Comments with `@copydoc`, `@inheritdoc` or `@overload` are skipped. No fix.
         static std::vector<Diagnostic> AnalyzeDoxygenStyle(const SemanticModel& model,
-            DocScope scope = DocScope::Public);
+                                                           DocScope scope = DocScope::Public);
 
         // The two rules above, for those the engine has enabled, with the engine's
         // DocScope. They are not part of Analyze: every undocumented declaration would
         // trip them, so the CLI and the language server add them only when a config
         // file or --rule asks for them.
         static std::vector<Diagnostic> AnalyzeDocumentation(const SemanticModel& model,
-            const RuleEngine& engine);
+                                                            const RuleEngine&    engine);
 
         // Every rule above except the project-level ones, sorted by offset. The
         // overload without a TypeModel runs the Typer itself.
@@ -264,7 +265,7 @@ namespace heimdall
 
         // The same plus the project-level rules, which need the file's context.
         static std::vector<Diagnostic> Analyze(const SemanticModel& model, const TypeModel& types,
-            const ProjectContext& context);
+                                               const ProjectContext& context);
     };
 
 } // namespace heimdall

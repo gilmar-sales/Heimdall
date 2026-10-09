@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <future>
 #include <fstream>
+#include <future>
 
 namespace
 {
@@ -17,12 +17,12 @@ namespace
 
     TEST(WorkspaceSpec, OldSnapshotKeepsSourceSyntaxAndSemanticAlive)
     {
-        Workspace workspace;
+        Workspace  workspace;
         const auto id = workspace.Open("snapshot.cpp", Text("int value = 1;\n"), 1);
         ASSERT_TRUE(id);
-        auto old = workspace.Snapshot();
+        auto old    = workspace.Snapshot();
         auto syntax = old.Syntax(*id);
-        auto types = old.Types(*id);
+        auto types  = old.Types(*id);
         ASSERT_TRUE(workspace.Update(*id, Text("double other = 2;\n"), 2));
         auto current = workspace.Snapshot();
         EXPECT_LT(old.Revision(), current.Revision());
@@ -40,13 +40,13 @@ namespace
     TEST(WorkspaceSpec, UnchangedDocumentsShareAllCaches)
     {
         Workspace workspace;
-        auto a = workspace.Open("a.cpp", Text("int a;\n"), 1);
-        auto b = workspace.Open("b.cpp", Text("int b;\n"), 1);
-        ASSERT_TRUE(a&& b);
-        auto before = workspace.Snapshot();
-        auto syntax = before.Syntax(*b);
+        auto      a = workspace.Open("a.cpp", Text("int a;\n"), 1);
+        auto      b = workspace.Open("b.cpp", Text("int b;\n"), 1);
+        ASSERT_TRUE(a && b);
+        auto before   = workspace.Snapshot();
+        auto syntax   = before.Syntax(*b);
         auto semantic = before.Semantic(*b);
-        auto types = before.Types(*b);
+        auto types    = before.Types(*b);
         ASSERT_TRUE(workspace.Update(*a, Text("int c;\n"), 2));
         auto after = workspace.Snapshot();
         EXPECT_EQ(after.Syntax(*b), syntax);
@@ -60,7 +60,7 @@ namespace
     TEST(WorkspaceSpec, RejectsInvalidDocumentsVersionsAndDuplicatePaths)
     {
         Workspace workspace;
-        auto id = workspace.Open("folder/../version.cpp", Text("int x;"), 5);
+        auto      id = workspace.Open("folder/../version.cpp", Text("int x;"), 5);
         ASSERT_TRUE(id);
         EXPECT_EQ(workspace.Snapshot().Find("version.cpp"), *id);
         EXPECT_FALSE(workspace.Open("version.cpp", Text("")));
@@ -79,18 +79,18 @@ namespace
     TEST(WorkspaceSpec, DependencyInvalidationIsTransitiveAndCycleSafe)
     {
         Workspace workspace;
-        auto header = workspace.Open("header.hpp", Text("struct S {};"), 1);
-        auto user = workspace.Open("user.cpp", Text("int x;"), 1);
-        auto other = workspace.Open("other.cpp", Text("int y;"), 1);
-        auto independent = workspace.Open("independent.cpp", Text("int z;"), 1);
+        auto      header      = workspace.Open("header.hpp", Text("struct S {};"), 1);
+        auto      user        = workspace.Open("user.cpp", Text("int x;"), 1);
+        auto      other       = workspace.Open("other.cpp", Text("int y;"), 1);
+        auto      independent = workspace.Open("independent.cpp", Text("int z;"), 1);
         ASSERT_TRUE(header && user && other && independent);
-        ASSERT_TRUE(workspace.SetDependencies(*user, std::array{*header}));
-        ASSERT_TRUE(workspace.SetDependencies(*other, std::array{*user}));
-        ASSERT_TRUE(workspace.SetDependencies(*header, std::array{*other}));
-        auto before = workspace.Snapshot();
-        auto user_syntax = before.Syntax(*user);
-        auto user_semantic = before.Semantic(*user);
-        auto other_semantic = before.Semantic(*other);
+        ASSERT_TRUE(workspace.SetDependencies(*user, std::array { *header }));
+        ASSERT_TRUE(workspace.SetDependencies(*other, std::array { *user }));
+        ASSERT_TRUE(workspace.SetDependencies(*header, std::array { *other }));
+        auto before               = workspace.Snapshot();
+        auto user_syntax          = before.Syntax(*user);
+        auto user_semantic        = before.Semantic(*user);
+        auto other_semantic       = before.Semantic(*other);
         auto independent_semantic = before.Semantic(*independent);
         ASSERT_TRUE(workspace.Update(*header, Text("struct S { int member; };"), 2));
         auto after = workspace.Snapshot();
@@ -99,7 +99,7 @@ namespace
         EXPECT_NE(after.Semantic(*other), other_semantic);
         EXPECT_EQ(after.Semantic(*independent), independent_semantic);
         EXPECT_EQ(before.Dependencies(*user)[0], *header);
-        EXPECT_FALSE(workspace.SetDependencies(*user, std::array{InvalidDocument}));
+        EXPECT_FALSE(workspace.SetDependencies(*user, std::array { InvalidDocument }));
         ASSERT_TRUE(workspace.Close(*header));
         EXPECT_TRUE(workspace.Snapshot().Dependencies(*user).empty());
         EXPECT_FALSE(before.Dependencies(*user).empty());
@@ -110,14 +110,12 @@ namespace
         Workspace workspace;
         auto id = workspace.Open("concurrent.cpp", Text("int add(int a, int b) { return a + b; }"));
         ASSERT_TRUE(id);
-        auto snapshot = workspace.Snapshot();
+        auto                                                       snapshot = workspace.Snapshot();
         std::vector<std::future<std::shared_ptr<const TypeModel>>> workers;
         for (int i = 0; i < 8; ++i)
         {
-            workers.push_back(std::async(std::launch::async,
-                [snapshot, id = *id]
-                {
-                    return snapshot.Types(id);
+            workers.push_back(std::async(std::launch::async, [snapshot, id = *id] {
+                return snapshot.Types(id);
             }));
         }
 
@@ -143,10 +141,10 @@ namespace
 
     TEST(WorkspaceSpec, SourceStorageIsReleasedWhenLastReaderFinishes)
     {
-        Workspace workspace;
-        auto text = Text("int retained;");
+        Workspace                        workspace;
+        auto                             text = Text("int retained;");
         std::weak_ptr<const std::string> weak = text;
-        auto id = workspace.Open("retained.cpp", text);
+        auto                             id   = workspace.Open("retained.cpp", text);
         ASSERT_TRUE(id);
         text.reset();
         auto snapshot = workspace.Snapshot();
@@ -161,27 +159,29 @@ namespace
     TEST(WorkspaceSpec, ExistingParseIsAdoptedWithoutReparsingOrSourceCopy)
     {
         Workspace workspace;
-        auto text = Text("int existing;");
-        auto id = workspace.Open("existing.cpp", text);
+        auto      text = Text("int existing;");
+        auto      id   = workspace.Open("existing.cpp", text);
         ASSERT_TRUE(id);
-        auto tree = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(text, {}));
+        auto tree     = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(text, {}));
         auto snapshot = workspace.Snapshot();
-        auto derived = snapshot.WithSyntax(*id, tree, {});
+        auto derived  = snapshot.WithSyntax(*id, tree, {});
         ASSERT_TRUE(derived);
         EXPECT_EQ(derived->Syntax(*id), tree);
         EXPECT_EQ(derived->Source(*id), text);
         EXPECT_EQ(derived->Metrics().parse_count, 0);
-        EXPECT_FALSE(snapshot.WithSyntax(*id,
-            std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(Text("int wrong;"), {})), {}));
+        EXPECT_FALSE(snapshot.WithSyntax(
+            *id,
+            std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(Text("int wrong;"), {})),
+            {}));
     }
 
     TEST(WorkspaceSpec, OptionsInvalidateCachesWithoutChangingPinnedViews)
     {
         Workspace workspace;
-        auto id = workspace.Open("dialect.cpp", Text("int x;"));
+        auto      id = workspace.Open("dialect.cpp", Text("int x;"));
         ASSERT_TRUE(id);
-        auto before = workspace.Snapshot();
-        auto syntax = before.Syntax(*id);
+        auto          before = workspace.Snapshot();
+        auto          syntax = before.Syntax(*id);
         ParserOptions options;
         options.standard = CppStandard::Cpp26;
         ASSERT_TRUE(workspace.SetOptions(*id, options));
@@ -193,13 +193,13 @@ namespace
     TEST(WorkspaceSpec, SnapshotFeaturesMatchExistingTreeFeatures)
     {
         Workspace workspace;
-        auto text = Text("int value; int f() { return value; }\n");
-        auto id = workspace.Open("features.cpp", text);
+        auto      text = Text("int value; int f() { return value; }\n");
+        auto      id   = workspace.Open("features.cpp", text);
         ASSERT_TRUE(id);
         AnalysisContext context(workspace.Snapshot(), *id);
-        const auto offset = text->rfind("value");
-        auto targets = AnalysisFeatures::Definition(context, offset);
-        auto expected = Navigation::Definition(context.Syntax(), offset);
+        const auto      offset   = text->rfind("value");
+        auto            targets  = AnalysisFeatures::Definition(context, offset);
+        auto            expected = Navigation::Definition(context.Syntax(), offset);
         ASSERT_EQ(targets.size(), expected.size());
         ASSERT_FALSE(targets.empty());
         EXPECT_EQ(targets[0].offset, expected[0].offset);
@@ -208,7 +208,7 @@ namespace
         EXPECT_EQ(context.Semantic().Names().Text(context.Symbols().name[symbol]), "value");
         EXPECT_FALSE(context.References(symbol).empty());
         auto completed = AnalysisFeatures::Complete(context, offset + 3);
-        auto old = CompletionEngine::Complete(context.Syntax(), {}, offset + 3);
+        auto old       = CompletionEngine::Complete(context.Syntax(), {}, offset + 3);
         EXPECT_EQ(completed.size(), old.size());
         EXPECT_EQ(context.NodeRange(InvalidNode).length, 0);
         EXPECT_EQ(context.ResolveSymbol(text->size() + 10), kNone);
@@ -221,11 +221,12 @@ namespace
     TEST(WorkspaceSpec, WorkspaceUpdatesReuseUnchangedTopLevelItems)
     {
         Workspace workspace;
-        auto id = workspace.Open("incremental.cpp", Text("int a() { return 1; }\nint b() { return 2; }\n"),
-            1);
+        auto      id = workspace.Open(
+            "incremental.cpp", Text("int a() { return 1; }\nint b() { return 2; }\n"), 1);
         ASSERT_TRUE(id);
         auto before = workspace.Snapshot().Syntax(*id);
-        ASSERT_TRUE(workspace.Update(*id, Text("int a() { return 3; }\nint b() { return 2; }\n"), 2));
+        ASSERT_TRUE(
+            workspace.Update(*id, Text("int a() { return 3; }\nint b() { return 2; }\n"), 2));
         auto current = workspace.Snapshot();
         EXPECT_GT(current.Memory().retained_base_bytes, 0);
         auto after = current.Syntax(*id);
@@ -237,8 +238,9 @@ namespace
     TEST(WorkspaceSpec, RegisteredQuotedIncludesBuildAndUpdateDependencyGraph)
     {
         Workspace workspace;
-        auto source = workspace.Open("project/source.cpp",
-            Text("#include /* \"misleading.hpp\" */ \"header.hpp\"\nint x;"), 1);
+        auto      source =
+            workspace.Open("project/source.cpp",
+                           Text("#include /* \"misleading.hpp\" */ \"header.hpp\"\nint x;"), 1);
         ASSERT_TRUE(source);
         EXPECT_TRUE(workspace.Snapshot().Dependencies(*source).empty());
         auto header = workspace.Open("project/header.hpp", Text("struct S {};"), 1);
@@ -257,9 +259,9 @@ namespace
     TEST(WorkspaceSpec, HeaderSummaryReusesBoundModelAndFingerprintsRelevantChanges)
     {
         Workspace workspace;
-        auto id = workspace.Open("summary.hpp", Text("#define SIZE 4\nstruct S {};"), 1);
+        auto      id = workspace.Open("summary.hpp", Text("#define SIZE 4\nstruct S {};"), 1);
         ASSERT_TRUE(id);
-        auto before = workspace.Snapshot();
+        auto before  = workspace.Snapshot();
         auto summary = before.Summary(*id);
         ASSERT_TRUE(summary);
         EXPECT_EQ(summary->ExportCount(), 1);
@@ -268,28 +270,32 @@ namespace
         EXPECT_EQ(before.Metrics().bind_count, 1);
         EXPECT_EQ(before.Summary(*id), summary);
         ASSERT_TRUE(workspace.Update(*id, Text("#define SIZE 8\nstruct S {};"), 2));
-        EXPECT_NE(workspace.Snapshot().Summary(*id)->SemanticFingerprint(), summary->SemanticFingerprint());
+        EXPECT_NE(workspace.Snapshot().Summary(*id)->SemanticFingerprint(),
+                  summary->SemanticFingerprint());
     }
 
     TEST(WorkspaceSpec, CompilationDatabaseIsPinnedAndDrivesDialectMacrosAndIncludePaths)
     {
         const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
-        const auto path = std::filesystem::temp_directory_path() / "heimdall_workspace_database_test.json";
+        const auto path =
+            std::filesystem::temp_directory_path() / "heimdall_workspace_database_test.json";
         {
             std::ofstream file(path);
             file << "[{\"directory\":\"" << root.generic_string()
-            << "\",\"file\":\"project/source.cpp\",\"arguments\":[\"g++\",\"-std=c++26\",\"-DVALUE=42\",\"-Iproject/include\"]}]";
+                 << "\",\"file\":\"project/"
+                    "source.cpp\",\"arguments\":[\"g++\",\"-std=c++26\",\"-DVALUE=42\",\"-Iproject/"
+                    "include\"]}]";
         }
         auto loaded = CompileDatabase::Load(path);
         std::filesystem::remove(path);
         ASSERT_TRUE(loaded);
         Workspace workspace;
-        auto database = std::make_shared<const CompileDatabase>(std::move(*loaded));
+        auto      database = std::make_shared<const CompileDatabase>(std::move(*loaded));
         workspace.SetCompilationDatabase(database);
         auto source = workspace.Open(root / "project/source.cpp",
-            Text("#include <header.hpp>\nint x = VALUE;"));
+                                     Text("#include <header.hpp>\nint x = VALUE;"));
         auto header = workspace.Open(root / "project/include/header.hpp", Text("struct S {};"));
-        ASSERT_TRUE(source&& header);
+        ASSERT_TRUE(source && header);
         auto pinned = workspace.Snapshot();
         ASSERT_NE(pinned.Command(*source), nullptr);
         EXPECT_EQ(pinned.Command(*source), database->Find(root / "project/source.cpp"));
@@ -308,7 +314,7 @@ namespace
     TEST(WorkspaceSpec, ProjectIndexIsBuiltLazilyAndOldSnapshotKeepsOldExports)
     {
         Workspace workspace;
-        auto id = workspace.Open("exports.hpp", Text("struct OldType {};"), 1);
+        auto      id = workspace.Open("exports.hpp", Text("struct OldType {};"), 1);
         ASSERT_TRUE(id);
         auto before = workspace.Snapshot();
         EXPECT_EQ(before.Metrics().project_index_count, 0);
@@ -325,4 +331,4 @@ namespace
         EXPECT_EQ(current->ExportsNamed("NewType").size(), 1);
         EXPECT_EQ(index->ExportsNamed("OldType").size(), 1);
     }
-}
+} // namespace

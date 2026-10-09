@@ -21,12 +21,12 @@ namespace heimdall
     // a parse; it holds them alive and does not outlive them.
     class ProjectIndex
     {
-    public:
+      public:
         // `index` addresses the export (or class) inside `Summaries()[summary]`.
         struct Ref
         {
             std::uint32_t summary = 0;
-            std::uint32_t index = 0;
+            std::uint32_t index   = 0;
         };
 
         enum class Tri : std::uint8_t
@@ -40,7 +40,8 @@ namespace heimdall
 
         static ProjectIndex Build(const IncludeProfile& profile);
 
-        static ProjectIndex FromSummaries(std::vector<std::shared_ptr<const HeaderSummary>> summaries);
+        static ProjectIndex FromSummaries(
+            std::vector<std::shared_ptr<const HeaderSummary>> summaries);
 
         const std::vector<std::shared_ptr<const HeaderSummary>>& Summaries() const noexcept
         {
@@ -60,13 +61,13 @@ namespace heimdall
         // Some indexed class lists `name` among its bases.
         bool HasDerived(std::string_view name) const;
 
-    private:
+      private:
         Tri IsPolymorphic(std::string_view name, std::vector<std::string_view>& visiting) const;
 
-        std::vector<std::shared_ptr<const HeaderSummary>> m_summaries;
+        std::vector<std::shared_ptr<const HeaderSummary>>      m_summaries;
         std::unordered_map<std::string_view, std::vector<Ref>> m_exports;
         std::unordered_map<std::string_view, std::vector<Ref>> m_classes;
-        std::unordered_map<std::string_view, std::uint32_t> m_base_uses;
+        std::unordered_map<std::string_view, std::uint32_t>    m_base_uses;
     };
 
 } // namespace heimdall

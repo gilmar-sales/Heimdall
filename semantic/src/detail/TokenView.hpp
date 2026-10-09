@@ -15,19 +15,15 @@ namespace heimdall::detail
     // The model's tokens, with the helpers every rule below needs.
     class TokenView
     {
-    public:
-        explicit TokenView(const SemanticModel& model)
-        : m_model(model), m_tokens(model.Tree().Tokens()), m_sig(model.Significant()) {}
-
-        std::size_t Size() const
+      public:
+        explicit TokenView(const SemanticModel& model) :
+            m_model(model), m_tokens(model.Tree().Tokens()), m_sig(model.Significant())
         {
-            return m_sig.size();
         }
 
-        std::uint32_t TokenAt(std::size_t position) const
-        {
-            return m_sig[position];
-        }
+        std::size_t Size() const { return m_sig.size(); }
+
+        std::uint32_t TokenAt(std::size_t position) const { return m_sig[position]; }
 
         Tok At(std::size_t position) const
         {
@@ -36,13 +32,15 @@ namespace heimdall::detail
 
         bool IsWord(std::size_t position) const
         {
-            return position < m_sig.size() && m_tokens[m_sig[position]].kind == TokenKind::Identifier &&
-                m_tokens[m_sig[position]].tok == Tok::None;
+            return position < m_sig.size() &&
+                   m_tokens[m_sig[position]].kind == TokenKind::Identifier &&
+                   m_tokens[m_sig[position]].tok == Tok::None;
         }
 
         std::string_view Text(std::size_t position) const
         {
-            return position < m_sig.size() ? m_model.Tree().Text(m_tokens[m_sig[position]]) : std::string_view {};
+            return position < m_sig.size() ? m_model.Tree().Text(m_tokens[m_sig[position]])
+                                           : std::string_view {};
         }
 
         TokenKind KindAt(std::size_t position) const
@@ -59,13 +57,10 @@ namespace heimdall::detail
 
             const auto kind = m_tokens[m_sig[position]].kind;
             return kind == TokenKind::Number || kind == TokenKind::StringLiteral ||
-                kind == TokenKind::CharacterLiteral || kind == TokenKind::RawStringLiteral;
+                   kind == TokenKind::CharacterLiteral || kind == TokenKind::RawStringLiteral;
         }
 
-        std::size_t Offset(std::size_t position) const
-        {
-            return m_tokens[m_sig[position]].offset;
-        }
+        std::size_t Offset(std::size_t position) const { return m_tokens[m_sig[position]].offset; }
 
         std::size_t End(std::size_t position) const
         {
@@ -75,16 +70,16 @@ namespace heimdall::detail
         // First position holding raw token `token` or a later one.
         std::size_t PositionOf(std::uint32_t token) const
         {
-            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(),
-                token) - m_sig.begin());
+            return static_cast<std::size_t>(
+                std::lower_bound(m_sig.begin(), m_sig.end(), token) - m_sig.begin());
         }
 
         // [begin, end) positions of a node's significant tokens.
         std::pair<std::size_t, std::size_t> Range(std::uint32_t node) const
         {
-            const auto n = m_model.Tree().NodesSoA()[node];
+            const auto n     = m_model.Tree().NodesSoA()[node];
             const auto begin = PositionOf(n.GetFirstToken());
-            return {begin, std::max(begin, PositionOf(n.GetFirstToken() + n.GetTokenCount()))};
+            return { begin, std::max(begin, PositionOf(n.GetFirstToken() + n.GetTokenCount())) };
         }
 
         // `0`, `0L`, `0u`, `0UL`...: a null pointer constant.
@@ -96,17 +91,18 @@ namespace heimdall::detail
             }
 
             const auto text = Text(position);
-            return!text.empty() && text[0] == '0' &&
-                text.find_first_not_of("uUlL", 1) == std::string_view::npos;
+            return !text.empty() && text[0] == '0' &&
+                   text.find_first_not_of("uUlL", 1) == std::string_view::npos;
         }
 
         // Position of the bracket closing the one at `open`, or `limit`.
         std::size_t Match(std::size_t open, std::size_t limit) const
         {
-            const Tok opening = At(open);
-            const Tok closing = opening == Tok::LParen ? Tok::RParen : opening == Tok::LBracket ? Tok::RBracket
-            : Tok::RBrace;
-            std::size_t depth = 0;
+            const Tok   opening = At(open);
+            const Tok   closing = opening == Tok::LParen     ? Tok::RParen
+                                  : opening == Tok::LBracket ? Tok::RBracket
+                                                             : Tok::RBrace;
+            std::size_t depth   = 0;
             for (std::size_t i = open; i < limit && i < m_sig.size(); ++i)
             {
                 if (At(i) == opening)
@@ -160,9 +156,9 @@ namespace heimdall::detail
             return result;
         }
 
-    private:
-        const SemanticModel& m_model;
-        const std::vector<Token>& m_tokens;
+      private:
+        const SemanticModel&                   m_model;
+        const std::vector<Token>&              m_tokens;
         const std::pmr::vector<std::uint32_t>& m_sig;
     };
 

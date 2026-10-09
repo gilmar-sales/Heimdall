@@ -27,18 +27,16 @@ namespace heimdall::bench
     };
 
     inline constexpr StbUnit kStbUnits[] = {
-        {
-            "stb_c_lexer.h", "STB_C_LEXER_IMPLEMENTATION", "INCLUDE_STB_C_LEXER_H"
-        },
-        {"stb_tilemap_editor.h", "STB_TILEMAP_EDITOR_IMPLEMENTATION",
-            "STB_TILEMAP_INCLUDE_STB_TILEMAP_EDITOR_H"},
-        {"stb_image.h", "STB_IMAGE_IMPLEMENTATION", "STBI_INCLUDE_STB_IMAGE_H"},
+        { "stb_c_lexer.h", "STB_C_LEXER_IMPLEMENTATION", "INCLUDE_STB_C_LEXER_H" },
+        { "stb_tilemap_editor.h", "STB_TILEMAP_EDITOR_IMPLEMENTATION",
+          "STB_TILEMAP_INCLUDE_STB_TILEMAP_EDITOR_H" },
+        { "stb_image.h", "STB_IMAGE_IMPLEMENTATION", "STBI_INCLUDE_STB_IMAGE_H" },
     };
 
     inline std::size_t CountLines(std::string_view text)
     {
         return static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n')) +
-            (!text.empty() && text.back() != '\n' ? 1 : 0);
+               (!text.empty() && text.back() != '\n' ? 1 : 0);
     }
 
     inline std::optional<std::string> ReadFile(const std::string& path)
@@ -54,8 +52,8 @@ namespace heimdall::bench
 
     inline void ReplaceAll(std::string& text, std::string_view from, const std::string& to)
     {
-        for (std::size_t at = text.find(from); at != std::string::npos; at = text.find(from,
-            at + to.size()))
+        for (std::size_t at = text.find(from); at != std::string::npos;
+             at             = text.find(from, at + to.size()))
         {
             text.replace(at, from.size(), to);
         }
@@ -64,7 +62,7 @@ namespace heimdall::bench
     // One self-contained copy of a stb header: implementation enabled, guard made
     // unique per `copy` so the preprocessor does not skip repeated copies.
     inline std::optional<std::string> LoadUnit(std::string_view directory, const StbUnit& unit,
-        std::size_t copy)
+                                               std::size_t copy)
     {
         auto source = ReadFile(std::string(directory) + "/" + unit.file);
         if (!source)
@@ -74,7 +72,8 @@ namespace heimdall::bench
 
         if (copy > 0)
         {
-            ReplaceAll(*source, unit.guard, std::string(unit.guard) + "_COPY" + std::to_string(copy));
+            ReplaceAll(*source, unit.guard,
+                       std::string(unit.guard) + "_COPY" + std::to_string(copy));
         }
 
         return "#define " + std::string(unit.implementation_macro) + "\n" + *source + "\n";
@@ -85,14 +84,14 @@ namespace heimdall::bench
     // cycle lexer (~0.95k lines) -> tilemap (~4.2k) -> image (~8k): 1000 -> 0.95k,
     // 5000 -> 5.1k, 20000 -> 18.3k. Report CountLines() of the result, not the target.
     inline std::optional<std::string> BuildDocument(std::string_view directory,
-        std::size_t target_lines)
+                                                    std::size_t      target_lines)
     {
         std::string document;
         std::size_t copies[std::size(kStbUnits)] = {};
         for (std::size_t index = 0; CountLines(document) * 10 < target_lines * 9; ++index)
         {
             const std::size_t which = index % std::size(kStbUnits);
-            auto unit = LoadUnit(directory, kStbUnits[which], copies[which] ++);
+            auto              unit  = LoadUnit(directory, kStbUnits[which], copies[which]++);
             if (!unit)
             {
                 return std::nullopt;

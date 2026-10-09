@@ -15,13 +15,13 @@ namespace heimdall
 
     namespace
     {
-        constexpr std::size_t kNone = static_cast<std::size_t>(-1);
-        constexpr std::size_t kMinAmbiguousScopes = 2;
-        constexpr int kDoubleAngleCount = 2;
+        constexpr std::size_t kNone                  = static_cast<std::size_t>(-1);
+        constexpr std::size_t kMinAmbiguousScopes    = 2;
+        constexpr int         kDoubleAngleCount      = 2;
         constexpr std::size_t kMaxPlacementWalkDepth = 64;
-        constexpr std::size_t kMinQualifiedParts = 2;
-        constexpr std::size_t kMinScopeGroups = 2;
-        constexpr std::size_t kMaxBaseDepth = 4;
+        constexpr std::size_t kMinQualifiedParts     = 2;
+        constexpr std::size_t kMinScopeGroups        = 2;
+        constexpr std::size_t kMaxBaseDepth          = 4;
 
         using Path = std::vector<std::string>;
 
@@ -53,74 +53,75 @@ namespace heimdall
         bool IsTrivia(TokenKind kind)
         {
             return kind == TokenKind::Whitespace || kind == TokenKind::LineComment ||
-                kind == TokenKind::BlockComment;
+                   kind == TokenKind::BlockComment;
         }
 
         // Declared symbol of the buffer being analyzed.
         struct Decl
         {
-            std::string name;
-            Path scope;
-            std::size_t offset = 0;
-            std::size_t length = 0;
-            CompletionKind kind = CompletionKind::Variable;
-            bool is_definition = false;
-            std::uint32_t param_count = 0;
+            std::string    name;
+            Path           scope;
+            std::size_t    offset        = 0;
+            std::size_t    length        = 0;
+            CompletionKind kind          = CompletionKind::Variable;
+            bool           is_definition = false;
+            std::uint32_t  param_count   = 0;
             // Block-local names are only visible in [local_begin, local_end).
-            bool local = false;
+            bool        local       = false;
             std::size_t local_begin = 0;
-            std::size_t local_end = 0;
+            std::size_t local_end   = 0;
             // Introduced by `using a::b;` (points at the used entity's name).
             bool via_using = false;
         };
 
         struct RecordInfo
         {
-            Path path;
+            Path                     path;
             std::vector<std::string> bases;
-            std::size_t begin = 0;
-            std::size_t end = 0;
+            std::size_t              begin = 0;
+            std::size_t              end   = 0;
         };
 
         struct ScopeRange
         {
             std::size_t begin = 0;
-            std::size_t end = 0;
-            Path path;
+            std::size_t end   = 0;
+            Path        path;
         };
 
         struct UsingDecl
         {
-            Path scope;
-            Path target; // `a::b` for `using a::b;` (last element is the name)
-            std::size_t offset = 0;
+            Path        scope;
+            Path        target; // `a::b` for `using a::b;` (last element is the name)
+            std::size_t offset       = 0;
             std::size_t active_begin = 0;
-            std::size_t active_end = 0;
+            std::size_t active_end   = 0;
         };
 
         // One external (header index) member.
         struct ExternalRef
         {
-            std::size_t scope = 0;
+            std::size_t scope  = 0;
             std::size_t member = 0;
         };
 
         struct Candidate
         {
-            Path scope;
-            std::string name;
+            Path           scope;
+            std::string    name;
             CompletionKind kind = CompletionKind::Variable;
             // Decl index (>= 0) or external reference (decl == kNone).
-            std::size_t decl = kNone;
-            ExternalRef external;
-            bool is_definition = false;
-            std::uint32_t param_count = 0;
+            std::size_t   decl = kNone;
+            ExternalRef   external;
+            bool          is_definition = false;
+            std::uint32_t param_count   = 0;
         };
 
         class Model
         {
-        public:
-            Model(const ParseTree& tree, const ScopeIndex* external) : m_tree(tree), m_external(external)
+          public:
+            Model(const ParseTree& tree, const ScopeIndex* external) :
+                m_tree(tree), m_external(external)
             {
                 BuildPaths();
                 CollectScopes();
@@ -128,20 +129,11 @@ namespace heimdall
                 BuildExternal();
             }
 
-            const ParseTree& Tree() const noexcept
-            {
-                return m_tree;
-            }
+            const ParseTree& Tree() const noexcept { return m_tree; }
 
-            const std::vector<Decl>& Decls() const noexcept
-            {
-                return m_decls;
-            }
+            const std::vector<Decl>& Decls() const noexcept { return m_decls; }
 
-            const std::vector<UsingDirective>& Directives() const noexcept
-            {
-                return m_directives;
-            }
+            const std::vector<UsingDirective>& Directives() const noexcept { return m_directives; }
 
             // ---- token helpers -------------------------------------------------
             std::string_view Text(std::size_t token) const
@@ -180,11 +172,9 @@ namespace heimdall
             std::size_t IdentifierAt(std::size_t offset) const
             {
                 const auto& tokens = m_tree.Tokens();
-                auto it = std::upper_bound(tokens.begin(), tokens.end(), offset,
-                    [](std::size_t value, const Token& token)
-                    {
-                        return value < token.offset;
-                });
+                auto        it     = std::upper_bound(
+                    tokens.begin(), tokens.end(), offset,
+                    [](std::size_t value, const Token& token) { return value < token.offset; });
                 if (it == tokens.begin())
                 {
                     return kNone;
@@ -210,8 +200,9 @@ namespace heimdall
                     return 0;
                 }
 
-                return grammar.GetFirstToken() < m_tree.Tokens().size() ? m_tree.Tokens()[grammar.GetFirstToken()].offset
-                : m_tree.Source().size();
+                return grammar.GetFirstToken() < m_tree.Tokens().size()
+                           ? m_tree.Tokens()[grammar.GetFirstToken()].offset
+                           : m_tree.Source().size();
             }
 
             std::size_t NodeEnd(std::size_t node) const
@@ -224,7 +215,8 @@ namespace heimdall
 
                 const std::size_t last =
                     std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
-                    m_tree.Tokens().size()) - 1;
+                                          m_tree.Tokens().size()) -
+                    1;
                 return m_tree.Tokens()[last].offset + m_tree.Tokens()[last].length;
             }
 
@@ -233,11 +225,12 @@ namespace heimdall
             // bodies) containing `offset`.
             Path ScopeAt(std::size_t offset) const
             {
-                Path best;
+                Path        best;
                 std::size_t span = kNone;
                 for (const auto& range : m_ranges)
                 {
-                    if (range.begin <= offset && offset <= range.end && range.end - range.begin < span)
+                    if (range.begin <= offset && offset <= range.end &&
+                        range.end - range.begin < span)
                     {
                         best = range.path;
                         span = range.end - range.begin;
@@ -257,14 +250,12 @@ namespace heimdall
                 return m_record_scopes.contains(PathKey(path));
             }
 
-            const std::vector<RecordInfo>& Records() const noexcept
-            {
-                return m_records;
-            }
+            const std::vector<RecordInfo>& Records() const noexcept { return m_records; }
 
             // Members named `name` declared directly in `scope`: buffer first, then
             // the header index. Block locals are never members.
-            void Members(const Path& scope, std::string_view name, std::vector<Candidate>& out) const
+            void Members(const Path& scope, std::string_view name,
+                         std::vector<Candidate>& out) const
             {
                 const std::string key = PathKey(scope);
                 if (const auto found = m_by_name.find(std::string(name)); found != m_by_name.end())
@@ -364,7 +355,8 @@ namespace heimdall
             {
                 for (std::size_t keep = from.size() + 1; keep > 0; --keep)
                 {
-                    Path candidate(from.begin(), from.begin() + static_cast<std::ptrdiff_t>(keep - 1));
+                    Path candidate(from.begin(),
+                                   from.begin() + static_cast<std::ptrdiff_t>(keep - 1));
                     candidate.insert(candidate.end(), written.begin(), written.end());
                     if (KnownScope(candidate))
                     {
@@ -380,7 +372,7 @@ namespace heimdall
             // visible there (transitively through directives inside them).
             std::vector<Path> NominatedAt(const Path& level, std::size_t pos) const
             {
-                std::vector<Path> result;
+                std::vector<Path>               result;
                 std::unordered_set<std::string> seen;
                 for (const UsingDirective& directive : m_directives)
                 {
@@ -399,7 +391,7 @@ namespace heimdall
                     // namespace that contains both the directive and the target.
                     std::size_t common = 0;
                     while (common < directive.scope.size() && common < target->size() &&
-                        directive.scope[common] ==(*target)[common])
+                           directive.scope[common] == (*target)[common])
                     {
                         ++common;
                     }
@@ -417,11 +409,10 @@ namespace heimdall
             }
 
             // using-declarations active at `pos` introducing `name` into `level`.
-            void UsingDeclared(
-                const Path& level,
-                std::string_view name,
-                std::size_t pos,
-                std::vector<Candidate>& out) const
+            void UsingDeclared(const Path&             level,
+                               std::string_view        name,
+                               std::size_t             pos,
+                               std::vector<Candidate>& out) const
             {
                 for (const UsingDecl& using_decl : m_using_decls)
                 {
@@ -432,7 +423,7 @@ namespace heimdall
                         continue;
                     }
 
-                    Path qualifier(using_decl.target.begin(), using_decl.target.end() - 1);
+                    Path       qualifier(using_decl.target.begin(), using_decl.target.end() - 1);
                     const auto resolved = ResolveNamespace(qualifier, using_decl.scope);
                     if (resolved)
                     {
@@ -480,9 +471,9 @@ namespace heimdall
             // Records derived (transitively) from a record named `base`.
             std::vector<const RecordInfo*> Derived(std::string_view base) const
             {
-                std::vector<const RecordInfo*> out;
-                std::unordered_set<std::string> frontier{std::string(base)};
-                bool grew = true;
+                std::vector<const RecordInfo*>        out;
+                std::unordered_set<std::string>       frontier { std::string(base) };
+                bool                                  grew = true;
                 std::unordered_set<const RecordInfo*> taken;
                 while (grew)
                 {
@@ -514,49 +505,50 @@ namespace heimdall
             Candidate FromDecl(std::size_t index) const
             {
                 const Decl& decl = m_decls[index];
-                Candidate candidate;
-                candidate.scope = decl.scope;
-                candidate.name = decl.name;
-                candidate.kind = decl.kind;
-                candidate.decl = index;
+                Candidate   candidate;
+                candidate.scope         = decl.scope;
+                candidate.name          = decl.name;
+                candidate.kind          = decl.kind;
+                candidate.decl          = index;
                 candidate.is_definition = decl.is_definition;
-                candidate.param_count = decl.param_count;
+                candidate.param_count   = decl.param_count;
                 return candidate;
             }
 
             Candidate FromExternal(ExternalRef ref) const
             {
-                const IndexedScope& scope = (*m_external)[ref.scope];
-                const CompletionItem& item = scope.members[ref.member];
-                Candidate candidate;
-                candidate.scope = scope.path;
-                candidate.name = item.label;
-                candidate.kind = item.kind;
-                candidate.external = ref;
+                const IndexedScope&   scope = (*m_external)[ref.scope];
+                const CompletionItem& item  = scope.members[ref.member];
+                Candidate             candidate;
+                candidate.scope         = scope.path;
+                candidate.name          = item.label;
+                candidate.kind          = item.kind;
+                candidate.external      = ref;
                 candidate.is_definition = item.is_definition;
-                candidate.param_count = item.param_count;
+                candidate.param_count   = item.param_count;
                 return candidate;
             }
 
             NavTarget ToTarget(const Candidate& candidate) const
             {
                 NavTarget target;
-                target.name = candidate.name;
-                target.scope = candidate.scope;
-                target.kind = candidate.kind;
+                target.name          = candidate.name;
+                target.scope         = candidate.scope;
+                target.kind          = candidate.kind;
                 target.is_definition = candidate.is_definition;
-                target.param_count = candidate.param_count;
+                target.param_count   = candidate.param_count;
                 if (candidate.decl != kNone)
                 {
                     const Decl& decl = m_decls[candidate.decl];
-                    target.file = -1;
-                    target.offset = decl.offset;
-                    target.length = decl.length;
+                    target.file      = -1;
+                    target.offset    = decl.offset;
+                    target.length    = decl.length;
                 }
                 else
                 {
-                    const CompletionItem& item = (*m_external)[candidate.external.scope].members[candidate.external.member];
-                    target.file = item.file;
+                    const CompletionItem& item =
+                        (*m_external)[candidate.external.scope].members[candidate.external.member];
+                    target.file   = item.file;
                     target.offset = item.offset;
                     target.length = item.label.size();
                 }
@@ -564,13 +556,11 @@ namespace heimdall
                 return target;
             }
 
-            const std::vector<UsingDecl>& UsingDecls() const noexcept
-            {
-                return m_using_decls;
-            }
+            const std::vector<UsingDecl>& UsingDecls() const noexcept { return m_using_decls; }
 
-        private:
-            void AddClosure(const Path& ns, std::vector<Path>& out, std::unordered_set<std::string>& seen) const
+          private:
+            void AddClosure(const Path& ns, std::vector<Path>& out,
+                            std::unordered_set<std::string>& seen) const
             {
                 if (!seen.insert(PathKey(ns)).second)
                 {
@@ -596,19 +586,21 @@ namespace heimdall
             void BuildPaths()
             {
                 const auto& nodes = m_tree.NodesSoA();
-                m_node_path.assign(nodes.size(), Path{});
-                m_node_elements.assign(nodes.size(), Path{});
+                m_node_path.assign(nodes.size(), Path {});
+                m_node_elements.assign(nodes.size(), Path {});
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
                     const GrammarKind kind = nodes.Kind(n);
                     Path path = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path {};
-                    if (kind == GrammarKind::NamespaceDefinition || kind == GrammarKind::RecordDefinition)
+                    if (kind == GrammarKind::NamespaceDefinition ||
+                        kind == GrammarKind::RecordDefinition)
                     {
                         const ScopeName name = ParseScopeName(n);
                         m_scope_name.emplace(n, name);
                         if (!name.visible_elements.empty())
                         {
-                            path.insert(path.end(), name.visible_elements.begin(), name.visible_elements.end());
+                            path.insert(path.end(), name.visible_elements.begin(),
+                                        name.visible_elements.end());
                         }
                     }
 
@@ -622,12 +614,12 @@ namespace heimdall
                 // anonymous and inline namespaces).
                 Path visible_elements;
                 // All written elements (`a::b` -> {a, b}); last is the declared name.
-                Path written;
-                std::size_t name_token = kNone;
-                bool has_body = false;
-                bool is_enum = false;
-                bool is_scoped_enum = false;
-                bool is_inline = false;
+                Path                     written;
+                std::size_t              name_token     = kNone;
+                bool                     has_body       = false;
+                bool                     is_enum        = false;
+                bool                     is_scoped_enum = false;
+                bool                     is_inline      = false;
                 std::vector<std::string> bases;
             }
 
@@ -635,25 +627,28 @@ namespace heimdall
 
             ScopeName ParseScopeName(std::size_t node) const
             {
-                ScopeName out;
-                const auto grammar = m_tree.NodesSoA()[node];
-                const auto& tokens = m_tree.Tokens();
-                const std::size_t end = std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
-                    tokens.size());
-                const std::size_t t = grammar.GetFirstToken();
-                std::size_t body = kNone;
+                ScopeName         out;
+                const auto        grammar = m_tree.NodesSoA()[node];
+                const auto&       tokens  = m_tree.Tokens();
+                const std::size_t end =
+                    std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+                                          tokens.size());
+                const std::size_t t    = grammar.GetFirstToken();
+                std::size_t       body = kNone;
                 for (std::size_t k = t; k < end; ++k)
                 {
-                    if (!IsTrivia(tokens[k].kind) && tokens[k].kind == TokenKind::Punctuation && Text(k) == "{")
+                    if (!IsTrivia(tokens[k].kind) && tokens[k].kind == TokenKind::Punctuation &&
+                        Text(k) == "{")
                     {
                         body = k;
                         break;
                     }
                 }
 
-                out.has_body = body != kNone;
+                out.has_body            = body != kNone;
                 const std::size_t limit = body != kNone ? body : end;
-                const bool is_namespace = m_tree.NodesSoA().Kind(node) == GrammarKind::NamespaceDefinition;
+                const bool        is_namespace =
+                    m_tree.NodesSoA().Kind(node) == GrammarKind::NamespaceDefinition;
                 std::size_t k = t;
                 for (; k < limit; ++k)
                 {
@@ -664,16 +659,18 @@ namespace heimdall
 
                     const std::string_view word = Text(k);
                     if (is_namespace ? word == "namespace"
-                        : (word == "class" || word == "struct" || word == "union" || word == "enum"))
+                                     : (word == "class" || word == "struct" || word == "union" ||
+                                        word == "enum"))
                     {
                         if (word == "enum")
                         {
-                            out.is_enum = true;
+                            out.is_enum             = true;
                             const std::size_t after = NextSig(k);
-                            if (after != kNone && after < limit && (Text(after) == "class" || Text(after) == "struct"))
+                            if (after != kNone && after < limit &&
+                                (Text(after) == "class" || Text(after) == "struct"))
                             {
                                 out.is_scoped_enum = true;
-                                k = after;
+                                k                  = after;
                             }
                         }
 
@@ -716,7 +713,8 @@ namespace heimdall
                         continue;
                     }
 
-                    if (tokens[cursor].kind == TokenKind::Identifier && (text == "alignas" || text == "inline"))
+                    if (tokens[cursor].kind == TokenKind::Identifier &&
+                        (text == "alignas" || text == "inline"))
                     {
                         if (text == "alignas")
                         {
@@ -748,7 +746,8 @@ namespace heimdall
                     }
 
                     // Qualified name chain.
-                    while (cursor != kNone && cursor < limit && tokens[cursor].kind == TokenKind::Identifier)
+                    while (cursor != kNone && cursor < limit &&
+                           tokens[cursor].kind == TokenKind::Identifier)
                     {
                         const std::string_view word = Text(cursor);
                         if (word == "final" && out.written.empty() == false)
@@ -757,12 +756,13 @@ namespace heimdall
                         }
 
                         out.written.emplace_back(word);
-                        out.name_token = cursor;
+                        out.name_token        = cursor;
                         const std::size_t sep = NextSig(cursor);
                         if (sep != kNone && sep < limit && Text(sep) == "::")
                         {
                             const std::size_t next = NextSig(sep);
-                            if (next != kNone && next < limit && tokens[next].kind == TokenKind::Identifier)
+                            if (next != kNone && next < limit &&
+                                tokens[next].kind == TokenKind::Identifier)
                             {
                                 cursor = next;
                                 continue;
@@ -775,7 +775,8 @@ namespace heimdall
                     break;
                 }
 
-                if (!is_namespace && !out.is_enum && !out.written.empty() && out.name_token != kNone)
+                if (!is_namespace && !out.is_enum && !out.written.empty() &&
+                    out.name_token != kNone)
                 {
                     // Base clause: `: public A, private ns::B<int>`.
                     std::size_t colon = NextSig(out.name_token);
@@ -787,7 +788,7 @@ namespace heimdall
                     if (colon != kNone && colon < limit && Text(colon) == ":")
                     {
                         std::string last;
-                        int angle = 0;
+                        int         angle = 0;
                         for (std::size_t b = colon + 1; b < limit; ++b)
                         {
                             if (IsTrivia(tokens[b].kind))
@@ -817,8 +818,9 @@ namespace heimdall
 
                                 last.clear();
                             }
-                            else if (angle <= 0 && tokens[b].kind == TokenKind::Identifier && piece != "public" &&
-                                piece != "private" && piece != "protected" && piece != "virtual")
+                            else if (angle <= 0 && tokens[b].kind == TokenKind::Identifier &&
+                                     piece != "public" && piece != "private" &&
+                                     piece != "protected" && piece != "virtual")
                             {
                                 last = std::string(piece);
                             }
@@ -852,7 +854,8 @@ namespace heimdall
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
                     const GrammarKind kind = nodes.Kind(n);
-                    if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
+                    if (kind != GrammarKind::NamespaceDefinition &&
+                        kind != GrammarKind::RecordDefinition)
                     {
                         continue;
                     }
@@ -867,19 +870,20 @@ namespace heimdall
                     // Every prefix is a known scope (`a::b` declares `a` too).
                     for (std::size_t length = 1; length <= path.size(); ++length)
                     {
-                        m_known_scopes.insert(PathKey(Path(path.begin(),
-                            path.begin() + static_cast<std::ptrdiff_t>(length))));
+                        m_known_scopes.insert(
+                            PathKey(Path(path.begin(),
+                                         path.begin() + static_cast<std::ptrdiff_t>(length))));
                     }
 
-                    m_ranges.push_back({NodeBegin(n), NodeEnd(n), path});
+                    m_ranges.push_back({ NodeBegin(n), NodeEnd(n), path });
                     if (kind == GrammarKind::RecordDefinition && !name.written.empty())
                     {
                         m_record_scopes.insert(PathKey(path));
                         RecordInfo info;
-                        info.path = path;
+                        info.path  = path;
                         info.bases = name.bases;
                         info.begin = NodeBegin(n);
-                        info.end = NodeEnd(n);
+                        info.end   = NodeEnd(n);
                         m_records.push_back(std::move(info));
                     }
                 }
@@ -888,12 +892,12 @@ namespace heimdall
             // Boundary classification for a DeclaredName.
             struct Placement
             {
-                bool ignore = false;
-                bool local = false;
-                std::size_t boundary = kNone;
-                std::size_t container = 0;
-                bool param = false;
-                bool enumerator = false;
+                bool        ignore     = false;
+                bool        local      = false;
+                std::size_t boundary   = kNone;
+                std::size_t container  = 0;
+                bool        param      = false;
+                bool        enumerator = false;
             }
 
             ;
@@ -901,79 +905,77 @@ namespace heimdall
             Placement Place(std::size_t name_node) const
             {
                 const auto& nodes = m_tree.NodesSoA();
-                Placement placement;
+                Placement   placement;
                 std::size_t previous = name_node;
-                std::size_t current = nodes.Parent(name_node);
-                for (std::size_t depth = 0; depth < kMaxPlacementWalkDepth && current < nodes.size(); ++depth)
+                std::size_t current  = nodes.Parent(name_node);
+                for (std::size_t depth = 0;
+                     depth < kMaxPlacementWalkDepth && current < nodes.size(); ++depth)
                 {
                     const GrammarKind kind = nodes.Kind(current);
                     switch (kind)
                     {
-                    case GrammarKind::ParameterDeclaration:
-                        placement.param = true;
-                        break;
-                    case GrammarKind::Enumerator:
-                        placement.enumerator = true;
-                        break;
-                    case GrammarKind::FunctionDefinition:
-                        if (placement.param)
-                        {
-                            placement.local = true;
+                        case GrammarKind::ParameterDeclaration:
+                            placement.param = true;
+                            break;
+                        case GrammarKind::Enumerator:
+                            placement.enumerator = true;
+                            break;
+                        case GrammarKind::FunctionDefinition:
+                            if (placement.param)
+                            {
+                                placement.local    = true;
+                                placement.boundary = current;
+                                return placement;
+                            }
+
+                            break;
+                        case GrammarKind::FunctionDeclaration:
+                            if (placement.param)
+                            {
+                                placement.ignore = true;
+                                return placement;
+                            }
+
+                            break;
+                        case GrammarKind::LambdaExpression:
+                            if (placement.param)
+                            {
+                                placement.local    = true;
+                                placement.boundary = current;
+                                return placement;
+                            }
+
+                            break;
+                        case GrammarKind::CompoundStatement:
+                        case GrammarKind::IfStatement:
+                        case GrammarKind::LoopStatement:
+                        case GrammarKind::SwitchStatement:
+                        case GrammarKind::TryStatement:
+                            placement.local    = true;
                             placement.boundary = current;
                             return placement;
-                        }
-
-                        break;
-                    case GrammarKind::FunctionDeclaration:
-                        if (placement.param)
-                        {
-                            placement.ignore = true;
+                        case GrammarKind::NamespaceDefinition:
+                        case GrammarKind::RecordDefinition:
+                        case GrammarKind::TranslationUnit:
+                            placement.container = current;
                             return placement;
-                        }
-
-                        break;
-                    case GrammarKind::LambdaExpression:
-                        if (placement.param)
-                        {
-                            placement.local = true;
-                            placement.boundary = current;
-                            return placement;
-                        }
-
-                        break;
-                    case GrammarKind::CompoundStatement:
-                    case GrammarKind::IfStatement:
-                    case GrammarKind::LoopStatement:
-                    case GrammarKind::SwitchStatement:
-                    case GrammarKind::TryStatement:
-                        placement.local = true;
-                        placement.boundary = current;
-                        return placement;
-                    case GrammarKind::NamespaceDefinition:
-                    case GrammarKind::RecordDefinition:
-                    case GrammarKind::TranslationUnit:
-                        placement.container = current;
-                        return placement;
-                    default:
-                        break;
+                        default:
+                            break;
                     }
 
                     previous = current;
-                    current = nodes.Parent(current);
+                    current  = nodes.Parent(current);
                 }
 
                 (void) previous;
                 return placement;
             }
 
-            void AddDecl(Decl decl)
-            {
-                m_decls.push_back(std::move(decl));
-            }
+            void AddDecl(Decl decl) { m_decls.push_back(std::move(decl)); }
 
             void CollectDecls()
             {
-                const auto& nodes = m_tree.NodesSoA();
+                const auto& nodes  = m_tree.NodesSoA();
                 const auto& tokens = m_tree.Tokens();
                 for (std::size_t n = 1; n < nodes.size(); ++n)
                 {
@@ -991,30 +993,32 @@ namespace heimdall
                         }
 
                         Decl decl;
-                        decl.name = name.written.back();
+                        decl.name  = name.written.back();
                         decl.scope = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path {};
-                        decl.scope.insert(decl.scope.end(), name.written.begin(), name.written.end() - 1);
-                        decl.offset = tokens[name.name_token].offset;
-                        decl.length = tokens[name.name_token].length;
-                        decl.kind = CompletionKind::Namespace;
+                        decl.scope.insert(decl.scope.end(), name.written.begin(),
+                                          name.written.end() - 1);
+                        decl.offset        = tokens[name.name_token].offset;
+                        decl.length        = tokens[name.name_token].length;
+                        decl.kind          = CompletionKind::Namespace;
                         decl.is_definition = true;
                         AddDecl(std::move(decl));
                     }
                     else if (grammar.GetKind() == GrammarKind::RecordDefinition)
                     {
                         const ScopeName& name = m_scope_name.at(n);
-                        if (name.written.empty() || name.name_token == kNone ||!name.has_body)
+                        if (name.written.empty() || name.name_token == kNone || !name.has_body)
                         {
                             continue;
                         }
 
                         Decl decl;
-                        decl.name = name.written.back();
+                        decl.name  = name.written.back();
                         decl.scope = nodes.Parent(n) < n ? m_node_path[nodes.Parent(n)] : Path {};
-                        decl.scope.insert(decl.scope.end(), name.written.begin(), name.written.end() - 1);
-                        decl.offset = tokens[name.name_token].offset;
-                        decl.length = tokens[name.name_token].length;
-                        decl.kind = CompletionKind::Type;
+                        decl.scope.insert(decl.scope.end(), name.written.begin(),
+                                          name.written.end() - 1);
+                        decl.offset        = tokens[name.name_token].offset;
+                        decl.length        = tokens[name.name_token].length;
+                        decl.kind          = CompletionKind::Type;
                         decl.is_definition = true;
                         AddDecl(std::move(decl));
                     }
@@ -1032,9 +1036,9 @@ namespace heimdall
 
             void CollectDeclaredName(std::size_t n)
             {
-                const auto& nodes = m_tree.NodesSoA();
-                const auto& tokens = m_tree.Tokens();
-                const std::size_t token = nodes.FirstToken(n);
+                const auto&       nodes  = m_tree.NodesSoA();
+                const auto&       tokens = m_tree.Tokens();
+                const std::size_t token  = nodes.FirstToken(n);
                 if (token >= tokens.size() || tokens[token].kind != TokenKind::Identifier)
                 {
                     return;
@@ -1047,17 +1051,17 @@ namespace heimdall
                 }
 
                 Decl decl;
-                decl.name = std::string(Text(token));
-                decl.offset = tokens[token].offset;
-                decl.length = tokens[token].length;
+                decl.name          = std::string(Text(token));
+                decl.offset        = tokens[token].offset;
+                decl.length        = tokens[token].length;
                 decl.is_definition = true;
 
                 // Function-ness and qualifiers come from the owning Declarator.
                 const std::size_t declarator = nodes.Parent(n);
-                Path qualifiers;
+                Path              qualifiers;
                 if (declarator < nodes.size() && nodes.Kind(declarator) == GrammarKind::Declarator)
                 {
-                    bool suffix = false;
+                    bool        suffix      = false;
                     std::size_t suffix_node = kNone;
                     for (const std::size_t child : m_tree.DirectChildren(declarator))
                     {
@@ -1065,35 +1069,36 @@ namespace heimdall
                         if (kind == GrammarKind::NestedNameSpecifier)
                         {
                             const std::size_t first = nodes.FirstToken(child);
-                            if (first < tokens.size() && tokens[first].kind == TokenKind::Identifier)
+                            if (first < tokens.size() &&
+                                tokens[first].kind == TokenKind::Identifier)
                             {
                                 qualifiers.emplace_back(Text(first));
                             }
                         }
                         else if (kind == GrammarKind::FunctionSuffix && !suffix)
                         {
-                            suffix = true;
+                            suffix      = true;
                             suffix_node = child;
                         }
                     }
 
                     if (suffix && !placement.param)
                     {
-                        decl.kind = CompletionKind::Function;
+                        decl.kind               = CompletionKind::Function;
                         const std::size_t owner = nodes.Parent(declarator);
-                        decl.is_definition =
-                            owner < nodes.size() && nodes.Kind(owner) == GrammarKind::FunctionDefinition;
+                        decl.is_definition  = owner < nodes.size() &&
+                                              nodes.Kind(owner) == GrammarKind::FunctionDefinition;
                         std::uint32_t count = 0;
-                        std::size_t only_void = kNone;
+                        std::size_t   only_void = kNone;
                         for (const std::size_t param : m_tree.DirectChildren(suffix_node))
                         {
                             if (nodes.Kind(param) == GrammarKind::ParameterDeclaration)
                             {
                                 ++count;
                                 only_void = (nodes.TokenCount(param) == 1 &&
-                                    Text(nodes.FirstToken(param)) == "void")
-                                ? param
-                                : kNone;
+                                             Text(nodes.FirstToken(param)) == "void")
+                                                ? param
+                                                : kNone;
                             }
                         }
 
@@ -1109,26 +1114,27 @@ namespace heimdall
                 if (placement.local)
                 {
                     decl.local = true;
-                    decl.local_begin = placement.param ? NodeBegin(placement.boundary) : decl.offset;
+                    decl.local_begin =
+                        placement.param ? NodeBegin(placement.boundary) : decl.offset;
                     decl.local_end = NodeEnd(placement.boundary);
                     AddDecl(std::move(decl));
                     return;
                 }
 
                 const std::size_t container = placement.container;
-                Path scope = m_node_path[container];
+                Path              scope     = m_node_path[container];
                 scope.insert(scope.end(), qualifiers.begin(), qualifiers.end());
                 if (placement.enumerator)
                 {
                     // Enumerators live in the enum's scope; unscoped enums also
                     // leak them into the enclosing scope.
-                    decl.kind = CompletionKind::Variable;
-                    decl.scope = scope;
-                    const auto found = m_scope_name.find(container);
+                    decl.kind         = CompletionKind::Variable;
+                    decl.scope        = scope;
+                    const auto found  = m_scope_name.find(container);
                     const bool scoped = found != m_scope_name.end() && found->second.is_scoped_enum;
                     if (!scoped && !scope.empty())
                     {
-                        Decl outer = decl;
+                        Decl outer  = decl;
                         outer.scope = Path(scope.begin(), scope.end() - 1);
                         AddDecl(std::move(outer));
                     }
@@ -1139,12 +1145,14 @@ namespace heimdall
                 }
 
                 // Out-of-line member bodies see the class scope.
-                if (decl.kind == CompletionKind::Function && !qualifiers.empty() && decl.is_definition)
+                if (decl.kind == CompletionKind::Function && !qualifiers.empty() &&
+                    decl.is_definition)
                 {
                     const std::size_t owner = nodes.Parent(nodes.Parent(n));
-                    if (owner < nodes.size() && nodes.Kind(owner) == GrammarKind::FunctionDefinition)
+                    if (owner < nodes.size() &&
+                        nodes.Kind(owner) == GrammarKind::FunctionDefinition)
                     {
-                        m_ranges.push_back({NodeBegin(owner), NodeEnd(owner), decl.scope});
+                        m_ranges.push_back({ NodeBegin(owner), NodeEnd(owner), decl.scope });
                     }
                 }
 
@@ -1153,10 +1161,10 @@ namespace heimdall
 
             void CollectUsing(std::size_t n)
             {
-                const auto& nodes = m_tree.NodesSoA();
-                const auto& tokens = m_tree.Tokens();
-                const std::size_t end = std::min<std::size_t>(nodes.FirstToken(n) + nodes.TokenCount(n),
-                    tokens.size());
+                const auto&       nodes  = m_tree.NodesSoA();
+                const auto&       tokens = m_tree.Tokens();
+                const std::size_t end =
+                    std::min<std::size_t>(nodes.FirstToken(n) + nodes.TokenCount(n), tokens.size());
                 std::size_t first = nodes.FirstToken(n);
                 while (first < end && IsTrivia(tokens[first].kind))
                 {
@@ -1174,14 +1182,14 @@ namespace heimdall
                     return;
                 }
 
-                const std::size_t parent = nodes.Parent(n);
-                const Path scope = m_node_path[n];
+                const std::size_t parent       = nodes.Parent(n);
+                const Path        scope        = m_node_path[n];
                 const std::size_t active_begin = tokens[first].offset;
-                const std::size_t active_end = parent < nodes.size() ? NodeEnd(parent) : m_tree.Source().size();
+                const std::size_t active_end =
+                    parent < nodes.size() ? NodeEnd(parent) : m_tree.Source().size();
 
-                auto read_path =[&](std::size_t at)->std::pair<Path, std::size_t>
-                {
-                    Path path;
+                auto read_path = [&](std::size_t at) -> std::pair<Path, std::size_t> {
+                    Path        path;
                     std::size_t last = at;
                     while (at != kNone && at < end)
                     {
@@ -1197,7 +1205,7 @@ namespace heimdall
                         }
 
                         path.emplace_back(Text(at));
-                        last = at;
+                        last                  = at;
                         const std::size_t sep = NextSig(at);
                         if (sep != kNone && sep < end && Text(sep) == "::")
                         {
@@ -1208,21 +1216,22 @@ namespace heimdall
                         break;
                     }
 
-                    return {path, last};
+                    return { path, last };
                 };
 
                 if (Text(cursor) == "namespace")
                 {
-                    const auto[path, last] = read_path(NextSig(cursor));
+                    const auto [path, last] = read_path(NextSig(cursor));
                     if (!path.empty())
                     {
                         UsingDirective directive;
-                        directive.scope = scope;
+                        directive.scope  = scope;
                         directive.target = path;
                         directive.offset = tokens[NextSig(cursor)].offset;
-                        directive.length = tokens[last].offset + tokens[last].length - directive.offset;
+                        directive.length =
+                            tokens[last].offset + tokens[last].length - directive.offset;
                         directive.active_begin = active_begin;
-                        directive.active_end = active_end;
+                        directive.active_end   = active_end;
                         m_directives.push_back(std::move(directive));
                     }
 
@@ -1234,7 +1243,8 @@ namespace heimdall
                     cursor = NextSig(cursor);
                 }
 
-                if (cursor == kNone || cursor >= end || tokens[cursor].kind != TokenKind::Identifier)
+                if (cursor == kNone || cursor >= end ||
+                    tokens[cursor].kind != TokenKind::Identifier)
                 {
                     return;
                 }
@@ -1244,25 +1254,25 @@ namespace heimdall
                 {
                     // Alias declaration: a type name in this scope.
                     Decl decl;
-                    decl.name = std::string(Text(cursor));
-                    decl.scope = scope;
-                    decl.offset = tokens[cursor].offset;
-                    decl.length = tokens[cursor].length;
-                    decl.kind = CompletionKind::Type;
+                    decl.name          = std::string(Text(cursor));
+                    decl.scope         = scope;
+                    decl.offset        = tokens[cursor].offset;
+                    decl.length        = tokens[cursor].length;
+                    decl.kind          = CompletionKind::Type;
                     decl.is_definition = true;
                     AddDecl(std::move(decl));
                     return;
                 }
 
-                const auto[path, last] = read_path(cursor);
+                const auto [path, last] = read_path(cursor);
                 if (path.size() >= kMinQualifiedParts)
                 {
                     UsingDecl using_decl;
-                    using_decl.scope = scope;
-                    using_decl.target = path;
-                    using_decl.offset = tokens[last].offset;
+                    using_decl.scope        = scope;
+                    using_decl.target       = path;
+                    using_decl.offset       = tokens[last].offset;
                     using_decl.active_begin = active_begin;
-                    using_decl.active_end = active_end;
+                    using_decl.active_end   = active_end;
                     m_using_decls.push_back(std::move(using_decl));
                 }
             }
@@ -1294,7 +1304,7 @@ namespace heimdall
                             continue;
                         }
 
-                        m_external_by_name[scope.members[m].label].push_back({s, m});
+                        m_external_by_name[scope.members[m].label].push_back({ s, m });
                     }
                 }
 
@@ -1303,8 +1313,9 @@ namespace heimdall
                 {
                     for (std::size_t length = 1; length <= scope.path.size(); ++length)
                     {
-                        m_known_scopes.insert(
-                            PathKey(Path(scope.path.begin(), scope.path.begin() + static_cast<std::ptrdiff_t>(length))));
+                        m_known_scopes.insert(PathKey(
+                            Path(scope.path.begin(),
+                                 scope.path.begin() + static_cast<std::ptrdiff_t>(length))));
                     }
 
                     if (scope.kind == CompletionKind::Type && !scope.path.empty())
@@ -1314,20 +1325,20 @@ namespace heimdall
                 }
             }
 
-            const ParseTree& m_tree;
-            const ScopeIndex* m_external;
-            std::vector<Path> m_node_path;
-            std::vector<Path> m_node_elements;
-            std::unordered_map<std::size_t, ScopeName> m_scope_name;
-            std::vector<Decl> m_decls;
+            const ParseTree&                                          m_tree;
+            const ScopeIndex*                                         m_external;
+            std::vector<Path>                                         m_node_path;
+            std::vector<Path>                                         m_node_elements;
+            std::unordered_map<std::size_t, ScopeName>                m_scope_name;
+            std::vector<Decl>                                         m_decls;
             std::unordered_map<std::string, std::vector<std::size_t>> m_by_name;
-            std::vector<RecordInfo> m_records;
-            std::vector<ScopeRange> m_ranges;
-            std::unordered_set<std::string> m_known_scopes;
-            std::unordered_set<std::string> m_record_scopes;
-            std::vector<UsingDirective> m_directives;
-            std::vector<UsingDecl> m_using_decls;
-            std::vector<std::string> m_external_keys;
+            std::vector<RecordInfo>                                   m_records;
+            std::vector<ScopeRange>                                   m_ranges;
+            std::unordered_set<std::string>                           m_known_scopes;
+            std::unordered_set<std::string>                           m_record_scopes;
+            std::vector<UsingDirective>                               m_directives;
+            std::vector<UsingDecl>                                    m_using_decls;
+            std::vector<std::string>                                  m_external_keys;
             std::unordered_map<std::string, std::vector<ExternalRef>> m_external_by_name;
         };
 
@@ -1336,7 +1347,7 @@ namespace heimdall
         struct LookupResult
         {
             std::vector<Candidate> found;
-            bool ambiguous = false;
+            bool                   ambiguous = false;
         };
 
         bool IsFunctionKind(CompletionKind kind)
@@ -1351,8 +1362,8 @@ namespace heimdall
             std::unordered_map<std::string, bool> groups; // key -> all functions
             for (const Candidate& candidate : found)
             {
-                const std::string key = Joined(candidate.scope, candidate.name);
-                const auto[it, inserted] = groups.emplace(key, IsFunctionKind(candidate.kind));
+                const std::string key     = Joined(candidate.scope, candidate.name);
+                const auto [it, inserted] = groups.emplace(key, IsFunctionKind(candidate.kind));
                 if (!inserted)
                 {
                     it->second = it->second && IsFunctionKind(candidate.kind);
@@ -1375,13 +1386,12 @@ namespace heimdall
             return false;
         }
 
-        void CollectLevel(
-            const Model& model,
-            const Path& level,
-            std::string_view name,
-            std::size_t pos,
-            std::vector<Candidate>& out,
-            int base_depth)
+        void CollectLevel(const Model&            model,
+                          const Path&             level,
+                          std::string_view        name,
+                          std::size_t             pos,
+                          std::vector<Candidate>& out,
+                          int                     base_depth)
         {
             model.Members(level, name, out);
             model.UsingDeclared(level, name, pos, out);
@@ -1390,7 +1400,8 @@ namespace heimdall
                 model.Members(nominated, name, out);
             }
 
-            if (out.empty() && base_depth < kMaxBaseDepth && !level.empty() && model.IsRecordScope(level))
+            if (out.empty() && base_depth < kMaxBaseDepth && !level.empty() &&
+                model.IsRecordScope(level))
             {
                 for (const Path& base : model.BaseScopes(level))
                 {
@@ -1407,14 +1418,14 @@ namespace heimdall
         {
             LookupResult result;
             // Block locals: innermost range wins, latest declaration in it.
-            const Decl* best = nullptr;
+            const Decl* best       = nullptr;
             std::size_t best_index = kNone;
-            const auto& decls = model.Decls();
+            const auto& decls      = model.Decls();
             for (std::size_t i = 0; i < decls.size(); ++i)
             {
                 const Decl& decl = decls[i];
-                if (!decl.local || decl.name != name ||!(decl.local_begin <= pos && pos < decl.local_end) ||
-                    decl.offset > pos)
+                if (!decl.local || decl.name != name ||
+                    !(decl.local_begin <= pos && pos < decl.local_end) || decl.offset > pos)
                 {
                     continue;
                 }
@@ -1423,7 +1434,7 @@ namespace heimdall
                 if (best == nullptr || span < best->local_end - best->local_begin ||
                     (span == best->local_end - best->local_begin && decl.offset > best->offset))
                 {
-                    best = &decl;
+                    best       = &decl;
                     best_index = i;
                 }
             }
@@ -1442,7 +1453,7 @@ namespace heimdall
                 if (!found.empty())
                 {
                     result.ambiguous = Ambiguous(found);
-                    result.found = std::move(found);
+                    result.found     = std::move(found);
                     return result;
                 }
 
@@ -1461,14 +1472,14 @@ namespace heimdall
         struct Qualification
         {
             Path elements;
-            bool absolute = false;
+            bool absolute      = false;
             bool member_access = false;
         };
 
         Qualification QualificationOf(const Model& model, std::size_t token)
         {
             Qualification out;
-            std::size_t current = token;
+            std::size_t   current = token;
             while (true)
             {
                 const std::size_t before = model.PrevSig(current);
@@ -1529,7 +1540,8 @@ namespace heimdall
                     }
                 }
 
-                if (qualifier == kNone || model.Tree().Tokens()[qualifier].kind != TokenKind::Identifier)
+                if (qualifier == kNone ||
+                    model.Tree().Tokens()[qualifier].kind != TokenKind::Identifier)
                 {
                     out.absolute = true;
                     break;
@@ -1544,15 +1556,14 @@ namespace heimdall
 
         // First qualifier element resolved through enclosing scopes and active
         // directives; remaining elements must exist below it.
-        std::optional<Path> ResolveQualifier(
-            const Model& model,
-            const Qualification& qualification,
-            std::size_t pos,
-            const Path& elements)
+        std::optional<Path> ResolveQualifier(const Model&         model,
+                                             const Qualification& qualification,
+                                             std::size_t          pos,
+                                             const Path&          elements)
         {
             if (elements.empty())
             {
-                return Path{};
+                return Path {};
             }
 
             if (qualification.absolute)
@@ -1595,7 +1606,7 @@ namespace heimdall
         {
             ambiguous = false;
             std::vector<Candidate> out;
-            const std::size_t token = model.IdentifierAt(offset);
+            const std::size_t      token = model.IdentifierAt(offset);
             if (token == kNone)
             {
                 return out;
@@ -1622,8 +1633,8 @@ namespace heimdall
                 return out;
             }
 
-            const std::size_t next = model.NextSig(token);
-            const bool is_qualifier = next != kNone && model.Text(next) == "::";
+            const std::size_t next         = model.NextSig(token);
+            const bool        is_qualifier = next != kNone && model.Text(next) == "::";
             if (is_qualifier)
             {
                 // A namespace/type used as qualifier: resolve the path ending here.
@@ -1633,9 +1644,9 @@ namespace heimdall
                 {
                     Path scope(path->begin(), path->end() - 1);
                     model.Members(scope, name, out);
-                    std::erase_if(out,[](const Candidate& candidate)
-                        {
-                            return candidate.kind != CompletionKind::Namespace && candidate.kind != CompletionKind::Type;
+                    std::erase_if(out, [](const Candidate& candidate) {
+                        return candidate.kind != CompletionKind::Namespace &&
+                               candidate.kind != CompletionKind::Type;
                     });
                 }
 
@@ -1644,7 +1655,8 @@ namespace heimdall
 
             if (!qualification.elements.empty() || qualification.absolute)
             {
-                if (const auto scope = ResolveQualifier(model, qualification, pos, qualification.elements))
+                if (const auto scope =
+                        ResolveQualifier(model, qualification, pos, qualification.elements))
                 {
                     model.Members(*scope, name, out);
                     if (out.empty() && model.IsRecordScope(*scope))
@@ -1664,7 +1676,7 @@ namespace heimdall
             }
 
             LookupResult result = LookupUnqualified(model, name, pos);
-            ambiguous = result.ambiguous;
+            ambiguous           = result.ambiguous;
             return std::move(result.found);
         }
 
@@ -1673,10 +1685,10 @@ namespace heimdall
         {
             (void) model;
             std::unordered_map<std::string, bool> has_definition;
-            auto key_of =[](const Candidate& candidate)
-            {
+            auto                                  key_of = [](const Candidate& candidate) {
                 return Joined(candidate.scope, candidate.name) + '#' +
-                    (IsFunctionKind(candidate.kind) ? std::to_string(candidate.param_count) : std::string());
+                       (IsFunctionKind(candidate.kind) ? std::to_string(candidate.param_count)
+                                                       : std::string());
             };
             for (const Candidate& candidate : found)
             {
@@ -1713,7 +1725,8 @@ namespace heimdall
             out.push_back(std::move(target));
         }
 
-        std::vector<NavTarget> ToTargets(const Model& model, const std::vector<Candidate>& candidates)
+        std::vector<NavTarget> ToTargets(const Model&                  model,
+                                         const std::vector<Candidate>& candidates)
         {
             std::vector<NavTarget> out;
             for (const Candidate& candidate : candidates)
@@ -1730,10 +1743,10 @@ namespace heimdall
         return Model(tree, nullptr).Directives();
     }
 
-    std::vector<AmbiguousReference> Navigation::FindAmbiguities(const ParseTree& tree,
-        const ScopeIndex* external)
+    std::vector<AmbiguousReference> Navigation::FindAmbiguities(const ParseTree&  tree,
+                                                                const ScopeIndex* external)
     {
-        const Model model(tree, external);
+        const Model                     model(tree, external);
         std::vector<AmbiguousReference> out;
         if (model.Directives().empty() && model.UsingDecls().empty())
         {
@@ -1762,7 +1775,7 @@ namespace heimdall
         }
 
         std::unordered_map<std::string, bool> maybe_cache;
-        const auto& tokens = tree.Tokens();
+        const auto&                           tokens = tree.Tokens();
         for (std::size_t t = 0; t < tokens.size(); ++t)
         {
             if (tokens[t].kind != TokenKind::Identifier)
@@ -1792,7 +1805,7 @@ namespace heimdall
             }
 
             const std::string name(model.Text(t));
-            auto cached = maybe_cache.find(name);
+            auto              cached = maybe_cache.find(name);
             if (cached == maybe_cache.end())
             {
                 cached = maybe_cache.emplace(name, model.MaybeAmbiguous(name)).first;
@@ -1830,7 +1843,7 @@ namespace heimdall
             AmbiguousReference reference;
             reference.offset = offset;
             reference.length = tokens[t].length;
-            reference.name = name;
+            reference.name   = name;
             std::unordered_set<std::string> seen;
             for (const Candidate& candidate : result.found)
             {
@@ -1849,22 +1862,23 @@ namespace heimdall
     }
 
     std::vector<NavTarget> Navigation::Definition(const ParseTree& tree, std::size_t offset,
-        const ScopeIndex* external)
+                                                  const ScopeIndex* external)
     {
-        const Model model(tree, external);
-        bool ambiguous = false;
-        std::vector<Candidate> found = ResolveAt(model, offset, ambiguous);
-        found = PreferDefinitions(model, std::move(found));
+        const Model            model(tree, external);
+        bool                   ambiguous = false;
+        std::vector<Candidate> found     = ResolveAt(model, offset, ambiguous);
+        found                            = PreferDefinitions(model, std::move(found));
         // A declaration site with a definition elsewhere in the buffer jumps to it;
         // a definition site (`void C::m() {}`) jumps back to its declaration.
         std::vector<Candidate> refined;
-        bool jumped_back = false;
-        const std::size_t cursor_token = model.IdentifierAt(offset);
-        const std::size_t cursor_offset =
+        bool                   jumped_back  = false;
+        const std::size_t      cursor_token = model.IdentifierAt(offset);
+        const std::size_t      cursor_offset =
             cursor_token == kNone ? kNone : model.Tree().Tokens()[cursor_token].offset;
         for (const Candidate& candidate : found)
         {
-            if (candidate.decl != kNone && candidate.is_definition && candidate.kind == CompletionKind::Function &&
+            if (candidate.decl != kNone && candidate.is_definition &&
+                candidate.kind == CompletionKind::Function &&
                 model.Decls()[candidate.decl].offset == cursor_offset)
             {
                 std::vector<Candidate> same;
@@ -1887,7 +1901,8 @@ namespace heimdall
                 }
             }
 
-            if (candidate.decl != kNone && !candidate.is_definition && candidate.kind == CompletionKind::Function)
+            if (candidate.decl != kNone && !candidate.is_definition &&
+                candidate.kind == CompletionKind::Function)
             {
                 std::vector<Candidate> same;
                 model.Members(candidate.scope, candidate.name, same);
@@ -1921,12 +1936,12 @@ namespace heimdall
     }
 
     std::vector<NavTarget> Navigation::Implementation(const ParseTree& tree, std::size_t offset,
-        const ScopeIndex* external)
+                                                      const ScopeIndex* external)
     {
-        const Model model(tree, external);
-        bool ambiguous = false;
-        const std::vector<Candidate> found = ResolveAt(model, offset, ambiguous);
-        std::vector<NavTarget> out;
+        const Model                  model(tree, external);
+        bool                         ambiguous = false;
+        const std::vector<Candidate> found     = ResolveAt(model, offset, ambiguous);
+        std::vector<NavTarget>       out;
         for (const Candidate& candidate : found)
         {
             bool added = false;
@@ -1941,7 +1956,8 @@ namespace heimdall
                         model.Members(derived->path, candidate.name, members);
                         for (const Candidate& member : members)
                         {
-                            if (member.kind == CompletionKind::Function && member.param_count == candidate.param_count)
+                            if (member.kind == CompletionKind::Function &&
+                                member.param_count == candidate.param_count)
                             {
                                 AppendUnique(out, model.ToTarget(member));
                                 added = true;
@@ -1972,7 +1988,7 @@ namespace heimdall
                 for (const RecordInfo* derived : model.Derived(candidate.name))
                 {
                     std::vector<Candidate> self;
-                    Path scope(derived->path.begin(), derived->path.end() - 1);
+                    Path                   scope(derived->path.begin(), derived->path.end() - 1);
                     model.Members(scope, derived->path.back(), self);
                     for (const Candidate& item : self)
                     {
@@ -1995,13 +2011,13 @@ namespace heimdall
     }
 
     std::vector<NavTarget> Navigation::FindDefinitions(
-        const ParseTree& tree,
+        const ParseTree&                tree,
         const std::vector<std::string>& scope,
-        std::string_view name,
-        bool function,
-        std::uint32_t param_count)
+        std::string_view                name,
+        bool                            function,
+        std::uint32_t                   param_count)
     {
-        const Model model(tree, nullptr);
+        const Model            model(tree, nullptr);
         std::vector<Candidate> members;
         model.Members(scope, name, members);
         std::vector<NavTarget> out;
@@ -2012,8 +2028,9 @@ namespace heimdall
                 continue;
             }
 
-            if (function ? (candidate.kind == CompletionKind::Function && candidate.param_count == param_count)
-                : candidate.kind == CompletionKind::Type)
+            if (function ? (candidate.kind == CompletionKind::Function &&
+                            candidate.param_count == param_count)
+                         : candidate.kind == CompletionKind::Type)
             {
                 out.push_back(model.ToTarget(candidate));
             }
@@ -2022,13 +2039,12 @@ namespace heimdall
         return out;
     }
 
-    std::vector<NavTarget> Navigation::FindOverriders(
-        const ParseTree& tree,
-        std::string_view base,
-        std::string_view name,
-        std::uint32_t param_count)
+    std::vector<NavTarget> Navigation::FindOverriders(const ParseTree& tree,
+                                                      std::string_view base,
+                                                      std::string_view name,
+                                                      std::uint32_t    param_count)
     {
-        const Model model(tree, nullptr);
+        const Model            model(tree, nullptr);
         std::vector<NavTarget> out;
         for (const RecordInfo* derived : model.Derived(base))
         {

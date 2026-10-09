@@ -14,16 +14,25 @@
 namespace heimdall
 {
     inline constexpr std::uint32_t PluginApiVersion = 1;
-    inline constexpr std::uint32_t InvalidHandle = ~0u;
+    inline constexpr std::uint32_t InvalidHandle    = ~0u;
 
     enum class PluginNodeKind : std::uint8_t
     {
-        Other, Declaration, Function, Record, Namespace, Call, Identifier, Literal, Return
+        Other,
+        Declaration,
+        Function,
+        Record,
+        Namespace,
+        Call,
+        Identifier,
+        Literal,
+        Return
     };
 
     enum class PluginSeverity : std::uint8_t
     {
-        Warning, Error
+        Warning,
+        Error
     };
 
     struct PluginRange
@@ -40,7 +49,7 @@ namespace heimdall
 
     class PluginContext
     {
-    public:
+      public:
         struct Impl;
 
         explicit PluginContext(std::shared_ptr<const Impl> impl);
@@ -67,26 +76,26 @@ namespace heimdall
 
         std::vector<PluginRange> References(SymbolId symbol) const;
 
-    private:
+      private:
         std::shared_ptr<const Impl> m_impl;
     };
 
     struct PluginRule
     {
-        std::string code;
-        std::string summary;
-        PluginSeverity severity = PluginSeverity::Warning;
-        bool enabled = true;
+        std::string                 code;
+        std::string                 summary;
+        PluginSeverity              severity = PluginSeverity::Warning;
+        bool                        enabled  = true;
         std::vector<PluginNodeKind> interests;
         // Output is buffered and validated by the host. No internal Diagnostic,
         // ParseTree, SemanticModel or table reference crosses this boundary.
-        std::function<void(const PluginContext&, NodeId, std::vector<PluginDiagnostic>&) > on_node;
+        std::function<void(const PluginContext&, NodeId, std::vector<PluginDiagnostic>&)> on_node;
     };
 
     struct Plugin
     {
-        std::string name;
-        std::uint32_t required_api = PluginApiVersion;
+        std::string             name;
+        std::uint32_t           required_api = PluginApiVersion;
         std::vector<PluginRule> rules;
     };
-}
+} // namespace heimdall

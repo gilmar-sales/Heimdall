@@ -7,8 +7,8 @@ namespace heimdall
     std::string SourceOverlay::Key(const std::filesystem::path& path)
     {
         std::error_code error;
-        const auto absolute = std::filesystem::absolute(path, error);
-        auto key = (error ? path : absolute).lexically_normal().generic_string();
+        const auto      absolute = std::filesystem::absolute(path, error);
+        auto            key      = (error ? path : absolute).lexically_normal().generic_string();
 #ifdef _WIN32
         for (auto& c : key)
         {
@@ -21,8 +21,8 @@ namespace heimdall
         return key;
     }
 
-    void SourceOverlay::Add(const std::filesystem::path& path,
-        std::shared_ptr<const std::string> source)
+    void SourceOverlay::Add(
+        const std::filesystem::path& path, std::shared_ptr<const std::string> source)
     {
         if (source)
         {
@@ -68,4 +68,4 @@ namespace heimdall
 
         return selected.Fingerprint();
     }
-}
+} // namespace heimdall

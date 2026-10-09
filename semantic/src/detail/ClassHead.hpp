@@ -14,7 +14,7 @@ namespace heimdall::detail
     inline bool ClassHeadIsFinal(const ParseTree& tree, std::uint32_t name_token)
     {
         const auto& tokens = tree.Tokens();
-        for (std::size_t i = std::size_t{name_token} + 1; i < tokens.size(); ++i)
+        for (std::size_t i = std::size_t { name_token } + 1; i < tokens.size(); ++i)
         {
             const Token& token = tokens[i];
             if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
@@ -28,7 +28,8 @@ namespace heimdall::detail
                 return false;
             }
 
-            if (token.tok == Tok::KwFinal ||(token.kind == TokenKind::Identifier && tree.Text(token) == "final"))
+            if (token.tok == Tok::KwFinal ||
+                (token.kind == TokenKind::Identifier && tree.Text(token) == "final"))
             {
                 return true;
             }
@@ -41,14 +42,15 @@ namespace heimdall::detail
     // function. Indexed by SymbolId; non-classes are false.
     inline std::vector<std::uint8_t> ClassesWithVirtualMembers(const SemanticModel& model)
     {
-        const auto& symbols = model.Symbols();
-        const auto& scopes = model.Scopes();
+        const auto&               symbols = model.Symbols();
+        const auto&               scopes  = model.Scopes();
         std::vector<std::uint8_t> result(symbols.Size(), 0);
-        constexpr std::uint32_t virtualish = SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final |
-            SymbolFlag::Pure;
+        constexpr std::uint32_t   virtualish =
+            SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final | SymbolFlag::Pure;
         for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
         {
-            if (symbols.kind[symbol] != SymbolKind::Function ||(symbols.flags[symbol] & virtualish) == 0)
+            if (symbols.kind[symbol] != SymbolKind::Function ||
+                (symbols.flags[symbol] & virtualish) == 0)
             {
                 continue;
             }

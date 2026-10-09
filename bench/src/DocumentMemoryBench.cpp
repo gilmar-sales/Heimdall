@@ -22,12 +22,12 @@
 #include <vector>
 
 #if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <psapi.h>
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <psapi.h>
 #endif
 
 namespace
@@ -36,17 +36,17 @@ namespace
     double WorkingSetMb()
     {
 #if defined(_WIN32)
-        PROCESS_MEMORY_COUNTERS counters{};
+        PROCESS_MEMORY_COUNTERS counters {};
         counters.cb = sizeof(counters);
         if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)))
         {
-            return static_cast<double>(counters.WorkingSetSize) /(1024.0 * 1024.0);
+            return static_cast<double>(counters.WorkingSetSize) / (1024.0 * 1024.0);
         }
 #else
-        if (std::FILE * status = std::fopen("/proc/self/status", "r"))
+        if (std::FILE* status = std::fopen("/proc/self/status", "r"))
         {
-            char line[256];
-            double kb = 0;
+            char   line[256];
+            double kb  = 0;
             double rss = 0;
             while (std::fgets(line, sizeof(line), status))
             {
@@ -66,10 +66,11 @@ namespace
     std::size_t TreeBytes(const heimdall::ParseTree& tree)
     {
         std::size_t bytes = tree.Tokens().capacity() * sizeof(heimdall::Token);
-        const auto& soa = tree.NodesSoA();
+        const auto& soa   = tree.NodesSoA();
         bytes += soa.kind.capacity() * sizeof(std::uint8_t);
-        bytes +=(soa.first_token.capacity() + soa.token_count.capacity() + soa.parent.capacity() +
-            soa.subtree_end.capacity()) * sizeof(std::uint32_t);
+        bytes += (soa.first_token.capacity() + soa.token_count.capacity() + soa.parent.capacity() +
+                  soa.subtree_end.capacity()) *
+                 sizeof(std::uint32_t);
         bytes += tree.Directives().capacity() * sizeof(heimdall::PreprocessorDirective);
         bytes += tree.Diagnostics().capacity() * sizeof(heimdall::GrammarDiagnostic);
         for (const auto& diagnostic : tree.Diagnostics())
@@ -82,10 +83,10 @@ namespace
 
 } // namespace
 
-int main(int argc, char**argv)
+int main(int argc, char** argv)
 {
-    std::string stb_dir = HEIMDALL_STB_DIR;
-    std::vector<std::size_t> sizes = {1000, 5000, 20000};
+    std::string              stb_dir = HEIMDALL_STB_DIR;
+    std::vector<std::size_t> sizes   = { 1000, 5000, 20000 };
     for (int i = 1; i + 1 < argc; i += 2)
     {
         const std::string_view flag = argv[i];
@@ -96,7 +97,7 @@ int main(int argc, char**argv)
         else if (flag == "--lines")
         {
             sizes.clear();
-            for (const char * p = argv[i + 1]; *p;)
+            for (const char* p = argv[i + 1]; *p;)
             {
                 char* end = nullptr;
                 sizes.push_back(std::strtoull(p, &end, 10));
@@ -114,9 +115,8 @@ int main(int argc, char**argv)
         }
     }
 
-    std::printf("%8s %9s %9s %9s %10s %10s %10s %11s\n", "lines", "KiB", "tokens", "nodes", "tree MiB",
-        "B/line",
-        "B/token", "RSS +MiB");
+    std::printf("%8s %9s %9s %9s %10s %10s %10s %11s\n", "lines", "KiB", "tokens", "nodes",
+                "tree MiB", "B/line", "B/token", "RSS +MiB");
     for (const std::size_t target : sizes)
     {
         auto document = heimdall::bench::BuildDocument(stb_dir, target);
@@ -126,16 +126,16 @@ int main(int argc, char**argv)
             return 1;
         }
 
-        const std::size_t lines = heimdall::bench::CountLines(*document);
-        const double before = WorkingSetMb();
-        const auto tree = heimdall::ParseTree::Parse(*document);
-        const double growth = WorkingSetMb() - before;
-        const std::size_t bytes = TreeBytes(tree);
+        const std::size_t lines  = heimdall::bench::CountLines(*document);
+        const double      before = WorkingSetMb();
+        const auto        tree   = heimdall::ParseTree::Parse(*document);
+        const double      growth = WorkingSetMb() - before;
+        const std::size_t bytes  = TreeBytes(tree);
         std::printf("%8zu %9.1f %9zu %9zu %10.2f %10.0f %10.1f %11.1f\n", lines,
-            static_cast<double>(document->size()) / 1024.0, tree.Tokens().size(), tree.NodesSoA().size(),
-            static_cast<double>(bytes) /(1024.0 * 1024.0),
-            static_cast<double>(bytes) / static_cast<double>(lines),
-            static_cast<double>(bytes) / static_cast<double>(tree.Tokens().size()), growth);
+                    static_cast<double>(document->size()) / 1024.0, tree.Tokens().size(),
+                    tree.NodesSoA().size(), static_cast<double>(bytes) / (1024.0 * 1024.0),
+                    static_cast<double>(bytes) / static_cast<double>(lines),
+                    static_cast<double>(bytes) / static_cast<double>(tree.Tokens().size()), growth);
     }
 
     return 0;

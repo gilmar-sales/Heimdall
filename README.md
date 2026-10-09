@@ -69,6 +69,9 @@ LSP rename yet; see [the index API and supported subset](docs/project-symbol-ind
 ./build/src/heimdall init ./my-project --force
 ```
 
+See [formatter style options](docs/formatter-style.md) for the Freyr `.clang-format` rule
+inventory, Heimdall project settings, and current compatibility status.
+
 `init [directory] [--force]` creates `<directory>/.heimdall.json` (default:
 current directory) with `root`, `rules`, `suppressions` and `include-order`
 defaults. It refuses to overwrite an existing file unless `--force` (`-f`) is

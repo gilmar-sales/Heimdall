@@ -16,7 +16,8 @@ namespace
 
     std::filesystem::path MakeInitDir(std::string_view suffix)
     {
-        const auto path = std::filesystem::temp_directory_path() /("heimdall_init_" + std::string(suffix));
+        const auto path =
+            std::filesystem::temp_directory_path() / ("heimdall_init_" + std::string(suffix));
         std::filesystem::remove_all(path);
         std::filesystem::create_directories(path);
         return path;
@@ -38,8 +39,8 @@ namespace
 
 TEST(CliInitSpec, ParsesBareInit)
 {
-    heimdall::cli::Options options{};
-    EXPECT_TRUE(ParseArgs({"init"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_TRUE(ParseArgs({ "init" }, options));
     EXPECT_EQ(options.command, heimdall::cli::Command::Init);
     EXPECT_FALSE(options.force);
     EXPECT_TRUE(options.inputs.empty());
@@ -47,8 +48,8 @@ TEST(CliInitSpec, ParsesBareInit)
 
 TEST(CliInitSpec, ParsesInitWithDirectoryAndForce)
 {
-    heimdall::cli::Options options{};
-    EXPECT_TRUE(ParseArgs({"init", "myproj", "--force"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_TRUE(ParseArgs({ "init", "myproj", "--force" }, options));
     EXPECT_EQ(options.command, heimdall::cli::Command::Init);
     EXPECT_TRUE(options.force);
     ASSERT_EQ(options.inputs.size(), 1);
@@ -57,40 +58,40 @@ TEST(CliInitSpec, ParsesInitWithDirectoryAndForce)
 
 TEST(CliInitSpec, ParsesInitWithShortForce)
 {
-    heimdall::cli::Options options{};
-    EXPECT_TRUE(ParseArgs({"init", "-f"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_TRUE(ParseArgs({ "init", "-f" }, options));
     EXPECT_TRUE(options.force);
 }
 
 TEST(CliInitSpec, RejectsSecondDirectory)
 {
-    heimdall::cli::Options options{};
-    EXPECT_FALSE(ParseArgs({"init", "a", "b"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_FALSE(ParseArgs({ "init", "a", "b" }, options));
 }
 
 TEST(CliInitSpec, RejectsUnknownInitOption)
 {
-    heimdall::cli::Options options{};
-    EXPECT_FALSE(ParseArgs({"init", "--json"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_FALSE(ParseArgs({ "init", "--json" }, options));
 }
 
 TEST(CliInitSpec, RejectsForceOnOtherCommands)
 {
-    heimdall::cli::Options options{};
-    EXPECT_FALSE(ParseArgs({"lint", "--force", "src"}, options));
+    heimdall::cli::Options options {};
+    EXPECT_FALSE(ParseArgs({ "lint", "--force", "src" }, options));
 }
 
 TEST(CliInitSpec, DefaultTemplateLoadsAsValidConfig)
 {
     const auto directory = MakeInitDir("template");
-    const auto path = directory / heimdall::RuleConfigFileName;
+    const auto path      = directory / heimdall::RuleConfigFileName;
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << heimdall::cli::DefaultConfigText();
     }
 
     auto loaded = heimdall::LoadRuleConfiguration(path);
-    ASSERT_TRUE(loaded) <<(loaded ? "" : loaded.error());
+    ASSERT_TRUE(loaded) << (loaded ? "" : loaded.error());
     EXPECT_TRUE(loaded->root);
     EXPECT_FALSE(loaded->options.overrides.empty());
     std::filesystem::remove_all(directory);
@@ -99,13 +100,13 @@ TEST(CliInitSpec, DefaultTemplateLoadsAsValidConfig)
 TEST(CliInitSpec, RunInitCreatesFileAndRespectsForce)
 {
     const auto directory = MakeInitDir("run");
-    const auto target = directory / "proj";
+    const auto target    = directory / "proj";
 
-    heimdall::cli::Options options{};
+    heimdall::cli::Options options {};
     options.command = heimdall::cli::Command::Init;
     options.inputs.push_back(target);
 
-    std::string error;
+    std::string           error;
     std::filesystem::path created;
     EXPECT_TRUE(heimdall::cli::RunInit(options, error, created)) << error;
     EXPECT_EQ(created, target / heimdall::RuleConfigFileName);
@@ -128,7 +129,8 @@ TEST(CliInitSpec, RunInitCreatesFileAndRespectsForce)
 
 TEST(CliInitSpec, SchemaFileExistsAndMentionsRules)
 {
-    const auto schema = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "schemas" / "heimdall.schema.json";
+    const auto schema =
+        std::filesystem::path(HEIMDALL_SOURCE_DIR) / "schemas" / "heimdall.schema.json";
     EXPECT_TRUE(std::filesystem::exists(schema));
 
     std::ifstream in(schema);

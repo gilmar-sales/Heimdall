@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/MappedBuffer.hpp>
 
 #include <filesystem>
 #include <string>
@@ -13,7 +13,7 @@ namespace
     void BM_Lex(benchmark::State& state)
     {
         std::vector<std::string> sources;
-        std::size_t corpus_bytes = 0;
+        std::size_t              corpus_bytes = 0;
         for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
@@ -45,7 +45,7 @@ namespace
             for (const auto& source : sources)
             {
                 const heimdall::Lexer lexer(source);
-                const auto tokens = lexer.Lex();
+                const auto            tokens = lexer.Lex();
                 token_count += tokens.size();
                 benchmark::DoNotOptimize(tokens.data());
             }

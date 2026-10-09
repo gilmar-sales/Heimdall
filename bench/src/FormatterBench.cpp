@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/MappedBuffer.hpp>
 
 #include <filesystem>
 #include <string>
@@ -13,7 +13,7 @@ namespace
     void BM_Format(benchmark::State& state)
     {
         std::vector<std::string> sources;
-        std::size_t source_bytes = 0;
+        std::size_t              source_bytes = 0;
         for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
@@ -39,7 +39,7 @@ namespace
         }
 
         const heimdall::Formatter formatter;
-        std::size_t output_bytes = 0;
+        std::size_t               output_bytes = 0;
         for (auto _ : state)
         {
             output_bytes = 0;

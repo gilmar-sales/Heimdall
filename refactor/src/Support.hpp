@@ -9,7 +9,7 @@ namespace heimdall::refactor_detail
     // document. Header expansions are excluded using compiler line markers.
     std::expected<void, RefactoringError> VerifyPreprocessing(
         const AnalysisSnapshot& snapshot,
-        DocumentId document,
-        std::string_view source,
-        std::stop_token stop);
-}
+        DocumentId              document,
+        std::string_view        source,
+        std::stop_token         stop);
+} // namespace heimdall::refactor_detail

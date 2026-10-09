@@ -12,25 +12,31 @@
 namespace heimdall
 {
 
-    FunctionTable::FunctionTable(std::pmr::memory_resource* resource)
-    : node(resource), body(resource), symbol(resource), entry(resource), exit(resource),
-        first_block(resource),
-        block_count(resource), complete(resource) {}
+    FunctionTable::FunctionTable(std::pmr::memory_resource* resource) :
+        node(resource), body(resource), symbol(resource), entry(resource), exit(resource),
+        first_block(resource), block_count(resource), complete(resource)
+    {
+    }
 
-    BlockTable::BlockTable(std::pmr::memory_resource* resource)
-    : function(resource), first_event(resource), event_count(resource), first_succ(resource),
-        succ_count(resource),
-        returns(resource) {}
+    BlockTable::BlockTable(std::pmr::memory_resource* resource) :
+        function(resource), first_event(resource), event_count(resource), first_succ(resource),
+        succ_count(resource), returns(resource)
+    {
+    }
 
-    EventTable::EventTable(std::pmr::memory_resource* resource)
-    : kind(resource), symbol(resource), token(resource), block(resource) {}
+    EventTable::EventTable(std::pmr::memory_resource* resource) :
+        kind(resource), symbol(resource), token(resource), block(resource)
+    {
+    }
 
-    FlowModel::FlowModel(const TypeModel& types, std::size_t arena_hint)
-    : m_arena(std::make_unique<Arena>(arena_hint)), m_types(&types), m_functions(m_arena->Resource()),
-        m_blocks(m_arena->Resource()), m_events(m_arena->Resource()), m_successors(m_arena->Resource()),
+    FlowModel::FlowModel(const TypeModel& types, std::size_t arena_hint) :
+        m_arena(std::make_unique<Arena>(arena_hint)), m_types(&types),
+        m_functions(m_arena->Resource()), m_blocks(m_arena->Resource()),
+        m_events(m_arena->Resource()), m_successors(m_arena->Resource()),
         m_owner(m_arena->Resource()), m_symbol_begin(m_arena->Resource()),
-        m_symbol_events(m_arena->Resource()),
-        m_node_function(m_arena->Resource()) {}
+        m_symbol_events(m_arena->Resource()), m_node_function(m_arena->Resource())
+    {
+    }
 
     FunctionId FlowModel::FunctionOfNode(std::uint32_t node) const noexcept
     {
@@ -47,7 +53,7 @@ namespace heimdall
 
         const auto first = m_functions.first_block[function];
         seen.assign(m_functions.block_count[function], 0);
-        std::vector<BlockId> pending{m_functions.entry[function]};
+        std::vector<BlockId> pending { m_functions.entry[function] };
         seen[m_functions.entry[function] - first] = 1;
         while (!pending.empty())
         {
@@ -68,7 +74,7 @@ namespace heimdall
 
     bool FlowModel::IsReachable(FunctionId function, BlockId block) const
     {
-        const auto seen = ReachableSet(function);
+        const auto seen  = ReachableSet(function);
         const auto first = function < m_functions.Size() ? m_functions.first_block[function] : 0;
         return block >= first && block - first < seen.size() && seen[block - first] != 0;
     }
@@ -80,7 +86,7 @@ namespace heimdall
 
     bool FlowModel::HasReachableReturn(FunctionId function) const
     {
-        const auto seen = ReachableSet(function);
+        const auto seen  = ReachableSet(function);
         const auto first = function < m_functions.Size() ? m_functions.first_block[function] : 0;
         for (std::size_t i = 0; i < seen.size(); ++i)
         {
@@ -106,13 +112,13 @@ namespace heimdall
         {
             switch (m_events.kind[index])
             {
-            case EventKind::Init:
-                ++inits;
-                break;
-            case EventKind::Read:
-                break;
-            default:
-                return false;
+                case EventKind::Init:
+                    ++inits;
+                    break;
+                case EventKind::Read:
+                    break;
+                default:
+                    return false;
             }
         }
 
@@ -123,10 +129,12 @@ namespace heimdall
 
     class FlowBuilder
     {
-    public:
-        explicit FlowBuilder(FlowModel& out)
-        : m(out), types(out.Types()), table(out.Types().Types()), model(out.Model()),
-            nodes(out.Model().Tree().NodesSoA()), symbols(out.Model().Symbols()), view(out.Model()) {}
+      public:
+        explicit FlowBuilder(FlowModel& out) :
+            m(out), types(out.Types()), table(out.Types().Types()), model(out.Model()),
+            nodes(out.Model().Tree().NodesSoA()), symbols(out.Model().Symbols()), view(out.Model())
+        {
+        }
 
         void Run()
         {
@@ -141,17 +149,17 @@ namespace heimdall
             Finish();
         }
 
-    private:
+      private:
         struct RawEvent
         {
-            EventKind kind;
-            SymbolId symbol;
+            EventKind     kind;
+            SymbolId      symbol;
             std::uint32_t token;
-            BlockId block;
+            BlockId       block;
         };
 
-        static constexpr std::size_t kMaxDepth = 128;
-        static constexpr std::uint32_t kUnset = ~0u - 1;
+        static constexpr std::size_t   kMaxDepth = 128;
+        static constexpr std::uint32_t kUnset    = ~0u - 1;
 
         using Range = std::pair<std::size_t, std::size_t>;
 
@@ -159,7 +167,7 @@ namespace heimdall
         bool IsFunctionLike(std::uint32_t node) const
         {
             return nodes.Kind(node) == GrammarKind::FunctionDefinition ||
-                nodes.Kind(node) == GrammarKind::LambdaExpression;
+                   nodes.Kind(node) == GrammarKind::LambdaExpression;
         }
 
         std::uint32_t BodyOf(std::uint32_t node) const
@@ -182,7 +190,8 @@ namespace heimdall
             std::unordered_map<std::uint32_t, SymbolId> by_node;
             for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
             {
-                if (symbols.kind[symbol] == SymbolKind::Function && (symbols.flags[symbol] & SymbolFlag::Definition) != 0)
+                if (symbols.kind[symbol] == SymbolKind::Function &&
+                    (symbols.flags[symbol] & SymbolFlag::Definition) != 0)
                 {
                     by_node.emplace(symbols.decl_node[symbol], symbol);
                 }
@@ -203,7 +212,7 @@ namespace heimdall
                     continue;
                 }
 
-                const auto found = by_node.find(node);
+                const auto found        = by_node.find(node);
                 m.m_node_function[node] = static_cast<FunctionId>(functions.Size());
                 functions.node.push_back(node);
                 functions.body.push_back(body);
@@ -220,8 +229,8 @@ namespace heimdall
         FunctionId EnclosingFunction(std::uint32_t node)
         {
             std::vector<std::uint32_t> path;
-            std::uint32_t current = node;
-            FunctionId result = kNone;
+            std::uint32_t              current = node;
+            FunctionId                 result  = kNone;
             for (std::size_t steps = 0; steps < nodes.size() + 1; ++steps)
             {
                 if (current >= nodes.size())
@@ -277,7 +286,6 @@ namespace heimdall
                 m_symbol_at.emplace(symbols.decl_token[symbol], symbol);
                 m_locals_by_name[symbols.name[symbol]].push_back(symbol);
             }
-
         }
 
         // ---- blocks and edges --------------------------------------------
@@ -298,23 +306,18 @@ namespace heimdall
 
         void Emit(EventKind kind, SymbolId symbol, std::uint32_t token)
         {
-            m_events.push_back({kind, symbol, token, m_current});
+            m_events.push_back({ kind, symbol, token, m_current });
         }
 
-        void Incomplete()
-        {
-            m.m_functions.complete[m_function] = 0;
-        }
+        void Incomplete() { m.m_functions.complete[m_function] = 0; }
 
         // ---- node helpers -------------------------------------------------
         std::vector<std::uint32_t> Sorted(std::uint32_t node) const
         {
-            const auto children = model.ChildrenOf(node);
+            const auto                 children = model.ChildrenOf(node);
             std::vector<std::uint32_t> result(children.begin(), children.end());
-            std::stable_sort(result.begin(), result.end(),
-                [&](std::uint32_t a, std::uint32_t b)
-                {
-                    return nodes.FirstToken(a) < nodes.FirstToken(b);
+            std::stable_sort(result.begin(), result.end(), [&](std::uint32_t a, std::uint32_t b) {
+                return nodes.FirstToken(a) < nodes.FirstToken(b);
             });
             return result;
         }
@@ -342,7 +345,7 @@ namespace heimdall
         bool Header(std::uint32_t node, std::size_t& open, std::size_t& close) const
         {
             const auto begin = view.Range(node).first;
-            const auto end = view.Range(node).second;
+            const auto end   = view.Range(node).second;
             for (open = begin + 1; open < end && open < begin + 4; ++open)
             {
                 if (view.At(open) == Tok::LParen)
@@ -359,20 +362,20 @@ namespace heimdall
         {
             switch (tok)
             {
-            case Tok::Eq:
-            case Tok::PlusEq:
-            case Tok::MinusEq:
-            case Tok::StarEq:
-            case Tok::SlashEq:
-            case Tok::PercentEq:
-            case Tok::AmpEq:
-            case Tok::PipeEq:
-            case Tok::CaretEq:
-            case Tok::ShlEq:
-            case Tok::ShrEq:
-                return true;
-            default:
-                return false;
+                case Tok::Eq:
+                case Tok::PlusEq:
+                case Tok::MinusEq:
+                case Tok::StarEq:
+                case Tok::SlashEq:
+                case Tok::PercentEq:
+                case Tok::AmpEq:
+                case Tok::PipeEq:
+                case Tok::CaretEq:
+                case Tok::ShlEq:
+                case Tok::ShrEq:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -380,11 +383,11 @@ namespace heimdall
         struct Shape
         {
             bool scalar = false; // arithmetic, enum or pointer: no members, no overloaded operators
-            bool pointer = false;
-            bool array = false;
+            bool pointer  = false;
+            bool array    = false;
             bool external = false; // library type
-            bool known = false;
-            TypeId value = TypeTable::Unknown;
+            bool known    = false;
+            TypeId value  = TypeTable::Unknown;
         }
 
         ;
@@ -392,12 +395,13 @@ namespace heimdall
         Shape ShapeOf(SymbolId symbol) const
         {
             Shape shape;
-            shape.value = table.Strip(types.SymbolType(symbol));
-            shape.known = table.IsKnown(shape.value);
-            shape.pointer = table.IsPointer(shape.value);
-            shape.array = table.IsArray(shape.value);
+            shape.value    = table.Strip(types.SymbolType(symbol));
+            shape.known    = table.IsKnown(shape.value);
+            shape.pointer  = table.IsPointer(shape.value);
+            shape.array    = table.IsArray(shape.value);
             shape.external = table.Kind(shape.value) == TypeKind::External;
-            shape.scalar = table.IsArithmetic(shape.value) || table.Kind(shape.value) == TypeKind::Enum || shape.pointer;
+            shape.scalar   = table.IsArithmetic(shape.value) ||
+                             table.Kind(shape.value) == TypeKind::Enum || shape.pointer;
             return shape;
         }
 
@@ -405,9 +409,9 @@ namespace heimdall
         EventKind Classify(std::uint32_t node, SymbolId symbol)
         {
             const auto shape = ShapeOf(symbol);
-            bool nested = false; // reached through `x[i]` or `x.m`: the object is changed, not replaced
-            const auto finish =[&](EventKind kind)
-            {
+            bool       nested =
+                false; // reached through `x[i]` or `x.m`: the object is changed, not replaced
+            const auto finish = [&](EventKind kind) {
                 return nested && kind == EventKind::Write ? EventKind::Modify : kind;
             };
 
@@ -420,204 +424,206 @@ namespace heimdall
                     return EventKind::Escape;
                 }
 
-                const auto kids = Sorted(parent);
-                const auto[begin, end] = view.Range(parent);
+                const auto kids         = Sorted(parent);
+                const auto [begin, end] = view.Range(parent);
                 switch (nodes.Kind(parent))
                 {
-                case GrammarKind::ParenthesizedExpression:
-                    current = parent;
-                    continue;
-                case GrammarKind::CastExpression:
-                {
-                    // `(double)x` reads x; `(T&)x` hands out a reference to it.
-                    if (kids.size() != 2 || kids[1] != current)
-                    {
-                        return EventKind::Escape;
-                    }
-
-                    const auto[type_begin, type_end] = view.Range(kids[0]);
-                    for (auto p = type_begin; p < type_end; ++p)
-                    {
-                        if (view.At(p) == Tok::Amp || view.At(p) == Tok::AmpAmp)
+                    case GrammarKind::ParenthesizedExpression:
+                        current = parent;
+                        continue;
+                    case GrammarKind::CastExpression: {
+                        // `(double)x` reads x; `(T&)x` hands out a reference to it.
+                        if (kids.size() != 2 || kids[1] != current)
                         {
                             return EventKind::Escape;
                         }
-                    }
 
-                    return shape.scalar || shape.external ? EventKind::Read : EventKind::Escape;
-                }
-                case GrammarKind::UnaryExpression:
-                {
-                    const Tok first = view.At(begin);
-                    const Tok last = end > begin ? view.At(end - 1) : Tok::None;
-                    if (first == Tok::PlusPlus || first == Tok::MinusMinus ||
-                        (kids.size() == 1 && kids[0] == current && view.Range(current).first == begin &&
-                        (last == Tok::PlusPlus || last == Tok::MinusMinus)))
-                    {
-                        return EventKind::Modify;
-                    }
-
-                    if (first == Tok::Amp)
-                    {
-                        return EventKind::Escape;
-                    }
-
-                    if (first == Tok::Star && shape.array)
-                    {
-                        nested = true;
-                        current = parent;
-                        continue;
-                    }
-
-                    if (first == Tok::Star || first == Tok::Plus || first == Tok::Minus || first == Tok::Bang ||
-                        first == Tok::Tilde || first == Tok::KwThrow)
-                    {
-                        return shape.scalar || shape.external ? EventKind::Read : EventKind::Escape;
-                    }
-
-                    return EventKind::Escape;
-                }
-                case GrammarKind::BinaryExpression:
-                {
-                    if (kids.size() != 2)
-                    {
-                        return EventKind::Escape;
-                    }
-
-                    const auto op = view.Range(kids[0]).second;
-                    const Tok tok = view.At(op);
-                    if (kids[0] == current)
-                    {
-                        if (tok == Tok::Eq)
+                        const auto [type_begin, type_end] = view.Range(kids[0]);
+                        for (auto p = type_begin; p < type_end; ++p)
                         {
-                            return finish(EventKind::Write);
+                            if (view.At(p) == Tok::Amp || view.At(p) == Tok::AmpAmp)
+                            {
+                                return EventKind::Escape;
+                            }
                         }
 
-                        if (IsAssignment(tok))
+                        return shape.scalar || shape.external ? EventKind::Read : EventKind::Escape;
+                    }
+                    case GrammarKind::UnaryExpression: {
+                        const Tok first = view.At(begin);
+                        const Tok last  = end > begin ? view.At(end - 1) : Tok::None;
+                        if (first == Tok::PlusPlus || first == Tok::MinusMinus ||
+                            (kids.size() == 1 && kids[0] == current &&
+                             view.Range(current).first == begin &&
+                             (last == Tok::PlusPlus || last == Tok::MinusMinus)))
                         {
                             return EventKind::Modify;
                         }
 
-                        if (tok == Tok::DotStar || tok == Tok::ArrowStar)
+                        if (first == Tok::Amp)
                         {
                             return EventKind::Escape;
                         }
 
-                        if ((tok == Tok::Shl || tok == Tok::Shr) && !shape.scalar)
+                        if (first == Tok::Star && shape.array)
                         {
-                            return EventKind::Modify; // `out << x` writes to the stream
+                            nested  = true;
+                            current = parent;
+                            continue;
+                        }
+
+                        if (first == Tok::Star || first == Tok::Plus || first == Tok::Minus ||
+                            first == Tok::Bang || first == Tok::Tilde || first == Tok::KwThrow)
+                        {
+                            return shape.scalar || shape.external ? EventKind::Read
+                                                                  : EventKind::Escape;
+                        }
+
+                        return EventKind::Escape;
+                    }
+                    case GrammarKind::BinaryExpression: {
+                        if (kids.size() != 2)
+                        {
+                            return EventKind::Escape;
+                        }
+
+                        const auto op  = view.Range(kids[0]).second;
+                        const Tok  tok = view.At(op);
+                        if (kids[0] == current)
+                        {
+                            if (tok == Tok::Eq)
+                            {
+                                return finish(EventKind::Write);
+                            }
+
+                            if (IsAssignment(tok))
+                            {
+                                return EventKind::Modify;
+                            }
+
+                            if (tok == Tok::DotStar || tok == Tok::ArrowStar)
+                            {
+                                return EventKind::Escape;
+                            }
+
+                            if ((tok == Tok::Shl || tok == Tok::Shr) && !shape.scalar)
+                            {
+                                return EventKind::Modify; // `out << x` writes to the stream
+                            }
+
+                            return EventKind::Read;
+                        }
+
+                        if (tok == Tok::Comma)
+                        {
+                            current = parent;
+                            continue;
+                        }
+
+                        if (tok == Tok::Shr &&
+                            !(table.IsArithmetic(table.Strip(types.NodeType(kids[0])))))
+                        {
+                            return EventKind::Modify; // `in >> x` writes to x
                         }
 
                         return EventKind::Read;
                     }
+                    case GrammarKind::ConditionalExpression:
+                        if (!kids.empty() && kids[0] == current)
+                        {
+                            return EventKind::Read;
+                        }
 
-                    if (tok == Tok::Comma)
-                    {
+                        current = parent;
+                        continue;
+                    case GrammarKind::SubscriptExpression:
+                        if (kids.size() >= 2 && kids[1] == current)
+                        {
+                            return EventKind::Read;
+                        }
+
+                        if (shape.pointer)
+                        {
+                            return EventKind::Read;
+                        }
+
+                        nested  = true;
+                        current = parent;
+                        continue;
+                    case GrammarKind::MemberExpression: {
+                        if (kids.size() != 2 || kids[0] != current)
+                        {
+                            return EventKind::Escape;
+                        }
+
+                        const Tok tok = view.At(view.Range(kids[0]).second);
+                        if (tok == Tok::Arrow)
+                        {
+                            return shape.pointer ? EventKind::Read : EventKind::Escape;
+                        }
+
+                        if (tok != Tok::Dot || shape.scalar)
+                        {
+                            return EventKind::Escape;
+                        }
+
+                        // `x.f(...)`: whether f is a const member decides.
+                        const auto grand = nodes.Parent(parent);
+                        if (grand < nodes.size() &&
+                            nodes.Kind(grand) == GrammarKind::CallExpression)
+                        {
+                            const auto call_kids = Sorted(grand);
+                            if (!call_kids.empty() && call_kids[0] == parent)
+                            {
+                                return IsConstMethod(shape, view.Text(view.Range(kids[1]).first))
+                                           ? EventKind::Read
+                                           : EventKind::Modify;
+                            }
+                        }
+
+                        nested  = true;
                         current = parent;
                         continue;
                     }
-
-                    if (tok == Tok::Shr && !(table.IsArithmetic(table.Strip(types.NodeType(kids[0])))))
-                    {
-                        return EventKind::Modify; // `in >> x` writes to x
-                    }
-
-                    return EventKind::Read;
-                }
-                case GrammarKind::ConditionalExpression:
-                    if (!kids.empty() && kids[0] == current)
-                    {
-                        return EventKind::Read;
-                    }
-
-                    current = parent;
-                    continue;
-                case GrammarKind::SubscriptExpression:
-                    if (kids.size() >= 2 && kids[1] == current)
-                    {
-                        return EventKind::Read;
-                    }
-
-                    if (shape.pointer)
-                    {
-                        return EventKind::Read;
-                    }
-
-                    nested = true;
-                    current = parent;
-                    continue;
-                case GrammarKind::MemberExpression:
-                {
-                    if (kids.size() != 2 || kids[0] != current)
-                    {
-                        return EventKind::Escape;
-                    }
-
-                    const Tok tok = view.At(view.Range(kids[0]).second);
-                    if (tok == Tok::Arrow)
-                    {
-                        return shape.pointer ? EventKind::Read : EventKind::Escape;
-                    }
-
-                    if (tok != Tok::Dot || shape.scalar)
-                    {
-                        return EventKind::Escape;
-                    }
-
-                    // `x.f(...)`: whether f is a const member decides.
-                    const auto grand = nodes.Parent(parent);
-                    if (grand < nodes.size() && nodes.Kind(grand) == GrammarKind::CallExpression)
-                    {
-                        const auto call_kids = Sorted(grand);
-                        if (!call_kids.empty() && call_kids[0] == parent)
+                    case GrammarKind::CallExpression: {
+                        if (kids.empty())
                         {
-                            return IsConstMethod(shape, view.Text(view.Range(kids[1]).first)) ? EventKind::Read
-                            : EventKind::Modify;
+                            return EventKind::Escape;
                         }
-                    }
 
-                    nested = true;
-                    current = parent;
-                    continue;
-                }
-                case GrammarKind::CallExpression:
-                {
-                    if (kids.empty())
-                    {
+                        if (kids[0] == current)
+                        {
+                            return shape.pointer ? EventKind::Read : EventKind::Escape;
+                        }
+
+                        std::size_t index = 0;
+                        while (index < kids.size() && kids[index] != current)
+                        {
+                            ++index;
+                        }
+
+                        return index < kids.size() ? ArgumentContext(kids[0], index - 1, shape)
+                                                   : EventKind::Escape;
+                    }
+                    case GrammarKind::ExpressionStatement:
+                    case GrammarKind::IfStatement:
+                    case GrammarKind::SwitchStatement:
+                    case GrammarKind::DoStatement:
+                    case GrammarKind::CaseLabel:
+                        return EventKind::Read;
+                    case GrammarKind::LoopStatement: {
+                        // The container of `for (auto e : c)` is iterated by reference.
+                        const auto first = view.Range(current).first;
+                        return first > 0 && view.At(first - 1) == Tok::Colon
+                                   ? EventKind::Escape
+                                   : EventKind::Read;
+                    }
+                    case GrammarKind::ReturnStatement:
+                        return ReturnContext(shape);
+                    case GrammarKind::InitDeclarator:
+                        return InitializerContext(parent);
+                    default:
                         return EventKind::Escape;
-                    }
-
-                    if (kids[0] == current)
-                    {
-                        return shape.pointer ? EventKind::Read : EventKind::Escape;
-                    }
-
-                    std::size_t index = 0;
-                    while (index < kids.size() && kids[index] != current)
-                    {
-                        ++index;
-                    }
-
-                    return index < kids.size() ? ArgumentContext(kids[0], index - 1, shape) : EventKind::Escape;
-                }
-                case GrammarKind::ExpressionStatement:
-                case GrammarKind::IfStatement:
-                case GrammarKind::SwitchStatement:
-                case GrammarKind::DoStatement:
-                case GrammarKind::CaseLabel:
-                    return EventKind::Read;
-                case GrammarKind::LoopStatement:
-                {
-                    // The container of `for (auto e : c)` is iterated by reference.
-                    const auto first = view.Range(current).first;
-                    return first > 0 && view.At(first - 1) == Tok::Colon ? EventKind::Escape : EventKind::Read;
-                }
-                case GrammarKind::ReturnStatement:
-                    return ReturnContext(shape);
-                case GrammarKind::InitDeclarator:
-                    return InitializerContext(parent);
-                default:
-                    return EventKind::Escape;
                 }
             }
 
@@ -629,8 +635,10 @@ namespace heimdall
         {
             if (shape.external)
             {
-                static constexpr std::string_view kConst[] = {"size", "empty", "length", "capacity", "max_size",
-                    "count", "contains", "c_str", "substr", "compare", "starts_with", "ends_with"};
+                static constexpr std::string_view kConst[] = {
+                    "size",     "empty", "length", "capacity", "max_size",    "count",
+                    "contains", "c_str", "substr", "compare",  "starts_with", "ends_with"
+                };
                 return std::find(std::begin(kConst), std::end(kConst), name) != std::end(kConst);
             }
 
@@ -639,20 +647,21 @@ namespace heimdall
                 return false;
             }
 
-            const auto id = model.Names().Find(name);
+            const auto id    = model.Names().Find(name);
             const auto klass = static_cast<SymbolId>(table.Arg(shape.value));
-            const auto first = id == kNone || klass >= symbols.Size() ? kNone
-            : model.LookupMember(klass, id);
+            const auto first =
+                id == kNone || klass >= symbols.Size() ? kNone : model.LookupMember(klass, id);
             if (first == kNone || symbols.kind[first] != SymbolKind::Function)
             {
                 return false;
             }
 
             const auto scope = symbols.scope[first];
-            for (auto overload = model.LookupLocal(scope,
-                id); overload != kNone; overload = symbols.next_same_name[overload])
+            for (auto overload = model.LookupLocal(scope, id); overload != kNone;
+                 overload      = symbols.next_same_name[overload])
             {
-                if (symbols.kind[overload] != SymbolKind::Function ||(symbols.flags[overload] & SymbolFlag::Const) == 0)
+                if (symbols.kind[overload] != SymbolKind::Function ||
+                    (symbols.flags[overload] & SymbolFlag::Const) == 0)
                 {
                     return false;
                 }
@@ -686,7 +695,8 @@ namespace heimdall
         EventKind InitializerContext(std::uint32_t init_declarator) const
         {
             const auto declarator = FindChild(init_declarator, GrammarKind::Declarator);
-            const auto name = declarator == kNone ? kNone : FindChild(declarator, GrammarKind::DeclaredName);
+            const auto name =
+                declarator == kNone ? kNone : FindChild(declarator, GrammarKind::DeclaredName);
             const auto symbol = name == kNone ? kNone : SymbolAt(nodes.FirstToken(name));
             if (symbol == kNone)
             {
@@ -696,23 +706,28 @@ namespace heimdall
             const auto type = types.SymbolType(symbol);
             switch (table.Kind(type))
             {
-            case TypeKind::Unknown:
-            case TypeKind::RRef:
-                return EventKind::Escape;
-            case TypeKind::LRef:
-                return table.Kind(table.Arg(type)) == TypeKind::Const ? EventKind::Read : EventKind::Escape;
-            default:
-                return EventKind::Read;
+                case TypeKind::Unknown:
+                case TypeKind::RRef:
+                    return EventKind::Escape;
+                case TypeKind::LRef:
+                    return table.Kind(table.Arg(type)) == TypeKind::Const
+                               ? EventKind::Read
+                               : EventKind::Escape;
+                default:
+                    return EventKind::Read;
             }
         }
 
         // Library functions that take their arguments by value or const reference.
         static bool TakesByValue(std::string_view name)
         {
-            static constexpr std::string_view kNames[] = {"printf", "std::printf", "puts", "putchar", "sqrt",
-                "std::sqrt",
-                "pow", "std::pow", "floor", "std::floor", "ceil", "std::ceil", "fabs", "std::fabs", "std::min",
-                "std::max", "std::to_string", "std::format", "std::print", "std::println"};
+            static constexpr std::string_view kNames[] = {
+                "printf",         "std::printf", "puts",       "putchar",
+                "sqrt",           "std::sqrt",   "pow",        "std::pow",
+                "floor",          "std::floor",  "ceil",       "std::ceil",
+                "fabs",           "std::fabs",   "std::min",   "std::max",
+                "std::to_string", "std::format", "std::print", "std::println"
+            };
             return std::find(std::begin(kNames), std::end(kNames), name) != std::end(kNames);
         }
 
@@ -722,7 +737,8 @@ namespace heimdall
             if (nodes.Kind(callee) == GrammarKind::IdentifierExpression)
             {
                 const auto text = view.Text(range.first);
-                if (text == "sizeof" || text == "alignof" || text == "noexcept" || text == "decltype")
+                if (text == "sizeof" || text == "alignof" || text == "noexcept" ||
+                    text == "decltype")
                 {
                     return EventKind::Read;
                 }
@@ -733,8 +749,9 @@ namespace heimdall
                     return shape.scalar && TakesByValue(text) ? EventKind::Read : EventKind::Escape;
                 }
 
-                return symbols.kind[target] == SymbolKind::Function ? ParameterContext(target, index, shape)
-                : EventKind::Escape;
+                return symbols.kind[target] == SymbolKind::Function
+                           ? ParameterContext(target, index, shape)
+                           : EventKind::Escape;
             }
 
             // `static_cast<T>(x)` copies a value; `static_cast<T&>(x)` aliases it.
@@ -775,11 +792,12 @@ namespace heimdall
         EventKind ParameterContext(SymbolId function, std::size_t index, const Shape& shape)
         {
             bool viable = false;
-            for (auto overload = model.LookupLocal(symbols.scope[function],
-                symbols.name[function]); overload != kNone;
-                overload = symbols.next_same_name[overload])
+            for (auto overload = model.LookupLocal(symbols.scope[function], symbols.name[function]);
+                 overload != kNone;
+                 overload = symbols.next_same_name[overload])
             {
-                if (symbols.kind[overload] != SymbolKind::Function ||(symbols.flags[overload] & SymbolFlag::Template) != 0)
+                if (symbols.kind[overload] != SymbolKind::Function ||
+                    (symbols.flags[overload] & SymbolFlag::Template) != 0)
                 {
                     return EventKind::Escape;
                 }
@@ -792,20 +810,21 @@ namespace heimdall
 
                 const auto close = view.Match(open, view.Size());
                 // Split the parameter list at top-level commas.
-                std::size_t count = 0;
-                std::size_t begin = open + 1;
-                std::size_t depth = 0;
-                bool found = false;
-                bool by_const_ref_or_value = false;
+                std::size_t count                 = 0;
+                std::size_t begin                 = open + 1;
+                std::size_t depth                 = 0;
+                bool        found                 = false;
+                bool        by_const_ref_or_value = false;
                 for (std::size_t p = open + 1; p <= close; ++p)
                 {
                     const Tok tok = view.At(p);
-                    if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace || tok == Tok::Lt)
+                    if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace ||
+                        tok == Tok::Lt)
                     {
                         ++depth;
                     }
-                    else if ((tok == Tok::RParen && p != close) || tok == Tok::RBracket || tok == Tok::RBrace ||
-                        tok == Tok::Gt)
+                    else if ((tok == Tok::RParen && p != close) || tok == Tok::RBracket ||
+                             tok == Tok::RBrace || tok == Tok::Gt)
                     {
                         depth = depth == 0 ? 0 : depth - 1;
                     }
@@ -818,10 +837,10 @@ namespace heimdall
                     {
                         if (p > begin && count == index)
                         {
-                            found = true;
-                            bool is_const = false;
-                            bool is_ref = false;
-                            bool is_rref = false;
+                            found           = true;
+                            bool is_const   = false;
+                            bool is_ref     = false;
+                            bool is_rref    = false;
                             bool is_pointer = false;
                             for (auto q = begin; q < p; ++q)
                             {
@@ -844,8 +863,10 @@ namespace heimdall
                                 }
                             }
 
-                            by_const_ref_or_value = is_rref ? false
-                            : is_ref ? is_const : (!shape.array ||(is_pointer&& is_const));
+                            by_const_ref_or_value =
+                                is_rref  ? false
+                                : is_ref ? is_const
+                                         : (!shape.array || (is_pointer && is_const));
                         }
 
                         if (p > begin)
@@ -896,29 +917,29 @@ namespace heimdall
         // Identifier nodes below `node`, not descending into function-like nodes,
         // which are reported separately through `nested`.
         void CollectRefs(std::uint32_t node, std::vector<std::uint32_t>& refs,
-            std::vector<std::uint32_t>& nested)
+                         std::vector<std::uint32_t>& nested)
         {
-            std::vector<std::uint32_t> pending{node};
+            std::vector<std::uint32_t> pending { node };
             while (!pending.empty())
             {
                 const auto current = pending.back();
                 pending.pop_back();
                 switch (nodes.Kind(current))
                 {
-                case GrammarKind::IdentifierExpression:
-                    refs.push_back(current);
-                    continue;
-                case GrammarKind::LambdaExpression:
-                case GrammarKind::FunctionDefinition:
-                case GrammarKind::RecordDefinition:
-                    nested.push_back(current);
-                    continue;
-                case GrammarKind::Error:
-                case GrammarKind::ErrorExpression:
-                    Incomplete();
-                    break;
-                default:
-                    break;
+                    case GrammarKind::IdentifierExpression:
+                        refs.push_back(current);
+                        continue;
+                    case GrammarKind::LambdaExpression:
+                    case GrammarKind::FunctionDefinition:
+                    case GrammarKind::RecordDefinition:
+                        nested.push_back(current);
+                        continue;
+                    case GrammarKind::Error:
+                    case GrammarKind::ErrorExpression:
+                        Incomplete();
+                        break;
+                    default:
+                        break;
                 }
 
                 for (const auto child : model.ChildrenOf(current))
@@ -936,16 +957,17 @@ namespace heimdall
             std::vector<RawEvent> local;
             for (const auto ref : refs)
             {
-                const auto token = nodes.FirstToken(ref);
+                const auto token  = nodes.FirstToken(ref);
                 const auto symbol = model.ResolveToken(token);
                 if (symbol != kNone && m.m_owner[symbol] == m_function)
                 {
                     // `decltype(x)`: adding `const` to x would change the type.
                     const auto position = view.PositionOf(token);
-                    const bool in_decltype = position >= 2 && view.At(position - 1) == Tok::LParen &&
+                    const bool in_decltype =
+                        position >= 2 && view.At(position - 1) == Tok::LParen &&
                         view.At(position - 2) == Tok::KwDecltype;
-                    local.push_back({in_decltype ? EventKind::Escape : Classify(ref, symbol), symbol, token,
-                            m_current});
+                    local.push_back({ in_decltype ? EventKind::Escape : Classify(ref, symbol),
+                                      symbol, token, m_current });
                 }
             }
 
@@ -956,27 +978,24 @@ namespace heimdall
                 CollectAll(inner, inner_refs);
                 for (const auto ref : inner_refs)
                 {
-                    const auto token = nodes.FirstToken(ref);
+                    const auto token  = nodes.FirstToken(ref);
                     const auto symbol = model.ResolveToken(token);
                     if (symbol != kNone && m.m_owner[symbol] == m_function)
                     {
-                        local.push_back({EventKind::Escape, symbol, token, m_current});
+                        local.push_back({ EventKind::Escape, symbol, token, m_current });
                     }
                 }
             }
 
             std::sort(local.begin(), local.end(),
-                [](const RawEvent& a, const RawEvent& b)
-                {
-                    return a.token < b.token;
-            });
+                      [](const RawEvent& a, const RawEvent& b) { return a.token < b.token; });
             m_events.insert(m_events.end(), local.begin(), local.end());
         }
 
         // Every identifier node below `node`, nested functions included.
         void CollectAll(std::uint32_t node, std::vector<std::uint32_t>& refs)
         {
-            std::vector<std::uint32_t> pending{node};
+            std::vector<std::uint32_t> pending { node };
             while (!pending.empty())
             {
                 const auto current = pending.back();
@@ -999,20 +1018,23 @@ namespace heimdall
         {
             for (const auto child : Sorted(node))
             {
-                if (nodes.Kind(child) == GrammarKind::InitDeclarator || nodes.Kind(child) == GrammarKind::Declarator)
+                if (nodes.Kind(child) == GrammarKind::InitDeclarator ||
+                    nodes.Kind(child) == GrammarKind::Declarator)
                 {
-                    std::uint32_t name = kNone;
-                    const auto declarator = nodes.Kind(child) == GrammarKind::Declarator
-                    ? child : FindChild(child, GrammarKind::Declarator);
+                    std::uint32_t name       = kNone;
+                    const auto    declarator = nodes.Kind(child) == GrammarKind::Declarator
+                                                   ? child
+                                                   : FindChild(child, GrammarKind::Declarator);
                     if (declarator != kNone)
                     {
                         const auto declared = FindChild(declarator, GrammarKind::DeclaredName);
                         name = declared == kNone ? kNone : nodes.FirstToken(declared);
                     }
                     else if (const auto spelled = FindChild(child, GrammarKind::TypeSpecifier);
-                        spelled != kNone && nodes.TokenCount(spelled) == 1)
+                             spelled != kNone && nodes.TokenCount(spelled) == 1)
                     {
-                        name = nodes.FirstToken(spelled); // later declarators of `int a = 0, b = 0;`
+                        name =
+                            nodes.FirstToken(spelled); // later declarators of `int a = 0, b = 0;`
                     }
 
                     const auto symbol = name == kNone ? kNone : SymbolAt(name);
@@ -1022,10 +1044,10 @@ namespace heimdall
                         while (view.At(after) == Tok::LBracket) // array bounds: `int a[3] = {...}`
                         {
                             const auto close = view.Match(after, view.Size());
-                            after = close < view.Size() ? close + 1 : view.Size();
+                            after            = close < view.Size() ? close + 1 : view.Size();
                         }
 
-                        const Tok next = view.At(after);
+                        const Tok  next        = view.At(after);
                         const bool initialized = next == Tok::Eq || next == Tok::LBrace;
                         Emit(initialized ? EventKind::Init : EventKind::Uninit, symbol, name);
                     }
@@ -1051,69 +1073,68 @@ namespace heimdall
             m_current = current;
             switch (nodes.Kind(node))
             {
-            case GrammarKind::CompoundStatement:
-                for (const auto child : Sorted(node))
-                {
-                    current = Statement(child, current, depth + 1);
-                }
+                case GrammarKind::CompoundStatement:
+                    for (const auto child : Sorted(node))
+                    {
+                        current = Statement(child, current, depth + 1);
+                    }
 
-                return current;
-            case GrammarKind::DeclarationStatement:
-            case GrammarKind::Declaration:
-                Declaration(node);
-                return current;
-            case GrammarKind::ExpressionStatement:
-                Walk(node);
-                if (view.At(view.Range(node).first) == Tok::KwThrow)
-                {
+                    return current;
+                case GrammarKind::DeclarationStatement:
+                case GrammarKind::Declaration:
+                    Declaration(node);
+                    return current;
+                case GrammarKind::ExpressionStatement:
+                    Walk(node);
+                    if (view.At(view.Range(node).first) == Tok::KwThrow)
+                    {
+                        m_block_returns[current] = 1;
+                        Edge(current, m_exit);
+                        return kNone;
+                    }
+
+                    return current;
+                case GrammarKind::ReturnStatement:
+                    Walk(node);
                     m_block_returns[current] = 1;
                     Edge(current, m_exit);
                     return kNone;
-                }
+                case GrammarKind::JumpStatement: {
+                    const Tok tok = view.At(view.Range(node).first);
+                    if (tok == Tok::KwBreak && !m_breaks.empty())
+                    {
+                        Edge(current, m_breaks.back());
+                    }
+                    else if (tok == Tok::KwContinue && !m_continues.empty())
+                    {
+                        Edge(current, m_continues.back());
+                    }
+                    else
+                    {
+                        Incomplete();
+                    }
 
-                return current;
-            case GrammarKind::ReturnStatement:
-                Walk(node);
-                m_block_returns[current] = 1;
-                Edge(current, m_exit);
-                return kNone;
-            case GrammarKind::JumpStatement:
-            {
-                const Tok tok = view.At(view.Range(node).first);
-                if (tok == Tok::KwBreak && !m_breaks.empty())
-                {
-                    Edge(current, m_breaks.back());
+                    return kNone;
                 }
-                else if (tok == Tok::KwContinue && !m_continues.empty())
-                {
-                    Edge(current, m_continues.back());
-                }
-                else
-                {
+                case GrammarKind::EmptyStatement:
+                    return current;
+                case GrammarKind::IfStatement:
+                    return If(node, current, depth);
+                case GrammarKind::LoopStatement:
+                    return Loop(node, current, depth);
+                case GrammarKind::DoStatement:
+                    return Do(node, current, depth);
+                case GrammarKind::SwitchStatement:
+                    return Switch(node, current, depth);
+                case GrammarKind::TryStatement:
+                    return Try(node, current, depth);
+                case GrammarKind::Error:
+                case GrammarKind::ErrorExpression:
                     Incomplete();
-                }
-
-                return kNone;
-            }
-            case GrammarKind::EmptyStatement:
-                return current;
-            case GrammarKind::IfStatement:
-                return If(node, current, depth);
-            case GrammarKind::LoopStatement:
-                return Loop(node, current, depth);
-            case GrammarKind::DoStatement:
-                return Do(node, current, depth);
-            case GrammarKind::SwitchStatement:
-                return Switch(node, current, depth);
-            case GrammarKind::TryStatement:
-                return Try(node, current, depth);
-            case GrammarKind::Error:
-            case GrammarKind::ErrorExpression:
-                Incomplete();
-                return current;
-            default:
-                Walk(node);
-                return current;
+                    return current;
+                default:
+                    Walk(node);
+                    return current;
             }
         }
 
@@ -1121,30 +1142,29 @@ namespace heimdall
         {
             switch (kind)
             {
-            case GrammarKind::CompoundStatement:
-            case GrammarKind::DeclarationStatement:
-            case GrammarKind::ExpressionStatement:
-            case GrammarKind::ReturnStatement:
-            case GrammarKind::IfStatement:
-            case GrammarKind::LoopStatement:
-            case GrammarKind::SwitchStatement:
-            case GrammarKind::JumpStatement:
-            case GrammarKind::EmptyStatement:
-            case GrammarKind::TryStatement:
-            case GrammarKind::DoStatement:
-                return true;
-            default:
-                return false;
+                case GrammarKind::CompoundStatement:
+                case GrammarKind::DeclarationStatement:
+                case GrammarKind::ExpressionStatement:
+                case GrammarKind::ReturnStatement:
+                case GrammarKind::IfStatement:
+                case GrammarKind::LoopStatement:
+                case GrammarKind::SwitchStatement:
+                case GrammarKind::JumpStatement:
+                case GrammarKind::EmptyStatement:
+                case GrammarKind::TryStatement:
+                case GrammarKind::DoStatement:
+                    return true;
+                default:
+                    return false;
             }
         }
 
         // Children of a header, split at the closing parenthesis: the part inside
         // is evaluated, the rest are the bodies.
-        void SplitHeader(
-            std::uint32_t node,
-            std::size_t close,
-            std::vector<std::uint32_t>& header,
-            std::vector<std::uint32_t>& bodies) const
+        void SplitHeader(std::uint32_t               node,
+                         std::size_t                 close,
+                         std::vector<std::uint32_t>& header,
+                         std::vector<std::uint32_t>& bodies) const
         {
             for (const auto child : Sorted(node))
             {
@@ -1157,7 +1177,8 @@ namespace heimdall
             m_current = current;
             for (const auto part : parts)
             {
-                if (nodes.Kind(part) == GrammarKind::DeclarationStatement || nodes.Kind(part) == GrammarKind::Declaration)
+                if (nodes.Kind(part) == GrammarKind::DeclarationStatement ||
+                    nodes.Kind(part) == GrammarKind::Declaration)
                 {
                     Declaration(part);
                 }
@@ -1170,7 +1191,7 @@ namespace heimdall
 
         BlockId If(std::uint32_t node, BlockId current, std::size_t depth)
         {
-            std::size_t open = 0;
+            std::size_t open  = 0;
             std::size_t close = 0;
             if (!Header(node, open, close))
             {
@@ -1189,7 +1210,7 @@ namespace heimdall
             for (const auto body : bodies)
             {
                 const bool is_else = view.At(view.Range(body).first - 1) == Tok::KwElse;
-                const auto start = NewBlock();
+                const auto start   = NewBlock();
                 Edge(current, start);
                 (is_else ? else_end : then_end) = Statement(body, start, depth + 1);
             }
@@ -1207,7 +1228,7 @@ namespace heimdall
 
         BlockId Loop(std::uint32_t node, BlockId current, std::size_t depth)
         {
-            std::size_t open = 0;
+            std::size_t open  = 0;
             std::size_t close = 0;
             if (!Header(node, open, close))
             {
@@ -1217,10 +1238,10 @@ namespace heimdall
             }
 
             // `for (init; cond; step)`, `for (decl : range)` or `while (cond)`.
-            std::size_t semi1 = close;
-            std::size_t semi2 = close;
+            std::size_t semi1        = close;
+            std::size_t semi2        = close;
             std::size_t depth_parens = 0;
-            std::size_t found = 0;
+            std::size_t found        = 0;
             for (std::size_t p = open + 1; p < close; ++p)
             {
                 const Tok tok = view.At(p);
@@ -1246,7 +1267,7 @@ namespace heimdall
             std::vector<std::uint32_t> init;
             std::vector<std::uint32_t> condition;
             std::vector<std::uint32_t> step;
-            const bool is_for = view.At(view.Range(node).first) == Tok::KwFor;
+            const bool                 is_for = view.At(view.Range(node).first) == Tok::KwFor;
             for (const auto part : header)
             {
                 const auto first = view.Range(part).first;
@@ -1273,7 +1294,7 @@ namespace heimdall
             Edge(current, test);
             Evaluate(condition, test);
             const auto body_start = NewBlock();
-            const auto after = NewBlock();
+            const auto after      = NewBlock();
             const auto step_block = NewBlock();
             Edge(test, body_start);
             // `for (;;)` leaves only through `break`.
@@ -1301,20 +1322,20 @@ namespace heimdall
         BlockId Do(std::uint32_t node, BlockId current, std::size_t depth)
         {
             const auto body_start = NewBlock();
-            const auto condition = NewBlock();
-            const auto after = NewBlock();
+            const auto condition  = NewBlock();
+            const auto after      = NewBlock();
             Edge(current, body_start);
             m_breaks.push_back(after);
             m_continues.push_back(condition);
-            BlockId end = body_start;
+            BlockId                    end = body_start;
             std::vector<std::uint32_t> tail;
-            bool have_body = false;
+            bool                       have_body = false;
             for (const auto child : Sorted(node))
             {
                 if (!have_body && IsStatement(nodes.Kind(child)))
                 {
                     have_body = true;
-                    end = Statement(child, end, depth + 1);
+                    end       = Statement(child, end, depth + 1);
                 }
                 else
                 {
@@ -1338,7 +1359,7 @@ namespace heimdall
 
         BlockId Switch(std::uint32_t node, BlockId current, std::size_t depth)
         {
-            std::size_t open = 0;
+            std::size_t open  = 0;
             std::size_t close = 0;
             if (!Header(node, open, close))
             {
@@ -1354,8 +1375,8 @@ namespace heimdall
 
             const auto after = NewBlock();
             m_breaks.push_back(after);
-            bool has_default = false;
-            BlockId previous = kNone;
+            bool    has_default = false;
+            BlockId previous    = kNone;
             for (const auto body : bodies)
             {
                 if (nodes.Kind(body) != GrammarKind::CompoundStatement)
@@ -1372,10 +1393,11 @@ namespace heimdall
                         const auto label = NewBlock();
                         Edge(current, label);
                         Edge(previous, label);
-                        previous = label;
+                        previous  = label;
                         m_current = label;
                         Walk(child);
-                        has_default = has_default || view.At(view.Range(child).first) == Tok::KwDefault;
+                        has_default =
+                            has_default || view.At(view.Range(child).first) == Tok::KwDefault;
                     }
                     else
                     {
@@ -1418,13 +1440,13 @@ namespace heimdall
         // ---- per function -----------------------------------------------------
         void BuildFunction(FunctionId function)
         {
-            m_function = function;
-            auto& functions = m.m_functions;
-            const auto first = static_cast<BlockId>(m_block_function.size());
-            const auto entry = NewBlock();
-            m_exit = NewBlock();
-            functions.entry[function] = entry;
-            functions.exit[function] = m_exit;
+            m_function                      = function;
+            auto&      functions            = m.m_functions;
+            const auto first                = static_cast<BlockId>(m_block_function.size());
+            const auto entry                = NewBlock();
+            m_exit                          = NewBlock();
+            functions.entry[function]       = entry;
+            functions.exit[function]        = m_exit;
             functions.first_block[function] = first;
             m_breaks.clear();
             m_continues.clear();
@@ -1437,25 +1459,26 @@ namespace heimdall
 
             const auto end = Statement(functions.body[function], entry, 0);
             Edge(end, m_exit);
-            functions.block_count[function] = static_cast<std::uint32_t>(m_block_function.size() - first);
+            functions.block_count[function] =
+                static_cast<std::uint32_t>(m_block_function.size() - first);
             ScanStray(function);
         }
 
         bool ContainsUnmodeled(std::uint32_t body) const
         {
-            const auto[begin, end] = view.Range(body);
+            const auto [begin, end] = view.Range(body);
             for (auto p = begin; p < end; ++p)
             {
                 switch (view.At(p))
                 {
-                case Tok::KwGoto:
-                case Tok::KwAsm:
-                case Tok::KwCoAwait:
-                case Tok::KwCoReturn:
-                case Tok::KwCoYield:
-                    return true;
-                default:
-                    break;
+                    case Tok::KwGoto:
+                    case Tok::KwAsm:
+                    case Tok::KwCoAwait:
+                    case Tok::KwCoReturn:
+                    case Tok::KwCoYield:
+                        return true;
+                    default:
+                        break;
                 }
             }
 
@@ -1467,8 +1490,8 @@ namespace heimdall
         // arguments...) are accounted for as escapes of every local of that name.
         void ScanStray(FunctionId function)
         {
-            const auto[begin, end] = view.Range(m.m_functions.body[function]);
-            m_current = m.m_functions.entry[function];
+            const auto [begin, end] = view.Range(m.m_functions.body[function]);
+            m_current               = m.m_functions.entry[function];
             for (auto p = begin; p < end; ++p)
             {
                 if (!view.IsWord(p))
@@ -1483,13 +1506,14 @@ namespace heimdall
                 }
 
                 if (p > begin && (view.At(p - 1) == Tok::Dot || view.At(p - 1) == Tok::Arrow ||
-                    view.At(p - 1) == Tok::ColonColon))
+                                  view.At(p - 1) == Tok::ColonColon))
                 {
                     continue;
                 }
 
                 const auto name = model.Names().Find(view.Text(p));
-                const auto found = name == kNone ? m_locals_by_name.end() : m_locals_by_name.find(name);
+                const auto found =
+                    name == kNone ? m_locals_by_name.end() : m_locals_by_name.find(name);
                 if (found == m_locals_by_name.end())
                 {
                     continue;
@@ -1499,7 +1523,8 @@ namespace heimdall
                 {
                     if (m.m_owner[symbol] == function && symbols.decl_token[symbol] < token)
                     {
-                        m_events.push_back({EventKind::Escape, symbol, token, m.m_functions.entry[function]});
+                        m_events.push_back(
+                            { EventKind::Escape, symbol, token, m.m_functions.entry[function] });
                     }
                 }
             }
@@ -1509,8 +1534,8 @@ namespace heimdall
         void Finish()
         {
             const auto block_count = m_block_function.size();
-            auto& blocks = m.m_blocks;
-            auto& events = m.m_events;
+            auto&      blocks      = m.m_blocks;
+            auto&      events      = m.m_events;
 
             // Events grouped by block, in the order they were emitted.
             std::vector<std::uint32_t> counts(block_count + 1, 0);
@@ -1529,7 +1554,7 @@ namespace heimdall
                 auto cursor = counts;
                 for (std::uint32_t i = 0; i < m_events.size(); ++i)
                 {
-                    order[cursor[m_events[i].block] ++] = i;
+                    order[cursor[m_events[i].block]++] = i;
                 }
             }
 
@@ -1549,7 +1574,7 @@ namespace heimdall
                 auto cursor = successor_counts;
                 for (const auto& edge : m_edges)
                 {
-                    m.m_successors[cursor[edge.first] ++] = edge.second;
+                    m.m_successors[cursor[edge.first]++] = edge.second;
                 }
             }
 
@@ -1574,7 +1599,7 @@ namespace heimdall
 
             // Per symbol, in token order.
             const auto symbol_count = symbols.Size();
-            auto& begin = m.m_symbol_begin;
+            auto&      begin        = m.m_symbol_begin;
             begin.assign(symbol_count + 1, 0);
             for (const auto symbol : events.symbol)
             {
@@ -1591,17 +1616,17 @@ namespace heimdall
                 std::vector<std::uint32_t> cursor(begin.begin(), begin.end());
                 for (std::uint32_t i = 0; i < events.Size(); ++i)
                 {
-                    m.m_symbol_events[cursor[events.symbol[i]] ++] = i;
+                    m.m_symbol_events[cursor[events.symbol[i]]++] = i;
                 }
             }
 
             for (std::size_t s = 0; s < symbol_count; ++s)
             {
-                std::stable_sort(m.m_symbol_events.begin() + begin[s], m.m_symbol_events.begin() + begin[s + 1],
-                    [&](std::uint32_t a, std::uint32_t b)
-                    {
+                std::stable_sort(
+                    m.m_symbol_events.begin() + begin[s], m.m_symbol_events.begin() + begin[s + 1],
+                    [&](std::uint32_t a, std::uint32_t b) {
                         return events.token[a] < events.token[b];
-                });
+                    });
             }
 
             // Nodes outside any function have no id.
@@ -1614,24 +1639,24 @@ namespace heimdall
             }
         }
 
-        FlowModel& m;
-        const TypeModel& types;
-        const TypeTable& table;
-        const SemanticModel& model;
+        FlowModel&            m;
+        const TypeModel&      types;
+        const TypeTable&      table;
+        const SemanticModel&  model;
         const GrammarNodeSoA& nodes;
-        const SymbolTable& symbols;
-        detail::TokenView view;
+        const SymbolTable&    symbols;
+        detail::TokenView     view;
 
-        FunctionId m_function = kNone;
-        BlockId m_current = kNone;
-        BlockId m_exit = kNone;
-        std::vector<BlockId> m_breaks;
-        std::vector<BlockId> m_continues;
-        std::vector<FunctionId> m_block_function;
-        std::vector<std::uint8_t> m_block_returns;
-        std::vector<std::pair<BlockId, BlockId>> m_edges;
-        std::vector<RawEvent> m_events;
-        std::unordered_map<std::uint32_t, SymbolId> m_symbol_at;
+        FunctionId                                        m_function = kNone;
+        BlockId                                           m_current  = kNone;
+        BlockId                                           m_exit     = kNone;
+        std::vector<BlockId>                              m_breaks;
+        std::vector<BlockId>                              m_continues;
+        std::vector<FunctionId>                           m_block_function;
+        std::vector<std::uint8_t>                         m_block_returns;
+        std::vector<std::pair<BlockId, BlockId>>          m_edges;
+        std::vector<RawEvent>                             m_events;
+        std::unordered_map<std::uint32_t, SymbolId>       m_symbol_at;
         std::unordered_map<NameId, std::vector<SymbolId>> m_locals_by_name;
     };
 

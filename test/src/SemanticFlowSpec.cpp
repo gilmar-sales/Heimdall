@@ -17,25 +17,27 @@ namespace
     // so the fixture is never moved.
     struct Stack
     {
-        explicit Stack(std::string text) : source(std::move(text)),
-            tree(heimdall::ParseTree::Parse(source)),
+        explicit Stack(std::string text) :
+            source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
             model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model)),
-            flow(heimdall::Flow::Build(types)) {}
+            flow(heimdall::Flow::Build(types))
+        {
+        }
 
         Stack(const Stack&) = delete;
 
-        Stack& operator= (const Stack&) = delete;
+        Stack& operator=(const Stack&) = delete;
 
         // First variable or parameter called `name`.
         heimdall::SymbolId Variable(const std::string& name) const
         {
             // Locals first: a member or global may share the name.
-            const auto& symbols = model.Symbols();
-            heimdall::SymbolId found = heimdall::kNone;
+            const auto&        symbols = model.Symbols();
+            heimdall::SymbolId found   = heimdall::kNone;
             for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
             {
                 if ((symbols.kind[symbol] == heimdall::SymbolKind::Variable ||
-                    symbols.kind[symbol] == heimdall::SymbolKind::Parameter) &&
+                     symbols.kind[symbol] == heimdall::SymbolKind::Parameter) &&
                     model.Names().Text(symbols.name[symbol]) == name)
                 {
                     if (flow.OwnerOf(symbol) != heimdall::kNone)
@@ -61,11 +63,11 @@ namespace
             return kinds;
         }
 
-        std::string source;
-        heimdall::ParseTree tree;
+        std::string             source;
+        heimdall::ParseTree     tree;
         heimdall::SemanticModel model;
-        heimdall::TypeModel types;
-        heimdall::FlowModel flow;
+        heimdall::TypeModel     types;
+        heimdall::FlowModel     flow;
     };
 
     std::vector<heimdall::Diagnostic> Const(const std::string& source)
@@ -83,13 +85,13 @@ namespace
     std::string ApplyAll(std::string source, std::vector<heimdall::Diagnostic> diagnostics)
     {
         std::sort(diagnostics.begin(), diagnostics.end(),
-            [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
-            {
-                return a.fix.offset > b.fix.offset;
-        });
+                  [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b) {
+                      return a.fix.offset > b.fix.offset;
+                  });
         for (const auto& diagnostic : diagnostics)
         {
-            source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
+            source.replace(diagnostic.fix.offset, diagnostic.fix.length,
+                           diagnostic.fix.replacement);
         }
 
         return source;
@@ -119,12 +121,11 @@ TEST(FlowCfg, StraightLineFunctionReachesItsExit)
 
 TEST(FlowCfg, IfElseJoinsBothBranches)
 {
-    const Stack stack(
-        "int f(int a) {\n"
-        "    int r = 0;\n"
-        "    if (a > 0) { r = 1; } else { r = 2; }\n"
-        "    return r;\n"
-        "}\n");
+    const Stack stack("int f(int a) {\n"
+                      "    int r = 0;\n"
+                      "    if (a > 0) { r = 1; } else { r = 2; }\n"
+                      "    return r;\n"
+                      "}\n");
     const auto& events = stack.flow.Events();
     const auto& blocks = stack.flow.Blocks();
     // The two writes of `r` sit in different blocks that both reach the `return`.
@@ -149,13 +150,12 @@ TEST(FlowCfg, IfElseJoinsBothBranches)
 
 TEST(FlowCfg, CodeAfterReturnIsUnreachable)
 {
-    const Stack stack(
-        "int f(int a) {\n"
-        "    return a;\n"
-        "    int dead = 1;\n"
-        "    return dead;\n"
-        "}\n");
-    const auto dead = stack.Variable("dead");
+    const Stack stack("int f(int a) {\n"
+                      "    return a;\n"
+                      "    int dead = 1;\n"
+                      "    return dead;\n"
+                      "}\n");
+    const auto  dead = stack.Variable("dead");
     ASSERT_NE(dead, heimdall::kNone);
     const auto events = stack.flow.EventsOf(dead);
     ASSERT_FALSE(events.empty());
@@ -203,10 +203,11 @@ TEST(FlowCfg, LoopsAndSwitchAndTryAreModeled)
 
 TEST(FlowCfg, SwitchWithoutDefaultCanSkipTheBody)
 {
-    const Stack stack("int f(int a) { int r = 0; switch (a) { case 1: r = 1; break; } return r; }\n");
+    const Stack stack(
+        "int f(int a) { int r = 0; switch (a) { case 1: r = 1; break; } return r; }\n");
     EXPECT_TRUE(stack.flow.HasReachableReturn(0));
     const auto writes = stack.Events("r");
-    EXPECT_EQ(writes, (Kinds{EventKind::Init, EventKind::Write, EventKind::Read}));
+    EXPECT_EQ(writes, (Kinds { EventKind::Init, EventKind::Write, EventKind::Read }));
 }
 
 TEST(FlowCfg, GotoMakesTheFunctionIncomplete)
@@ -218,7 +219,8 @@ TEST(FlowCfg, GotoMakesTheFunctionIncomplete)
 
 TEST(FlowCfg, LambdasAreFunctionsOfTheirOwn)
 {
-    const Stack stack("int f(int a) { auto g = [](int z) { int w = z + 1; return w; }; return a; }\n");
+    const Stack stack(
+        "int f(int a) { auto g = [](int z) { int w = z + 1; return w; }; return a; }\n");
     ASSERT_EQ(stack.flow.Functions().Size(), 2u);
     // (The grammar does not parse lambda parameters, so `z` has no symbol.)
     EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("w")), 1u);
@@ -227,10 +229,9 @@ TEST(FlowCfg, LambdasAreFunctionsOfTheirOwn)
 
 TEST(FlowCfg, GlobalsAndMembersAreNotLocal)
 {
-    const Stack stack(
-        "int global = 1;\n"
-        "struct S { int member = 2; int get() { return member; } };\n"
-        "int f() { return global; }\n");
+    const Stack stack("int global = 1;\n"
+                      "struct S { int member = 2; int get() { return member; } };\n"
+                      "int f() { return global; }\n");
     EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("global")), heimdall::kNone);
     EXPECT_EQ(stack.flow.OwnerOf(stack.Variable("member")), heimdall::kNone);
     EXPECT_TRUE(stack.flow.EventsOf(stack.Variable("global")).empty());
@@ -252,10 +253,10 @@ TEST(FlowEvents, ClassifiesPlainUses)
         "    return y;\n"
         "}\n");
     EXPECT_EQ(stack.Events("x"),
-        (Kinds{EventKind::Init, EventKind::Read, EventKind::Write, EventKind::Modify,
-            EventKind::Modify, EventKind::Modify}));
-    EXPECT_EQ(stack.Events("u"), (Kinds{EventKind::Uninit}));
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Read}));
+              (Kinds { EventKind::Init, EventKind::Read, EventKind::Write, EventKind::Modify,
+                       EventKind::Modify, EventKind::Modify }));
+    EXPECT_EQ(stack.Events("u"), (Kinds { EventKind::Uninit }));
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Read }));
     EXPECT_FALSE(stack.flow.IsNeverModified(stack.Variable("x")));
     EXPECT_TRUE(stack.flow.IsNeverModified(stack.Variable("y")));
 }
@@ -273,10 +274,10 @@ TEST(FlowEvents, AddressOfAndReferencesEscape)
         "    int d = 4;\n"
         "    int e = d;\n"
         "}\n");
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Init, EventKind::Escape}));
-    EXPECT_EQ(stack.Events("b"), (Kinds{EventKind::Init, EventKind::Escape}));
-    EXPECT_EQ(stack.Events("c"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("d"), (Kinds{EventKind::Init, EventKind::Read}));
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Init, EventKind::Escape }));
+    EXPECT_EQ(stack.Events("b"), (Kinds { EventKind::Init, EventKind::Escape }));
+    EXPECT_EQ(stack.Events("c"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("d"), (Kinds { EventKind::Init, EventKind::Read }));
 }
 
 TEST(FlowEvents, ArgumentsDependOnTheParameterOfTheCallee)
@@ -294,11 +295,11 @@ TEST(FlowEvents, ArgumentsDependOnTheParameterOfTheCallee)
         "    int e = 5; printf(\"%d\", e);\n"
         "    int arr[2] = {1, 2}; by_pointer(arr);\n"
         "}\n");
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("b"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("c"), (Kinds{EventKind::Init, EventKind::Escape}));
-    EXPECT_EQ(stack.Events("d"), (Kinds{EventKind::Init, EventKind::Escape}));
-    EXPECT_EQ(stack.Events("e"), (Kinds{EventKind::Init, EventKind::Read}));
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("b"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("c"), (Kinds { EventKind::Init, EventKind::Escape }));
+    EXPECT_EQ(stack.Events("d"), (Kinds { EventKind::Init, EventKind::Escape }));
+    EXPECT_EQ(stack.Events("e"), (Kinds { EventKind::Init, EventKind::Read }));
     EXPECT_EQ(stack.Events("arr").back(), EventKind::Escape);
 }
 
@@ -319,12 +320,12 @@ TEST(FlowEvents, ElementsAndMembersAreWrittenThroughTheObject)
         "    r.set(1);\n"
         "    *p = 3;\n"
         "}\n");
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Init, EventKind::Modify}));
-    EXPECT_EQ(stack.Events("b"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("s"), (Kinds{EventKind::Init, EventKind::Modify}));
-    EXPECT_EQ(stack.Events("q"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("r"), (Kinds{EventKind::Init, EventKind::Modify}));
-    EXPECT_EQ(stack.Events("p"), (Kinds{EventKind::Read}));
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Init, EventKind::Modify }));
+    EXPECT_EQ(stack.Events("b"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("s"), (Kinds { EventKind::Init, EventKind::Modify }));
+    EXPECT_EQ(stack.Events("q"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("r"), (Kinds { EventKind::Init, EventKind::Modify }));
+    EXPECT_EQ(stack.Events("p"), (Kinds { EventKind::Read }));
 }
 
 TEST(FlowEvents, StreamsAndLambdas)
@@ -336,22 +337,21 @@ TEST(FlowEvents, StreamsAndLambdas)
         "    int c = 3; auto g = [c]() { return c; };\n"
         "    int d = 4; auto h = [&]() { d = 5; };\n"
         "}\n");
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("b"), (Kinds{EventKind::Init, EventKind::Modify}));
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("b"), (Kinds { EventKind::Init, EventKind::Modify }));
     EXPECT_EQ(stack.Events("c").back(), EventKind::Escape);
     EXPECT_EQ(stack.Events("d").back(), EventKind::Escape);
 }
 
 TEST(FlowEvents, ReturnAndRangeForAndDecltype)
 {
-    const Stack stack(
-        "int by_value() { int a = 1; return a; }\n"
-        "std::string by_name() { std::string s = make(); return s; }\n"
-        "int& by_ref(int& r) { int b = 1; return r; }\n"
-        "void loop() { std::vector<int> v = make(); for (auto e : v) {} }\n"
-        "void type() { int x = 1; decltype(x) y = 2; }\n");
-    EXPECT_EQ(stack.Events("a"), (Kinds{EventKind::Init, EventKind::Read}));
-    EXPECT_EQ(stack.Events("s"), (Kinds{EventKind::Init, EventKind::Escape}));
+    const Stack stack("int by_value() { int a = 1; return a; }\n"
+                      "std::string by_name() { std::string s = make(); return s; }\n"
+                      "int& by_ref(int& r) { int b = 1; return r; }\n"
+                      "void loop() { std::vector<int> v = make(); for (auto e : v) {} }\n"
+                      "void type() { int x = 1; decltype(x) y = 2; }\n");
+    EXPECT_EQ(stack.Events("a"), (Kinds { EventKind::Init, EventKind::Read }));
+    EXPECT_EQ(stack.Events("s"), (Kinds { EventKind::Init, EventKind::Escape }));
     EXPECT_EQ(stack.Events("v").back(), EventKind::Escape);
     EXPECT_EQ(stack.Events("x").back(), EventKind::Escape);
 }
@@ -374,12 +374,11 @@ TEST(FlowEvents, NamesTheGrammarDidNotModelEscape)
 
 TEST(FlowEvents, InactiveCodeAndSameNamedMembersAreIgnored)
 {
-    const Stack stack(
-        "struct S { int mem; };\n"
-        "int f(S s) {\n"
-        "    int mem = 1;\n"
-        "    return s.mem + mem;\n"
-        "}\n");
+    const Stack stack("struct S { int mem; };\n"
+                      "int f(S s) {\n"
+                      "    int mem = 1;\n"
+                      "    return s.mem + mem;\n"
+                      "}\n");
     EXPECT_EQ(stack.Events("mem").size(), 2u);
     EXPECT_TRUE(stack.flow.IsNeverModified(stack.Variable("mem")));
 }
@@ -390,10 +389,10 @@ TEST(ModernizeConst, SuggestsConstForValuesNeverModified)
 {
     const std::string source =
         "int f(int a) {\n"
-    "    int x = a * 2;\n"
-    "    double d = a / 3.0;\n"
-    "    return x + static_cast<int>(d);\n"
-    "}\n";
+        "    int x = a * 2;\n"
+        "    double d = a / 3.0;\n"
+        "    return x + static_cast<int>(d);\n"
+        "}\n";
     const auto diagnostics = Const(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-const");
@@ -402,17 +401,17 @@ TEST(ModernizeConst, SuggestsConstForValuesNeverModified)
     EXPECT_EQ(Flagged(source, diagnostics[1]), "d");
     EXPECT_EQ(diagnostics[0].line, 2u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
-        "int f(int a) {\n"
-        "    const int x = a * 2;\n"
-        "    const double d = a / 3.0;\n"
-        "    return x + static_cast<int>(d);\n"
-        "}\n");
+              "int f(int a) {\n"
+              "    const int x = a * 2;\n"
+              "    const double d = a / 3.0;\n"
+              "    return x + static_cast<int>(d);\n"
+              "}\n");
 }
 
 TEST(ModernizeConst, FixIsOnlyAQuickFix)
 {
-    const std::string source = "int f(int a) { int x = a + 1; return x; }\n";
-    const auto diagnostics = Const(source);
+    const std::string source      = "int f(int a) { int x = a + 1; return x; }\n";
+    const auto        diagnostics = Const(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_FALSE(diagnostics[0].fix_title.empty());
@@ -423,33 +422,33 @@ TEST(ModernizeConst, InsertsBeforeQualifiedAndStaticTypes)
 {
     const std::string source =
         "int f() {\n"
-    "    std::string s = make();\n"
-    "    static unsigned int u = seed();\n"
-    "    return s.size() + u;\n"
-    "}\n";
+        "    std::string s = make();\n"
+        "    static unsigned int u = seed();\n"
+        "    return s.size() + u;\n"
+        "}\n";
     const auto diagnostics = Const(source);
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyAll(source, diagnostics),
-        "int f() {\n"
-        "    const std::string s = make();\n"
-        "    static const unsigned int u = seed();\n"
-        "    return s.size() + u;\n"
-        "}\n");
+              "int f() {\n"
+              "    const std::string s = make();\n"
+              "    static const unsigned int u = seed();\n"
+              "    return s.size() + u;\n"
+              "}\n");
 }
 
 TEST(ModernizeConst, ClassObjectsOnlyWhenEveryUseIsConst)
 {
     const std::string source =
         "struct P { int x; int get() const { return x; } void bump() { ++x; } };\n"
-    "int f() {\n"
-    "    P a = make();\n"
-    "    int g = a.get() + a.x;\n"
-    "    P b = make();\n"
-    "    b.bump();\n"
-    "    P c = make();\n"
-    "    return g + c.get();\n"
-    "}\n";
-    const auto diagnostics = Const(source);
+        "int f() {\n"
+        "    P a = make();\n"
+        "    int g = a.get() + a.x;\n"
+        "    P b = make();\n"
+        "    b.bump();\n"
+        "    P c = make();\n"
+        "    return g + c.get();\n"
+        "}\n";
+    const auto               diagnostics = Const(source);
     std::vector<std::string> names;
     for (const auto& diagnostic : diagnostics)
     {
@@ -467,7 +466,8 @@ TEST(ModernizeConst, SilentWhenTheVariableChanges)
     EXPECT_TRUE(Const("int f(int a) { int x = a; x += 2; return x; }\n").empty());
     EXPECT_TRUE(Const("int f(int a) { int x = a; ++x; return x; }\n").empty());
     EXPECT_TRUE(Const("int f(int a) { int x = a; x--; return x; }\n").empty());
-    EXPECT_TRUE(Const("int f(int a) { int x = a; int a2[2] = {0, 0}; a2[0] = x; return a2[0]; }\n").size() <= 1u);
+    EXPECT_TRUE(Const("int f(int a) { int x = a; int a2[2] = {0, 0}; a2[0] = x; return a2[0]; }\n")
+                    .size() <= 1u);
     EXPECT_TRUE(Const("int f(std::istream& in) { int x = 0; in >> x; return x; }\n").empty());
 }
 
@@ -476,7 +476,8 @@ TEST(ModernizeConst, SilentWhenTheVariableEscapes)
     EXPECT_TRUE(Const("int* f(int a) { int x = a; int* p = &x; return p; }\n").size() <= 1u);
     EXPECT_TRUE(Const("void use(int&);\nvoid f(int a) { int x = a; use(x); }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; unknown(x); }\n").empty());
-    EXPECT_TRUE(Const("int f(int a) { int x = a; auto g = [&]() { x = 1; }; g(); return x; }\n").empty());
+    EXPECT_TRUE(
+        Const("int f(int a) { int x = a; auto g = [&]() { x = 1; }; g(); return x; }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; int& r = x; r = 1; }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; decltype(x) y = 2; }\n").empty());
     EXPECT_TRUE(Const("void f(int a) { int x = a; S s(x); }\n").empty());
@@ -484,7 +485,6 @@ TEST(ModernizeConst, SilentWhenTheVariableEscapes)
     {
         EXPECT_NE(d.message.find("arr"), std::string::npos); // x itself must not be reported
     }
-
 }
 
 TEST(ModernizeConst, SilentForWhatCannotBeConst)
@@ -502,7 +502,9 @@ TEST(ModernizeConst, SilentForWhatCannotBeConst)
     // several declarators share one declaration
     EXPECT_TRUE(Const("int f(int a) { int x = a, y = a + 1; return x + y; }\n").empty());
     // loop headers
-    EXPECT_TRUE(Const("int f(int n) { int s = 0; for (int i = 0; i < n; ) { s = s + 1; break; } return s; }\n").size() == 0u);
+    EXPECT_TRUE(Const("int f(int n) { int s = 0; for (int i = 0; i < n; ) { s = s + 1; break; } "
+                      "return s; }\n")
+                    .size() == 0u);
     // globals and members belong to no function
     EXPECT_TRUE(Const("int g = f();\nint h() { return g; }\n").empty());
     EXPECT_TRUE(Const("struct S { int m = 1; };\n").empty());
@@ -520,7 +522,8 @@ TEST(ModernizeConst, ReturningAClassObjectByNameIsLeftAlone)
 {
     // `const` would turn the implicit move into a copy.
     EXPECT_TRUE(Const("std::string f() { std::string s = make(); return s; }\n").empty());
-    EXPECT_TRUE(Const("std::string f() { std::string s = make(); return std::move(s); }\n").empty());
+    EXPECT_TRUE(
+        Const("std::string f() { std::string s = make(); return std::move(s); }\n").empty());
 }
 
 TEST(ModernizeConst, IncompleteFunctionsStaySilent)
@@ -539,11 +542,11 @@ TEST(ModernizeConst, ReportsOnceAcrossLambdasAndFunctions)
 {
     const std::string source =
         "int f(int a) {\n"
-    "    int outer = a + 1;\n"
-    "    auto g = [](int z) { int inner = z * 2; return inner; };\n"
-    "    return outer + g(a);\n"
-    "}\n";
-    const auto diagnostics = Const(source);
+        "    int outer = a + 1;\n"
+        "    auto g = [](int z) { int inner = z * 2; return inner; };\n"
+        "    return outer + g(a);\n"
+        "}\n";
+    const auto               diagnostics = Const(source);
     std::vector<std::string> names;
     for (const auto& diagnostic : diagnostics)
     {
@@ -560,27 +563,27 @@ TEST(ModernizeConstexpr, ReplacesConstWhenTheInitializerIsConstant)
 {
     const std::string source =
         "const int kSize = 16;\n"
-    "const int kMask = kSize * 2 - 1;\n"
-    "const double kPi = 3.14159;\n"
-    "const bool kOn = true && !false;\n"
-    "const unsigned kBits = 1u << 4;\n";
+        "const int kMask = kSize * 2 - 1;\n"
+        "const double kPi = 3.14159;\n"
+        "const bool kOn = true && !false;\n"
+        "const unsigned kBits = 1u << 4;\n";
     const auto diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 5u);
     EXPECT_EQ(diagnostics[0].code, "cpp/modernize-constexpr");
     EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::ModernizeConstexpr);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "kSize");
     EXPECT_EQ(ApplyAll(source, diagnostics),
-        "constexpr int kSize = 16;\n"
-        "constexpr int kMask = kSize * 2 - 1;\n"
-        "constexpr double kPi = 3.14159;\n"
-        "constexpr bool kOn = true && !false;\n"
-        "constexpr unsigned kBits = 1u << 4;\n");
+              "constexpr int kSize = 16;\n"
+              "constexpr int kMask = kSize * 2 - 1;\n"
+              "constexpr double kPi = 3.14159;\n"
+              "constexpr bool kOn = true && !false;\n"
+              "constexpr unsigned kBits = 1u << 4;\n");
 }
 
 TEST(ModernizeConstexpr, FixIsOnlyAQuickFix)
 {
-    const std::string source = "const int kSize = 16;\n";
-    const auto diagnostics = Constexpr(source);
+    const std::string source      = "const int kSize = 16;\n";
+    const auto        diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
@@ -590,58 +593,58 @@ TEST(ModernizeConstexpr, LocalsThatNothingModifiesGetConstexpr)
 {
     const std::string source =
         "int f(int a) {\n"
-    "    int base = 10;\n"
-    "    static int step = 2 * 3;\n"
-    "    int changed = 1;\n"
-    "    changed = 2;\n"
-    "    return a + base + step + changed;\n"
-    "}\n";
-    const auto diagnostics = Constexpr(source);
-    ASSERT_EQ(diagnostics.size(), 2u);
-    EXPECT_EQ(ApplyAll(source, diagnostics),
-        "int f(int a) {\n"
-        "    constexpr int base = 10;\n"
-        "    static constexpr int step = 2 * 3;\n"
+        "    int base = 10;\n"
+        "    static int step = 2 * 3;\n"
         "    int changed = 1;\n"
         "    changed = 2;\n"
         "    return a + base + step + changed;\n"
-        "}\n");
+        "}\n";
+    const auto diagnostics = Constexpr(source);
+    ASSERT_EQ(diagnostics.size(), 2u);
+    EXPECT_EQ(ApplyAll(source, diagnostics),
+              "int f(int a) {\n"
+              "    constexpr int base = 10;\n"
+              "    static constexpr int step = 2 * 3;\n"
+              "    int changed = 1;\n"
+              "    changed = 2;\n"
+              "    return a + base + step + changed;\n"
+              "}\n");
 }
 
 TEST(ModernizeConstexpr, ReadsOtherConstantVariables)
 {
     const std::string source =
         "const int kA = 4;\n"
-    "int g() {\n"
-    "    const int kB = kA + 1;\n"
-    "    int c = kB * 2;\n"
-    "    return c;\n"
-    "}\n";
-    const auto diagnostics = Constexpr(source);
+        "int g() {\n"
+        "    const int kB = kA + 1;\n"
+        "    int c = kB * 2;\n"
+        "    return c;\n"
+        "}\n";
+    const auto               diagnostics = Constexpr(source);
     std::vector<std::string> names;
     for (const auto& diagnostic : diagnostics)
     {
         names.push_back(Flagged(source, diagnostic));
     }
 
-    EXPECT_EQ(names, (std::vector<std::string>{"kA", "kB", "c"}));
+    EXPECT_EQ(names, (std::vector<std::string> { "kA", "kB", "c" }));
 }
 
 TEST(ModernizeConstexpr, StaticConstMembersOfClasses)
 {
     const std::string source =
         "struct S {\n"
-    "    static const int kMax = 8;\n"
-    "    const int kNotStatic = 9;\n"
-    "};\n";
+        "    static const int kMax = 8;\n"
+        "    const int kNotStatic = 9;\n"
+        "};\n";
     const auto diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "kMax");
     EXPECT_EQ(ApplyAll(source, diagnostics),
-        "struct S {\n"
-        "    static constexpr int kMax = 8;\n"
-        "    const int kNotStatic = 9;\n"
-        "};\n");
+              "struct S {\n"
+              "    static constexpr int kMax = 8;\n"
+              "    const int kNotStatic = 9;\n"
+              "};\n");
 }
 
 TEST(ModernizeConstexpr, SilentWhenTheInitializerIsNotConstant)
@@ -697,35 +700,35 @@ TEST(ModernizeConstexpr, MarksInternalFunctionsThatOnlyCompute)
 {
     const std::string source =
         "static int square(int x) { return x * x; }\n"
-    "namespace {\n"
-    "int twice(int x) { return 2 * x; }\n"
-    "}\n"
-    "inline int plus_one(int x) { return x + 1; }\n";
+        "namespace {\n"
+        "int twice(int x) { return 2 * x; }\n"
+        "}\n"
+        "inline int plus_one(int x) { return x + 1; }\n";
     const auto diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 3u);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "square");
     EXPECT_EQ(Flagged(source, diagnostics[1]), "twice");
     EXPECT_EQ(Flagged(source, diagnostics[2]), "plus_one");
     EXPECT_EQ(ApplyAll(source, diagnostics),
-        "static constexpr int square(int x) { return x * x; }\n"
-        "namespace {\n"
-        "constexpr int twice(int x) { return 2 * x; }\n"
-        "}\n"
-        "inline constexpr int plus_one(int x) { return x + 1; }\n");
+              "static constexpr int square(int x) { return x * x; }\n"
+              "namespace {\n"
+              "constexpr int twice(int x) { return 2 * x; }\n"
+              "}\n"
+              "inline constexpr int plus_one(int x) { return x + 1; }\n");
 }
 
 TEST(ModernizeConstexpr, DeducedAutoReturnTypesAreLiteralTypes)
 {
-    const std::string source = "static auto square(int x) { return x * x; }\n";
-    const auto diagnostics = Constexpr(source);
+    const std::string source      = "static auto square(int x) { return x * x; }\n";
+    const auto        diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "square");
 }
 
 TEST(ModernizeConstexpr, FunctionFixIsOnlyAQuickFix)
 {
-    const std::string source = "static int square(int x) { return x * x; }\n";
-    const auto diagnostics = Constexpr(source);
+    const std::string source      = "static int square(int x) { return x * x; }\n";
+    const auto        diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
@@ -735,16 +738,16 @@ TEST(ModernizeConstexpr, LoopsLocalsAndRecursionAreFine)
 {
     const std::string source =
         "static int sum(int n) {\n"
-    "    int total = 0;\n"
-    "    for (int i = 0; i < n; ++i) { total += i; }\n"
-    "    return total;\n"
-    "}\n"
-    "static int fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }\n"
-    "static unsigned clamp(unsigned v, unsigned lo, unsigned hi) {\n"
-    "    if (v < lo) return lo;\n"
-    "    if (v > hi) return hi;\n"
-    "    return v;\n"
-    "}\n";
+        "    int total = 0;\n"
+        "    for (int i = 0; i < n; ++i) { total += i; }\n"
+        "    return total;\n"
+        "}\n"
+        "static int fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }\n"
+        "static unsigned clamp(unsigned v, unsigned lo, unsigned hi) {\n"
+        "    if (v < lo) return lo;\n"
+        "    if (v > hi) return hi;\n"
+        "    return v;\n"
+        "}\n";
     EXPECT_EQ(Constexpr(source).size(), 3u);
 }
 
@@ -752,27 +755,27 @@ TEST(ModernizeConstexpr, CallsToConstexprFunctionsChain)
 {
     const std::string source =
         "static int a(int x) { return x + 1; }\n"
-    "static int b(int x) { return a(x) * 2; }\n"
-    "constexpr int c(int x) { return x; }\n"
-    "static int d(int x) { return c(x) + b(x); }\n";
-    const auto diagnostics = Constexpr(source);
+        "static int b(int x) { return a(x) * 2; }\n"
+        "constexpr int c(int x) { return x; }\n"
+        "static int d(int x) { return c(x) + b(x); }\n";
+    const auto               diagnostics = Constexpr(source);
     std::vector<std::string> names;
     for (const auto& diagnostic : diagnostics)
     {
         names.push_back(Flagged(source, diagnostic));
     }
 
-    EXPECT_EQ(names, (std::vector<std::string>{"a", "b", "d"}));
+    EXPECT_EQ(names, (std::vector<std::string> { "a", "b", "d" }));
 }
 
 TEST(ModernizeConstexpr, StaticMembersDefinedInTheClass)
 {
     const std::string source =
         "struct S {\n"
-    "    static int twice(int x) { return 2 * x; }\n"
-    "    int member(int x) { return x; }\n"
-    "    virtual int virt(int x) { return x; }\n"
-    "};\n";
+        "    static int twice(int x) { return 2 * x; }\n"
+        "    int member(int x) { return x; }\n"
+        "    virtual int virt(int x) { return x; }\n"
+        "};\n";
     const auto diagnostics = Constexpr(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(Flagged(source, diagnostics[0]), "twice");
@@ -788,15 +791,19 @@ TEST(ModernizeConstexpr, SilentWhenTheBodyCannotBeEvaluated)
 {
     EXPECT_TRUE(Constexpr("static int f(int x) { return unknown(x); }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { return puts(\"hi\"); }\n").empty());
-    for (const auto& d : Constexpr("static int f(int x) { static int calls = 0; return x + calls; }\n"))
+    for (const auto& d :
+         Constexpr("static int f(int x) { static int calls = 0; return x + calls; }\n"))
     {
-        EXPECT_EQ(d.message.find("function"), std::string::npos); // only the variable may be reported
+        EXPECT_EQ(d.message.find("function"),
+                  std::string::npos); // only the variable may be reported
     }
 
     EXPECT_TRUE(Constexpr("static int f(int x) { int* p = new int(x); return *p; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { if (x < 0) throw 1; return x; }\n").empty());
-    EXPECT_TRUE(Constexpr("static int f(int x) { try { return x; } catch (...) { return 0; } }\n").empty());
-    EXPECT_TRUE(Constexpr("static int f(int x) { auto g = [x]() { return x; }; return g(); }\n").empty());
+    EXPECT_TRUE(
+        Constexpr("static int f(int x) { try { return x; } catch (...) { return 0; } }\n").empty());
+    EXPECT_TRUE(
+        Constexpr("static int f(int x) { auto g = [x]() { return x; }; return g(); }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { goto out; out: return x; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { return reinterpret_cast<int>(&x); }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { return x; }\nstatic int f(int x);\n").empty());
@@ -809,7 +816,8 @@ TEST(ModernizeConstexpr, SilentForNonConstantGlobalsAndNonLiteralTypes)
     EXPECT_TRUE(Constexpr("static std::string f(int x) { return {}; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(std::string s) { return 1; }\n").empty());
     EXPECT_TRUE(Constexpr("static int f(int x) { std::string s; return x; }\n").empty());
-    EXPECT_TRUE(Constexpr("static auto f(int x) { return std::string(); }\n").empty()); // return type not deduced
+    EXPECT_TRUE(Constexpr("static auto f(int x) { return std::string(); }\n")
+                    .empty()); // return type not deduced
     EXPECT_TRUE(Constexpr("static int f(int) { return 1; }\n").empty());
 }
 
@@ -823,29 +831,30 @@ TEST(ModernizeConstexpr, SilentForFunctionsThatNeverReturnAValue)
 TEST(ModernizeConstexpr, SilentForTemplatesAndMutualRecursion)
 {
     EXPECT_TRUE(Constexpr("template <class T> static T f(T x) { return x; }\n").empty());
-    EXPECT_TRUE(Constexpr("template <class T> struct S { static int f(int x) { return x; } };\n").empty());
-    EXPECT_TRUE(Constexpr(
-        "static int odd(int n);\n"
-        "static int even(int n) { return n == 0 ? 1 : odd(n - 1); }\n"
-        "static int odd(int n) { return n == 0 ? 0 : even(n - 1); }\n").empty());
+    EXPECT_TRUE(
+        Constexpr("template <class T> struct S { static int f(int x) { return x; } };\n").empty());
+    EXPECT_TRUE(Constexpr("static int odd(int n);\n"
+                          "static int even(int n) { return n == 0 ? 1 : odd(n - 1); }\n"
+                          "static int odd(int n) { return n == 0 ? 0 : even(n - 1); }\n")
+                    .empty());
 }
 
 TEST(ModernizeConstexpr, UsesEnumsAndConstantsOfTheFile)
 {
     const std::string source =
         "enum Color { Red, Green };\n"
-    "enum class Mode { Fast, Slow };\n"
-    "const int kLimit = 8;\n"
-    "static int pick(Color c) { return c == Red ? 1 : kLimit; }\n"
-    "static int mode(int x) { return x > 0 ? static_cast<int>(Mode::Fast) : 2; }\n";
-    const auto diagnostics = Constexpr(source);
+        "enum class Mode { Fast, Slow };\n"
+        "const int kLimit = 8;\n"
+        "static int pick(Color c) { return c == Red ? 1 : kLimit; }\n"
+        "static int mode(int x) { return x > 0 ? static_cast<int>(Mode::Fast) : 2; }\n";
+    const auto               diagnostics = Constexpr(source);
     std::vector<std::string> names;
     for (const auto& diagnostic : diagnostics)
     {
         names.push_back(Flagged(source, diagnostic));
     }
 
-    EXPECT_EQ(names, (std::vector<std::string>{"kLimit", "pick", "mode"}));
+    EXPECT_EQ(names, (std::vector<std::string> { "kLimit", "pick", "mode" }));
 }
 
 // ---- integration -----------------------------------------------------------------------
@@ -854,11 +863,11 @@ TEST(FlowRules, AnalyzeIncludesBothRules)
 {
     const std::string source =
         "static int square(int x) { return x * x; }\n"
-    "int f(int a) { int x = a * 2; return x; }\n"
-    "const int kSize = 4;\n";
-    const auto tree = heimdall::ParseTree::Parse(source);
-    const auto model = heimdall::Binder::Bind(tree);
-    const auto diagnostics = heimdall::SemanticRules::Analyze(model);
+        "int f(int a) { int x = a * 2; return x; }\n"
+        "const int kSize = 4;\n";
+    const auto               tree        = heimdall::ParseTree::Parse(source);
+    const auto               model       = heimdall::Binder::Bind(tree);
+    const auto               diagnostics = heimdall::SemanticRules::Analyze(model);
     std::vector<std::string> codes;
     for (const auto& diagnostic : diagnostics)
     {
@@ -868,19 +877,18 @@ TEST(FlowRules, AnalyzeIncludesBothRules)
     EXPECT_EQ(std::count(codes.begin(), codes.end(), "cpp/modernize-const"), 1);
     EXPECT_EQ(std::count(codes.begin(), codes.end(), "cpp/modernize-constexpr"), 2);
     EXPECT_TRUE(std::is_sorted(diagnostics.begin(), diagnostics.end(),
-        [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
-        {
-            return a.offset < b.offset;
-    }));
+                               [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b) {
+                                   return a.offset < b.offset;
+                               }));
 }
 
 TEST(FlowRules, RulesAreInTheCatalogAndDefaultToWarnings)
 {
-    bool found_const = false;
+    bool found_const     = false;
     bool found_constexpr = false;
     for (const auto& info : heimdall::RuleCatalog())
     {
-        found_const = found_const || info.code == "cpp/modernize-const";
+        found_const     = found_const || info.code == "cpp/modernize-const";
         found_constexpr = found_constexpr || info.code == "cpp/modernize-constexpr";
     }
 

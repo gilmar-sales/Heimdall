@@ -4,18 +4,18 @@
 #include <utility>
 
 #if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <windows.h>
 #else
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+    #include <fcntl.h>
+    #include <sys/mman.h>
+    #include <sys/stat.h>
+    #include <unistd.h>
 #endif
 
 namespace heimdall
@@ -27,14 +27,14 @@ namespace heimdall
         std::expected<std::string, std::string> ReadAll(const char* path)
         {
             constexpr std::size_t kReadChunkSize = 65536; // 64 KiB
-            std::string out;
-            FILE* file = std::fopen(path, "rb");
+            std::string           out;
+            FILE*                 file = std::fopen(path, "rb");
             if (file == nullptr)
             {
                 return std::unexpected(std::string("cannot open file: ") + path);
             }
 
-            char chunk[kReadChunkSize];
+            char        chunk[kReadChunkSize];
             std::size_t n = 0;
             while ((n = std::fread(chunk, 1, sizeof(chunk), file)) > 0)
             {
@@ -55,7 +55,8 @@ namespace heimdall
 
         std::expected<std::wstring, std::string> ToWide(const char* path)
         {
-            const int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+            const int needed =
+                MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
             if (needed <= 0)
             {
                 return std::unexpected(std::string("invalid UTF-8 path: ") + path);
@@ -100,10 +101,10 @@ namespace heimdall
 
         (void) m_map_handle;
 #endif
-        m_data = "";
-        m_size = 0;
+        m_data        = "";
+        m_size        = 0;
         m_file_handle = nullptr;
-        m_map_handle = nullptr;
+        m_map_handle  = nullptr;
     }
 
     MappedBuffer::MappedBuffer(MappedBuffer&& other) noexcept
@@ -111,16 +112,16 @@ namespace heimdall
         *this = std::move(other);
     }
 
-    MappedBuffer& MappedBuffer::operator= (MappedBuffer&& other) noexcept
+    MappedBuffer& MappedBuffer::operator=(MappedBuffer&& other) noexcept
     {
         if (this != &other)
         {
             Release();
-            m_data = std::exchange(other.m_data, "");
-            m_size = std::exchange(other.m_size, 0);
+            m_data        = std::exchange(other.m_data, "");
+            m_size        = std::exchange(other.m_size, 0);
             m_file_handle = std::exchange(other.m_file_handle, nullptr);
-            m_map_handle = std::exchange(other.m_map_handle, nullptr);
-            m_owned = std::move(other.m_owned);
+            m_map_handle  = std::exchange(other.m_map_handle, nullptr);
+            m_owned       = std::move(other.m_owned);
             // Buffered-fallback data aliases owned storage; re-alias to ours
             // after the move (also fixes SSO, where the bytes were copied).
             if (!m_owned.empty())
@@ -156,15 +157,14 @@ namespace heimdall
             return std::unexpected(wide.error());
         }
 
-        HANDLE file =
-            CreateFileW(wide->c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL, nullptr);
+        HANDLE file = CreateFileW(wide->c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE)
         {
             return std::unexpected(std::string("cannot open file: ") + path);
         }
 
-        LARGE_INTEGER size{};
+        LARGE_INTEGER size {};
         if (GetFileSizeEx(file, &size) == 0)
         {
             CloseHandle(file);
@@ -174,7 +174,7 @@ namespace heimdall
         if (size.QuadPart == 0)
         {
             CloseHandle(file);
-            return MappedBuffer{};
+            return MappedBuffer {};
         }
 
         HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
@@ -193,10 +193,10 @@ namespace heimdall
         }
 
         MappedBuffer out;
-        out.m_data = data;
-        out.m_size = static_cast<std::size_t>(size.QuadPart);
+        out.m_data        = data;
+        out.m_size        = static_cast<std::size_t>(size.QuadPart);
         out.m_file_handle = file;
-        out.m_map_handle = mapping;
+        out.m_map_handle  = mapping;
         return out;
 #else
         const int fd = open(path, O_RDONLY);
@@ -216,10 +216,11 @@ namespace heimdall
         if (st.st_size == 0)
         {
             close(fd);
-            return MappedBuffer{};
+            return MappedBuffer {};
         }
 
-        void* data = mmap(nullptr, static_cast<std::size_t>(st.st_size), PROT_READ, MAP_PRIVATE, fd, 0);
+        void* data =
+            mmap(nullptr, static_cast<std::size_t>(st.st_size), PROT_READ, MAP_PRIVATE, fd, 0);
         if (data == MAP_FAILED)
         {
             close(fd);
@@ -227,8 +228,8 @@ namespace heimdall
         }
 
         MappedBuffer out;
-        out.m_data = static_cast<const char*>(data);
-        out.m_size = static_cast<std::size_t>(st.st_size);
+        out.m_data        = static_cast<const char*>(data);
+        out.m_size        = static_cast<std::size_t>(st.st_size);
         out.m_file_handle = reinterpret_cast<void*>(static_cast<std::intptr_t>(fd));
         return out;
 #endif
@@ -244,8 +245,8 @@ namespace heimdall
 
         MappedBuffer out;
         out.m_owned = std::move(*contents);
-        out.m_data = out.m_owned.data();
-        out.m_size = out.m_owned.size();
+        out.m_data  = out.m_owned.data();
+        out.m_size  = out.m_owned.size();
         return out;
     }
 

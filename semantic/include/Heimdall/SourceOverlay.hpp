@@ -2,8 +2,8 @@
 
 #include <filesystem>
 #include <memory>
-#include <string>
 #include <span>
+#include <string>
 #include <unordered_map>
 
 namespace heimdall
@@ -12,7 +12,7 @@ namespace heimdall
     // Open buffers win over disk, including buffers of not-yet-created files.
     class SourceOverlay
     {
-    public:
+      public:
         void Add(const std::filesystem::path& path, std::shared_ptr<const std::string> source);
 
         std::shared_ptr<const std::string> Find(const std::filesystem::path& path) const;
@@ -21,14 +21,11 @@ namespace heimdall
 
         std::string Fingerprint(std::span<const std::filesystem::path> paths) const;
 
-        bool Empty() const noexcept
-        {
-            return m_sources.empty();
-        }
+        bool Empty() const noexcept { return m_sources.empty(); }
 
-    private:
+      private:
         static std::string Key(const std::filesystem::path& path);
 
         std::unordered_map<std::string, std::shared_ptr<const std::string>> m_sources;
     };
-}
+} // namespace heimdall

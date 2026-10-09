@@ -4,30 +4,35 @@
 #include "Pipeline.hpp"
 #include "Reporting.hpp"
 
-#include <Heimdall/RuleConfig.hpp>
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/RuleConfig.hpp>
 
 #include <filesystem>
 #include <iostream>
 
 #include <vector>
 
-int main(int argc, char**argv)
+int main(int argc, char** argv)
 {
-    constexpr int kExitUsageError = 2;
-    heimdall::cli::Options options{};
+    constexpr int          kExitUsageError = 2;
+    heimdall::cli::Options options {};
     if (!heimdall::cli::ParseOptions(argc, argv, options))
     {
-        std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--fix-unsafe|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] [--config <path>] <files-or-directories-or-globs...>\n";
-        std::cerr << "       heimdall format [--pointer-alignment <left|right>] [--reference-alignment <left|right>] [--write] <files...>\n";
+        std::cerr
+            << "usage: heimdall <lint|check|format|parse> [--jobs N] "
+               "[--json|--fix|--fix-unsafe|--write] [--std <c++20|c++23|c++26>] "
+               "[--compile-commands <path>] [--config <path>] <files-or-directories-or-globs...>\n";
+        std::cerr << "       heimdall format [--pointer-alignment <left|right>] "
+                     "[--reference-alignment <left|right>] [--write] <files...>\n";
         std::cerr << "       heimdall init [directory] [--force]\n";
-        std::cerr << "       globs support '*', '**', '?' and '[...]': e.g. src/**/*.cpp, src/**.cpp\n";
+        std::cerr
+            << "       globs support '*', '**', '?' and '[...]': e.g. src/**/*.cpp, src/**.cpp\n";
         return kExitUsageError;
     }
 
     if (options.command == heimdall::cli::Command::Init)
     {
-        std::string error;
+        std::string           error;
         std::filesystem::path created;
         if (!heimdall::cli::RunInit(options, error, created))
         {
@@ -39,7 +44,8 @@ int main(int argc, char**argv)
         return 0;
     }
 
-    if (options.command == heimdall::cli::Command::Lint || options.command == heimdall::cli::Command::Check)
+    if (options.command == heimdall::cli::Command::Lint ||
+        options.command == heimdall::cli::Command::Check)
     {
         // An explicit --config applies to every file. Otherwise each file
         // resolves its own `.heimdall.json` chain (file dir up to the git
@@ -55,8 +61,9 @@ int main(int argc, char**argv)
             }
 
             options.rule_options = std::move(loaded->options);
-            options.rule_options.overrides.insert(options.rule_options.overrides.end(),
-                options.rule_overrides.begin(), options.rule_overrides.end());
+            options.rule_options.overrides.insert(
+                options.rule_options.overrides.end(), options.rule_overrides.begin(),
+                options.rule_overrides.end());
         }
     }
 
@@ -91,7 +98,7 @@ int main(int argc, char**argv)
         return kExitUsageError;
     }
 
-    heimdall::CompileDatabase database;
+    heimdall::CompileDatabase        database;
     const heimdall::CompileDatabase* database_ptr = nullptr;
     if (!options.compile_commands.empty())
     {
@@ -102,7 +109,7 @@ int main(int argc, char**argv)
             return kExitUsageError;
         }
 
-        database = std::move(*loaded);
+        database     = std::move(*loaded);
         database_ptr = &database;
     }
 

@@ -3,25 +3,25 @@
 #include "Document.hpp"
 #include "JsonRpc.hpp"
 
+#include <Heimdall/Completion.hpp>
 #include <Heimdall/Formatter.hpp>
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Navigation.hpp>
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Refactoring.hpp>
+#include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
 #include <Heimdall/SemanticRules.hpp>
-#include <Heimdall/Completion.hpp>
-#include <Heimdall/Navigation.hpp>
-#include <Heimdall/RuleConfig.hpp>
-#include <Heimdall/Refactoring.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <shared_mutex>
 #include <stop_token>
-#include <fstream>
-#include <filesystem>
 
 namespace heimdall::lsp
 {
@@ -37,9 +37,9 @@ namespace heimdall::lsp
         std::size_t PoolSize()
         {
             std::size_t threads = std::thread::hardware_concurrency();
-            if (const char * env = std::getenv("HEIMDALL_LSP_THREADS"))
+            if (const char* env = std::getenv("HEIMDALL_LSP_THREADS"))
             {
-                char* end = nullptr;
+                char*               end    = nullptr;
                 const unsigned long parsed = std::strtoul(env, &end, 10);
                 if (end != env && parsed >= 2 && parsed <= 16)
                 {
@@ -54,7 +54,9 @@ namespace heimdall::lsp
 
     thread_local const LanguageServer::RequestContext* LanguageServer::t_context = nullptr;
 
-    LanguageServer::LanguageServer() : m_pool(PoolSize()), m_parse_pool(2), m_document_pool(1) {}
+    LanguageServer::LanguageServer() : m_pool(PoolSize()), m_parse_pool(2), m_document_pool(1)
+    {
+    }
 
     LanguageServer::~LanguageServer()
     {
@@ -92,22 +94,13 @@ namespace heimdall::lsp
 
     bool LanguageServer::Run()
     {
-        m_index_worker = std::jthread([this](std::stop_token stop)
-            {
-                IndexWorkerMain(stop);
-        });
-        m_diag_worker = std::jthread([this](std::stop_token stop)
-            {
-                DiagWorkerMain(stop);
-        });
+        m_index_worker = std::jthread([this](std::stop_token stop) { IndexWorkerMain(stop); });
+        m_diag_worker  = std::jthread([this](std::stop_token stop) { DiagWorkerMain(stop); });
 
-        m_pool.Submit([]
-            {
-                heimdall::IncludeIndex::SystemIncludes("c++");
-            }, ThreadPool::Priority::Background);
+        m_pool.Submit([] { heimdall::IncludeIndex::SystemIncludes("c++"); },
+                      ThreadPool::Priority::Background);
 
-        auto stop_workers =[&]
-        {
+        auto stop_workers = [&] {
             {
                 const std::lock_guard<std::mutex> lock(m_inflight_mu);
                 for (auto& [key, source] : m_inflight)
@@ -170,8 +163,8 @@ namespace heimdall::lsp
             }
 
             simdjson::dom::element id;
-            const bool has_id =!object["id"].get(id);
-            std::string id_json = has_id ? simdjson::minify(id) : "null";
+            const bool             has_id  = !object["id"].get(id);
+            std::string            id_json = has_id ? simdjson::minify(id) : "null";
 
             // A handler that throws on the I/O thread (bad_alloc, filesystem_error,
             // ...) must not unwind out of Run and end the session.
@@ -180,26 +173,31 @@ namespace heimdall::lsp
                 if (method == "initialize")
                 {
                     LoadInitializationOptions(request);
-                    const std::string rename_capability = m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
+                    const std::string rename_capability =
+                        m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
                     Respond(id_json,
-                        "{\"capabilities\":{\"textDocumentSync\":2,\"documentFormattingProvider\":true,"
-                        "\"documentRangeFormattingProvider\":true,"
-                        "\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source.fixAll\","
-                        "\"refactor.extract.variable\",\"refactor.extract.function\",\"refactor.inline.variable\"]},\"hoverProvider\":true,"
-                        "\"definitionProvider\":true,\"implementationProvider\":true,"
-                        "\"referencesProvider\":true,\"renameProvider\":" + rename_capability + ","
-                        "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\",\"/\",\"<\",\"\\\"\"],"
-                        "\"resolveProvider\":false}},"
-                        "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
+                            "{\"capabilities\":{\"textDocumentSync\":2,"
+                            "\"documentFormattingProvider\":true,"
+                            "\"documentRangeFormattingProvider\":true,"
+                            "\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source."
+                            "fixAll\","
+                            "\"refactor.extract.variable\",\"refactor.extract.function\","
+                            "\"refactor.inline.variable\"]},\"hoverProvider\":true,"
+                            "\"definitionProvider\":true,\"implementationProvider\":true,"
+                            "\"referencesProvider\":true,\"renameProvider\":" +
+                                rename_capability +
+                                ","
+                                "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\","
+                                "\"#\",\"/\",\"<\",\"\\\"\"],"
+                                "\"resolveProvider\":false}},"
+                                "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
                 }
                 else if (method == "initialized")
                 {
                     if (m_workspace_scan.load(std::memory_order_relaxed))
                     {
-                        m_scan_worker = std::jthread([this](std::stop_token stop)
-                            {
-                                WorkspaceScanMain(stop);
-                        });
+                        m_scan_worker =
+                            std::jthread([this](std::stop_token stop) { WorkspaceScanMain(stop); });
                     }
                 }
                 else if (method == "shutdown")
@@ -229,62 +227,63 @@ namespace heimdall::lsp
                 }
                 else if (method == "textDocument/formatting")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            FormatDocument(request, id);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 FormatDocument(request, id);
+                             });
                 }
                 else if (method == "textDocument/rangeFormatting")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            RangeFormatDocument(request, id);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 RangeFormatDocument(request, id);
+                             });
                 }
                 else if (method == "textDocument/codeAction")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            CodeActions(request, id);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 CodeActions(request, id);
+                             });
                 }
                 else if (method == "textDocument/completion")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            CompleteDocument(request, id);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 CompleteDocument(request, id);
+                             });
                 }
-                else if (method == "textDocument/references" || method == "textDocument/prepareRename" ||
-                    method == "textDocument/rename")
+                else if (method == "textDocument/references" ||
+                         method == "textDocument/prepareRename" || method == "textDocument/rename")
                 {
-                    const int mode = method == "textDocument/references" ? 0 :
-                    method == "textDocument/prepareRename" ? 1 : 2;
-                    Dispatch(body, request, id_json,[this, mode](simdjson::dom::element request, std::string_view id)
-                        {
-                            RenameDocument(request, id, mode);
-                    });
+                    const int mode = method == "textDocument/references"      ? 0
+                                     : method == "textDocument/prepareRename" ? 1
+                                                                              : 2;
+                    Dispatch(body, request, id_json,
+                             [this, mode](simdjson::dom::element request, std::string_view id) {
+                                 RenameDocument(request, id, mode);
+                             });
                 }
                 else if (method == "textDocument/definition")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            GotoDocument(request, id, false);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 GotoDocument(request, id, false);
+                             });
                 }
                 else if (method == "textDocument/implementation")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            GotoDocument(request, id, true);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 GotoDocument(request, id, true);
+                             });
                 }
                 else if (method == "textDocument/hover")
                 {
-                    Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
-                        {
-                            HoverDocument(request, id);
-                    });
+                    Dispatch(body, request, id_json,
+                             [this](simdjson::dom::element request, std::string_view id) {
+                                 HoverDocument(request, id);
+                             });
                 }
                 else if (method == "$/cancelRequest")
                 {
@@ -344,50 +343,48 @@ namespace heimdall::lsp
     {
         // All document notifications and snapshot pins use the same FIFO lane.
         // No text editing, lexing or line-index rebuilding runs on transport I/O.
-        m_document_pool.Submit([this, body = std::string(body)]
+        m_document_pool.Submit([this, body = std::string(body)] {
+            simdjson::dom::parser  parser;
+            simdjson::dom::element request;
+            if (parser.parse(body).get(request))
             {
-                simdjson::dom::parser parser;
-                simdjson::dom::element request;
-                if (parser.parse(body).get(request))
-                {
-                    return;
+                return;
             }
 
-                std::string_view method;
-                if (request["method"].get_string().get(method))
-                {
-                    return;
+            std::string_view method;
+            if (request["method"].get_string().get(method))
+            {
+                return;
             }
 
-                if (method == "textDocument/didOpen")
-                {
-                    OpenDocument(request);
+            if (method == "textDocument/didOpen")
+            {
+                OpenDocument(request);
             }
-                else if (method == "textDocument/didChange")
-                {
-                    ChangeDocument(request);
+            else if (method == "textDocument/didChange")
+            {
+                ChangeDocument(request);
             }
-                else if (method == "textDocument/didClose")
-                {
-                    CloseDocument(request);
+            else if (method == "textDocument/didClose")
+            {
+                CloseDocument(request);
             }
         });
     }
 
-    void LanguageServer::Dispatch(
-        std::string_view body,
-        simdjson::dom::element request,
-        const std::string& id,
-        RequestHandler handler)
+    void LanguageServer::Dispatch(std::string_view       body,
+                                  simdjson::dom::element request,
+                                  const std::string&     id,
+                                  RequestHandler         handler)
     {
-        auto job = std::make_shared<RequestJob>();
-        job->body = body;
-        job->id = id;
-        job->handler = std::move(handler);
+        auto job                 = std::make_shared<RequestJob>();
+        job->body                = body;
+        job->id                  = id;
+        job->handler             = std::move(handler);
         job->context.interactive = true;
         std::stop_source source;
         job->context.stop = source.get_token();
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object document;
         if (DocumentParams(request, uri, document))
         {
@@ -400,19 +397,16 @@ namespace heimdall::lsp
         }
         // Pin after prior notifications, before later ones. Cancellation was
         // registered above, so transport can cancel even while this pin is queued.
-        m_document_pool.Submit([this, job]
+        m_document_pool.Submit([this, job] {
+            if (!job->context.document_uri.empty())
             {
-                if (!job->context.document_uri.empty())
-                {
-                    if (auto snapshot = GetDocument(job->context.document_uri))
-                        job->context.pinned = PinnedDocument{job->context.document_uri, std::move(*snapshot)};
+                if (auto snapshot = GetDocument(job->context.document_uri))
+                    job->context.pinned =
+                        PinnedDocument { job->context.document_uri, std::move(*snapshot) };
             }
 
-                job->context.analysis = m_workspace.Snapshot();
-                m_pool.Submit([this, job]
-                {
-                    ExecuteRequest(job);
-            });
+            job->context.analysis = m_workspace.Snapshot();
+            m_pool.Submit([this, job] { ExecuteRequest(job); });
         });
     }
 
@@ -420,12 +414,9 @@ namespace heimdall::lsp
     {
         struct ContextScope
         {
-            ~ContextScope()
-            {
-                t_context = nullptr;
-            }
+            ~ContextScope() { t_context = nullptr; }
         } scope;
-        t_context = &job->context;
+        t_context      = &job->context;
         bool suspended = false;
         try
         {
@@ -441,7 +432,7 @@ namespace heimdall::lsp
                 }
 
                 thread_local simdjson::dom::parser parser;
-                simdjson::dom::element element;
+                simdjson::dom::element             element;
                 if (parser.parse(job->body).get(element))
                 {
                     Respond(job->id, "null");
@@ -454,33 +445,31 @@ namespace heimdall::lsp
         }
         catch (const ParsePending& pending)
         {
-            auto waiter = std::make_shared<ParseSlot::Waiter>();
-            waiter->resume =[this, job, slot = pending.slot]
-            {
+            auto waiter    = std::make_shared<ParseSlot::Waiter>();
+            waiter->resume = [this, job, slot = pending.slot] {
                 // Keep the finished result with this request even if didChange
                 // or another version has meanwhile evicted the document cache.
-                m_pool.Submit([this, job, slot]
+                m_pool.Submit([this, job, slot] {
                     {
-                        {
-                            const std::lock_guard<std::mutex> lock(slot->mu);
-                            job->context.parsed = slot->tree;
-                            job->context.parse_failure = slot->failure;
+                        const std::lock_guard<std::mutex> lock(slot->mu);
+                        job->context.parsed        = slot->tree;
+                        job->context.parse_failure = slot->failure;
                     }
-                        ExecuteRequest(job);
+                    ExecuteRequest(job);
                 });
             };
             std::weak_ptr<ParseSlot::Waiter> weak = waiter;
-            waiter->cancellation.emplace(job->context.stop, std::function<void() >([weak]
-                {
-                    if (auto waiting = weak.lock())
-                    {
-                        waiting->Wake();
-                }
-            }));
+            waiter->cancellation.emplace(job->context.stop, std::function<void()>([weak] {
+                                             if (auto waiting = weak.lock())
+                                             {
+                                                 waiting->Wake();
+                                             }
+                                         }));
             bool completed;
             {
                 const std::lock_guard<std::mutex> lock(pending.slot->mu);
-                completed = pending.slot->ready.load(std::memory_order_acquire) || pending.slot->failure;
+                completed =
+                    pending.slot->ready.load(std::memory_order_acquire) || pending.slot->failure;
                 if (!completed)
                 {
                     pending.slot->waiters.push_back(waiter);
@@ -504,7 +493,8 @@ namespace heimdall::lsp
         }
     }
 
-    std::optional<LanguageServer::DocumentSnapshot> LanguageServer::GetDocument(const std::string& uri)
+    std::optional<LanguageServer::DocumentSnapshot> LanguageServer::GetDocument(
+        const std::string& uri)
     {
         if (t_context != nullptr && t_context->interactive && t_context->document_uri == uri)
         {
@@ -531,7 +521,7 @@ namespace heimdall::lsp
             return nullptr;
         }
 
-        const std::filesystem::path path = PathFromUri(uri);
+        const std::filesystem::path     path  = PathFromUri(uri);
         const heimdall::CompileCommand* exact = m_compile_database->Find(path);
         return exact != nullptr ? exact : m_compile_database->FindOrNearest(path);
     }
@@ -550,20 +540,20 @@ namespace heimdall::lsp
     {
         // LSP RequestCancelled.
         Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
-            ",\"error\":{\"code\":-32800,\"message\":\"Request cancelled\"}}");
+             ",\"error\":{\"code\":-32800,\"message\":\"Request cancelled\"}}");
     }
 
     void LanguageServer::RespondInternalError(std::string_view id)
     {
         Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
-            ",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}");
+             ",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}");
     }
 
     void LanguageServer::LoadInitializationOptions(simdjson::dom::element request)
     {
         simdjson::dom::object params;
         simdjson::dom::object options;
-        const bool has_params = GetObject(request, "params", params);
+        const bool            has_params = GetObject(request, "params", params);
         simdjson::dom::object capabilities, workspace_capabilities, edit_capabilities;
         if (has_params && GetObject(params, "capabilities", capabilities) &&
             GetObject(capabilities, "workspace", workspace_capabilities) &&
@@ -585,7 +575,7 @@ namespace heimdall::lsp
                 for (const auto folder_element : folders)
                 {
                     simdjson::dom::object folder;
-                    std::string_view uri;
+                    std::string_view      uri;
                     if (!folder_element.get_object().get(folder) && GetString(folder, "uri", uri))
                     {
                         workspace_root = PathFromUri(uri);
@@ -617,7 +607,8 @@ namespace heimdall::lsp
             if (workspace_root.empty())
             {
                 std::string_view configured_root;
-                if (GetString(options, "workspaceRoot", configured_root) && !configured_root.empty())
+                if (GetString(options, "workspaceRoot", configured_root) &&
+                    !configured_root.empty())
                 {
                     workspace_root = std::filesystem::path(configured_root);
                 }
@@ -630,10 +621,10 @@ namespace heimdall::lsp
             m_workspace_root = workspace_root;
         }
         std::error_code cwd_error;
-        const auto cwd = std::filesystem::current_path(cwd_error);
+        const auto      cwd = std::filesystem::current_path(cwd_error);
         if (workspace_root.empty())
         {
-            workspace_root = cwd_error ? std::filesystem::path{}: cwd;
+            workspace_root = cwd_error ? std::filesystem::path {} : cwd;
         }
 
         if (!workspace_root.empty())
@@ -647,10 +638,10 @@ namespace heimdall::lsp
             else if (*loaded_rules)
             {
                 const std::lock_guard<std::mutex> lock(m_init_mu);
-                m_rule_options = std::move(* *loaded_rules);
+                m_rule_options = std::move(**loaded_rules);
             }
             else if (!cwd_error && std::filesystem::absolute(workspace_root).lexically_normal() !=
-                std::filesystem::absolute(cwd).lexically_normal())
+                                       std::filesystem::absolute(cwd).lexically_normal())
             {
                 auto cwd_rules = heimdall::FindRuleOptions(cwd);
                 if (!cwd_rules)
@@ -661,7 +652,7 @@ namespace heimdall::lsp
                 else if (*cwd_rules)
                 {
                     const std::lock_guard<std::mutex> lock(m_init_mu);
-                    m_rule_options = std::move(* *cwd_rules);
+                    m_rule_options = std::move(**cwd_rules);
                 }
             }
         }
@@ -681,7 +672,7 @@ namespace heimdall::lsp
         m_enable_semantic.store(enabled, std::memory_order_relaxed);
 
         std::string_view path;
-        if (!has_options ||!GetString(options, "compileCommands", path) || path.empty())
+        if (!has_options || !GetString(options, "compileCommands", path) || path.empty())
         {
             return;
         }
@@ -694,10 +685,11 @@ namespace heimdall::lsp
             return;
         }
 
-        std::unordered_set<std::string> drivers = {"c++"};
+        std::unordered_set<std::string> drivers = { "c++" };
         {
             const std::lock_guard<std::mutex> lock(m_init_mu);
-            m_compile_database = std::make_shared<const heimdall::CompileDatabase>(std::move(*database));
+            m_compile_database =
+                std::make_shared<const heimdall::CompileDatabase>(std::move(*database));
             m_workspace.SetCompilationDatabase(m_compile_database);
             for (const auto& command : m_compile_database->Commands())
             {
@@ -708,30 +700,30 @@ namespace heimdall::lsp
             }
         }
 
-        m_pool.Submit(ThreadPool::Task([drivers = std::move(drivers)]()
-            {
-                for (const auto& driver : drivers)
-                {
-                    heimdall::IncludeIndex::SystemIncludes(driver);
-            }
-            }), ThreadPool::Priority::Background);
+        m_pool.Submit(ThreadPool::Task([drivers = std::move(drivers)]() {
+                          for (const auto& driver : drivers)
+                          {
+                              heimdall::IncludeIndex::SystemIncludes(driver);
+                          }
+                      }),
+                      ThreadPool::Priority::Background);
     }
 
     void LanguageServer::Respond(std::string_view id, std::string_view result)
     {
-        Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) + ",\"result\":" + std::string(result) + "}");
+        Send("{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
+             ",\"result\":" + std::string(result) + "}");
     }
 
-    void LanguageServer::PublishDiagnostics(const std::string& uri,
-        std::shared_ptr<const std::string> text,
-        std::int64_t version)
+    void LanguageServer::PublishDiagnostics(
+        const std::string& uri, std::shared_ptr<const std::string> text, std::int64_t version)
     {
         // Single-pass pipeline: one lex + preprocess + grammar pass per version,
         // shared by the rule engine, the semantic pass and the syntax errors
         // (was: 4 lexes + 2 preprocesses of the same buffer per keystroke).
         const heimdall::CompileCommand* command = CommandFor(uri);
-        const auto tree = CachedParse(uri, text, version, command);
-        if (!tree || RequestCancelled() ||!IsCurrentVersion(uri, version))
+        const auto                      tree    = CachedParse(uri, text, version, command);
+        if (!tree || RequestCancelled() || !IsCurrentVersion(uri, version))
         {
             return;
         }
@@ -755,7 +747,7 @@ namespace heimdall::lsp
         // Names that a using-directive makes ambiguous (needs header scopes so
         // `using namespace std;` clashes with other namespaces are seen too).
         const HeaderView ambiguity_headers = HeaderScopes(uri, text, command);
-        const auto ambiguities = heimdall::Navigation::FindAmbiguities(
+        const auto       ambiguities       = heimdall::Navigation::FindAmbiguities(
             *tree, ambiguity_headers.index ? &ambiguity_headers.index->Scopes() : nullptr);
         if (!IsCurrentVersion(uri, version))
         {
@@ -766,7 +758,8 @@ namespace heimdall::lsp
         // O(log L) (was: an O(file size) scan per diagnostic).
         LineIndex lines;
         lines.Build(*text);
-        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
+        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                              "publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
         message += ",\"version\":" + std::to_string(version) + ",\"diagnostics\":[";
         bool first = true;
@@ -777,9 +770,9 @@ namespace heimdall::lsp
                 message += ',';
             }
 
-            first = false;
+            first                = false;
             const Position start = lines.ToPosition(diagnostic.offset);
-            const Position end = lines.ToPosition(diagnostic.offset + diagnostic.length);
+            const Position end   = lines.ToPosition(diagnostic.offset + diagnostic.length);
             message += "{\"range\":{\"start\":";
             AppendPosition(start, message);
             message += ",\"end\":";
@@ -798,9 +791,9 @@ namespace heimdall::lsp
                 message += ',';
             }
 
-            first = false;
+            first                = false;
             const Position start = lines.ToPosition(diagnostic.offset);
-            const Position end = lines.ToPosition(diagnostic.offset + diagnostic.length);
+            const Position end   = lines.ToPosition(diagnostic.offset + diagnostic.length);
             message += "{\"range\":{\"start\":";
             AppendPosition(start, message);
             message += ",\"end\":";
@@ -820,17 +813,19 @@ namespace heimdall::lsp
             }
 
             first = false;
-            std::string text_message = "reference to '" + ambiguity.name + "' is ambiguous; candidates: ";
+            std::string text_message =
+                "reference to '" + ambiguity.name + "' is ambiguous; candidates: ";
             for (std::size_t i = 0; i < ambiguity.candidates.size(); ++i)
             {
-                text_message +=(i == 0 ? "" : ", ") + ambiguity.candidates[i];
+                text_message += (i == 0 ? "" : ", ") + ambiguity.candidates[i];
             }
 
             message += "{\"range\":{\"start\":";
             AppendPosition(lines.ToPosition(ambiguity.offset), message);
             message += ",\"end\":";
             AppendPosition(lines.ToPosition(ambiguity.offset + ambiguity.length), message);
-            message += "},\"severity\":1,\"code\":\"semantic/ambiguous-reference\",\"source\":\"heimdall\",\"message\":";
+            message += "},\"severity\":1,\"code\":\"semantic/"
+                       "ambiguous-reference\",\"source\":\"heimdall\",\"message\":";
             QuoteJson(text_message, message);
             message += '}';
         }
@@ -842,13 +837,14 @@ namespace heimdall::lsp
                 message += ',';
             }
 
-            first = false;
+            first                = false;
             const Position start = lines.ToPosition(diagnostic.offset);
             message += "{\"range\":{\"start\":";
             AppendPosition(start, message);
             message += ",\"end\":";
             AppendPosition(start, message);
-            message += "},\"severity\":1,\"code\":\"syntax/parse-error\",\"source\":\"heimdall\",\"message\":";
+            message += "},\"severity\":1,\"code\":\"syntax/"
+                       "parse-error\",\"source\":\"heimdall\",\"message\":";
             QuoteJson(diagnostic.message, message);
             message += '}';
         }
@@ -862,7 +858,8 @@ namespace heimdall::lsp
         }
         if (!init_error.empty())
         {
-            std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/showMessage\",\"params\":{\"type\":2,\"message\":";
+            std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
+                                       "showMessage\",\"params\":{\"type\":2,\"message\":";
             QuoteJson(init_error, notification);
             notification += "}}";
             Send(notification);
@@ -872,7 +869,7 @@ namespace heimdall::lsp
     }
 
     bool LanguageServer::DocumentParams(simdjson::dom::element request, std::string_view& uri,
-        simdjson::dom::object& document)
+                                        simdjson::dom::object& document)
     {
         simdjson::dom::object params;
         if (!GetObject(request, "params", params))
@@ -890,7 +887,7 @@ namespace heimdall::lsp
 
     void LanguageServer::OpenDocument(simdjson::dom::element request)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
@@ -910,15 +907,15 @@ namespace heimdall::lsp
         }
 
         const std::string uri_string(uri);
-        DocumentSnapshot snapshot;
+        DocumentSnapshot  snapshot;
         // Created non-const: ChangeDocument edits an unshared snapshot in place.
-        snapshot.text = std::make_shared<std::string>(text);
+        snapshot.text    = std::make_shared<std::string>(text);
         snapshot.version = version;
-        auto lines = std::make_shared<LineIndex>();
+        auto lines       = std::make_shared<LineIndex>();
         lines->Build(*snapshot.text);
         snapshot.lines = std::move(lines);
-        snapshot.tokens = std::make_shared<std::vector<heimdall::Token>>(
-            heimdall::Lexer(*snapshot.text).Lex());
+        snapshot.tokens =
+            std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*snapshot.text).Lex());
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
             if (const auto old = m_documents.find(uri_string); old != m_documents.end())
@@ -927,13 +924,13 @@ namespace heimdall::lsp
             }
 
             auto opened = m_workspace.Open(PathFromUri(uri_string), snapshot.text, version,
-                ParserOptionsFor(CommandFor(uri_string)));
+                                           ParserOptionsFor(CommandFor(uri_string)));
             if (!opened)
             {
                 return;
             }
 
-            snapshot.document = *opened;
+            snapshot.document       = *opened;
             m_documents[uri_string] = std::move(snapshot);
         }
         {
@@ -943,12 +940,11 @@ namespace heimdall::lsp
         EnqueueDiagnostics(uri_string, version);
     }
 
-    bool LanguageServer::ApplyContentChange(
-        std::string& current,
-        LineIndex& index,
-        std::vector<heimdall::Token>& tokens,
-        EditHull& hull,
-        simdjson::dom::object change)
+    bool LanguageServer::ApplyContentChange(std::string&                  current,
+                                            LineIndex&                    index,
+                                            std::vector<heimdall::Token>& tokens,
+                                            EditHull&                     hull,
+                                            simdjson::dom::object         change)
     {
         std::string_view text;
         if (!GetString(change, "text", text))
@@ -960,7 +956,7 @@ namespace heimdall::lsp
         if (!GetObject(change, "range", range))
         {
             // Full-document sync (textDocumentSync = 1 fallback).
-            hull.Add({0, current.size(), text.size()});
+            hull.Add({ 0, current.size(), text.size() });
             current.assign(text);
             index.Build(current);
             tokens = heimdall::Lexer(current).Lex();
@@ -970,13 +966,12 @@ namespace heimdall::lsp
         // Incremental sync (textDocumentSync = 2): splice the range.
         simdjson::dom::object start_object;
         simdjson::dom::object end_object;
-        if (!GetObject(range, "start", start_object) ||!GetObject(range, "end", end_object))
+        if (!GetObject(range, "start", start_object) || !GetObject(range, "end", end_object))
         {
             return false;
         }
 
-        auto number =[](simdjson::dom::object object, const char* key)->std::size_t
-        {
+        auto number = [](simdjson::dom::object object, const char* key) -> std::size_t {
             std::uint64_t unsigned_value = 0;
             if (!object[key].get_uint64().get(unsigned_value))
             {
@@ -991,13 +986,13 @@ namespace heimdall::lsp
 
             return 0;
         };
-        const Position start = {number(start_object, "line"), number(start_object, "character")};
-        const Position end = {number(end_object, "line"), number(end_object, "character")};
+        const Position start = { number(start_object, "line"), number(start_object, "character") };
+        const Position end   = { number(end_object, "line"), number(end_object, "character") };
         // F3: the caller keeps one index across the batch (was: a fresh O(N)
         // build per change). Offsets resolve against the running buffer; the
         // index is refreshed once per applied change below.
         std::size_t start_offset = index.OffsetFromPosition(start);
-        std::size_t end_offset = index.OffsetFromPosition(end);
+        std::size_t end_offset   = index.OffsetFromPosition(end);
         if (start_offset > current.size())
         {
             start_offset = current.size();
@@ -1013,10 +1008,8 @@ namespace heimdall::lsp
             end_offset = start_offset;
         }
 
-        const heimdall::Lexer::TextEdit edit
-        {
-            start_offset, end_offset - start_offset, text.size()
-        };
+        const heimdall::Lexer::TextEdit edit { start_offset, end_offset - start_offset,
+                                               text.size() };
         current.replace(edit.offset, edit.old_length, text);
         index.Update(current, edit.offset, edit.old_length, edit.new_length);
         heimdall::Lexer(current).Relex(tokens, edit);
@@ -1026,14 +1019,14 @@ namespace heimdall::lsp
 
     void LanguageServer::ChangeDocument(simdjson::dom::element request)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
             return;
         }
 
-        const std::string uri_string(uri);
+        const std::string     uri_string(uri);
         simdjson::dom::object params;
         if (!GetObject(request, "params", params))
         {
@@ -1054,17 +1047,17 @@ namespace heimdall::lsp
 
         // Which text the parse cache entry has to describe for its tree to be a
         // usable base, and which document version that is.
-        const std::string* current_text = nullptr;
-        std::int64_t current_version = 0;
+        const std::string* current_text    = nullptr;
+        std::int64_t       current_version = 0;
         {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
-            const auto found = m_documents.find(uri_string);
+            const auto                                found = m_documents.find(uri_string);
             if (found == m_documents.end())
             {
                 return;
             }
 
-            current_text = found->second.text.get();
+            current_text    = found->second.text.get();
             current_version = found->second.version;
         }
 
@@ -1077,8 +1070,8 @@ namespace heimdall::lsp
         // Dropping the cache entry releases obsolete buffers. Keep just the
         // tokens/nodes needed for reuse when no other consumer owns the tree.
         std::shared_ptr<const heimdall::ParseTree> base;
-        heimdall::ParserOptions base_options;
-        EditHull pending;
+        heimdall::ParserOptions                    base_options;
+        EditHull                                   pending;
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
             if (const auto found = m_parse_cache.find(uri_string); found != m_parse_cache.end())
@@ -1087,15 +1080,15 @@ namespace heimdall::lsp
                 if (entry.slot && entry.slot->ready.load(std::memory_order_acquire) &&
                     entry.text.get() == current_text && entry.version == current_version)
                 {
-                    base = entry.slot->tree;
+                    base         = entry.slot->tree;
                     base_options = entry.options;
                 }
                 else if (entry.base && entry.base_version == current_version)
                 {
-                    base = entry.base;
-                    base_options = entry.base_options;
+                    base          = entry.base;
+                    base_options  = entry.base_options;
                     pending.valid = true;
-                    pending.edit = entry.base_edit;
+                    pending.edit  = entry.base_edit;
                 }
 
                 m_parse_cache.erase(found);
@@ -1107,11 +1100,11 @@ namespace heimdall::lsp
             std::const_pointer_cast<heimdall::ParseTree>(base)->ReleaseSource();
         }
 
-        EditHull hull;
+        EditHull         hull;
         DocumentSnapshot snapshot;
         {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
-            const auto found = m_documents.find(uri_string);
+            const auto                                found = m_documents.find(uri_string);
             if (found == m_documents.end())
             {
                 return;
@@ -1121,11 +1114,12 @@ namespace heimdall::lsp
         }
         // Published snapshots are always immutable. Build the next version
         // outside m_docs_mu; readers continue using the previous one meanwhile.
-        auto text = std::make_shared<std::string>(*snapshot.text);
+        auto text  = std::make_shared<std::string>(*snapshot.text);
         auto lines = std::make_shared<LineIndex>(*snapshot.lines);
-        auto tokens = snapshot.tokens
-        ? std::make_shared<std::vector<heimdall::Token>>(*snapshot.tokens)
-        : std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*text).Lex());
+        auto tokens =
+            snapshot.tokens
+                ? std::make_shared<std::vector<heimdall::Token>>(*snapshot.tokens)
+                : std::make_shared<std::vector<heimdall::Token>>(heimdall::Lexer(*text).Lex());
         lines->Rebind(*text);
         for (simdjson::dom::element change : changes)
         {
@@ -1138,9 +1132,9 @@ namespace heimdall::lsp
 
         lines->Rebind(*text);
         snapshot.version = new_version;
-        snapshot.text = std::move(text);
-        snapshot.lines = std::move(lines);
-        snapshot.tokens = std::move(tokens);
+        snapshot.text    = std::move(text);
+        snapshot.lines   = std::move(lines);
+        snapshot.tokens  = std::move(tokens);
         {
             const std::lock_guard<std::shared_mutex> lock(m_docs_mu);
             if (!m_workspace.Update(snapshot.document, snapshot.text, snapshot.version))
@@ -1156,8 +1150,8 @@ namespace heimdall::lsp
             if (base)
             {
                 ParseCacheEntry& entry = m_parse_cache[uri_string];
-                entry.base = std::move(base);
-                entry.base_options = std::move(base_options);
+                entry.base             = std::move(base);
+                entry.base_options     = std::move(base_options);
                 if (pending.valid && hull.valid)
                 {
                     entry.base_edit = heimdall::Lexer::Compose(pending.edit, hull.edit);
@@ -1183,7 +1177,7 @@ namespace heimdall::lsp
 
     void LanguageServer::CloseDocument(simdjson::dom::element request)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
@@ -1224,14 +1218,15 @@ namespace heimdall::lsp
         if (m_workspace_scan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
         {
             // The file stays part of the workspace: show what is on disk instead of clearing.
-            m_pool.Submit(ThreadPool::Task([this, closed_path]()
-                {
-                    PublishWorkspaceFile(closed_path, std::stop_token{});
-                }), ThreadPool::Priority::Background);
+            m_pool.Submit(ThreadPool::Task([this, closed_path]() {
+                              PublishWorkspaceFile(closed_path, std::stop_token {});
+                          }),
+                          ThreadPool::Priority::Background);
             return;
         }
 
-        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
+        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                              "publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
         message += ",\"diagnostics\":[]}}";
         Send(message);
@@ -1240,17 +1235,19 @@ namespace heimdall::lsp
     bool LanguageServer::IsWorkspaceSource(const std::filesystem::path& file)
     {
         static constexpr std::string_view kExtensions[] = {
-            ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h", ".ipp", ".tpp", ".inl", ".cppm", ".ixx",
+            ".cpp", ".cc",  ".cxx", ".c++", ".hpp",  ".hh",  ".hxx",
+            ".h",   ".ipp", ".tpp", ".inl", ".cppm", ".ixx",
         };
         const std::string extension = file.extension().string();
         return std::ranges::find(kExtensions, extension) != std::end(kExtensions);
     }
 
-    int LanguageServer::PublishWorkspaceFile(const std::filesystem::path& file, std::stop_token stop)
+    int LanguageServer::PublishWorkspaceFile(const std::filesystem::path& file,
+                                             std::stop_token              stop)
     {
         constexpr std::uintmax_t kMaxFileBytes = 2u * 1024u * 1024u;
-        std::error_code error;
-        const auto size = std::filesystem::file_size(file, error);
+        std::error_code          error;
+        const auto               size = std::filesystem::file_size(file, error);
         if (error || size > kMaxFileBytes)
         {
             return -1;
@@ -1263,10 +1260,9 @@ namespace heimdall::lsp
         }
 
         auto text = std::make_shared<std::string>((std::istreambuf_iterator<char>(input)),
-            std::istreambuf_iterator<char>());
-        const std::string uri = UriFromPath(file);
-        const auto is_open =[&]
-        {
+                                                  std::istreambuf_iterator<char>());
+        const std::string uri     = UriFromPath(file);
+        const auto        is_open = [&] {
             const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
             return m_documents.contains(uri);
         };
@@ -1276,7 +1272,7 @@ namespace heimdall::lsp
         }
 
         const heimdall::CompileCommand* command = CommandFor(uri);
-        auto tree = std::make_shared<const heimdall::ParseTree>(
+        auto                            tree    = std::make_shared<const heimdall::ParseTree>(
             heimdall::ParseTree::ParseSnapshot(text, ParserOptionsFor(command), stop));
         if (tree->Cancelled())
         {
@@ -1285,7 +1281,8 @@ namespace heimdall::lsp
 
         auto diagnostics = RuleDiagnostics(uri, tree, command);
         {
-            // RuleDiagnostics caches a per-document include profile; a one-shot scan must not keep it.
+            // RuleDiagnostics caches a per-document include profile; a one-shot scan must not keep
+            // it.
             const std::lock_guard<std::mutex> lock(m_profile_mu);
             m_include_profiles.erase(uri);
         }
@@ -1298,13 +1295,13 @@ namespace heimdall::lsp
 
         LineIndex lines;
         lines.Build(*text);
-        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
+        std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                              "publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
         message += ",\"diagnostics\":[";
-        int count = 0;
-        const auto append =[&](std::size_t offset, std::size_t length, int severity, std::string_view code,
-            std::string_view text_message)
-        {
+        int        count  = 0;
+        const auto append = [&](std::size_t offset, std::size_t length, int severity,
+                                std::string_view code, std::string_view text_message) {
             if (count++ > 0)
             {
                 message += ',';
@@ -1354,22 +1351,23 @@ namespace heimdall::lsp
             root = m_workspace_root;
         }
         std::error_code error;
-        if (root.empty() ||!std::filesystem::is_directory(root, error))
+        if (root.empty() || !std::filesystem::is_directory(root, error))
         {
             return;
         }
 
-        constexpr std::size_t kMaxFiles = 20000;
-        const auto skipped_directory =[](const std::string& name)
-        {
-            return name.starts_with('.') || name.starts_with("build") || name.starts_with("cmake-build") ||
-                name == "node_modules" || name == "_deps" || name == "vcpkg_installed" || name == "out";
+        constexpr std::size_t kMaxFiles         = 20000;
+        const auto            skipped_directory = [](const std::string& name) {
+            return name.starts_with('.') || name.starts_with("build") ||
+                   name.starts_with("cmake-build") || name == "node_modules" || name == "_deps" ||
+                   name == "vcpkg_installed" || name == "out";
         };
 
         std::vector<std::filesystem::path> files;
-        for (std::filesystem::recursive_directory_iterator it(
-            root, std::filesystem::directory_options::skip_permission_denied, error), end;
-            !error && it != end && files.size() < kMaxFiles; it.increment(error))
+        for (std::filesystem::recursive_directory_iterator
+                 it(root, std::filesystem::directory_options::skip_permission_denied, error),
+             end;
+             !error && it != end && files.size() < kMaxFiles; it.increment(error))
         {
             if (stop.stop_requested())
             {
@@ -1389,7 +1387,7 @@ namespace heimdall::lsp
             }
         }
 
-        std::size_t scanned = 0;
+        std::size_t scanned  = 0;
         std::size_t warnings = 0;
         for (const auto& file : files)
         {
@@ -1405,17 +1403,18 @@ namespace heimdall::lsp
             }
         }
 
-        std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":3,\"message\":";
+        std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
+                                   "logMessage\",\"params\":{\"type\":3,\"message\":";
         QuoteJson("Heimdall: workspace scan finished: " + std::to_string(scanned) + " files, " +
-            std::to_string(warnings) + " diagnostics",
-            notification);
+                      std::to_string(warnings) + " diagnostics",
+                  notification);
         notification += "}}";
         Send(notification);
     }
 
     void LanguageServer::FormatDocument(simdjson::dom::element request, std::string_view id)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
@@ -1424,17 +1423,17 @@ namespace heimdall::lsp
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, "[]");
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::int64_t version = document->version;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
-        const heimdall::CompileCommand* command = CommandFor(uri_string);
+        const std::shared_ptr<const std::string> text    = document->text;
+        const std::int64_t                       version = document->version;
+        const std::shared_ptr<const LineIndex>   lines   = document->lines;
+        const heimdall::CompileCommand*          command = CommandFor(uri_string);
         const auto tree = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
@@ -1447,7 +1446,7 @@ namespace heimdall::lsp
         {
             if (*found)
             {
-                format_options = * *found;
+                format_options = **found;
             }
         }
         else
@@ -1471,10 +1470,12 @@ namespace heimdall::lsp
         Respond(id, response);
     }
 
-    heimdall::AnalysisContext LanguageServer::AnalysisFor(const std::string& uri,
-        std::shared_ptr<const heimdall::ParseTree> tree, heimdall::ParserOptions options)
+    heimdall::AnalysisContext LanguageServer::AnalysisFor(
+        const std::string& uri, std::shared_ptr<const heimdall::ParseTree> tree,
+        heimdall::ParserOptions options)
     {
-        auto snapshot = t_context && t_context->interactive ? t_context->analysis : m_workspace.Snapshot();
+        auto snapshot =
+            t_context && t_context->interactive ? t_context->analysis : m_workspace.Snapshot();
         const auto document = snapshot.Find(PathFromUri(uri));
         if (document != heimdall::InvalidDocument)
         {
@@ -1485,13 +1486,15 @@ namespace heimdall::lsp
         }
 
         return heimdall::AnalysisContext(heimdall::AnalysisSnapshot::FromSyntax(
-            std::move(tree), std::move(options), PathFromUri(uri)), 0);
+                                             std::move(tree), std::move(options), PathFromUri(uri)),
+                                         0);
     }
 
-    std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(const std::string& uri,
-        std::shared_ptr<const heimdall::ParseTree> parsed, const heimdall::CompileCommand* command)
+    std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(
+        const std::string& uri, std::shared_ptr<const heimdall::ParseTree> parsed,
+        const heimdall::CompileCommand* command)
     {
-        const auto& tree = *parsed;
+        const auto&           tree = *parsed;
         heimdall::RuleOptions rule_options;
         {
             const std::lock_guard<std::mutex> lock(m_init_mu);
@@ -1504,7 +1507,7 @@ namespace heimdall::lsp
         {
             if (*per_file)
             {
-                rule_options = std::move(* *per_file);
+                rule_options = std::move(**per_file);
             }
         }
         else
@@ -1513,7 +1516,7 @@ namespace heimdall::lsp
             m_initialization_error = per_file.error();
         }
 
-        const heimdall::RuleEngine engine(rule_options);
+        const heimdall::RuleEngine        engine(rule_options);
         std::vector<heimdall::Diagnostic> diagnostics;
         if (!m_enable_semantic.load(std::memory_order_relaxed))
         {
@@ -1524,21 +1527,24 @@ namespace heimdall::lsp
         // document. Most rules on it need no compile command; the project-level
         // ones (include-what-you-use, modernize-final) see the included headers only
         // when there is a profile.
-        const std::filesystem::path file_path = PathFromUri(uri);
+        const std::filesystem::path                     file_path = PathFromUri(uri);
         std::shared_ptr<const heimdall::IncludeProfile> profile;
         if (command != nullptr)
         {
-            const std::string fingerprint = heimdall::IncludeAnalyzer::Fingerprint(file_path, tree, command);
+            const std::string fingerprint =
+                heimdall::IncludeAnalyzer::Fingerprint(file_path, tree, command);
             {
                 const std::lock_guard<std::mutex> lock(m_profile_mu);
-                if (const auto found = m_include_profiles.find(uri); found != m_include_profiles.end())
+                if (const auto found = m_include_profiles.find(uri);
+                    found != m_include_profiles.end())
                 {
                     profile = found->second;
                 }
             }
 
             // The profile reads every transitive header: keep it across keystrokes.
-            if (!profile || profile->fingerprint != fingerprint ||!heimdall::IncludeAnalyzer::IsFresh(*profile))
+            if (!profile || profile->fingerprint != fingerprint ||
+                !heimdall::IncludeAnalyzer::IsFresh(*profile))
             {
                 profile = heimdall::IncludeAnalyzer::BuildProfile(file_path, tree, command);
                 const std::lock_guard<std::mutex> lock(m_profile_mu);
@@ -1547,10 +1553,7 @@ namespace heimdall::lsp
         }
 
         {
-            const heimdall::ProjectContext context
-            {
-                file_path, profile.get(), command
-            };
+            const heimdall::ProjectContext context { file_path, profile.get(), command };
             diagnostics = heimdall::AnalysisFeatures::Diagnostics(
                 AnalysisFor(uri, parsed, ParserOptionsFor(command)), engine, true, context);
         }
@@ -1564,18 +1567,18 @@ namespace heimdall::lsp
         if (!unused.empty())
         {
             diagnostics.insert(diagnostics.end(), std::make_move_iterator(unused.begin()),
-                std::make_move_iterator(unused.end()));
+                               std::make_move_iterator(unused.end()));
             std::stable_sort(diagnostics.begin(), diagnostics.end(),
-                [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
-                {
-                    return a.offset < b.offset;
-            });
+                             [](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b) {
+                                 return a.offset < b.offset;
+                             });
         }
 
         return diagnostics;
     }
 
-    void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id, int mode)
+    void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id,
+                                        int mode)
     {
         if (mode != 0 && !m_versioned_edits)
         {
@@ -1584,16 +1587,17 @@ namespace heimdall::lsp
         }
 
         simdjson::dom::object params, text_document, position;
-        std::string_view uri;
-        if (!GetObject(request, "params", params) ||!GetObject(params, "textDocument", text_document) ||
-            !GetString(text_document, "uri", uri) ||!GetObject(params, "position", position))
+        std::string_view      uri;
+        if (!GetObject(request, "params", params) ||
+            !GetObject(params, "textDocument", text_document) ||
+            !GetString(text_document, "uri", uri) || !GetObject(params, "position", position))
         {
             Respond(id, mode == 0 ? "[]" : "null");
             return;
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, mode == 0 ? "[]" : "null");
@@ -1601,7 +1605,7 @@ namespace heimdall::lsp
         }
 
         const auto* command = CommandFor(uri_string);
-        const auto tree = CachedParse(uri_string, document->text, document->version, command);
+        const auto  tree    = CachedParse(uri_string, document->text, document->version, command);
         if (!tree || RequestCancelled())
         {
             RespondCancelled(id);
@@ -1609,11 +1613,10 @@ namespace heimdall::lsp
         }
 
         const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
-        const auto offset = document->lines->OffsetFromPosition({
-                static_cast<std::size_t>(PositionNumber(position, "line")),
-                static_cast<std::size_t>(PositionNumber(position, "character"))});
-        const auto fail =[&](const heimdall::RefactoringError& error)
-        {
+        const auto offset  = document->lines->OffsetFromPosition(
+            { static_cast<std::size_t>(PositionNumber(position, "line")),
+              static_cast<std::size_t>(PositionNumber(position, "character")) });
+        const auto fail = [&](const heimdall::RefactoringError& error) {
             if (error.code == heimdall::RefactoringErrorCode::Cancelled)
             {
                 RespondCancelled(id);
@@ -1627,12 +1630,12 @@ namespace heimdall::lsp
             }
 
             std::string response = "{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
-                ",\"error\":{\"code\":-32803,\"message\":";
+                                   ",\"error\":{\"code\":-32803,\"message\":";
             QuoteJson(error.message, response);
             response += "}}";
             Send(response);
         };
-        bool include_declaration = true;
+        bool                  include_declaration = true;
         simdjson::dom::object reference_context;
         if (mode == 0 && GetObject(params, "context", reference_context))
         {
@@ -1643,19 +1646,19 @@ namespace heimdall::lsp
             }
         }
 
-        const auto refs = mode == 2 ? std::expected<heimdall::SymbolOccurrences,
-            heimdall::RefactoringError>(
-            heimdall::SymbolOccurrences{}) : heimdall::RefactoringService::LocalReferences(context.Snapshot(),
-            context.Document(),
-            offset, include_declaration, CurrentStop());
+        const auto refs =
+            mode == 2 ? std::expected<heimdall::SymbolOccurrences, heimdall::RefactoringError>(
+                            heimdall::SymbolOccurrences {})
+                      : heimdall::RefactoringService::LocalReferences(
+                            context.Snapshot(), context.Document(), offset, include_declaration,
+                            CurrentStop());
         if (!refs)
         {
             fail(refs.error());
             return;
         }
 
-        const auto range =[&](std::size_t start, std::size_t length, std::string& output)
-        {
+        const auto range = [&](std::size_t start, std::size_t length, std::string& output) {
             output += "{\"start\":";
             AppendPosition(document->lines->ToPosition(start), output);
             output += ",\"end\":";
@@ -1698,23 +1701,26 @@ namespace heimdall::lsp
         std::string_view new_name;
         if (!GetString(params, "newName", new_name))
         {
-            fail({heimdall::RefactoringErrorCode::InvalidName, "Missing newName"});
+            fail({ heimdall::RefactoringErrorCode::InvalidName, "Missing newName" });
             return;
         }
 
-        const auto plan = heimdall::RefactoringService::RenameLocal(context.Snapshot(), context.Document(),
-            offset, new_name, CurrentStop());
+        const auto plan = heimdall::RefactoringService::RenameLocal(
+            context.Snapshot(), context.Document(), offset, new_name, CurrentStop());
         if (!plan)
         {
             fail(plan.error());
             return;
         }
 
-        const auto preview = heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
-        if (!preview ||!IsCurrentVersion(uri_string, document->version))
+        const auto preview =
+            heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
+        if (!preview || !IsCurrentVersion(uri_string, document->version))
         {
-            fail(preview ? heimdall::RefactoringError{heimdall::RefactoringErrorCode::StaleSnapshot,
-                    "Document changed; request rename again"}: preview.error());
+            fail(preview
+                     ? heimdall::RefactoringError { heimdall::RefactoringErrorCode::StaleSnapshot,
+                                                    "Document changed; request rename again" }
+                     : preview.error());
             return;
         }
 
@@ -1741,7 +1747,7 @@ namespace heimdall::lsp
 
     void LanguageServer::CodeActions(simdjson::dom::element request, std::string_view id)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
@@ -1753,32 +1759,32 @@ namespace heimdall::lsp
         simdjson::dom::object range;
         simdjson::dom::object start_object;
         simdjson::dom::object end_object;
-        if (!GetObject(request, "params", params) ||!GetObject(params, "range", range) ||
-            !GetObject(range, "start", start_object) ||!GetObject(range, "end", end_object))
+        if (!GetObject(request, "params", params) || !GetObject(params, "range", range) ||
+            !GetObject(range, "start", start_object) || !GetObject(range, "end", end_object))
         {
             Respond(id, "[]");
             return;
         }
 
         const auto start_line = static_cast<std::size_t>(PositionNumber(start_object, "line"));
-        auto end_line = static_cast<std::size_t>(PositionNumber(end_object, "line"));
+        auto       end_line   = static_cast<std::size_t>(PositionNumber(end_object, "line"));
         if (PositionNumber(end_object, "character") == 0 && end_line > start_line)
         {
             --end_line;
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, "[]");
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::int64_t version = document->version;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
-        const heimdall::CompileCommand* command = CommandFor(uri_string);
+        const std::shared_ptr<const std::string> text    = document->text;
+        const std::int64_t                       version = document->version;
+        const std::shared_ptr<const LineIndex>   lines   = document->lines;
+        const heimdall::CompileCommand*          command = CommandFor(uri_string);
         const auto tree = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
@@ -1786,15 +1792,15 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto diagnostics = RuleDiagnostics(uri_string, tree, command);
-        std::string response = "[";
-        bool first = true;
+        const auto  diagnostics = RuleDiagnostics(uri_string, tree, command);
+        std::string response    = "[";
+        bool        first       = true;
 
-        const auto accepts =[&](std::string_view kind)
-        {
+        const auto accepts = [&](std::string_view kind) {
             simdjson::dom::object action_context;
-            simdjson::dom::array only;
-            if (!GetObject(params, "context", action_context) || action_context["only"].get_array().get(only))
+            simdjson::dom::array  only;
+            if (!GetObject(params, "context", action_context) ||
+                action_context["only"].get_array().get(only))
             {
                 return true;
             }
@@ -1802,8 +1808,9 @@ namespace heimdall::lsp
             for (const auto item : only)
             {
                 std::string_view wanted;
-                if (!item.get_string().get(wanted) && (kind == wanted ||
-                    (kind.starts_with(wanted) && kind.size() > wanted.size() && kind[wanted.size()] == '.')))
+                if (!item.get_string().get(wanted) &&
+                    (kind == wanted || (kind.starts_with(wanted) && kind.size() > wanted.size() &&
+                                        kind[wanted.size()] == '.')))
                 {
                     return true;
                 }
@@ -1811,16 +1818,15 @@ namespace heimdall::lsp
 
             return false;
         };
-        const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
-        const auto selection_start = lines->OffsetFromPosition({
-                static_cast<std::size_t>(PositionNumber(start_object, "line")),
-                static_cast<std::size_t>(PositionNumber(start_object, "character"))});
-        const auto selection_end = lines->OffsetFromPosition({
-                static_cast<std::size_t>(PositionNumber(end_object, "line")),
-                static_cast<std::size_t>(PositionNumber(end_object, "character"))});
-        const auto append_refactor =[&](const auto& plan, std::string_view kind)
-        {
-            if (!plan || RequestCancelled() ||!IsCurrentVersion(uri_string, version) ||
+        const auto context         = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
+        const auto selection_start = lines->OffsetFromPosition(
+            { static_cast<std::size_t>(PositionNumber(start_object, "line")),
+              static_cast<std::size_t>(PositionNumber(start_object, "character")) });
+        const auto selection_end = lines->OffsetFromPosition(
+            { static_cast<std::size_t>(PositionNumber(end_object, "line")),
+              static_cast<std::size_t>(PositionNumber(end_object, "character")) });
+        const auto append_refactor = [&](const auto& plan, std::string_view kind) {
+            if (!plan || RequestCancelled() || !IsCurrentVersion(uri_string, version) ||
                 !heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop()))
             {
                 return;
@@ -1865,9 +1871,9 @@ namespace heimdall::lsp
             std::string name = "extractedValue";
             for (unsigned suffix = 1; suffix < 1000; ++suffix)
             {
-                const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
-                    {
-                        return token.kind == heimdall::TokenKind::Identifier && tree->Text(token) == name;
+                const bool used = std::ranges::any_of(tree->Tokens(), [&](const auto& token) {
+                    return token.kind == heimdall::TokenKind::Identifier &&
+                           tree->Text(token) == name;
                 });
                 if (!used)
                 {
@@ -1879,18 +1885,18 @@ namespace heimdall::lsp
 
             if (accepts("refactor.extract.variable"))
             {
-                append_refactor(heimdall::RefactoringService::ExtractVariable(context.Snapshot(),
-                    context.Document(),
-                    selection_start, selection_end - selection_start, name, CurrentStop()),
-                    "refactor.extract.variable");
+                append_refactor(heimdall::RefactoringService::ExtractVariable(
+                                    context.Snapshot(), context.Document(), selection_start,
+                                    selection_end - selection_start, name, CurrentStop()),
+                                "refactor.extract.variable");
             }
 
             std::string function_name = "extractedFunction";
             for (unsigned suffix = 1; suffix < 1000; ++suffix)
             {
-                const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
-                    {
-                        return token.kind == heimdall::TokenKind::Identifier && tree->Text(token) == function_name;
+                const bool used = std::ranges::any_of(tree->Tokens(), [&](const auto& token) {
+                    return token.kind == heimdall::TokenKind::Identifier &&
+                           tree->Text(token) == function_name;
                 });
                 if (!used)
                 {
@@ -1902,17 +1908,19 @@ namespace heimdall::lsp
 
             if (accepts("refactor.extract.function"))
             {
-                append_refactor(heimdall::RefactoringService::ExtractFunction(context.Snapshot(),
-                    context.Document(),
-                    selection_start, selection_end - selection_start, function_name, CurrentStop()),
-                    "refactor.extract.function");
+                append_refactor(heimdall::RefactoringService::ExtractFunction(
+                                    context.Snapshot(), context.Document(), selection_start,
+                                    selection_end - selection_start, function_name, CurrentStop()),
+                                "refactor.extract.function");
             }
         }
 
         if (m_versioned_edits && accepts("refactor.inline.variable"))
         {
-            append_refactor(heimdall::RefactoringService::InlineVariable(context.Snapshot(), context.Document(),
-                selection_start, CurrentStop()), "refactor.inline.variable");
+            append_refactor(
+                heimdall::RefactoringService::InlineVariable(
+                    context.Snapshot(), context.Document(), selection_start, CurrentStop()),
+                "refactor.inline.variable");
         }
 
         // Batch fixes follow any explicitly requested refactoring actions.
@@ -1930,10 +1938,10 @@ namespace heimdall::lsp
                 }
             }
 
-            std::sort(safe.begin(), safe.end(),[](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
-                {
-                    return a->fix.offset > b->fix.offset;
-            });
+            std::sort(safe.begin(), safe.end(),
+                      [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b) {
+                          return a->fix.offset > b->fix.offset;
+                      });
 
             std::vector<const heimdall::Diagnostic*> selected;
             selected.reserve(safe.size());
@@ -1943,10 +1951,12 @@ namespace heimdall::lsp
                 const auto& fix = diagnostic->fix;
                 // Safe fixes must stay within their diagnostic (same rule as
                 // ApplyFixes), be bounds-checked and not overlap a later fix.
-                const bool in_range = fix.offset >= diagnostic->offset &&
+                const bool in_range =
+                    fix.offset >= diagnostic->offset &&
                     fix.offset - diagnostic->offset <= diagnostic->length &&
-                    fix.length <= diagnostic->length -(fix.offset - diagnostic->offset);
-                if (!in_range || fix.offset > text->size() || fix.length > text->size() - fix.offset ||
+                    fix.length <= diagnostic->length - (fix.offset - diagnostic->offset);
+                if (!in_range || fix.offset > text->size() ||
+                    fix.length > text->size() - fix.offset ||
                     fix.offset + fix.length > previous_start)
                 {
                     continue;
@@ -1959,14 +1969,14 @@ namespace heimdall::lsp
             if (!selected.empty())
             {
                 std::sort(selected.begin(), selected.end(),
-                    [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
-                    {
-                        return a->fix.offset < b->fix.offset;
-                });
+                          [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b) {
+                              return a->fix.offset < b->fix.offset;
+                          });
 
                 first = false;
                 response += "{\"title\":";
-                const std::string fix_all_title = "Fix all Heimdall issues (" + std::to_string(selected.size()) +
+                const std::string fix_all_title =
+                    "Fix all Heimdall issues (" + std::to_string(selected.size()) +
                     (selected.size() == 1 ? " fix)" : " fixes)");
                 QuoteJson(fix_all_title, response);
                 response += ",\"kind\":\"source.fixAll\",\"edit\":{\"changes\":{";
@@ -1995,7 +2005,7 @@ namespace heimdall::lsp
 
         for (const auto& diagnostic : diagnostics)
         {
-            if (!diagnostic.has_fix ||!accepts("quickfix"))
+            if (!diagnostic.has_fix || !accepts("quickfix"))
             {
                 continue;
             }
@@ -2003,8 +2013,11 @@ namespace heimdall::lsp
             // Filter by the diagnostic, since its fix may edit another line
             // (for example, inserting an include for a symbol used here).
             const auto diagnostic_start = lines->ToPosition(diagnostic.offset).line;
-            const auto diagnostic_end = lines->ToPosition(diagnostic.offset +
-                (diagnostic.length == 0 ? 0 : diagnostic.length - 1)).line;
+            const auto diagnostic_end =
+                lines
+                    ->ToPosition(
+                        diagnostic.offset + (diagnostic.length == 0 ? 0 : diagnostic.length - 1))
+                    .line;
             if (diagnostic_start > end_line || diagnostic_end < start_line)
             {
                 continue;
@@ -2017,8 +2030,10 @@ namespace heimdall::lsp
 
             first = false;
             response += "{\"title\":";
-            QuoteJson(diagnostic.fix_title.empty() ? "Fix " + diagnostic.code + ": " + diagnostic.message :
-                diagnostic.fix_title, response);
+            QuoteJson(diagnostic.fix_title.empty()
+                          ? "Fix " + diagnostic.code + ": " + diagnostic.message
+                          : diagnostic.fix_title,
+                      response);
             response += ",\"kind\":\"quickfix\"";
             if (diagnostic.fix_is_safe)
             {
@@ -2030,7 +2045,8 @@ namespace heimdall::lsp
             response += ":[{\"range\":{\"start\":";
             AppendPosition(lines->ToPosition(diagnostic.fix.offset), response);
             response += ",\"end\":";
-            AppendPosition(lines->ToPosition(diagnostic.fix.offset + diagnostic.fix.length), response);
+            AppendPosition(lines->ToPosition(diagnostic.fix.offset + diagnostic.fix.length),
+                           response);
             response += "},\"newText\":";
             QuoteJson(diagnostic.fix.replacement, response);
             response += "}]}}}";
@@ -2047,19 +2063,19 @@ namespace heimdall::lsp
         {
             switch (kind)
             {
-            case heimdall::CompletionKind::Function:
-                return 3;
-            case heimdall::CompletionKind::Variable:
-                return 6;
-            case heimdall::CompletionKind::Type:
-                return 7;
-            case heimdall::CompletionKind::Namespace:
-                return 9;
-            case heimdall::CompletionKind::Macro:
-                return 21;
-            case heimdall::CompletionKind::Directive:
-            case heimdall::CompletionKind::Keyword:
-                return 14;
+                case heimdall::CompletionKind::Function:
+                    return 3;
+                case heimdall::CompletionKind::Variable:
+                    return 6;
+                case heimdall::CompletionKind::Type:
+                    return 7;
+                case heimdall::CompletionKind::Namespace:
+                    return 9;
+                case heimdall::CompletionKind::Macro:
+                    return 21;
+                case heimdall::CompletionKind::Directive:
+                case heimdall::CompletionKind::Keyword:
+                    return 14;
             }
 
             return 14;
@@ -2085,37 +2101,39 @@ namespace heimdall::lsp
     } // namespace
 
     void LanguageServer::RespondIncludeCompletion(
-        std::string_view id,
-        const std::string& uri,
-        const std::string& text,
-        const LineIndex& lines,
-        std::size_t offset,
+        std::string_view                id,
+        const std::string&              uri,
+        const std::string&              text,
+        const LineIndex&                lines,
+        std::size_t                     offset,
         const heimdall::IncludeContext& context,
         const heimdall::CompileCommand* command)
     {
         const std::filesystem::path file_path = PathFromUri(uri);
         const std::filesystem::path base_dir =
             file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
-        const std::string_view typed = std::string_view(text).substr(context.typed_offset,
-            offset - context.typed_offset);
-        const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(base_dir, context.angled, typed,
-            command, 1000);
+        const std::string_view typed =
+            std::string_view(text).substr(context.typed_offset, offset - context.typed_offset);
+        const auto candidates = heimdall::IncludeIndex::CompleteIncludePath(
+            base_dir, context.angled, typed, command, 1000);
 
         // Only the last path segment is replaced; earlier ones are already typed.
         const std::size_t slash = typed.find_last_of("/\\");
-        const std::size_t name_begin = context.typed_offset +(slash == std::string_view::npos ? 0 : slash + 1);
-        const char closing = context.angled ? '>' : '"';
-        const bool has_closing = offset < text.size() && text[offset] == closing;
-        const Position start = lines.ToPosition(name_begin);
-        const Position end = lines.ToPosition(offset);
+        const std::size_t name_begin =
+            context.typed_offset + (slash == std::string_view::npos ? 0 : slash + 1);
+        const char     closing     = context.angled ? '>' : '"';
+        const bool     has_closing = offset < text.size() && text[offset] == closing;
+        const Position start       = lines.ToPosition(name_begin);
+        const Position end         = lines.ToPosition(offset);
 
         // A full page means the cap may have dropped entries (an empty prefix
         // over a big system directory). The client filters what it has locally
         // as the user types: claim incompleteness so it asks again with the
         // longer prefix instead of never finding `vector`.
         constexpr std::size_t page_size = 1000;
-        std::string response = candidates.size() >= page_size ? "{\"isIncomplete\":true,\"items\":["
-        : "{\"isIncomplete\":false,\"items\":[";
+        std::string           response =
+            candidates.size() >= page_size ? "{\"isIncomplete\":true,\"items\":["
+                                           : "{\"isIncomplete\":false,\"items\":[";
         for (std::size_t i = 0; i < candidates.size(); ++i)
         {
             const auto& candidate = candidates[i];
@@ -2127,21 +2145,21 @@ namespace heimdall::lsp
             const char* origin = "";
             switch (candidate.origin)
             {
-            case heimdall::IncludeOrigin::Local:
-                origin = "current directory";
-                break;
-            case heimdall::IncludeOrigin::Quote:
-                origin = "-iquote directory";
-                break;
-            case heimdall::IncludeOrigin::Include:
-                origin = "include directory";
-                break;
-            case heimdall::IncludeOrigin::System:
-                origin = "system include";
-                break;
-            case heimdall::IncludeOrigin::Absolute:
-                origin = "absolute path";
-                break;
+                case heimdall::IncludeOrigin::Local:
+                    origin = "current directory";
+                    break;
+                case heimdall::IncludeOrigin::Quote:
+                    origin = "-iquote directory";
+                    break;
+                case heimdall::IncludeOrigin::Include:
+                    origin = "include directory";
+                    break;
+                case heimdall::IncludeOrigin::System:
+                    origin = "system include";
+                    break;
+                case heimdall::IncludeOrigin::Absolute:
+                    origin = "absolute path";
+                    break;
             }
 
             char sort[16];
@@ -2154,9 +2172,11 @@ namespace heimdall::lsp
 
             response += "{\"label\":";
             QuoteJson(candidate.label, response);
-            response += ",\"kind\":" + std::string(candidate.directory ? "19" : "17") + ",\"detail\":";
+            response +=
+                ",\"kind\":" + std::string(candidate.directory ? "19" : "17") + ",\"detail\":";
             QuoteJson(origin, response);
-            response += ",\"sortText\":\"" + std::string(sort) + "\",\"textEdit\":{\"range\":{\"start\":";
+            response +=
+                ",\"sortText\":\"" + std::string(sort) + "\",\"textEdit\":{\"range\":{\"start\":";
             AppendPosition(start, response);
             response += ",\"end\":";
             AppendPosition(end, response);
@@ -2166,7 +2186,8 @@ namespace heimdall::lsp
             if (candidate.directory)
             {
                 // Keep going: offer the directory's contents right away.
-                response += ",\"command\":{\"title\":\"Suggest\",\"command\":\"editor.action.triggerSuggest\"}";
+                response += ",\"command\":{\"title\":\"Suggest\",\"command\":\"editor.action."
+                            "triggerSuggest\"}";
             }
 
             response += '}';
@@ -2206,37 +2227,38 @@ namespace heimdall::lsp
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::int64_t version = document->version;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
-        simdjson::dom::object position;
+        const std::shared_ptr<const std::string> text    = document->text;
+        const std::int64_t                       version = document->version;
+        const std::shared_ptr<const LineIndex>   lines   = document->lines;
+        simdjson::dom::object                    position;
         if (!GetObject(params, "position", position))
         {
             Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
             return;
         }
 
-        const Position cursor = {static_cast<std::size_t>(PositionNumber(position, "line")),
-            static_cast<std::size_t>(PositionNumber(position, "character"))};
+        const Position cursor = { static_cast<std::size_t>(PositionNumber(position, "line")),
+                                  static_cast<std::size_t>(PositionNumber(position, "character")) };
         const std::size_t offset = lines->OffsetFromPosition(cursor);
 
         const heimdall::CompileCommand* command = CommandFor(uri_string);
         if (const auto include_context = heimdall::IncludeIndex::IncludeContextAt(*text, offset))
         {
-            RespondIncludeCompletion(id, uri_string, *text, *lines, offset, *include_context, command);
+            RespondIncludeCompletion(
+                id, uri_string, *text, *lines, offset, *include_context, command);
             return;
         }
 
         const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
-        const HeaderView headers = HeaderScopes(uri_string, text, command);
-        const auto tree = CachedParse(uri_string, text, version, command);
+        const HeaderView              headers        = HeaderScopes(uri_string, text, command);
+        const auto                    tree = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
             RespondCancelled(id);
@@ -2253,12 +2275,12 @@ namespace heimdall::lsp
             AnalysisFor(uri_string, tree, parser_options), offset,
             headers.index ? &headers.index->Scopes() : nullptr);
         const std::string prefix = heimdall::CompletionEngine::PrefixAt(*text, offset);
-        const Position start = lines->ToPosition(offset - prefix.size());
-        const Position end = lines->ToPosition(offset);
+        const Position    start  = lines->ToPosition(offset - prefix.size());
+        const Position    end    = lines->ToPosition(offset);
 
         std::string response = headers.complete ? "{\"isIncomplete\":false,\"items\":["
-        : "{\"isIncomplete\":true,\"items\":[";
-        bool first = true;
+                                                : "{\"isIncomplete\":true,\"items\":[";
+        bool        first    = true;
         for (const auto& item : items)
         {
             if (!first)
@@ -2304,9 +2326,10 @@ namespace heimdall::lsp
         found->second.lru = m_lru.begin();
     }
 
-    LanguageServer::HeaderView LanguageServer::AwaitHeaderScopes(const std::string& uri,
+    LanguageServer::HeaderView LanguageServer::AwaitHeaderScopes(
+        const std::string&                        uri,
         const std::shared_ptr<const std::string>& text,
-        const heimdall::CompileCommand* command)
+        const heimdall::CompileCommand*           command)
     {
         // Latency fix: never block a pool thread waiting for the index worker.
         // Answer with whatever HeaderScopes has now (stale or empty with
@@ -2315,14 +2338,14 @@ namespace heimdall::lsp
         // 10s and blew the <50ms budget for every concurrent request.
         if (RequestCancelled())
         {
-            return {nullptr, false};
+            return { nullptr, false };
         }
 
         HeaderView view = HeaderScopes(uri, text, command);
         if (view.index && view.index->TypeNames())
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
-            auto& known = m_type_names[uri];
+            auto&                             known = m_type_names[uri];
             if (!known || known->Fingerprint() != view.index->TypeNames()->Fingerprint())
             {
                 known = view.index->TypeNames();
@@ -2332,9 +2355,10 @@ namespace heimdall::lsp
         return view;
     }
 
-    LanguageServer::HeaderView LanguageServer::HeaderScopes(const std::string& uri,
+    LanguageServer::HeaderView LanguageServer::HeaderScopes(
+        const std::string&                        uri,
         const std::shared_ptr<const std::string>& text,
-        const heimdall::CompileCommand* command)
+        const heimdall::CompileCommand*           command)
     {
         // Two-level header cache. The fingerprint covers only the file's own
         // `#include` block plus search flags: repeat keystrokes hit it with zero
@@ -2349,7 +2373,7 @@ namespace heimdall::lsp
         const std::filesystem::path file_path = PathFromUri(uri);
         const std::filesystem::path base_dir =
             file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
-        auto overlay = std::make_shared<heimdall::SourceOverlay>();
+        auto       overlay  = std::make_shared<heimdall::SourceOverlay>();
         const auto snapshot = t_context ? t_context->analysis : m_workspace.Snapshot();
         for (auto document : snapshot.Documents())
         {
@@ -2360,15 +2384,16 @@ namespace heimdall::lsp
             }
         }
 
-        const std::string fingerprint = heimdall::IncludeIndex::IncludeFingerprint(base_dir, *text,
-            command) + overlay->Fingerprint();
+        const std::string fingerprint =
+            heimdall::IncludeIndex::IncludeFingerprint(base_dir, *text, command) +
+            overlay->Fingerprint();
 
         std::vector<std::filesystem::path> headers;
-        std::string requested_key;
-        std::string served_key;
+        std::string                        requested_key;
+        std::string                        served_key;
         {
             const std::lock_guard<std::mutex> lock(m_index_cache_mu);
-            auto& entry = m_include_cache[uri];
+            auto&                             entry = m_include_cache[uri];
             if (entry.fingerprint != fingerprint)
             {
                 entry.fingerprint.clear(); // mark resolving; restored below
@@ -2379,9 +2404,9 @@ namespace heimdall::lsp
             }
             else
             {
-                headers = entry.headers;
+                headers       = entry.headers;
                 requested_key = entry.requested_key;
-                served_key = entry.served_key;
+                served_key    = entry.served_key;
             }
 
             if (!entry.fingerprint.empty())
@@ -2393,7 +2418,7 @@ namespace heimdall::lsp
                         global != m_global_indices.end())
                     {
                         TouchGlobalIndex(requested_key);
-                        return {global->second.index, true};
+                        return { global->second.index, true };
                     }
 
                     if (m_index_pending.contains(requested_key))
@@ -2404,18 +2429,18 @@ namespace heimdall::lsp
                                 stale != m_global_indices.end())
                             {
                                 TouchGlobalIndex(served_key);
-                                return {stale->second.index, false};
+                                return { stale->second.index, false };
                             }
                         }
 
-                        return {nullptr, false};
+                        return { nullptr, false };
                     }
 
                     // Requested but neither built nor pending (evicted): rebuild.
                     m_index_pending.insert(requested_key);
                     {
                         const std::lock_guard<std::mutex> queue_lock(m_index_mu);
-                        m_index_queue.push_back({requested_key, headers, command, overlay});
+                        m_index_queue.push_back({ requested_key, headers, command, overlay });
                     }
                     m_index_cv.notify_one();
                 }
@@ -2426,36 +2451,36 @@ namespace heimdall::lsp
                         stale != m_global_indices.end())
                     {
                         TouchGlobalIndex(served_key);
-                        return {stale->second.index, false};
+                        return { stale->second.index, false };
                     }
                 }
 
-                return {nullptr, requested_key.empty()};
+                return { nullptr, requested_key.empty() };
             }
         }
         // Slow path: fingerprint changed. Resolve + stat outside the lock.
-        headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, *text, command, {}, nullptr,
-            overlay.get());
+        headers = heimdall::IncludeIndex::ResolveHeaders(
+            base_dir, *text, command, {}, nullptr, overlay.get());
         if (headers.empty())
         {
             // No headers: nothing to build, trivially complete (and shared, since
             // the key would be identical for every header-less file).
             const std::lock_guard<std::mutex> lock(m_index_cache_mu);
-            auto& entry = m_include_cache[uri];
-            entry.fingerprint = fingerprint;
-            entry.headers = headers;
+            auto&                             entry = m_include_cache[uri];
+            entry.fingerprint                       = fingerprint;
+            entry.headers                           = headers;
             entry.requested_key.clear();
             entry.served_key.clear();
-            return {nullptr, true};
+            return { nullptr, true };
         }
 
         requested_key = heimdall::IncludeIndex::CacheKey(headers, command, overlay.get());
         {
             const std::lock_guard<std::mutex> lock(m_index_cache_mu);
-            auto& entry = m_include_cache[uri];
-            entry.fingerprint = fingerprint;
-            entry.headers = headers;
-            entry.requested_key = requested_key;
+            auto&                             entry = m_include_cache[uri];
+            entry.fingerprint                       = fingerprint;
+            entry.headers                           = headers;
+            entry.requested_key                     = requested_key;
             if (!requested_key.empty())
             {
                 if (const auto global = m_global_indices.find(requested_key);
@@ -2463,7 +2488,7 @@ namespace heimdall::lsp
                 {
                     entry.served_key = requested_key;
                     TouchGlobalIndex(requested_key);
-                    return {global->second.index, true};
+                    return { global->second.index, true };
                 }
 
                 if (!m_index_pending.contains(requested_key))
@@ -2471,7 +2496,7 @@ namespace heimdall::lsp
                     m_index_pending.insert(requested_key);
                     {
                         const std::lock_guard<std::mutex> queue_lock(m_index_mu);
-                        m_index_queue.push_back({requested_key, headers, command, overlay});
+                        m_index_queue.push_back({ requested_key, headers, command, overlay });
                     }
                     m_index_cv.notify_one();
                 }
@@ -2479,24 +2504,26 @@ namespace heimdall::lsp
             else
             {
                 entry.served_key.clear();
-                return {nullptr, true};
+                return { nullptr, true };
             }
 
             served_key = entry.served_key;
             if (!served_key.empty())
             {
-                if (const auto stale = m_global_indices.find(served_key); stale != m_global_indices.end())
+                if (const auto stale = m_global_indices.find(served_key);
+                    stale != m_global_indices.end())
                 {
                     TouchGlobalIndex(served_key);
-                    return {stale->second.index, false};
+                    return { stale->second.index, false };
                 }
             }
 
-            return {nullptr, false};
+            return { nullptr, false };
         }
     }
 
-    heimdall::ParserOptions LanguageServer::ParserOptionsFor(const heimdall::CompileCommand* command)
+    heimdall::ParserOptions LanguageServer::ParserOptionsFor(
+        const heimdall::CompileCommand* command)
     {
         heimdall::ParserOptions options;
         if (command == nullptr)
@@ -2524,21 +2551,21 @@ namespace heimdall::lsp
     }
 
     std::shared_ptr<const heimdall::ParseTree> LanguageServer::CachedParse(
-        const std::string& uri,
+        const std::string&                        uri,
         const std::shared_ptr<const std::string>& text,
-        std::int64_t version,
-        const heimdall::CompileCommand* command)
+        std::int64_t                              version,
+        const heimdall::CompileCommand*           command)
     {
-        if (t_context && t_context->parsed && t_context->pinned &&
-            t_context->pinned->uri == uri && t_context->pinned->snapshot.text.get() == text.get())
+        if (t_context && t_context->parsed && t_context->pinned && t_context->pinned->uri == uri &&
+            t_context->pinned->snapshot.text.get() == text.get())
         {
             return t_context->parsed;
         }
 
-        heimdall::ParserOptions options = ParserOptionsFor(command);
-        std::shared_ptr<ParseSlot> slot;
+        heimdall::ParserOptions                    options = ParserOptionsFor(command);
+        std::shared_ptr<ParseSlot>                 slot;
         std::shared_ptr<const heimdall::ParseTree> base;
-        heimdall::Lexer::TextEdit base_edit;
+        heimdall::Lexer::TextEdit                  base_edit;
         {
             const std::lock_guard<std::mutex> lock(m_parse_mu);
             if (const auto names = m_type_names.find(uri); names != m_type_names.end())
@@ -2555,14 +2582,14 @@ namespace heimdall::lsp
             }
             else
             {
-                slot = std::make_shared<ParseSlot>();
+                slot        = std::make_shared<ParseSlot>();
                 auto& entry = m_parse_cache[uri];
                 if (entry.base && entry.base_version == version &&
                     entry.base_options.standard == options.standard &&
                     entry.base_options.shared_macros == options.shared_macros &&
                     entry.base_options.predefined_macros == options.predefined_macros)
                 {
-                    base = entry.base;
+                    base      = entry.base;
                     base_edit = entry.base_edit;
                 }
                 else
@@ -2571,9 +2598,9 @@ namespace heimdall::lsp
                 }
 
                 entry.version = version;
-                entry.text = text;
+                entry.text    = text;
                 entry.options = options;
-                entry.slot = slot;
+                entry.slot    = slot;
             }
         }
         std::shared_ptr<const std::vector<heimdall::Token>> lexed;
@@ -2588,7 +2615,7 @@ namespace heimdall::lsp
             if (!slot->started)
             {
                 slot->started = true;
-                start = true;
+                start         = true;
             }
         }
         if (start)
@@ -2596,44 +2623,40 @@ namespace heimdall::lsp
             // The parse belongs to the version, not to whichever request won
             // the race. Cancelling one consumer cannot invalidate other users.
             m_parse_pool.Submit([this, slot, uri, text, options = std::move(options), lexed,
-                base = std::move(base), base_edit]
+                                 base = std::move(base), base_edit] {
+                std::shared_ptr<const heimdall::ParseTree> tree;
+                std::exception_ptr                         failure;
+                try
                 {
-                    std::shared_ptr<const heimdall::ParseTree> tree;
-                    std::exception_ptr failure;
-                    try
-                    {
-                        const heimdall::ParseReuse reuse
-                        {
-                            base.get(), base_edit.offset,
-                            base_edit.old_length, base_edit.new_length
-                    };
-                        tree = std::make_shared<heimdall::ParseTree>(heimdall::ParseTree::ParseSnapshot(
+                    const heimdall::ParseReuse reuse { base.get(), base_edit.offset,
+                                                       base_edit.old_length, base_edit.new_length };
+                    tree = std::make_shared<heimdall::ParseTree>(heimdall::ParseTree::ParseSnapshot(
                         text, options, {}, lexed, base ? &reuse : nullptr));
                 }
-                    catch (...)
-                    {
-                        failure = std::current_exception();
+                catch (...)
+                {
+                    failure = std::current_exception();
                 }
 
-                    std::vector<std::shared_ptr<ParseSlot::Waiter>> waiters;
-                    {
-                        const std::lock_guard<std::mutex> lock(slot->mu);
-                        slot->tree = std::move(tree);
-                        slot->failure = failure;
-                        slot->ready.store(slot->tree != nullptr, std::memory_order_release);
-                        waiters.swap(slot->waiters);
+                std::vector<std::shared_ptr<ParseSlot::Waiter>> waiters;
+                {
+                    const std::lock_guard<std::mutex> lock(slot->mu);
+                    slot->tree    = std::move(tree);
+                    slot->failure = failure;
+                    slot->ready.store(slot->tree != nullptr, std::memory_order_release);
+                    waiters.swap(slot->waiters);
                 }
-                    slot->cv.notify_all();
-                    for (auto& waiter : waiters)
-                    {
-                        waiter->Wake();
+                slot->cv.notify_all();
+                for (auto& waiter : waiters)
+                {
+                    waiter->Wake();
                 }
 
-                    const std::lock_guard<std::mutex> lock(m_parse_mu);
-                    if (const auto found = m_parse_cache.find(uri);
+                const std::lock_guard<std::mutex> lock(m_parse_mu);
+                if (const auto found = m_parse_cache.find(uri);
                     found != m_parse_cache.end() && found->second.slot == slot)
-                    {
-                        found->second.base.reset();
+                {
+                    found->second.base.reset();
                 }
             });
         }
@@ -2641,12 +2664,12 @@ namespace heimdall::lsp
         std::unique_lock<std::mutex> lock(slot->mu);
         if (!slot->ready.load(std::memory_order_acquire) && !slot->failure)
         {
-            if (t_context && t_context->interactive) throw ParsePending{slot};
+            if (t_context && t_context->interactive)
+                throw ParsePending { slot };
             // Dedicated diagnostics may wait, but remain immediately cancelable.
-            if (!slot->cv.wait(lock, CurrentStop(),[&]
-                {
+            if (!slot->cv.wait(lock, CurrentStop(), [&] {
                     return slot->ready.load(std::memory_order_acquire) || slot->failure;
-            }))
+                }))
             {
                 return nullptr;
             }
@@ -2663,7 +2686,7 @@ namespace heimdall::lsp
     bool LanguageServer::IsCurrentVersion(const std::string& uri, std::int64_t version)
     {
         const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
-        const auto found = m_documents.find(uri);
+        const auto                                found = m_documents.find(uri);
         return found != m_documents.end() && found->second.version == version;
     }
 
@@ -2691,31 +2714,31 @@ namespace heimdall::lsp
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, "null");
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::int64_t version = document->version;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
-        simdjson::dom::object position;
+        const std::shared_ptr<const std::string> text    = document->text;
+        const std::int64_t                       version = document->version;
+        const std::shared_ptr<const LineIndex>   lines   = document->lines;
+        simdjson::dom::object                    position;
         if (!GetObject(params, "position", position))
         {
             Respond(id, "null");
             return;
         }
 
-        const Position cursor = {static_cast<std::size_t>(PositionNumber(position, "line")),
-            static_cast<std::size_t>(PositionNumber(position, "character"))};
+        const Position cursor = { static_cast<std::size_t>(PositionNumber(position, "line")),
+                                  static_cast<std::size_t>(PositionNumber(position, "character")) };
         const std::size_t offset = lines->OffsetFromPosition(cursor);
 
-        const heimdall::CompileCommand* command = CommandFor(uri_string);
-        const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
-        const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
-        const auto tree = CachedParse(uri_string, text, version, command);
+        const heimdall::CompileCommand* command        = CommandFor(uri_string);
+        const heimdall::ParserOptions   parser_options = ParserOptionsFor(command);
+        const HeaderView                headers = AwaitHeaderScopes(uri_string, text, command);
+        const auto                      tree    = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
             RespondCancelled(id);
@@ -2728,9 +2751,9 @@ namespace heimdall::lsp
             return;
         }
 
-        const auto hovered = heimdall::AnalysisFeatures::Hover(
-            AnalysisFor(uri_string, tree, parser_options), offset,
-            headers.index ? &headers.index->Scopes() : nullptr);
+        const auto hovered =
+            heimdall::AnalysisFeatures::Hover(AnalysisFor(uri_string, tree, parser_options), offset,
+                                              headers.index ? &headers.index->Scopes() : nullptr);
         if (!hovered.has_value())
         {
             Respond(id, "null");
@@ -2741,8 +2764,8 @@ namespace heimdall::lsp
         if (!hovered->detail.empty() && hovered->detail != hovered->label)
         {
             line = hovered->detail.find(hovered->label) == std::string::npos
-            ? hovered->label + ": " + hovered->detail
-            : hovered->detail;
+                       ? hovered->label + ": " + hovered->detail
+                       : hovered->detail;
         }
 
         std::string value = "```cpp\n" + line + "\n```";
@@ -2753,8 +2776,8 @@ namespace heimdall::lsp
 
         if (hovered->has_layout)
         {
-            value += "\n\n**Size:** " + std::to_string(hovered->size_bytes) + " bytes · **Align:** " +
-                std::to_string(hovered->align_bytes) + " bytes";
+            value += "\n\n**Size:** " + std::to_string(hovered->size_bytes) +
+                     " bytes · **Align:** " + std::to_string(hovered->align_bytes) + " bytes";
         }
 
         if (hovered->has_field_offset)
@@ -2775,7 +2798,7 @@ namespace heimdall::lsp
 
     void LanguageServer::RangeFormatDocument(simdjson::dom::element request, std::string_view id)
     {
-        std::string_view uri;
+        std::string_view      uri;
         simdjson::dom::object text_document;
         if (!DocumentParams(request, uri, text_document))
         {
@@ -2783,7 +2806,7 @@ namespace heimdall::lsp
             return;
         }
 
-        const std::string uri_string(uri);
+        const std::string     uri_string(uri);
         simdjson::dom::object params;
         if (!GetObject(request, "params", params))
         {
@@ -2800,14 +2823,14 @@ namespace heimdall::lsp
 
         simdjson::dom::object start_object;
         simdjson::dom::object end_object;
-        if (!GetObject(range, "start", start_object) ||!GetObject(range, "end", end_object))
+        if (!GetObject(range, "start", start_object) || !GetObject(range, "end", end_object))
         {
             Respond(id, "[]");
             return;
         }
 
         auto start_line = static_cast<std::size_t>(PositionNumber(start_object, "line"));
-        auto end_line = static_cast<std::size_t>(PositionNumber(end_object, "line"));
+        auto end_line   = static_cast<std::size_t>(PositionNumber(end_object, "line"));
         if (PositionNumber(end_object, "character") == 0 && end_line > start_line)
         {
             --end_line;
@@ -2820,14 +2843,14 @@ namespace heimdall::lsp
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
-        heimdall::FormatOptions format_options;
+        const std::shared_ptr<const std::string> text  = document->text;
+        const std::shared_ptr<const LineIndex>   lines = document->lines;
+        heimdall::FormatOptions                  format_options;
         if (auto found = heimdall::FindFormatOptions(PathFromUri(uri_string)))
         {
             if (*found)
             {
-                format_options = * *found;
+                format_options = **found;
             }
         }
         else
@@ -2839,9 +2862,9 @@ namespace heimdall::lsp
         // Diff the fully formatted buffer, then keep only hunks overlapping
         // the requested lines: context outside the range still informs the
         // formatting (brace depth, continuation) but is never rewritten.
-        const auto edits = heimdall::Formatter(format_options).FormatEdits(*text);
+        const auto  edits    = heimdall::Formatter(format_options).FormatEdits(*text);
         std::string response = "[";
-        bool first = true;
+        bool        first    = true;
         for (const auto& edit : edits)
         {
             if (edit.start_line > end_line || edit.end_line <= start_line)
@@ -2881,10 +2904,7 @@ namespace heimdall::lsp
             IndexJob job;
             {
                 std::unique_lock<std::mutex> lock(m_index_mu);
-                m_index_cv.wait(lock, stop,[&]
-                    {
-                        return!m_index_queue.empty();
-                });
+                m_index_cv.wait(lock, stop, [&] { return !m_index_queue.empty(); });
                 if (stop.stop_requested())
                 {
                     return;
@@ -2915,8 +2935,8 @@ namespace heimdall::lsp
                 }
 
                 // LRU eviction: the global index used to grow without bounds.
-                if (!m_global_indices.contains(job.key) && m_global_indices.size() >= kMaxGlobalIndices &&
-                    !m_lru.empty())
+                if (!m_global_indices.contains(job.key) &&
+                    m_global_indices.size() >= kMaxGlobalIndices && !m_lru.empty())
                 {
                     m_global_indices.erase(m_lru.back());
                     m_lru.pop_back();
@@ -2924,7 +2944,7 @@ namespace heimdall::lsp
 
                 m_lru.remove(job.key);
                 m_lru.push_front(job.key);
-                m_global_indices[job.key] = {std::move(built), m_lru.begin()};
+                m_global_indices[job.key] = { std::move(built), m_lru.begin() };
                 for (auto& [uri, entry] : m_include_cache)
                 {
                     if (entry.requested_key == job.key)
@@ -2940,7 +2960,7 @@ namespace heimdall::lsp
     {
         {
             const std::lock_guard<std::mutex> lock(m_diag_mu);
-            m_diag_queue.push_back({uri, version});
+            m_diag_queue.push_back({ uri, version });
             // The running pass (if for this document) is now obsolete.
             if (m_diag_running_uri == uri)
             {
@@ -2953,10 +2973,7 @@ namespace heimdall::lsp
     void LanguageServer::FlushDiagnostics()
     {
         std::unique_lock<std::mutex> lock(m_diag_mu);
-        m_diag_cv.wait(lock,[&]
-            {
-                return m_diag_queue.empty() && !m_diag_busy;
-        });
+        m_diag_cv.wait(lock, [&] { return m_diag_queue.empty() && !m_diag_busy; });
     }
 
     void LanguageServer::DiagWorkerMain(std::stop_token stop)
@@ -2965,13 +2982,10 @@ namespace heimdall::lsp
         while (!stop.stop_requested())
         {
             DiagJob job;
-            bool stale = false;
+            bool    stale = false;
             {
                 std::unique_lock<std::mutex> lock(m_diag_mu);
-                m_diag_cv.wait(lock, stop,[&]
-                    {
-                        return!m_diag_queue.empty();
-                });
+                m_diag_cv.wait(lock, stop, [&] { return !m_diag_queue.empty(); });
                 if (stop.stop_requested())
                 {
                     return;
@@ -3009,22 +3023,21 @@ namespace heimdall::lsp
                 // Trailing-edge debounce: a keystroke arriving within the window
                 // supersedes this version instead of paying for a full publish.
                 std::unique_lock<std::mutex> lock(m_diag_mu);
-                m_diag_cv.wait_for(lock, 50ms,[&]
+                m_diag_cv.wait_for(lock, 50ms, [&] {
+                    if (stop.stop_requested())
                     {
-                        if (stop.stop_requested())
-                        {
-                            return true;
+                        return true;
                     }
 
-                        for (const auto& queued : m_diag_queue)
+                    for (const auto& queued : m_diag_queue)
+                    {
+                        if (queued.uri == job.uri)
                         {
-                            if (queued.uri == job.uri)
-                            {
-                                return true;
+                            return true;
                         }
                     }
 
-                        return false;
+                    return false;
                 });
                 if (stop.stop_requested())
                 {
@@ -3052,17 +3065,17 @@ namespace heimdall::lsp
 
                 // Registered under the same lock EnqueueDiagnostics takes, so a
                 // keystroke can never slip between "not superseded" and "running".
-                m_diag_stop = std::stop_source();
+                m_diag_stop        = std::stop_source();
                 m_diag_running_uri = job.uri;
-                job_stop = m_diag_stop.get_token();
+                job_stop           = m_diag_stop.get_token();
             }
             {
                 // Drop versions that are already obsolete (closed or re-edited).
                 std::shared_ptr<const std::string> text;
-                std::int64_t version = -1;
+                std::int64_t                       version = -1;
                 if (const auto document = GetDocument(job.uri))
                 {
-                    text = document->text;
+                    text    = document->text;
                     version = document->version;
                 }
 
@@ -3074,12 +3087,9 @@ namespace heimdall::lsp
                         Scope(std::stop_token stop)
                         {
                             context.stop = std::move(stop);
-                            t_context = &context;
+                            t_context    = &context;
                         }
-                        ~Scope()
-                        {
-                            t_context = nullptr;
-                        }
+                        ~Scope() { t_context = nullptr; }
                     } scope(job_stop);
                     try
                     {
@@ -3106,7 +3116,8 @@ namespace heimdall::lsp
         // Source files that may hold the body of something declared in `owner`:
         // siblings sharing its stem (`foo.hpp` -> `foo.cpp`), compile-database
         // entries with that stem, and the open documents.
-        constexpr std::string_view kSourceExtensions[] = {".cpp", ".cc", ".cxx", ".c++", ".cp", ".C"};
+        constexpr std::string_view kSourceExtensions[] = { ".cpp", ".cc", ".cxx",
+                                                           ".c++", ".cp", ".C" };
 
         bool IsSourceExtension(const std::filesystem::path& path)
         {
@@ -3125,8 +3136,8 @@ namespace heimdall::lsp
         std::optional<std::string> ReadWholeFile(const std::filesystem::path& path)
         {
             constexpr std::uintmax_t kMaxBytes = 4u << 20;
-            std::error_code error;
-            const auto size = std::filesystem::file_size(path, error);
+            std::error_code          error;
+            const auto               size = std::filesystem::file_size(path, error);
             if (error || size > kMaxBytes)
             {
                 return std::nullopt;
@@ -3148,16 +3159,13 @@ namespace heimdall::lsp
         // borrows the text).
         struct LoadedFile
         {
-            std::string uri;
+            std::string                        uri;
             std::shared_ptr<const std::string> text;
-            std::unique_ptr<LineIndex> lines;
+            std::unique_ptr<LineIndex>         lines;
         };
 
         void AppendLocation(
-            const LoadedFile& file,
-            std::size_t offset,
-            std::size_t length,
-            std::string& out)
+            const LoadedFile& file, std::size_t offset, std::size_t length, std::string& out)
         {
             if (!out.empty() && out.back() != '[')
             {
@@ -3175,33 +3183,34 @@ namespace heimdall::lsp
     } // namespace
 
     void LanguageServer::GotoDocument(simdjson::dom::element request, std::string_view id,
-        bool implementation)
+                                      bool implementation)
     {
         simdjson::dom::object params;
         simdjson::dom::object text_document;
         simdjson::dom::object position;
-        std::string_view uri;
-        if (!GetObject(request, "params", params) ||!GetObject(params, "textDocument", text_document) ||
-            !GetString(text_document, "uri", uri) ||!GetObject(params, "position", position))
+        std::string_view      uri;
+        if (!GetObject(request, "params", params) ||
+            !GetObject(params, "textDocument", text_document) ||
+            !GetString(text_document, "uri", uri) || !GetObject(params, "position", position))
         {
             Respond(id, "null");
             return;
         }
 
         const std::string uri_string(uri);
-        const auto document = GetDocument(uri_string);
+        const auto        document = GetDocument(uri_string);
         if (!document)
         {
             Respond(id, "null");
             return;
         }
 
-        const std::shared_ptr<const std::string> text = document->text;
-        const std::int64_t version = document->version;
-        const std::shared_ptr<const LineIndex> lines = document->lines;
+        const std::shared_ptr<const std::string> text    = document->text;
+        const std::int64_t                       version = document->version;
+        const std::shared_ptr<const LineIndex>   lines   = document->lines;
 
-        const Position cursor = {static_cast<std::size_t>(PositionNumber(position, "line")),
-            static_cast<std::size_t>(PositionNumber(position, "character"))};
+        const Position cursor = { static_cast<std::size_t>(PositionNumber(position, "line")),
+                                  static_cast<std::size_t>(PositionNumber(position, "character")) };
         const std::size_t offset = lines->OffsetFromPosition(cursor);
 
         const heimdall::CompileCommand* command = CommandFor(uri_string);
@@ -3211,22 +3220,22 @@ namespace heimdall::lsp
         if (!implementation)
         {
             const std::filesystem::path self_file = PathFromUri(uri_string);
-            const std::filesystem::path header = heimdall::IncludeIndex::ResolveIncludeAt(
-                self_file.has_parent_path() ? self_file.parent_path() : std::filesystem::path(), *text, offset,
-                command);
+            const std::filesystem::path header    = heimdall::IncludeIndex::ResolveIncludeAt(
+                self_file.has_parent_path() ? self_file.parent_path() : std::filesystem::path(),
+                *text, offset, command);
             if (!header.empty())
             {
                 std::string response = "[{\"uri\":";
                 QuoteJson(UriFromPath(header), response);
                 response += ",\"range\":{\"start\":{\"line\":0,\"character\":0},"
-                "\"end\":{\"line\":0,\"character\":0}}}]";
+                            "\"end\":{\"line\":0,\"character\":0}}}]";
                 Respond(id, response);
                 return;
             }
         }
 
         const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
-        const auto tree = CachedParse(uri_string, text, version, command);
+        const auto       tree    = CachedParse(uri_string, text, version, command);
         if (!tree)
         {
             RespondCancelled(id);
@@ -3241,17 +3250,17 @@ namespace heimdall::lsp
 
         const heimdall::ScopeIndex* scopes = headers.index ? &headers.index->Scopes() : nullptr;
         const auto analysis = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
-        std::vector<heimdall::NavTarget> targets = implementation
-        ? heimdall::AnalysisFeatures::Implementation(analysis, offset, scopes)
-        : heimdall::AnalysisFeatures::Definition(analysis, offset, scopes);
+        std::vector<heimdall::NavTarget> targets =
+            implementation ? heimdall::AnalysisFeatures::Implementation(analysis, offset, scopes)
+                           : heimdall::AnalysisFeatures::Definition(analysis, offset, scopes);
 
         // File table: this document, header-index files (read on demand) and the
         // source files searched below, each loaded once per request.
         std::unordered_map<std::string, LoadedFile> loaded; // keyed by uri
         // Header locations use the exact source pinned by their index.
-        auto load =[&](const std::filesystem::path& path, std::string uri_for,
-            std::shared_ptr<const std::string> indexed_source = nullptr) -> LoadedFile *
-        {
+        auto load =
+            [&](const std::filesystem::path& path, std::string uri_for,
+                std::shared_ptr<const std::string> indexed_source = nullptr) -> LoadedFile* {
             if (uri_for.empty())
             {
                 uri_for = UriFromPath(path);
@@ -3285,8 +3294,8 @@ namespace heimdall::lsp
             }
 
             LoadedFile file;
-            file.uri = uri_for;
-            file.text = std::move(content);
+            file.uri   = uri_for;
+            file.text  = std::move(content);
             file.lines = std::make_unique<LineIndex>();
             file.lines->Build(*file.text);
             return &loaded.emplace(cache_key, std::move(file)).first->second;
@@ -3295,8 +3304,8 @@ namespace heimdall::lsp
         LoadedFile* self = nullptr;
         {
             LoadedFile file;
-            file.uri = uri_string;
-            file.text = text;
+            file.uri   = uri_string;
+            file.text  = text;
             file.lines = std::make_unique<LineIndex>();
             file.lines->Build(*text);
             self = &loaded.emplace(uri_string, std::move(file)).first->second;
@@ -3304,14 +3313,13 @@ namespace heimdall::lsp
 
         struct Resolved
         {
-            LoadedFile* file = nullptr;
+            LoadedFile* file   = nullptr;
             std::size_t offset = 0;
             std::size_t length = 0;
         };
 
         std::vector<Resolved> resolved;
-        auto add_resolved =[&](LoadedFile* file, std::size_t at, std::size_t length)
-        {
+        auto add_resolved = [&](LoadedFile* file, std::size_t at, std::size_t length) {
             for (const Resolved& existing : resolved)
             {
                 if (existing.file == file && existing.offset == at)
@@ -3320,31 +3328,30 @@ namespace heimdall::lsp
                 }
             }
 
-            resolved.push_back({file, at, length});
+            resolved.push_back({ file, at, length });
         };
 
         // Candidate files for bodies of things declared in `owner`.
         // Bounded for <50ms: at most kMaxGotoCandidates files per target
         // (siblings first, then compile-DB stems, then open docs). Each
         // candidate parse below is cancellable via CurrentStop().
-        auto source_candidates =[&](const std::filesystem::path& owner)
-        {
-            constexpr std::size_t kMaxGotoCandidates = 4;
+        auto source_candidates = [&](const std::filesystem::path& owner) {
+            constexpr std::size_t              kMaxGotoCandidates = 4;
             std::vector<std::filesystem::path> candidates;
-            auto push =[&](const std::filesystem::path& path)
-            {
+            auto                               push = [&](const std::filesystem::path& path) {
                 if (candidates.size() >= kMaxGotoCandidates)
                 {
                     return;
                 }
 
-                if (path != owner && std::find(candidates.begin(), candidates.end(), path) == candidates.end())
+                if (path != owner &&
+                    std::find(candidates.begin(), candidates.end(), path) == candidates.end())
                 {
                     candidates.push_back(path);
                 }
             };
-            const std::string stem = owner.stem().string();
-            std::error_code error;
+            const std::string           stem = owner.stem().string();
+            std::error_code             error;
             const std::filesystem::path directory = owner.parent_path();
             for (const auto extension : kSourceExtensions)
             {
@@ -3353,7 +3360,7 @@ namespace heimdall::lsp
                     break;
                 }
 
-                const std::filesystem::path sibling = directory /(stem + std::string(extension));
+                const std::filesystem::path sibling = directory / (stem + std::string(extension));
                 if (std::filesystem::is_regular_file(sibling, error))
                 {
                     push(sibling);
@@ -3404,11 +3411,11 @@ namespace heimdall::lsp
         };
 
         const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
-        const std::filesystem::path self_path = PathFromUri(uri_string);
+        const std::filesystem::path   self_path      = PathFromUri(uri_string);
         // Bound fan-out: goto rarely needs more than a handful of targets;
         // each extra target multiplies file I/O + parses on this worker.
         constexpr std::size_t kMaxGotoTargets = 8;
-        std::size_t handled_targets = 0;
+        std::size_t           handled_targets = 0;
         for (const heimdall::NavTarget& target : targets)
         {
             if (RequestCancelled())
@@ -3422,7 +3429,7 @@ namespace heimdall::lsp
                 break;
             }
 
-            LoadedFile* file = self;
+            LoadedFile*           file  = self;
             std::filesystem::path owner = self_path;
             if (target.file >= 0)
             {
@@ -3438,7 +3445,8 @@ namespace heimdall::lsp
                 }
 
                 owner = files[static_cast<std::size_t>(target.file)];
-                file = load(owner, {}, headers.index->Source(static_cast<std::size_t>(target.file)));
+                file =
+                    load(owner, {}, headers.index->Source(static_cast<std::size_t>(target.file)));
                 if (file == nullptr)
                 {
                     continue;
@@ -3447,7 +3455,7 @@ namespace heimdall::lsp
 
             // A function declared without a body: follow it into its source files.
             const bool function = target.kind == heimdall::CompletionKind::Function;
-            bool followed = false;
+            bool       followed = false;
             if (function && !target.is_definition && !target.back_reference)
             {
                 for (const auto& candidate : source_candidates(owner))
@@ -3464,16 +3472,16 @@ namespace heimdall::lsp
                         continue;
                     }
 
-                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source->text, parser_options,
-                        CurrentStop());
+                    const heimdall::ParseTree source_tree =
+                        heimdall::ParseTree::Parse(*source->text, parser_options, CurrentStop());
                     if (source_tree.Cancelled() || RequestCancelled())
                     {
                         RespondCancelled(id);
                         return;
                     }
 
-                    for (const auto& found : heimdall::Navigation::FindDefinitions(source_tree, target.scope,
-                        target.name, true, target.param_count))
+                    for (const auto& found : heimdall::Navigation::FindDefinitions(
+                             source_tree, target.scope, target.name, true, target.param_count))
                     {
                         add_resolved(source, found.offset, found.length);
                         followed = true;
@@ -3498,21 +3506,19 @@ namespace heimdall::lsp
                         continue;
                     }
 
-                    const heimdall::ParseTree source_tree = heimdall::ParseTree::Parse(*source->text, parser_options,
-                        CurrentStop());
+                    const heimdall::ParseTree source_tree =
+                        heimdall::ParseTree::Parse(*source->text, parser_options, CurrentStop());
                     if (source_tree.Cancelled() || RequestCancelled())
                     {
                         RespondCancelled(id);
                         return;
-
                     }
 
-                    for (const auto& found : heimdall::Navigation::FindOverriders(source_tree, target.scope.back(),
-                        target.name, target.param_count))
+                    for (const auto& found : heimdall::Navigation::FindOverriders(
+                             source_tree, target.scope.back(), target.name, target.param_count))
                     {
                         add_resolved(source, found.offset, found.length);
                         followed = true;
-
                     }
                 }
             }

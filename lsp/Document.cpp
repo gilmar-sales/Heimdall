@@ -20,10 +20,7 @@ namespace heimdall::lsp
     }
 
     void LineIndex::Update(
-        std::string_view text,
-        std::size_t offset,
-        std::size_t old_length,
-        std::size_t new_length)
+        std::string_view text, std::size_t offset, std::size_t old_length, std::size_t new_length)
     {
         if (m_line_starts.empty())
         {
@@ -31,12 +28,13 @@ namespace heimdall::lsp
             return;
         }
 
-        m_text = text;
+        m_text                    = text;
         const std::size_t old_end = offset + old_length;
         // Line starts s with offset < s <= old_end sat right after a removed newline.
-        const auto first = std::upper_bound(m_line_starts.begin(), m_line_starts.end(),
-            static_cast<std::uint32_t>(offset));
-        const auto last = std::upper_bound(first, m_line_starts.end(), static_cast<std::uint32_t>(old_end));
+        const auto first = std::upper_bound(
+            m_line_starts.begin(), m_line_starts.end(), static_cast<std::uint32_t>(offset));
+        const auto last =
+            std::upper_bound(first, m_line_starts.end(), static_cast<std::uint32_t>(old_end));
         const auto position = m_line_starts.erase(first, last) - m_line_starts.begin();
 
         std::vector<std::uint32_t> fresh;
@@ -59,7 +57,8 @@ namespace heimdall::lsp
         m_line_starts.insert(m_line_starts.begin() + position, fresh.begin(), fresh.end());
     }
 
-    std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i, std::size_t stop) noexcept
+    std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i,
+                                      std::size_t stop) noexcept
     {
         const unsigned char c = static_cast<unsigned char>(text[i]);
         if ((c & 0x80) == 0)
@@ -76,7 +75,7 @@ namespace heimdall::lsp
         std::uint32_t codepoint = c & (width == 2 ? 0x1f : width == 3 ? 0x0f : 0x07);
         for (std::size_t j = 1; j < width; ++j)
         {
-            codepoint = (codepoint << 6) |(static_cast<unsigned char>(text[i + j]) & 0x3f);
+            codepoint = (codepoint << 6) | (static_cast<unsigned char>(text[i + j]) & 0x3f);
         }
 
         if (codepoint > 0xffff)
@@ -116,7 +115,7 @@ namespace heimdall::lsp
 
             line = lo;
         }
-        position.line = line;
+        position.line         = line;
         std::size_t character = 0;
         for (std::size_t i = m_line_starts[line]; i < stop;)
         {
@@ -157,7 +156,7 @@ namespace heimdall::lsp
         }
 
         const std::size_t line = position.line;
-        std::size_t i = m_line_starts[line];
+        std::size_t       i    = m_line_starts[line];
         const std::size_t line_end =
             line + 1 < m_line_starts.size() ? m_line_starts[line + 1] - 1 : m_text.size();
         std::size_t character = 0;
@@ -207,8 +206,7 @@ namespace heimdall::lsp
 
         std::string decoded;
         decoded.reserve(uri.size());
-        auto hex =[](char c) -> int
-        {
+        auto hex = [](char c) -> int {
             if (c >= '0' && c <= '9')
             {
                 return c - '0';
@@ -252,7 +250,7 @@ namespace heimdall::lsp
     std::string UriFromPath(const std::filesystem::path& path)
     {
         std::string generic = path.generic_string();
-        std::string uri = "file://";
+        std::string uri     = "file://";
         if (generic.empty() || generic.front() != '/')
         {
             uri += '/'; // drive-letter paths: file:///C:/dir
@@ -262,9 +260,9 @@ namespace heimdall::lsp
         for (const char c : generic)
         {
             const unsigned char byte = static_cast<unsigned char>(c);
-            const bool plain = (byte >= 'A' && byte <= 'Z') ||(byte >= 'a' && byte <= 'z') ||
-                (byte >= '0' && byte <= '9') || c == '-' || c == '.' || c == '_' || c == '~' || c == '/' ||
-                c == ':';
+            const bool plain = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+                               (byte >= '0' && byte <= '9') || c == '-' || c == '.' || c == '_' ||
+                               c == '~' || c == '/' || c == ':';
             if (plain)
             {
                 uri += c;
@@ -282,8 +280,8 @@ namespace heimdall::lsp
 
     void AppendPosition(Position position, std::string& out)
     {
-        out += "{\"line\":" + std::to_string(position.line) + ",\"character\":" +
-            std::to_string(position.character) + "}";
+        out += "{\"line\":" + std::to_string(position.line) +
+               ",\"character\":" + std::to_string(position.character) + "}";
     }
 
     std::size_t OffsetFromPosition(std::string_view text, Position position)

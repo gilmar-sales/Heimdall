@@ -21,7 +21,7 @@ namespace heimdall
             }
 
             const char first = value.front();
-            return (first >= 'a' && first <= 'z') ||(first >= 'A' && first <= 'Z') || first == '_';
+            return (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_';
         }
 
         std::vector<std::string_view> SignificantTokens(std::string_view source)
@@ -42,8 +42,8 @@ namespace heimdall
         struct SignificantToken
         {
             std::string_view text;
-            TokenKind kind;
-            std::size_t offset;
+            TokenKind        kind;
+            std::size_t      offset;
         };
 
         // Non-owning preprocessor over the command's defines: avoids the deep copy
@@ -68,11 +68,12 @@ namespace heimdall
                 filtered.erase(name);
             }
 
-            return Preprocessor(std::make_shared<const Preprocessor::MacroMap>(std::move(filtered)));
+            return Preprocessor(
+                std::make_shared<const Preprocessor::MacroMap>(std::move(filtered)));
         }
 
-        std::vector<std::string_view> SignificantViews(std::string_view source,
-            const std::vector<Token>& tokens)
+        std::vector<std::string_view> SignificantViews(std::string_view          source,
+                                                       const std::vector<Token>& tokens)
         {
             std::vector<std::string_view> result;
             result.reserve(tokens.size());
@@ -90,13 +91,14 @@ namespace heimdall
 
         bool IsModifier(std::string_view token)
         {
-            return token == "const" || token == "volatile" || token == "static" || token == "constexpr" ||
-                token == "register" || token == "thread_local";
+            return token == "const" || token == "volatile" || token == "static" ||
+                   token == "constexpr" || token == "register" || token == "thread_local";
         }
 
         bool IsControlKeyword(std::string_view token)
         {
-            return token == "if" || token == "for" || token == "while" || token == "switch" || token == "catch";
+            return token == "if" || token == "for" || token == "while" || token == "switch" ||
+                   token == "catch";
         }
 
         bool IsClassBody(const std::vector<SignificantToken>& tokens, std::size_t open_brace)
@@ -144,8 +146,8 @@ namespace heimdall
 
     } // namespace
 
-    std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNames(std::string_view source,
-        const CompileCommand* command) const
+    std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNames(
+        std::string_view source, const CompileCommand* command) const
     {
         return CollectTypeNamesFromViews(SignificantViews(source, Lexer(source).Lex()), command);
     }
@@ -154,8 +156,9 @@ namespace heimdall
         const std::vector<std::string_view>& tokens, const CompileCommand* command) const
     {
         std::unordered_set<std::string> types = {
-            "void", "bool", "char", "wchar_t", "char8_t", "char16_t", "char32_t", "short", "int", "long",
-            "signed", "unsigned", "float", "double", "auto", "size_t", "std::size_t"
+            "void",     "bool",   "char", "wchar_t", "char8_t",    "char16_t",
+            "char32_t", "short",  "int",  "long",    "signed",     "unsigned",
+            "float",    "double", "auto", "size_t",  "std::size_t"
         };
         for (std::size_t i = 0; i + 1 < tokens.size(); ++i)
         {
@@ -164,8 +167,9 @@ namespace heimdall
             {
                 types.emplace(tokens[i + 2]);
             }
-            else if ((tokens[i] == "class" || tokens[i] == "struct" || tokens[i] == "union" || tokens[i] == "enum") &&
-                IsWord(tokens[i + 1]))
+            else if ((tokens[i] == "class" || tokens[i] == "struct" || tokens[i] == "union" ||
+                      tokens[i] == "enum") &&
+                     IsWord(tokens[i + 1]))
             {
                 types.emplace(tokens[i + 1]);
             }
@@ -194,7 +198,8 @@ namespace heimdall
         const std::unordered_set<std::string>& known_values) const
     {
         const auto tokens = SignificantTokens(statement);
-        if (tokens.size() != 4 ||!IsWord(tokens[0]) || tokens[1] != "*" ||!IsWord(tokens[2]) || tokens[3] != ";")
+        if (tokens.size() != 4 || !IsWord(tokens[0]) || tokens[1] != "*" || !IsWord(tokens[2]) ||
+            tokens[3] != ";")
         {
             return AsteriskMeaning::NotApplicable;
         }
@@ -212,15 +217,15 @@ namespace heimdall
         return AsteriskMeaning::Ambiguous;
     }
 
-    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(std::string_view source,
-        const CompileCommand* command) const
+    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(
+        std::string_view source, const CompileCommand* command) const
     {
         const auto preprocessing = MakePreprocessor(command).Process(source);
         return AnalyzeUnusedLocalsImpl(source, Lexer(source).Lex(), preprocessing, command);
     }
 
-    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(const ParseTree& tree,
-        const CompileCommand* command) const
+    std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(
+        const ParseTree& tree, const CompileCommand* command) const
     {
         // Only the active-range mask is recomputed (a cheap line scan); the
         // tokens themselves are reused from the tree (saves 2 full lexes).
@@ -229,10 +234,10 @@ namespace heimdall
     }
 
     std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocalsImpl(
-        std::string_view source,
+        std::string_view          source,
         const std::vector<Token>& lexed,
         const PreprocessorResult& preprocessing,
-        const CompileCommand* command) const
+        const CompileCommand*     command) const
     {
         std::vector<SignificantToken> tokens;
         tokens.reserve(lexed.size());
@@ -242,16 +247,18 @@ namespace heimdall
         for (const auto& token : lexed)
         {
             while (active_cursor < preprocessing.active_ranges.size() &&
-                preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <=
-                token.offset)
+                   preprocessing.active_ranges[active_cursor].offset +
+                           preprocessing.active_ranges[active_cursor].length <=
+                       token.offset)
             {
                 ++active_cursor;
             }
 
-            const bool active = active_cursor < preprocessing.active_ranges.size() &&
+            const bool active =
+                active_cursor < preprocessing.active_ranges.size() &&
                 preprocessing.active_ranges[active_cursor].offset <= token.offset &&
                 token.offset < preprocessing.active_ranges[active_cursor].offset +
-                preprocessing.active_ranges[active_cursor].length;
+                                   preprocessing.active_ranges[active_cursor].length;
             if (!active)
             {
                 continue;
@@ -260,7 +267,8 @@ namespace heimdall
             if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                 token.kind != TokenKind::BlockComment)
             {
-                tokens.push_back({source.substr(token.offset, token.length), token.kind, token.offset});
+                tokens.push_back(
+                    { source.substr(token.offset, token.length), token.kind, token.offset });
                 views.push_back(source.substr(token.offset, token.length));
             }
         }
@@ -268,16 +276,16 @@ namespace heimdall
         const auto known_types = CollectTypeNamesFromViews(views, command);
         struct ScopeFrame
         {
-            bool class_body;
-            bool function_root;
+            bool        class_body;
+            bool        function_root;
             std::size_t previous_function;
         };
 
-        std::vector<ScopeFrame> scopes;
+        std::vector<ScopeFrame>  scopes;
         std::vector<std::size_t> function_ids(tokens.size(), 0);
-        std::size_t function_id = 0;
-        std::size_t next_function_id = 1;
-        std::size_t class_depth = 0;
+        std::size_t              function_id      = 0;
+        std::size_t              next_function_id = 1;
+        std::size_t              class_depth      = 0;
         for (std::size_t i = 0; i < tokens.size(); ++i)
         {
             const auto text = tokens[i].text;
@@ -285,8 +293,9 @@ namespace heimdall
             if (text == "{")
             {
                 const bool class_body = IsClassBody(tokens, i);
-                const bool function_root =!class_body && function_id == 0 && IsFunctionBody(tokens, i);
-                scopes.push_back({class_body, function_root, function_id});
+                const bool function_root =
+                    !class_body && function_id == 0 && IsFunctionBody(tokens, i);
+                scopes.push_back({ class_body, function_root, function_id });
                 if (class_body)
                 {
                     ++class_depth;
@@ -316,7 +325,7 @@ namespace heimdall
         }
 
         std::vector<SemanticDiagnostic> diagnostics;
-        LineTable line_table;
+        LineTable                       line_table;
         line_table.Build(source);
         for (std::size_t i = 0; i < tokens.size(); ++i)
         {
@@ -351,8 +360,8 @@ namespace heimdall
 
             std::size_t name_index = i + 1;
             while (name_index < tokens.size() &&
-                (tokens[name_index].text == "*" || tokens[name_index].text == "&" || tokens[name_index].text == "&&" ||
-                tokens[name_index].text == "const"))
+                   (tokens[name_index].text == "*" || tokens[name_index].text == "&" ||
+                    tokens[name_index].text == "&&" || tokens[name_index].text == "const"))
             {
                 ++name_index;
             }
@@ -363,15 +372,17 @@ namespace heimdall
                 continue;
             }
 
-            const auto following = name_index + 1 < tokens.size() ? tokens[name_index + 1].text : std::string_view {};
+            const auto following =
+                name_index + 1 < tokens.size() ? tokens[name_index + 1].text : std::string_view {};
             if (following != "=" && following != ";" && following != "[")
             {
                 continue;
             }
 
             const std::string_view name = tokens[name_index].text;
-            bool used = false;
-            for (std::size_t j = name_index + 1; j < tokens.size() && function_ids[j] == function_ids[i]; ++j)
+            bool                   used = false;
+            for (std::size_t j = name_index + 1;
+                 j < tokens.size() && function_ids[j] == function_ids[i]; ++j)
             {
                 if (tokens[j].kind == TokenKind::Identifier && tokens[j].text == name)
                 {
@@ -383,9 +394,10 @@ namespace heimdall
             if (!used)
             {
                 const auto position = line_table.Lookup(tokens[name_index].offset);
-                diagnostics.push_back({"semantic/no-unused-local",
-                        "local variable '" + std::string(name) + "' is never used",
-                        tokens[name_index].offset, name.size(), position.line, position.column});
+                diagnostics.push_back(
+                    { "semantic/no-unused-local",
+                      "local variable '" + std::string(name) + "' is never used",
+                      tokens[name_index].offset, name.size(), position.line, position.column });
             }
         }
 

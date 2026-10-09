@@ -1,5 +1,5 @@
-#include <Heimdall/LineTable.hpp>
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/LineTable.hpp>
 #include <Heimdall/Preprocessor.hpp>
 #include <Heimdall/RuleEngine.hpp>
 
@@ -20,47 +20,55 @@ namespace heimdall
     namespace
     {
 
-        constexpr std::size_t kMinPrefixedLen = 2;
-        constexpr int kDecimalBase = 10;
-        constexpr int kHexBase = 16;
-        constexpr int kBinaryBase = 2;
-        constexpr int kOctalBase = 8;
-        constexpr std::size_t kHexPrefixLen = 2;
-        constexpr int kMaxSignHops = 4;
-        constexpr int kMaxDeclWalkSteps = 25;
-        constexpr int kMaxEnumLookback = 6;
+        constexpr std::size_t kMinPrefixedLen    = 2;
+        constexpr int         kDecimalBase       = 10;
+        constexpr int         kHexBase           = 16;
+        constexpr int         kBinaryBase        = 2;
+        constexpr int         kOctalBase         = 8;
+        constexpr std::size_t kHexPrefixLen      = 2;
+        constexpr int         kMaxSignHops       = 4;
+        constexpr int         kMaxDeclWalkSteps  = 25;
+        constexpr int         kMaxEnumLookback   = 6;
         constexpr std::size_t kIncludeDelimCount = 2;
-        constexpr std::size_t kMinSortableBlock = 2;
+        constexpr std::size_t kMinSortableBlock  = 2;
 
         bool IsInDirective(std::size_t offset, const std::vector<PreprocessorDirective>& directives,
-            std::size_t& cursor)
+                           std::size_t& cursor)
         {
-            while (cursor < directives.size() && directives[cursor].offset + directives[cursor].length <= offset)
+            while (cursor < directives.size() &&
+                   directives[cursor].offset + directives[cursor].length <= offset)
             {
                 ++cursor;
             }
 
             return cursor < directives.size() && directives[cursor].offset <= offset &&
-                offset < directives[cursor].offset + directives[cursor].length;
+                   offset < directives[cursor].offset + directives[cursor].length;
         }
 
-        Diagnostic MakeDiagnostic(
-            RuleId rule,
-            std::string code,
-            std::string message,
-            std::size_t offset,
-            std::size_t length,
-            LineTable::Position position,
-            TextEdit fix,
-            bool has_fix = true)
+        Diagnostic MakeDiagnostic(RuleId              rule,
+                                  std::string         code,
+                                  std::string         message,
+                                  std::size_t         offset,
+                                  std::size_t         length,
+                                  LineTable::Position position,
+                                  TextEdit            fix,
+                                  bool                has_fix = true)
         {
-            return {rule, Severity::Warning, std::move(code), std::move(message), offset, length,
-                position.line, position.column, has_fix, std::move(fix)};
+            return { rule,
+                     Severity::Warning,
+                     std::move(code),
+                     std::move(message),
+                     offset,
+                     length,
+                     position.line,
+                     position.column,
+                     has_fix,
+                     std::move(fix) };
         }
 
         struct Suppression
         {
-            std::uint32_t line;
+            std::uint32_t    line;
             std::string_view codes;
         };
 
@@ -68,12 +76,13 @@ namespace heimdall
         {
             while (!codes.empty())
             {
-                while (!codes.empty() && (codes.front() == ' ' || codes.front() == '\t' || codes.front() == ','))
+                while (!codes.empty() &&
+                       (codes.front() == ' ' || codes.front() == '\t' || codes.front() == ','))
                 {
                     codes.remove_prefix(1);
                 }
 
-                const auto end = codes.find_first_of(" ,\t");
+                const auto end  = codes.find_first_of(" ,\t");
                 const auto item = codes.substr(0, end);
                 if (item == code || item == "*")
                 {
@@ -91,13 +100,12 @@ namespace heimdall
             return false;
         }
 
-        std::vector<Suppression> FindSuppressions(std::string_view source,
-            const std::vector<Token>& tokens,
-            const LineTable& lines)
+        std::vector<Suppression> FindSuppressions(
+            std::string_view source, const std::vector<Token>& tokens, const LineTable& lines)
         {
             constexpr std::string_view line_marker = "heimdall-disable-line";
             constexpr std::string_view next_marker = "heimdall-disable-next-line";
-            std::vector<Suppression> result;
+            std::vector<Suppression>   result;
             for (const auto& token : tokens)
             {
                 if (token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
@@ -105,14 +113,14 @@ namespace heimdall
                     continue;
                 }
 
-                const auto text = source.substr(token.offset, token.length);
-                auto marker = text.find(next_marker);
-                std::uint32_t target = lines.Lookup(token.offset).line + 1;
-                std::size_t marker_length = next_marker.size();
+                const auto    text          = source.substr(token.offset, token.length);
+                auto          marker        = text.find(next_marker);
+                std::uint32_t target        = lines.Lookup(token.offset).line + 1;
+                std::size_t   marker_length = next_marker.size();
                 if (marker == std::string_view::npos)
                 {
-                    marker = text.find(line_marker);
-                    target = lines.Lookup(token.offset).line;
+                    marker        = text.find(line_marker);
+                    target        = lines.Lookup(token.offset).line;
                     marker_length = line_marker.size();
                 }
 
@@ -122,7 +130,8 @@ namespace heimdall
                 }
 
                 std::size_t begin = marker + marker_length;
-                while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\t' || text[begin] == ':'))
+                while (begin < text.size() &&
+                       (text[begin] == ' ' || text[begin] == '\t' || text[begin] == ':'))
                 {
                     ++begin;
                 }
@@ -133,7 +142,7 @@ namespace heimdall
                     end = text.size();
                 }
 
-                result.push_back({target, text.substr(begin, end - begin)});
+                result.push_back({ target, text.substr(begin, end - begin) });
             }
 
             return result;
@@ -141,10 +150,9 @@ namespace heimdall
 
         std::size_t NextSignificant(const std::vector<Token>& tokens, std::size_t index)
         {
-            while (index < tokens.size() &&
-                (tokens[index].kind == TokenKind::Whitespace ||
-                tokens[index].kind == TokenKind::LineComment ||
-                tokens[index].kind == TokenKind::BlockComment))
+            while (index < tokens.size() && (tokens[index].kind == TokenKind::Whitespace ||
+                                             tokens[index].kind == TokenKind::LineComment ||
+                                             tokens[index].kind == TokenKind::BlockComment))
             {
                 ++index;
             }
@@ -170,23 +178,24 @@ namespace heimdall
 
         bool IsWord(std::string_view source, const Token& token, std::string_view word)
         {
-            return token.kind == TokenKind::Identifier && source.substr(token.offset, token.length) == word;
+            return token.kind == TokenKind::Identifier &&
+                   source.substr(token.offset, token.length) == word;
         }
 
         bool IsPunct(std::string_view source, const Token& token, std::string_view punct)
         {
-            return token.kind == TokenKind::Punctuation && source.substr(token.offset, token.length) == punct;
+            return token.kind == TokenKind::Punctuation &&
+                   source.substr(token.offset, token.length) == punct;
         }
 
         // Index of the bracket closing the one at `open`, or tokens.size().
         // `open_text`/`close_text` are single-character punctuators; anything
         // unbalanced gives up so fixes never come from half-parsed code.
-        std::size_t MatchBracket(
-            const std::vector<Token>& tokens,
-            std::string_view source,
-            std::size_t open,
-            std::string_view open_text,
-            std::string_view close_text)
+        std::size_t MatchBracket(const std::vector<Token>& tokens,
+                                 std::string_view          source,
+                                 std::size_t               open,
+                                 std::string_view          open_text,
+                                 std::string_view          close_text)
         {
             std::size_t depth = 0;
             for (std::size_t i = open; i < tokens.size(); ++i)
@@ -213,14 +222,14 @@ namespace heimdall
 
         std::string_view Trimmed(std::string_view text)
         {
-            while (!text.empty() &&
-                (text.front() == ' ' || text.front() == '\t' || text.front() == '\n' || text.front() == '\r'))
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' ||
+                                     text.front() == '\n' || text.front() == '\r'))
             {
                 text.remove_prefix(1);
             }
 
-            while (!text.empty() &&
-                (text.back() == ' ' || text.back() == '\t' || text.back() == '\n' || text.back() == '\r'))
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t' ||
+                                     text.back() == '\n' || text.back() == '\r'))
             {
                 text.remove_suffix(1);
             }
@@ -231,26 +240,25 @@ namespace heimdall
         // A `new T(args)` / `new T` / `new T[n]` starting at the `new` keyword.
         struct NewExpression
         {
-            std::size_t new_index = 0;
+            std::size_t      new_index = 0;
             std::string_view type;
             std::string_view args;
-            bool has_parens = false;
-            bool is_array = false;
-            std::size_t end_index = 0; // last token of the expression
+            bool             has_parens = false;
+            bool             is_array   = false;
+            std::size_t      end_index  = 0; // last token of the expression
         };
 
-        bool ParseNewExpression(
-            const std::vector<Token>& tokens,
-            std::string_view source,
-            std::size_t new_index,
-            NewExpression& out)
+        bool ParseNewExpression(const std::vector<Token>& tokens,
+                                std::string_view          source,
+                                std::size_t               new_index,
+                                NewExpression&            out)
         {
-            std::size_t i = NextSignificant(tokens, new_index + 1);
+            std::size_t       i          = NextSignificant(tokens, new_index + 1);
             const std::size_t type_begin = i;
-            bool has_ident = false;
+            bool              has_ident  = false;
             while (i < tokens.size() && tokens[i].kind == TokenKind::Identifier)
             {
-                has_ident = true;
+                has_ident               = true;
                 const std::size_t after = NextSignificant(tokens, i + 1);
                 if (after < tokens.size() && IsPunct(source, tokens[after], "::"))
                 {
@@ -267,16 +275,17 @@ namespace heimdall
             }
 
             const std::size_t type_end = i;
-            out.new_index = new_index;
-            out.type = Trimmed(source.substr(tokens[type_begin].offset,
+            out.new_index              = new_index;
+            out.type                   = Trimmed(source.substr(
+                tokens[type_begin].offset,
                 tokens[type_end].offset + tokens[type_end].length - tokens[type_begin].offset));
-            out.args = {};
-            out.has_parens = false;
-            out.is_array = false;
-            const std::size_t after = NextSignificant(tokens, type_end + 1);
+            out.args                   = {};
+            out.has_parens             = false;
+            out.is_array               = false;
+            const std::size_t after    = NextSignificant(tokens, type_end + 1);
             if (after < tokens.size() && IsPunct(source, tokens[after], "["))
             {
-                out.is_array = true;
+                out.is_array  = true;
                 out.end_index = MatchBracket(tokens, source, after, "[", "]");
                 return out.end_index < tokens.size();
             }
@@ -289,8 +298,8 @@ namespace heimdall
                     return false;
                 }
 
-                out.has_parens = true;
-                out.end_index = close;
+                out.has_parens               = true;
+                out.end_index                = close;
                 const std::size_t args_begin = tokens[after].offset + tokens[after].length;
                 out.args = Trimmed(source.substr(args_begin, tokens[close].offset - args_begin));
                 return true;
@@ -311,11 +320,11 @@ namespace heimdall
         struct IncludeTarget
         {
             std::string_view text;
-            bool angle;
+            bool             angle;
         };
 
-        std::optional<IncludeTarget> ReadIncludeTarget(std::string_view source,
-            const PreprocessorDirective& directive)
+        std::optional<IncludeTarget> ReadIncludeTarget(std::string_view             source,
+                                                       const PreprocessorDirective& directive)
         {
             std::string_view body = source.substr(directive.offset, directive.length);
             while (!body.empty() && (body.front() == ' ' || body.front() == '\t'))
@@ -335,9 +344,9 @@ namespace heimdall
 
             std::size_t name_length = 0;
             while (name_length < body.size() &&
-                ((body[name_length] >= 'a' && body[name_length] <= 'z') ||
-                (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
-                body[name_length] == '_'))
+                   ((body[name_length] >= 'a' && body[name_length] <= 'z') ||
+                    (body[name_length] >= 'A' && body[name_length] <= 'Z') ||
+                    body[name_length] == '_'))
             {
                 ++name_length;
             }
@@ -356,13 +365,13 @@ namespace heimdall
             }
 
             const auto close_char = body[open] == '<' ? '>' : '"';
-            const auto close = body.find(close_char, open + 1);
+            const auto close      = body.find(close_char, open + 1);
             if (close == std::string_view::npos)
             {
                 return std::nullopt;
             }
 
-            return IncludeTarget{body.substr(open, close - open + 1), body[open] == '<'};
+            return IncludeTarget { body.substr(open, close - open + 1), body[open] == '<' };
         }
 
         bool CaseInsensitiveLess(std::string_view left, std::string_view right)
@@ -370,10 +379,9 @@ namespace heimdall
             const auto common = std::min(left.size(), right.size());
             for (std::size_t i = 0; i < common; ++i)
             {
-                const auto a = static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(left[i])));
-                const auto b = static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(right[i])));
+                const auto a = static_cast<char>(std::tolower(static_cast<unsigned char>(left[i])));
+                const auto b =
+                    static_cast<char>(std::tolower(static_cast<unsigned char>(right[i])));
                 if (a != b)
                 {
                     return a < b;
@@ -387,11 +395,10 @@ namespace heimdall
         // subscripts: zero or more [ <bound> ] groups. Anything else
         // (attributes, initializers, function declarators) is left to
         // a real parser.
-        bool IsPlainArrayDeclarator(
-            const std::vector<Token>& tokens,
-            std::string_view source,
-            std::size_t declarator,
-            std::size_t end)
+        bool IsPlainArrayDeclarator(const std::vector<Token>& tokens,
+                                    std::string_view          source,
+                                    std::size_t               declarator,
+                                    std::size_t               end)
         {
             std::size_t j = NextSignificant(tokens, declarator + 1);
             while (j < end)
@@ -403,9 +410,8 @@ namespace heimdall
                 }
 
                 const auto bound = NextSignificant(tokens, j + 1);
-                if (bound >= end ||
-                    (tokens[bound].kind != TokenKind::Number &&
-                    tokens[bound].kind != TokenKind::Identifier))
+                if (bound >= end || (tokens[bound].kind != TokenKind::Number &&
+                                     tokens[bound].kind != TokenKind::Identifier))
                 {
                     return false;
                 }
@@ -425,16 +431,17 @@ namespace heimdall
 
         bool IsWordChar(char c)
         {
-            return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||
-                (c >= '0' && c <= '9') || c == '_';
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                   c == '_';
         }
 
-        // First uppercase TODO/FIXME/XXX whole-word marker in a comment, // heimdall-disable-line cpp/no-todo -- documents the rule's own markers.
-        // or nullopt. Matching is case-sensitive: lowercase prose
+        // First uppercase TODO/FIXME/XXX whole-word marker in a comment, // heimdall-disable-line
+        // cpp/no-todo -- documents the rule's own markers. or nullopt. Matching is case-sensitive:
+        // lowercase prose
         // ("todo list", "fixme later?") stays quiet.
         std::optional<std::string_view> FindTodoMarker(std::string_view text)
         {
-            constexpr std::string_view markers[] = {"TODO", "FIXME", "XXX"};
+            constexpr std::string_view markers[] = { "TODO", "FIXME", "XXX" };
             for (std::size_t i = 0; i < text.size(); ++i)
             {
                 for (const auto marker : markers)
@@ -444,9 +451,9 @@ namespace heimdall
                         continue;
                     }
 
-                    const bool left_ok = i == 0 ||!IsWordChar(text[i - 1]);
-                    const bool right_ok = i + marker.size() == text.size() ||
-                        !IsWordChar(text[i + marker.size()]);
+                    const bool left_ok = i == 0 || !IsWordChar(text[i - 1]);
+                    const bool right_ok =
+                        i + marker.size() == text.size() || !IsWordChar(text[i + marker.size()]);
                     if (left_ok && right_ok)
                     {
                         return marker;
@@ -478,26 +485,28 @@ namespace heimdall
                 return false;
             }
 
-            const bool hex = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
-                (clean[1] == 'x' || clean[1] == 'X');
-            const bool binary = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
-                (clean[1] == 'b' || clean[1] == 'B');
-            bool is_float = false;
+            const bool hex      = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
+                                  (clean[1] == 'x' || clean[1] == 'X');
+            const bool binary   = clean.size() > kMinPrefixedLen && clean[0] == '0' &&
+                                  (clean[1] == 'b' || clean[1] == 'B');
+            bool       is_float = false;
             if (hex)
             {
-                is_float = clean.find('.') != std::string::npos ||
-                    clean.find('p') != std::string::npos || clean.find('P') != std::string::npos;
+                is_float =
+                    clean.find('.') != std::string::npos || clean.find('p') != std::string::npos ||
+                    clean.find('P') != std::string::npos;
             }
             else if (!binary)
             {
-                is_float = clean.find('.') != std::string::npos ||
-                    clean.find('e') != std::string::npos || clean.find('E') != std::string::npos;
+                is_float =
+                    clean.find('.') != std::string::npos || clean.find('e') != std::string::npos ||
+                    clean.find('E') != std::string::npos;
             }
 
             errno = 0;
             if (is_float)
             {
-                char* end = nullptr;
+                char*        end   = nullptr;
                 const double value = std::strtod(clean.c_str(), &end);
                 if (end == clean.c_str() || errno == ERANGE)
                 {
@@ -505,8 +514,8 @@ namespace heimdall
                 }
 
                 const std::string_view suffix(end);
-                if (!suffix.empty() && suffix != "f" && suffix != "F" &&
-                    suffix != "l" && suffix != "L")
+                if (!suffix.empty() && suffix != "f" && suffix != "F" && suffix != "l" &&
+                    suffix != "L")
                 {
                     return false;
                 }
@@ -515,29 +524,27 @@ namespace heimdall
             }
 
             const char* digits = clean.c_str();
-            int base = kDecimalBase;
+            int         base   = kDecimalBase;
             if (hex || binary)
             {
                 digits += kHexPrefixLen;
                 base = hex ? kHexBase : kBinaryBase;
             }
-            else if (clean.size() > 1 && clean[0] == '0' &&
-                clean[1] >= '0' && clean[1] <= '9')
+            else if (clean.size() > 1 && clean[0] == '0' && clean[1] >= '0' && clean[1] <= '9')
             {
                 base = kOctalBase;
             }
 
-            char* end = nullptr;
+            char*                    end   = nullptr;
             const unsigned long long value = std::strtoull(digits, &end, base);
             if (end == digits || errno == ERANGE)
             {
                 return false;
             }
 
-            for (const char * p = end; *p != '\0'; ++p)
+            for (const char* p = end; *p != '\0'; ++p)
             {
-                if (*p != 'u' && *p != 'U' && *p != 'l' && *p != 'L' &&
-                    *p != 'z' && *p != 'Z')
+                if (*p != 'u' && *p != 'U' && *p != 'l' && *p != 'L' && *p != 'z' && *p != 'Z')
                 {
                     return false;
                 }
@@ -546,14 +553,13 @@ namespace heimdall
             return value <= 1;
         }
 
-        bool IsPunctuation(
-            const std::vector<Token>& tokens,
-            std::string_view source,
-            std::size_t index,
-            std::string_view text)
+        bool IsPunctuation(const std::vector<Token>& tokens,
+                           std::string_view          source,
+                           std::size_t               index,
+                           std::string_view          text)
         {
             return index < tokens.size() && tokens[index].kind == TokenKind::Punctuation &&
-                PunctuationText(source, tokens[index]) == text;
+                   PunctuationText(source, tokens[index]) == text;
         }
 
         // A literal that gives a named constant its value is not magic:
@@ -564,12 +570,13 @@ namespace heimdall
         // a former false positive (flagged `constinit int kX = 42;`); it
         // names its value exactly like const/constexpr, so it is exempt.
         bool IsNamedConstantInitializer(const std::vector<Token>& tokens, std::string_view source,
-            std::size_t index)
+                                        std::size_t index)
         {
             std::size_t trigger = PrevSignificant(tokens, index);
-            int parens = 0;
+            int         parens  = 0;
             for (int hops = 0; hops < kMaxSignHops && trigger < tokens.size() &&
-                tokens[trigger].kind == TokenKind::Punctuation; ++hops)
+                               tokens[trigger].kind == TokenKind::Punctuation;
+                 ++hops)
             {
                 const auto text = PunctuationText(source, tokens[trigger]);
                 if (text == "-" || text == "+")
@@ -661,7 +668,8 @@ namespace heimdall
                             }
 
                             if (tokens[cursor].kind == TokenKind::Identifier &&
-                                source.substr(tokens[cursor].offset, tokens[cursor].length) == "enum")
+                                source.substr(tokens[cursor].offset, tokens[cursor].length) ==
+                                    "enum")
                             {
                                 return true;
                             }
@@ -695,109 +703,115 @@ namespace heimdall
 
     const std::vector<RuleInfo>& RuleCatalog()
     {
-        static const std::vector<RuleInfo> catalog =
-            {
-            {
-                RuleId::NullMacro, "cpp/no-null", "cpp", Severity::Warning, "lexical", true,
-                    "use nullptr instead of NULL"
-            },
-            {RuleId::TrailingWhitespace, "format/no-trailing-whitespace", "format",
-                Severity::Warning, "lexical", true, "remove trailing spaces and tabs"},
-            {RuleId::MissingFinalNewline, "format/require-final-newline", "format",
-                Severity::Warning, "lexical", true, "ensure the file ends with a newline"},
-            {RuleId::EmptyCatch, "cpp/no-empty-catch", "cpp", Severity::Warning,
-                "sintática", false, "catch block that ignores the exception"},
-            {RuleId::DuplicateInclude, "cpp/no-duplicate-include", "cpp", Severity::Warning,
-                "diretivas", false, "same header included more than once"},
-            {RuleId::LegacyTypedef, "cpp/modernize-using", "cpp", Severity::Warning,
-                "sintática", true, "replace typedef with a using alias"},
-            {RuleId::UnusedInclude, "cpp/no-unused-include", "cpp", Severity::Warning,
-                "semântica", false, "included header whose symbols are never used"},
-            {RuleId::PreferForwardDeclaration, "cpp/prefer-forward-declaration", "cpp", Severity::Warning,
-                "semântica", false, "header included only for pointers or references to its classes"},
-            {RuleId::CircularInclude, "cpp/no-circular-include", "cpp", Severity::Error,
-                "semântica", false, "include that leads back to the including file"},
-            {RuleId::UnsortedIncludes, "cpp/sort-includes", "cpp", Severity::Warning,
-                "diretivas", true, "includes out of the configured order"},
-            {RuleId::TodoComment, "cpp/no-todo", "cpp", Severity::Warning,
-                "lexical", false, "unresolved TODO, FIXME or XXX comment"},
-            {RuleId::MagicNumber, "cpp/no-magic-numbers", "cpp", Severity::Warning,
-                "sintática", false, "numeric literal without a named constant"},
-            {RuleId::ModernizeOverride, "cpp/modernize-override", "cpp", Severity::Warning,
-                "semântica", true, "overriding virtual function without override"},
-            {RuleId::ModernizeNullptr, "cpp/modernize-nullptr", "cpp", Severity::Warning,
-                "semântica", true, "explicit cast of a null constant to a pointer type"},
-            {RuleId::NoZeroAsNull, "cpp/no-zero-as-null", "cpp", Severity::Warning,
-                "semântica", true, "0 used as a null pointer"},
-            {RuleId::ModernizeAuto, "cpp/modernize-auto", "cpp", Severity::Warning,
-                "semântica", true, "explicit type that repeats the initializer"},
-            {RuleId::ModernizeEmplace, "cpp/modernize-emplace", "cpp", Severity::Warning,
-                "sintática", true, "push_back of a temporary that emplace_back can build in place"},
-            {RuleId::ModernizeMakeUnique, "cpp/modernize-make-unique", "cpp", Severity::Warning,
-                "sintática", true, "unique_ptr built from new instead of std::make_unique"},
-            {RuleId::ModernizeMakeShared, "cpp/modernize-make-shared", "cpp", Severity::Warning,
-                "sintática", true, "shared_ptr built from new instead of std::make_shared"},
-            {RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr", "cpp", Severity::Warning,
-                "sintática", true, "ownership held in a raw pointer instead of a smart pointer"},
-            {RuleId::NoNewDelete, "cpp/no-new-delete", "cpp", Severity::Warning,
-                "sintática", false, "direct use of new or delete instead of RAII"},
-            {RuleId::ModernizeSpan, "cpp/modernize-span", "cpp", Severity::Warning,
-                "semântica", true, "pointer and size parameters that std::span can replace"},
-            {RuleId::ModernizeStringView, "cpp/modernize-string-view", "cpp", Severity::Warning,
-                "semântica", true, "const std::string parameter copied by value instead of std::string_view"},
-            {RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms", "cpp", Severity::Warning,
-                "sintática", false, "loop that a standard algorithm can replace"},
-            {RuleId::ModernizeStructuredBindings, "cpp/modernize-structured-bindings", "cpp", Severity::Warning,
-                "sintática", true, "pair or tuple unpacked without structured bindings"},
-            {RuleId::ModernizeAttributes, "cpp/modernize-attributes", "cpp", Severity::Warning,
-                "semântica", true, "query function whose result should be [[nodiscard]]"},
-            {RuleId::ModernizeConstevalConstexpr, "cpp/modernize-consteval-constexpr", "cpp", Severity::Warning,
-                "semântica", true, "constant that could be constexpr"},
-            {RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion", "cpp", Severity::Warning,
-                "semântica", false, "integer, floating-point or pointer used as a condition"},
-            {RuleId::ModernizeRangeLoop, "cpp/modernize-range-loop", "cpp", Severity::Warning,
-                "semântica", true, "index loop replaceable by a range-based for"},
-            {RuleId::ModernizeLoopConvert, "cpp/modernize-loop-convert", "cpp", Severity::Warning,
-                "semântica", true, "iterator loop replaceable by a range-based for"},
-            {RuleId::IncludeWhatYouUse, "cpp/include-what-you-use", "cpp", Severity::Warning,
-                "semântica", false, "name used from a header that is only included transitively"},
-            {RuleId::ModernizeFinal, "cpp/modernize-final", "cpp", Severity::Warning,
-                "semântica", true, "class or virtual function that nothing can derive from or override"},
-            {RuleId::ModernizeConst, "cpp/modernize-const", "cpp", Severity::Warning,
-                "semântica", true, "local variable that is never modified and could be const"},
-            {RuleId::ModernizeConstexpr, "cpp/modernize-constexpr", "cpp", Severity::Warning,
-                "semântica", true, "variable or function that could be constexpr"},
-            {RuleId::ApiVirtualDestructor, "api/virtual-destructor", "api", Severity::Warning,
-                "semântica", true, "polymorphic class whose destructor is not virtual"},
-            {RuleId::ApiMissingNodiscard, "api/missing-nodiscard", "api", Severity::Warning,
-                "semântica", true, "function whose resource-like result should be [[nodiscard]]"},
-            {RuleId::ApiPassByValue, "api/pass-by-value", "api", Severity::Warning,
-                "semântica", true, "const reference parameter that is copied and could be taken by value"},
-            {RuleId::ApiPassByConstReference, "api/pass-by-const-reference", "api", Severity::Warning,
-                "semântica", true, "expensive parameter copied by value but only read"},
-            {RuleId::ApiConstCorrectness, "api/const-correctness", "api", Severity::Warning,
-                "semântica", true, "member function or reference parameter that could be const"},
-            {RuleId::ApiUnsafeDowncast, "api/unsafe-downcast", "api", Severity::Warning,
-                "semântica", false, "static_cast downcast without a runtime check"},
-            {RuleId::ApiSlicing, "api/slicing", "api", Severity::Warning,
-                "semântica", false, "derived object stored or returned by value as its base"},
-            {RuleId::ApiImplicitConversion, "api/implicit-conversion", "api", Severity::Warning,
-                "semântica", false, "implicit conversion operator that allows accidental conversions"},
-            {RuleId::ApiExplicitConstructor, "api/explicit-constructor", "api", Severity::Warning,
-                "semântica", true, "constructor callable with one argument that is not explicit"},
-            {RuleId::ApiOverloadHiding, "api/overload-hiding", "api", Severity::Warning,
-                "semântica", true, "derived function that hides the virtual overloads of a base"},
-            {RuleId::ApiVirtualCallInConstructor, "api/virtual-call-in-constructor", "api", Severity::Warning,
-                "semântica", false, "virtual call in a constructor or destructor"},
-            {RuleId::DesignatedInitOrder, "cpp/designated-init-order", "cpp", Severity::Warning,
-                "semântica", true, "designated initializers out of member declaration order"},
-            {RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer", "cpp", Severity::Error,
-                "semântica", false, "non-zero integer constant used as a pointer"},
-            {RuleId::DocRequireComment, "doc/require-comment", "doc", Severity::Warning,
-                "semântica", true, "public class, enum or function without a documentation comment (opt-in)"},
-            {RuleId::DocDoxygenStyle, "doc/doxygen-style", "doc", Severity::Warning,
-                "semântica", true,
-                "Doxygen comment that breaks good practice: brief, @param, @tparam, @return, @throws, style (opt-in)"},
+        static const std::vector<RuleInfo> catalog = {
+            { RuleId::NullMacro, "cpp/no-null", "cpp", Severity::Warning, "lexical", true,
+              "use nullptr instead of NULL" },
+            { RuleId::TrailingWhitespace, "format/no-trailing-whitespace", "format",
+              Severity::Warning, "lexical", true, "remove trailing spaces and tabs" },
+            { RuleId::MissingFinalNewline, "format/require-final-newline", "format",
+              Severity::Warning, "lexical", true, "ensure the file ends with a newline" },
+            { RuleId::EmptyCatch, "cpp/no-empty-catch", "cpp", Severity::Warning, "sintática",
+              false, "catch block that ignores the exception" },
+            { RuleId::DuplicateInclude, "cpp/no-duplicate-include", "cpp", Severity::Warning,
+              "diretivas", false, "same header included more than once" },
+            { RuleId::LegacyTypedef, "cpp/modernize-using", "cpp", Severity::Warning, "sintática",
+              true, "replace typedef with a using alias" },
+            { RuleId::UnusedInclude, "cpp/no-unused-include", "cpp", Severity::Warning, "semântica",
+              false, "included header whose symbols are never used" },
+            { RuleId::PreferForwardDeclaration, "cpp/prefer-forward-declaration", "cpp",
+              Severity::Warning, "semântica", false,
+              "header included only for pointers or references to its classes" },
+            { RuleId::CircularInclude, "cpp/no-circular-include", "cpp", Severity::Error,
+              "semântica", false, "include that leads back to the including file" },
+            { RuleId::UnsortedIncludes, "cpp/sort-includes", "cpp", Severity::Warning, "diretivas",
+              true, "includes out of the configured order" },
+            { RuleId::TodoComment, "cpp/no-todo", "cpp", Severity::Warning, "lexical", false,
+              "unresolved TODO, FIXME or XXX comment" },
+            { RuleId::MagicNumber, "cpp/no-magic-numbers", "cpp", Severity::Warning, "sintática",
+              false, "numeric literal without a named constant" },
+            { RuleId::ModernizeOverride, "cpp/modernize-override", "cpp", Severity::Warning,
+              "semântica", true, "overriding virtual function without override" },
+            { RuleId::ModernizeNullptr, "cpp/modernize-nullptr", "cpp", Severity::Warning,
+              "semântica", true, "explicit cast of a null constant to a pointer type" },
+            { RuleId::NoZeroAsNull, "cpp/no-zero-as-null", "cpp", Severity::Warning, "semântica",
+              true, "0 used as a null pointer" },
+            { RuleId::ModernizeAuto, "cpp/modernize-auto", "cpp", Severity::Warning, "semântica",
+              true, "explicit type that repeats the initializer" },
+            { RuleId::ModernizeEmplace, "cpp/modernize-emplace", "cpp", Severity::Warning,
+              "sintática", true, "push_back of a temporary that emplace_back can build in place" },
+            { RuleId::ModernizeMakeUnique, "cpp/modernize-make-unique", "cpp", Severity::Warning,
+              "sintática", true, "unique_ptr built from new instead of std::make_unique" },
+            { RuleId::ModernizeMakeShared, "cpp/modernize-make-shared", "cpp", Severity::Warning,
+              "sintática", true, "shared_ptr built from new instead of std::make_shared" },
+            { RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr", "cpp", Severity::Warning,
+              "sintática", true, "ownership held in a raw pointer instead of a smart pointer" },
+            { RuleId::NoNewDelete, "cpp/no-new-delete", "cpp", Severity::Warning, "sintática",
+              false, "direct use of new or delete instead of RAII" },
+            { RuleId::ModernizeSpan, "cpp/modernize-span", "cpp", Severity::Warning, "semântica",
+              true, "pointer and size parameters that std::span can replace" },
+            { RuleId::ModernizeStringView, "cpp/modernize-string-view", "cpp", Severity::Warning,
+              "semântica", true,
+              "const std::string parameter copied by value instead of std::string_view" },
+            { RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms", "cpp", Severity::Warning,
+              "sintática", false, "loop that a standard algorithm can replace" },
+            { RuleId::ModernizeStructuredBindings, "cpp/modernize-structured-bindings", "cpp",
+              Severity::Warning, "sintática", true,
+              "pair or tuple unpacked without structured bindings" },
+            { RuleId::ModernizeAttributes, "cpp/modernize-attributes", "cpp", Severity::Warning,
+              "semântica", true, "query function whose result should be [[nodiscard]]" },
+            { RuleId::ModernizeConstevalConstexpr, "cpp/modernize-consteval-constexpr", "cpp",
+              Severity::Warning, "semântica", true, "constant that could be constexpr" },
+            { RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion", "cpp",
+              Severity::Warning, "semântica", false,
+              "integer, floating-point or pointer used as a condition" },
+            { RuleId::ModernizeRangeLoop, "cpp/modernize-range-loop", "cpp", Severity::Warning,
+              "semântica", true, "index loop replaceable by a range-based for" },
+            { RuleId::ModernizeLoopConvert, "cpp/modernize-loop-convert", "cpp", Severity::Warning,
+              "semântica", true, "iterator loop replaceable by a range-based for" },
+            { RuleId::IncludeWhatYouUse, "cpp/include-what-you-use", "cpp", Severity::Warning,
+              "semântica", false, "name used from a header that is only included transitively" },
+            { RuleId::ModernizeFinal, "cpp/modernize-final", "cpp", Severity::Warning, "semântica",
+              true, "class or virtual function that nothing can derive from or override" },
+            { RuleId::ModernizeConst, "cpp/modernize-const", "cpp", Severity::Warning, "semântica",
+              true, "local variable that is never modified and could be const" },
+            { RuleId::ModernizeConstexpr, "cpp/modernize-constexpr", "cpp", Severity::Warning,
+              "semântica", true, "variable or function that could be constexpr" },
+            { RuleId::ApiVirtualDestructor, "api/virtual-destructor", "api", Severity::Warning,
+              "semântica", true, "polymorphic class whose destructor is not virtual" },
+            { RuleId::ApiMissingNodiscard, "api/missing-nodiscard", "api", Severity::Warning,
+              "semântica", true, "function whose resource-like result should be [[nodiscard]]" },
+            { RuleId::ApiPassByValue, "api/pass-by-value", "api", Severity::Warning, "semântica",
+              true, "const reference parameter that is copied and could be taken by value" },
+            { RuleId::ApiPassByConstReference, "api/pass-by-const-reference", "api",
+              Severity::Warning, "semântica", true,
+              "expensive parameter copied by value but only read" },
+            { RuleId::ApiConstCorrectness, "api/const-correctness", "api", Severity::Warning,
+              "semântica", true, "member function or reference parameter that could be const" },
+            { RuleId::ApiUnsafeDowncast, "api/unsafe-downcast", "api", Severity::Warning,
+              "semântica", false, "static_cast downcast without a runtime check" },
+            { RuleId::ApiSlicing, "api/slicing", "api", Severity::Warning, "semântica", false,
+              "derived object stored or returned by value as its base" },
+            { RuleId::ApiImplicitConversion, "api/implicit-conversion", "api", Severity::Warning,
+              "semântica", false,
+              "implicit conversion operator that allows accidental conversions" },
+            { RuleId::ApiExplicitConstructor, "api/explicit-constructor", "api", Severity::Warning,
+              "semântica", true, "constructor callable with one argument that is not explicit" },
+            { RuleId::ApiOverloadHiding, "api/overload-hiding", "api", Severity::Warning,
+              "semântica", true, "derived function that hides the virtual overloads of a base" },
+            { RuleId::ApiVirtualCallInConstructor, "api/virtual-call-in-constructor", "api",
+              Severity::Warning, "semântica", false,
+              "virtual call in a constructor or destructor" },
+            { RuleId::DesignatedInitOrder, "cpp/designated-init-order", "cpp", Severity::Warning,
+              "semântica", true, "designated initializers out of member declaration order" },
+            { RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer", "cpp", Severity::Error,
+              "semântica", false, "non-zero integer constant used as a pointer" },
+            { RuleId::DocRequireComment, "doc/require-comment", "doc", Severity::Warning,
+              "semântica", true,
+              "public class, enum or function without a documentation comment (opt-in)" },
+            { RuleId::DocDoxygenStyle, "doc/doxygen-style", "doc", Severity::Warning, "semântica",
+              true,
+              "Doxygen comment that breaks good practice: brief, @param, @tparam, @return, "
+              "@throws, style (opt-in)" },
         };
         return catalog;
     }
@@ -805,23 +819,19 @@ namespace heimdall
     const RuleInfo* FindRuleByCode(std::string_view code)
     {
         const auto& catalog = RuleCatalog();
-        const auto it = std::find_if(catalog.begin(), catalog.end(),
-            [code](const RuleInfo& info)
-            {
-                return info.code == code;
+        const auto  it = std::find_if(catalog.begin(), catalog.end(), [code](const RuleInfo& info) {
+            return info.code == code;
         });
-        return it == catalog.end() ? nullptr : & *it;
+        return it == catalog.end() ? nullptr : &*it;
     }
 
     const RuleInfo* FindRule(RuleId id)
     {
         const auto& catalog = RuleCatalog();
-        const auto it = std::find_if(catalog.begin(), catalog.end(),
-            [id](const RuleInfo& info)
-            {
-                return info.id == id;
+        const auto  it = std::find_if(catalog.begin(), catalog.end(), [id](const RuleInfo& info) {
+            return info.id == id;
         });
-        return it == catalog.end() ? nullptr : & *it;
+        return it == catalog.end() ? nullptr : &*it;
     }
 
     bool IsKnownRuleCode(std::string_view code)
@@ -837,7 +847,7 @@ namespace heimdall
             --begin;
         }
 
-        std::size_t end = std::min(offset + length, source.size());
+        std::size_t end   = std::min(offset + length, source.size());
         std::size_t probe = end;
         while (probe < source.size() && (source[probe] == ' ' || source[probe] == '\t'))
         {
@@ -855,20 +865,21 @@ namespace heimdall
         else if (source[probe] == '\r' && probe + 1 < source.size() && source[probe + 1] == '\n')
         {
             constexpr std::size_t kCrlfLen = 2;
-            end = probe + kCrlfLen;
+            end                            = probe + kCrlfLen;
         }
 
-        return {begin, end - begin, ""};
+        return { begin, end - begin, "" };
     }
 
     bool RuleEngine::RuleEnabled(std::string_view code, bool default_enabled) const
     {
         bool enabled = default_enabled;
-        for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+        for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend();
+             ++override)
         {
             if (override->code == code)
             {
-                enabled = override -> enabled;
+                enabled = override->enabled;
                 break;
             }
         }
@@ -878,7 +889,7 @@ namespace heimdall
 
     std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
     {
-        const auto tokens = Lexer(source).Lex();
+        const auto tokens     = Lexer(source).Lex();
         const auto directives = Preprocessor().Process(source).directives;
         return AnalyzeImpl(source, tokens, directives);
     }
@@ -888,12 +899,13 @@ namespace heimdall
         return AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
     }
 
-    std::vector<Diagnostic> RuleEngine::AnalyzeImpl(std::string_view source,
-        const std::vector<Token>& tokens,
+    std::vector<Diagnostic> RuleEngine::AnalyzeImpl(
+        std::string_view                          source,
+        const std::vector<Token>&                 tokens,
         const std::vector<PreprocessorDirective>& directives) const
     {
         std::vector<Diagnostic> diagnostics;
-        LineTable lines;
+        LineTable               lines;
         lines.Build(source);
 
         if (m_options.null_macro)
@@ -901,8 +913,8 @@ namespace heimdall
             std::size_t directive_cursor = 0;
             for (const auto& token : tokens)
             {
-                if (token.kind != TokenKind::Identifier || IsInDirective(token.offset, directives,
-                    directive_cursor))
+                if (token.kind != TokenKind::Identifier ||
+                    IsInDirective(token.offset, directives, directive_cursor))
                 {
                     continue;
                 }
@@ -911,8 +923,9 @@ namespace heimdall
                 {
                     const auto position = lines.Lookup(token.offset);
                     diagnostics.push_back(MakeDiagnostic(
-                        RuleId::NullMacro, "cpp/no-null", "use nullptr instead of NULL", token.offset, token.length,
-                        position, {token.offset, token.length, "nullptr"}));
+                        RuleId::NullMacro, "cpp/no-null", "use nullptr instead of NULL",
+                        token.offset, token.length, position,
+                        { token.offset, token.length, "nullptr" }));
                 }
             }
         }
@@ -935,7 +948,8 @@ namespace heimdall
                 }
 
                 std::size_t trim_end = content_end;
-                while (trim_end > line_start && (source[trim_end - 1] == ' ' || source[trim_end - 1] == '\t'))
+                while (trim_end > line_start &&
+                       (source[trim_end - 1] == ' ' || source[trim_end - 1] == '\t'))
                 {
                     --trim_end;
                 }
@@ -944,8 +958,9 @@ namespace heimdall
                 {
                     const auto position = lines.Lookup(trim_end);
                     diagnostics.push_back(MakeDiagnostic(
-                        RuleId::TrailingWhitespace, "format/no-trailing-whitespace", "trailing whitespace", trim_end,
-                        content_end - trim_end, position, {trim_end, content_end - trim_end, ""}));
+                        RuleId::TrailingWhitespace, "format/no-trailing-whitespace",
+                        "trailing whitespace", trim_end, content_end - trim_end, position,
+                        { trim_end, content_end - trim_end, "" }));
                 }
 
                 line_start = line_end == source.size() ? source.size() : line_end + 1;
@@ -955,19 +970,18 @@ namespace heimdall
         if (m_options.final_newline && !source.empty() && source.back() != '\n')
         {
             const auto position = lines.Lookup(source.size());
-            const bool crlf = source.find("\r\n") != std::string_view::npos;
+            const bool crlf     = source.find("\r\n") != std::string_view::npos;
             diagnostics.push_back(MakeDiagnostic(
-                RuleId::MissingFinalNewline, "format/require-final-newline", "file must end with a newline",
-                source.size(), 0,
-                position, {source.size(), 0, crlf ? "\r\n" : "\n"}));
+                RuleId::MissingFinalNewline, "format/require-final-newline",
+                "file must end with a newline", source.size(), 0, position,
+                { source.size(), 0, crlf ? "\r\n" : "\n" }));
         }
 
         if (m_options.todo_comment)
         {
             for (const auto& token : tokens)
             {
-                if (token.kind != TokenKind::LineComment &&
-                    token.kind != TokenKind::BlockComment)
+                if (token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
                 {
                     continue;
                 }
@@ -979,10 +993,10 @@ namespace heimdall
                 }
 
                 const auto position = lines.Lookup(token.offset);
-                auto diagnostic = MakeDiagnostic(
-                    RuleId::TodoComment, "cpp/no-todo",
-                    std::string(*marker) + " comment should be resolved or tracked",
-                    token.offset, token.length, position, {0, 0, ""}, false);
+                auto       diagnostic =
+                    MakeDiagnostic(RuleId::TodoComment, "cpp/no-todo",
+                                   std::string(*marker) + " comment should be resolved or tracked",
+                                   token.offset, token.length, position, { 0, 0, "" }, false);
                 diagnostics.push_back(std::move(diagnostic));
             }
         }
@@ -1005,11 +1019,11 @@ namespace heimdall
                     continue;
                 }
 
-                const auto position = lines.Lookup(token.offset);
-                auto diagnostic = MakeDiagnostic(
+                const auto position   = lines.Lookup(token.offset);
+                auto       diagnostic = MakeDiagnostic(
                     RuleId::MagicNumber, "cpp/no-magic-numbers",
                     "magic number '" + std::string(text) + "' should use a named constant",
-                    token.offset, token.length, position, {0, 0, ""}, false);
+                    token.offset, token.length, position, { 0, 0, "" }, false);
                 diagnostics.push_back(std::move(diagnostic));
             }
         }
@@ -1029,13 +1043,14 @@ namespace heimdall
 
                 // catch ( <exception declaration> ) { }
                 const std::size_t open_paren = NextSignificant(tokens, i + 1);
-                if (open_paren >= tokens.size() || tokens[open_paren].kind != TokenKind::Punctuation ||
+                if (open_paren >= tokens.size() ||
+                    tokens[open_paren].kind != TokenKind::Punctuation ||
                     PunctuationText(source, tokens[open_paren]) != "(")
                 {
                     continue;
                 }
 
-                std::size_t depth = 0;
+                std::size_t depth       = 0;
                 std::size_t close_paren = tokens.size();
                 for (std::size_t j = open_paren; j < tokens.size(); ++j)
                 {
@@ -1063,40 +1078,39 @@ namespace heimdall
                 }
 
                 const std::size_t open_brace = NextSignificant(tokens, close_paren + 1);
-                if (open_brace >= tokens.size() || tokens[open_brace].kind != TokenKind::Punctuation ||
+                if (open_brace >= tokens.size() ||
+                    tokens[open_brace].kind != TokenKind::Punctuation ||
                     PunctuationText(source, tokens[open_brace]) != "{")
                 {
                     continue;
                 }
 
                 const std::size_t close_brace = NextSignificant(tokens, open_brace + 1);
-                if (close_brace >= tokens.size() || tokens[close_brace].kind != TokenKind::Punctuation ||
+                if (close_brace >= tokens.size() ||
+                    tokens[close_brace].kind != TokenKind::Punctuation ||
                     PunctuationText(source, tokens[close_brace]) != "}")
                 {
                     continue;
                 }
 
                 const auto offset = tokens[open_brace].offset;
-                const auto length = tokens[close_brace].offset + tokens[close_brace].length - offset;
+                const auto length =
+                    tokens[close_brace].offset + tokens[close_brace].length - offset;
 
                 const auto interior_begin = tokens[open_brace].offset + tokens[open_brace].length;
-                const auto interior_end = tokens[close_brace].offset;
-                TextEdit edit{interior_begin, interior_end - interior_begin, " throw; "};
+                const auto interior_end   = tokens[close_brace].offset;
+                TextEdit   edit { interior_begin, interior_end - interior_begin, " throw; " };
                 if (std::any_of(tokens.begin() + open_brace + 1, tokens.begin() + close_brace,
-                    [](const Token& t)
-                    {
-                        return t.kind != TokenKind::Whitespace;
-                }))
+                                [](const Token& t) { return t.kind != TokenKind::Whitespace; }))
                 {
-                    edit = {interior_end, 0, "throw; "};
+                    edit = { interior_end, 0, "throw; " };
                 }
 
-                auto diagnostic = MakeDiagnostic(
-                    RuleId::EmptyCatch, "cpp/no-empty-catch",
-                    "empty catch block ignores the exception", offset, length,
-                    lines.Lookup(offset), std::move(edit));
+                auto diagnostic = MakeDiagnostic(RuleId::EmptyCatch, "cpp/no-empty-catch",
+                                                 "empty catch block ignores the exception", offset,
+                                                 length, lines.Lookup(offset), std::move(edit));
                 diagnostic.fix_is_safe = false;
-                diagnostic.fix_title = "Rethrow the exception in the empty catch block";
+                diagnostic.fix_title   = "Rethrow the exception in the empty catch block";
                 diagnostics.push_back(std::move(diagnostic));
             }
         }
@@ -1105,22 +1119,22 @@ namespace heimdall
         {
             // Only includes outside any conditional block are compared: the
             // same header in different #ifdef branches is usually intentional.
-            std::size_t conditional_depth = 0;
+            std::size_t                                       conditional_depth = 0;
             std::unordered_map<std::string_view, std::size_t> seen;
             for (const auto& directive : directives)
             {
                 switch (directive.kind)
                 {
-                case DirectiveKind::If:
-                case DirectiveKind::Ifdef:
-                case DirectiveKind::Ifndef:
-                    ++conditional_depth;
-                    continue;
-                case DirectiveKind::Endif:
-                    conditional_depth = conditional_depth == 0 ? 0 : conditional_depth - 1;
-                    continue;
-                default:
-                    break;
+                    case DirectiveKind::If:
+                    case DirectiveKind::Ifdef:
+                    case DirectiveKind::Ifndef:
+                        ++conditional_depth;
+                        continue;
+                    case DirectiveKind::Endif:
+                        conditional_depth = conditional_depth == 0 ? 0 : conditional_depth - 1;
+                        continue;
+                    default:
+                        break;
                 }
 
                 if (directive.kind != DirectiveKind::Include || conditional_depth != 0)
@@ -1136,19 +1150,20 @@ namespace heimdall
                     continue;
                 }
 
-                const auto offset = static_cast<std::size_t>(
-                    target->text.data() - source.data());
-                const auto[it, inserted] = seen.try_emplace(target->text, directive.offset);
+                const auto offset = static_cast<std::size_t>(target->text.data() - source.data());
+                const auto [it, inserted] = seen.try_emplace(target->text, directive.offset);
                 if (!inserted)
                 {
                     // Not safe in batch: a #define/#undef between the includes
                     // may make the second one meaningful (X-macro headers).
                     auto diagnostic = MakeDiagnostic(
                         RuleId::DuplicateInclude, "cpp/no-duplicate-include",
-                        "duplicate include of " + std::string(target->text), offset, target->text.length(),
-                        lines.Lookup(offset), RemoveDirectiveLine(source, directive.offset, directive.length));
+                        "duplicate include of " + std::string(target->text), offset,
+                        target->text.length(), lines.Lookup(offset),
+                        RemoveDirectiveLine(source, directive.offset, directive.length));
                     diagnostic.fix_is_safe = false;
-                    diagnostic.fix_title = "Remove duplicate include of " + std::string(target->text);
+                    diagnostic.fix_title =
+                        "Remove duplicate include of " + std::string(target->text);
                     diagnostics.push_back(std::move(diagnostic));
                 }
             }
@@ -1171,11 +1186,11 @@ namespace heimdall
                 // class definitions and multiple declarators need parsing
                 // beyond the statement's token shape.
                 std::size_t angle_depth = 0;
-                bool has_paren = false;
-                bool has_brace = false;
-                bool has_comma = false;
-                std::size_t declarator = 0;
-                std::size_t end = tokens.size();
+                bool        has_paren   = false;
+                bool        has_brace   = false;
+                bool        has_comma   = false;
+                std::size_t declarator  = 0;
+                std::size_t end         = tokens.size();
                 for (std::size_t j = i + 1; j < tokens.size(); ++j)
                 {
                     const auto& candidate = tokens[j];
@@ -1253,25 +1268,25 @@ namespace heimdall
                     continue;
                 }
 
-                const auto name = source.substr(tokens[alias].offset, tokens[alias].length);
-                auto before = source.substr(tokens[i + 1].offset,
-                    tokens[alias].offset - tokens[i + 1].offset);
+                const auto name   = source.substr(tokens[alias].offset, tokens[alias].length);
+                auto       before = source.substr(tokens[i + 1].offset,
+                                                  tokens[alias].offset - tokens[i + 1].offset);
                 while (!before.empty() && (before.front() == ' ' || before.front() == '\t' ||
-                    before.front() == '\n' || before.front() == '\r'))
+                                           before.front() == '\n' || before.front() == '\r'))
                 {
                     before.remove_prefix(1);
                 }
 
                 while (!before.empty() && (before.back() == ' ' || before.back() == '\t' ||
-                    before.back() == '\n' || before.back() == '\r'))
+                                           before.back() == '\n' || before.back() == '\r'))
                 {
                     before.remove_suffix(1);
                 }
 
                 const auto after_begin = tokens[alias].offset + tokens[alias].length;
-                auto after = source.substr(after_begin, tokens[end].offset - after_begin);
+                auto       after = source.substr(after_begin, tokens[end].offset - after_begin);
                 while (!after.empty() && (after.front() == ' ' || after.front() == '\t' ||
-                    after.front() == '\n' || after.front() == '\r'))
+                                          after.front() == '\n' || after.front() == '\r'))
                 {
                     after.remove_prefix(1);
                 }
@@ -1281,8 +1296,8 @@ namespace heimdall
                     continue;
                 }
 
-                const auto offset = tokens[i].offset;
-                const auto length = tokens[end].offset + tokens[end].length - offset;
+                const auto  offset      = tokens[i].offset;
+                const auto  length      = tokens[end].offset + tokens[end].length - offset;
                 std::string replacement = "using ";
                 replacement.append(name);
                 replacement += " = ";
@@ -1291,9 +1306,8 @@ namespace heimdall
                 replacement += ";";
                 diagnostics.push_back(MakeDiagnostic(
                     RuleId::LegacyTypedef, "cpp/modernize-using",
-                    "replace typedef with a using alias", offset, length,
-                    lines.Lookup(offset),
-                    {offset, length, std::move(replacement)}));
+                    "replace typedef with a using alias", offset, length, lines.Lookup(offset),
+                    { offset, length, std::move(replacement) }));
             }
         }
 
@@ -1311,19 +1325,17 @@ namespace heimdall
             struct SmartFactory
             {
                 const char* code;
-                RuleId id;
-                bool enabled;
+                RuleId      id;
+                bool        enabled;
                 const char* smart;
                 const char* maker;
             };
 
             const SmartFactory factories[] = {
-                {
-                    "cpp/modernize-make-unique", RuleId::ModernizeMakeUnique, make_unique_on,
-                        "unique_ptr", "make_unique"
-                },
-                {"cpp/modernize-make-shared", RuleId::ModernizeMakeShared, make_shared_on,
-                    "shared_ptr", "make_shared"},
+                { "cpp/modernize-make-unique", RuleId::ModernizeMakeUnique, make_unique_on,
+                  "unique_ptr", "make_unique" },
+                { "cpp/modernize-make-shared", RuleId::ModernizeMakeShared, make_shared_on,
+                  "shared_ptr", "make_shared" },
             };
             std::size_t directive_cursor = 0;
             for (const auto& factory : factories)
@@ -1342,8 +1354,8 @@ namespace heimdall
                     }
 
                     // `std::unique_ptr`: keep the qualification for the fix.
-                    bool qualified = false;
-                    std::size_t start = i;
+                    bool              qualified   = false;
+                    std::size_t       start       = i;
                     const std::size_t maybe_scope = PrevSignificant(tokens, i);
                     if (maybe_scope < tokens.size() && IsPunct(source, tokens[maybe_scope], "::"))
                     {
@@ -1351,12 +1363,12 @@ namespace heimdall
                         if (maybe_std < tokens.size() && IsWord(source, tokens[maybe_std], "std"))
                         {
                             qualified = true;
-                            start = maybe_std;
+                            start     = maybe_std;
                         }
                     }
 
                     const std::size_t open_angle = NextSignificant(tokens, i + 1);
-                    if (open_angle >= tokens.size() ||!IsPunct(source, tokens[open_angle], "<"))
+                    if (open_angle >= tokens.size() || !IsPunct(source, tokens[open_angle], "<"))
                     {
                         continue;
                     }
@@ -1364,7 +1376,7 @@ namespace heimdall
                     // Template arguments: plain nesting only. Anything fancier
                     // (`>>`, parens, braces, `;`) gives up silently and the
                     // `new` falls through to cpp/no-new-delete.
-                    std::size_t depth = 0;
+                    std::size_t depth       = 0;
                     std::size_t close_angle = tokens.size();
                     for (std::size_t k = open_angle; k < tokens.size(); ++k)
                     {
@@ -1386,8 +1398,8 @@ namespace heimdall
                                 break;
                             }
                         }
-                        else if (text == ";" || text == "{" || text == "}" || text == "(" || text == ")" ||
-                            (text.size() > 1 && text.front() == '>'))
+                        else if (text == ";" || text == "{" || text == "}" || text == "(" ||
+                                 text == ")" || (text.size() > 1 && text.front() == '>'))
                         {
                             break;
                         }
@@ -1398,24 +1410,26 @@ namespace heimdall
                         continue;
                     }
 
-                    const auto template_args = Trimmed(source.substr(
+                    const auto        template_args = Trimmed(source.substr(
                         tokens[open_angle].offset + tokens[open_angle].length,
                         tokens[close_angle].offset -
-                        (tokens[open_angle].offset + tokens[open_angle].length)));
-                    const std::size_t after = NextSignificant(tokens, close_angle + 1);
+                            (tokens[open_angle].offset + tokens[open_angle].length)));
+                    const std::size_t after         = NextSignificant(tokens, close_angle + 1);
                     if (after >= tokens.size())
                     {
                         continue;
                     }
 
                     // Declaration form: `unique_ptr<T> name(new T(args))`.
-                    bool is_declaration = false;
+                    bool             is_declaration = false;
                     std::string_view declared_name;
-                    std::size_t open_paren = after;
-                    if (tokens[after].kind == TokenKind::Identifier && !IsWord(source, tokens[after], "new"))
+                    std::size_t      open_paren = after;
+                    if (tokens[after].kind == TokenKind::Identifier &&
+                        !IsWord(source, tokens[after], "new"))
                     {
                         const std::size_t maybe_paren = NextSignificant(tokens, after + 1);
-                        if (maybe_paren < tokens.size() && IsPunct(source, tokens[maybe_paren], "("))
+                        if (maybe_paren < tokens.size() &&
+                            IsPunct(source, tokens[maybe_paren], "("))
                         {
                             is_declaration = true;
                             declared_name =
@@ -1433,7 +1447,7 @@ namespace heimdall
                     }
 
                     const std::size_t maybe_new = NextSignificant(tokens, open_paren + 1);
-                    if (maybe_new >= tokens.size() ||!IsWord(source, tokens[maybe_new], "new") ||
+                    if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new") ||
                         IsInDirective(tokens[maybe_new].offset, directives, directive_cursor))
                     {
                         continue;
@@ -1446,7 +1460,7 @@ namespace heimdall
                     }
 
                     const std::size_t outer_close = NextSignificant(tokens, created.end_index + 1);
-                    if (outer_close >= tokens.size() ||!IsPunct(source, tokens[outer_close], ")"))
+                    if (outer_close >= tokens.size() || !IsPunct(source, tokens[outer_close], ")"))
                     {
                         continue;
                     }
@@ -1474,27 +1488,29 @@ namespace heimdall
                         replacement += ">(";
                         replacement += created.args;
                         replacement += ')';
-                        Diagnostic diagnostic = MakeDiagnostic(factory.id, factory.code,
-                            std::string("use ") + qualified_maker + " instead of " +
-                            factory.smart + "(new ...)",
+                        Diagnostic diagnostic = MakeDiagnostic(
+                            factory.id, factory.code,
+                            std::string("use ") + qualified_maker + " instead of " + factory.smart +
+                                "(new ...)",
                             fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
-                            {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                            { fix_begin, fix_end - fix_begin, std::move(replacement) });
                         // make_unique changes overload/exception behavior for
                         // exotic types: offered as a quick fix, not in batch.
                         diagnostic.fix_is_safe = false;
-                        diagnostic.fix_title = std::string("Replace with ") + qualified_maker + "<" +
-                            std::string(template_args) + ">(...)";
+                        diagnostic.fix_title   = std::string("Replace with ") + qualified_maker +
+                                                 "<" + std::string(template_args) + ">(...)";
                         diagnostics.push_back(std::move(diagnostic));
                     }
                     else
                     {
                         // `unique_ptr<Base>(new Derived)`: make_unique<Base>(args)
                         // would build the wrong object, so only the direction.
-                        diagnostics.push_back(MakeDiagnostic(factory.id, factory.code,
-                            std::string("use ") + qualified_maker + " instead of " +
-                            factory.smart + "(new ...)",
+                        diagnostics.push_back(MakeDiagnostic(
+                            factory.id, factory.code,
+                            std::string("use ") + qualified_maker + " instead of " + factory.smart +
+                                "(new ...)",
                             fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
-                            {0, 0, std::string()}, false));
+                            { 0, 0, std::string() }, false));
                     }
                 }
             }
@@ -1514,7 +1530,7 @@ namespace heimdall
                 // `holder.reset(new T(args))`: unique vs shared is unknowable
                 // here, so the direction only, without a fix.
                 const std::size_t dot = PrevSignificant(tokens, i);
-                if (dot >= tokens.size() ||!IsPunct(source, tokens[dot], "."))
+                if (dot >= tokens.size() || !IsPunct(source, tokens[dot], "."))
                 {
                     continue;
                 }
@@ -1526,13 +1542,13 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
 
                 const std::size_t maybe_new = NextSignificant(tokens, open + 1);
-                if (maybe_new >= tokens.size() ||!IsWord(source, tokens[maybe_new], "new"))
+                if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new"))
                 {
                     continue;
                 }
@@ -1544,18 +1560,19 @@ namespace heimdall
                 }
 
                 const std::size_t close = NextSignificant(tokens, created.end_index + 1);
-                if (close >= tokens.size() ||!IsPunct(source, tokens[close], ")"))
+                if (close >= tokens.size() || !IsPunct(source, tokens[close], ")"))
                 {
                     continue;
                 }
 
                 claimed_new.insert(maybe_new);
                 const std::size_t begin = tokens[holder].offset;
-                const std::size_t end = tokens[close].offset + tokens[close].length;
-                diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeSmartPtr,
-                    "cpp/modernize-smart-ptr",
-                    "resetting a smart pointer with new; assign std::make_unique/std::make_shared instead",
-                    begin, end - begin, lines.Lookup(begin), {0, 0, std::string()}, false));
+                const std::size_t end   = tokens[close].offset + tokens[close].length;
+                diagnostics.push_back(MakeDiagnostic(
+                    RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr",
+                    "resetting a smart pointer with new; assign std::make_unique/std::make_shared "
+                    "instead",
+                    begin, end - begin, lines.Lookup(begin), { 0, 0, std::string() }, false));
             }
 
             for (std::size_t m = 0; m < tokens.size(); ++m)
@@ -1568,7 +1585,7 @@ namespace heimdall
                 }
 
                 const std::size_t equal = PrevSignificant(tokens, m);
-                if (equal >= tokens.size() ||!IsPunct(source, tokens[equal], "="))
+                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
                 {
                     continue;
                 }
@@ -1580,7 +1597,7 @@ namespace heimdall
                 }
 
                 const std::size_t star = PrevSignificant(tokens, name);
-                if (star >= tokens.size() ||!IsPunct(source, tokens[star], "*"))
+                if (star >= tokens.size() || !IsPunct(source, tokens[star], "*"))
                 {
                     continue;
                 }
@@ -1590,25 +1607,25 @@ namespace heimdall
                 // `&`, or an expression) is not a plain owning declaration.
                 std::size_t run_begin = star;
                 {
-                    std::size_t cursor = PrevSignificant(tokens, star);
+                    std::size_t cursor      = PrevSignificant(tokens, star);
                     std::size_t angle_depth = 0;
-                    bool ok = false;
+                    bool        ok          = false;
                     while (cursor < tokens.size())
                     {
                         const auto& token = tokens[cursor];
                         if (token.kind == TokenKind::Identifier || IsWord(source, token, "const") ||
                             IsWord(source, token, "volatile"))
                         {
-                            ok = true;
+                            ok        = true;
                             run_begin = cursor;
-                            cursor = PrevSignificant(tokens, cursor);
+                            cursor    = PrevSignificant(tokens, cursor);
                             continue;
                         }
 
                         if (IsPunct(source, token, "::"))
                         {
                             run_begin = cursor;
-                            cursor = PrevSignificant(tokens, cursor);
+                            cursor    = PrevSignificant(tokens, cursor);
                             continue;
                         }
 
@@ -1616,7 +1633,7 @@ namespace heimdall
                         {
                             ++angle_depth;
                             run_begin = cursor;
-                            cursor = PrevSignificant(tokens, cursor);
+                            cursor    = PrevSignificant(tokens, cursor);
                             continue;
                         }
 
@@ -1629,7 +1646,7 @@ namespace heimdall
 
                             --angle_depth;
                             run_begin = cursor;
-                            cursor = PrevSignificant(tokens, cursor);
+                            cursor    = PrevSignificant(tokens, cursor);
                             continue;
                         }
 
@@ -1646,20 +1663,23 @@ namespace heimdall
                 // or a control keyword. Anything else (an identifier, `*`,
                 // `&`, `>`, `]`, `)`) continues a larger declarator or an
                 // expression, so this is not a declaration.
-                const std::size_t before = PrevSignificant(tokens, run_begin);
-                bool boundary = before >= tokens.size();
+                const std::size_t before   = PrevSignificant(tokens, run_begin);
+                bool              boundary = before >= tokens.size();
                 if (!boundary && before < tokens.size())
                 {
                     if (tokens[before].kind == TokenKind::Punctuation)
                     {
-                        const auto text = source.substr(tokens[before].offset, tokens[before].length);
+                        const auto text =
+                            source.substr(tokens[before].offset, tokens[before].length);
                         boundary = text == ";" || text == "{" || text == "}" || text == "(" ||
-                            text == "," || text == ":";
+                                   text == "," || text == ":";
                     }
                     else if (tokens[before].kind == TokenKind::Identifier)
                     {
-                        const auto text = source.substr(tokens[before].offset, tokens[before].length);
-                        boundary = text == "if" || text == "else" || text == "for" || text == "while" ||
+                        const auto text =
+                            source.substr(tokens[before].offset, tokens[before].length);
+                        boundary =
+                            text == "if" || text == "else" || text == "for" || text == "while" ||
                             text == "do" || text == "case" || text == "return";
                     }
                 }
@@ -1679,25 +1699,26 @@ namespace heimdall
                 const std::size_t fix_begin = tokens[run_begin].offset;
                 const std::size_t fix_end =
                     tokens[created.end_index].offset + tokens[created.end_index].length;
-                const auto declared_type = Trimmed(source.substr(fix_begin,
-                    tokens[star].offset - fix_begin));
-                const auto variable =
-                    source.substr(tokens[name].offset, tokens[name].length);
+                const auto declared_type =
+                    Trimmed(source.substr(fix_begin, tokens[star].offset - fix_begin));
+                const auto variable  = source.substr(tokens[name].offset, tokens[name].length);
                 const bool same_type = created.type == declared_type;
-                const bool has_constexpr = declared_type.find("constexpr") != std::string_view::npos;
+                const bool has_constexpr =
+                    declared_type.find("constexpr") != std::string_view::npos;
                 const bool is_builtin_new =
                     created.type == "int" || created.type == "char" || created.type == "short" ||
                     created.type == "long" || created.type == "float" || created.type == "double" ||
-                    created.type == "bool" || created.type == "unsigned" || created.type == "signed";
+                    created.type == "bool" || created.type == "unsigned" ||
+                    created.type == "signed";
                 // `new T` without parens leaves scalars uninitialized while
                 // `make_unique<T>()` value-initializes: only class types get
                 // the fix there. `Base* p = new Derived` would build the wrong
                 // object; constexpr cannot call make_unique here either.
                 const bool fixable =
-                    same_type && !has_constexpr && (created.has_parens ||!is_builtin_new);
+                    same_type && !has_constexpr && (created.has_parens || !is_builtin_new);
                 if (fixable)
                 {
-                    const bool is_const = declared_type.find("const") != std::string_view::npos;
+                    const bool  is_const = declared_type.find("const") != std::string_view::npos;
                     std::string replacement(is_const ? "const auto " : "auto ");
                     replacement += variable;
                     replacement += " = std::make_unique<";
@@ -1705,12 +1726,12 @@ namespace heimdall
                     replacement += ">(";
                     replacement += created.args;
                     replacement += ')';
-                    Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeSmartPtr,
-                        "cpp/modernize-smart-ptr",
+                    Diagnostic diagnostic = MakeDiagnostic(
+                        RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr",
                         "ownership held in raw pointer '" + std::string(variable) +
-                        "'; use std::unique_ptr",
+                            "'; use std::unique_ptr",
                         fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
-                        {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                        { fix_begin, fix_end - fix_begin, std::move(replacement) });
                     diagnostic.fix_is_safe = false;
                     diagnostic.fix_title =
                         "Use std::make_unique for '" + std::string(variable) + '\'';
@@ -1718,12 +1739,12 @@ namespace heimdall
                 }
                 else
                 {
-                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeSmartPtr,
-                        "cpp/modernize-smart-ptr",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::ModernizeSmartPtr, "cpp/modernize-smart-ptr",
                         "ownership held in raw pointer '" + std::string(variable) +
-                        "'; use a smart pointer",
+                            "'; use a smart pointer",
                         fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
-                        {0, 0, std::string()}, false));
+                        { 0, 0, std::string() }, false));
                 }
             }
         }
@@ -1734,13 +1755,13 @@ namespace heimdall
             for (std::size_t i = 0; i < tokens.size(); ++i)
             {
                 const auto& token = tokens[i];
-                const bool is_new = token.tok == Tok::KwNew ||
-                    (token.kind == TokenKind::Identifier &&
-                    source.substr(token.offset, token.length) == "new");
-                const bool is_delete =!is_new &&
-                    (token.tok == Tok::KwDelete ||
-                    (token.kind == TokenKind::Identifier &&
-                    source.substr(token.offset, token.length) == "delete"));
+                const bool  is_new =
+                    token.tok == Tok::KwNew || (token.kind == TokenKind::Identifier &&
+                                                source.substr(token.offset, token.length) == "new");
+                const bool is_delete =
+                    !is_new && (token.tok == Tok::KwDelete ||
+                                (token.kind == TokenKind::Identifier &&
+                                 source.substr(token.offset, token.length) == "delete"));
                 if ((!is_new && !is_delete) ||
                     IsInDirective(token.offset, directives, directive_cursor))
                 {
@@ -1770,18 +1791,21 @@ namespace heimdall
                         continue;
                     }
 
-                    diagnostics.push_back(MakeDiagnostic(RuleId::NoNewDelete, "cpp/no-new-delete",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::NoNewDelete, "cpp/no-new-delete",
                         "direct use of 'new'; prefer RAII (std::make_unique, containers, values)",
                         token.offset, token.length, lines.Lookup(token.offset),
-                        {0, 0, std::string()}, false));
+                        { 0, 0, std::string() }, false));
                 }
                 else
                 {
-                    std::size_t end = i;
+                    std::size_t       end           = i;
                     const std::size_t maybe_bracket = NextSignificant(tokens, i + 1);
-                    if (maybe_bracket < tokens.size() && IsPunct(source, tokens[maybe_bracket], "["))
+                    if (maybe_bracket < tokens.size() &&
+                        IsPunct(source, tokens[maybe_bracket], "["))
                     {
-                        const std::size_t close = MatchBracket(tokens, source, maybe_bracket, "[", "]");
+                        const std::size_t close =
+                            MatchBracket(tokens, source, maybe_bracket, "[", "]");
                         if (close < tokens.size())
                         {
                             end = close;
@@ -1790,10 +1814,11 @@ namespace heimdall
 
                     const std::size_t length =
                         tokens[end].offset + tokens[end].length - token.offset;
-                    diagnostics.push_back(MakeDiagnostic(RuleId::NoNewDelete, "cpp/no-new-delete",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::NoNewDelete, "cpp/no-new-delete",
                         "direct use of 'delete'; ownership belongs in a smart pointer",
-                        token.offset, length, lines.Lookup(token.offset),
-                        {0, 0, std::string()}, false));
+                        token.offset, length, lines.Lookup(token.offset), { 0, 0, std::string() },
+                        false));
                 }
             }
         }
@@ -1821,7 +1846,8 @@ namespace heimdall
                     continue;
                 }
 
-                const auto method_name = source.substr(tokens[method].offset, tokens[method].length);
+                const auto method_name =
+                    source.substr(tokens[method].offset, tokens[method].length);
                 std::string_view emplacer;
                 if (method_name == "push_back")
                 {
@@ -1837,7 +1863,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, method + 1);
-                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
@@ -1849,7 +1875,7 @@ namespace heimdall
                 }
 
                 std::string_view inner;
-                std::size_t fix_end = tokens.size();
+                std::size_t      fix_end = tokens.size();
                 if (IsPunct(source, tokens[first], "{"))
                 {
                     // `v.push_back({a, b})` -> `v.emplace_back(a, b)`.
@@ -1860,30 +1886,31 @@ namespace heimdall
                     }
 
                     const std::size_t close_paren = NextSignificant(tokens, close_brace + 1);
-                    if (close_paren >= tokens.size() ||!IsPunct(source, tokens[close_paren], ")"))
+                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
                     {
                         continue;
                     }
 
                     const std::size_t inner_begin = tokens[first].offset + tokens[first].length;
-                    inner = Trimmed(source.substr(inner_begin, tokens[close_brace].offset - inner_begin));
+                    inner                         = Trimmed(
+                        source.substr(inner_begin, tokens[close_brace].offset - inner_begin));
                     fix_end = tokens[close_paren].offset + tokens[close_paren].length;
                 }
                 else
                 {
                     // `v.push_back(T(a, b))` -> `v.emplace_back(a, b)`: a type
                     // run (identifiers, `::`, balanced `<...>`) then `(args)`.
-                    std::size_t cursor = first;
+                    std::size_t cursor      = first;
                     std::size_t angle_depth = 0;
-                    bool saw_ident = false;
-                    bool shape_ok = true;
+                    bool        saw_ident   = false;
+                    bool        shape_ok    = true;
                     while (cursor < tokens.size())
                     {
                         const auto& token = tokens[cursor];
                         if (token.kind == TokenKind::Identifier)
                         {
                             saw_ident = true;
-                            cursor = NextSignificant(tokens, cursor + 1);
+                            cursor    = NextSignificant(tokens, cursor + 1);
                             continue;
                         }
 
@@ -1923,7 +1950,7 @@ namespace heimdall
                         break;
                     }
 
-                    if (!shape_ok ||!saw_ident || angle_depth != 0 || cursor >= tokens.size() ||
+                    if (!shape_ok || !saw_ident || angle_depth != 0 || cursor >= tokens.size() ||
                         !IsPunct(source, tokens[cursor], "("))
                     {
                         continue;
@@ -1948,37 +1975,38 @@ namespace heimdall
                     }
 
                     const std::size_t close_paren = NextSignificant(tokens, close_ctor + 1);
-                    if (close_paren >= tokens.size() ||!IsPunct(source, tokens[close_paren], ")"))
+                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
                     {
                         continue;
                     }
 
-                    const std::size_t inner_begin =
-                        tokens[cursor].offset + tokens[cursor].length;
-                    inner = Trimmed(source.substr(inner_begin, tokens[close_ctor].offset - inner_begin));
+                    const std::size_t inner_begin = tokens[cursor].offset + tokens[cursor].length;
+                    inner                         = Trimmed(
+                        source.substr(inner_begin, tokens[close_ctor].offset - inner_begin));
                     fix_end = tokens[close_paren].offset + tokens[close_paren].length;
                 }
 
                 const std::size_t fix_begin = tokens[method].offset;
-                std::string replacement(emplacer);
+                std::string       replacement(emplacer);
                 replacement += '(';
                 replacement += inner;
                 replacement += ')';
-                Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeEmplace,
-                    "cpp/modernize-emplace",
+                Diagnostic diagnostic = MakeDiagnostic(
+                    RuleId::ModernizeEmplace, "cpp/modernize-emplace",
                     std::string("use ") + std::string(emplacer) + " instead of " +
-                    std::string(method_name) + " with a temporary",
+                        std::string(method_name) + " with a temporary",
                     fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
-                    {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                    { fix_begin, fix_end - fix_begin, std::move(replacement) });
                 // Explicit constructors, narrowing and initializer_list
                 // overloads differ: quick fix only.
                 diagnostic.fix_is_safe = false;
-                diagnostic.fix_title = std::string("Replace with ") + std::string(emplacer);
+                diagnostic.fix_title   = std::string("Replace with ") + std::string(emplacer);
                 diagnostics.push_back(std::move(diagnostic));
             }
         }
 
-        if (RuleEnabled("cpp/modernize-structured-bindings", m_options.modernize_structured_bindings))
+        if (RuleEnabled("cpp/modernize-structured-bindings",
+                        m_options.modernize_structured_bindings))
         {
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tokens.size(); ++i)
@@ -1990,7 +2018,7 @@ namespace heimdall
                     continue;
                 }
 
-                std::size_t start = i;
+                std::size_t       start       = i;
                 const std::size_t maybe_scope = PrevSignificant(tokens, i);
                 if (maybe_scope < tokens.size() && IsPunct(source, tokens[maybe_scope], "::"))
                 {
@@ -2002,7 +2030,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
@@ -2015,7 +2043,7 @@ namespace heimdall
 
                 // Bindings only: plain identifiers, at least two.
                 std::vector<std::string_view> bound;
-                bool shape_ok = true;
+                bool                          shape_ok = true;
                 for (std::size_t k = NextSignificant(tokens, open + 1); k < close;)
                 {
                     if (tokens[k].kind != TokenKind::Identifier)
@@ -2046,15 +2074,15 @@ namespace heimdall
                 }
 
                 const std::size_t equal = NextSignificant(tokens, close + 1);
-                if (equal >= tokens.size() ||!IsPunct(source, tokens[equal], "="))
+                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
                 {
                     continue;
                 }
 
                 // The assigned expression runs to `;` without braces.
                 const std::size_t value_begin = NextSignificant(tokens, equal + 1);
-                std::size_t semi = value_begin;
-                bool expr_ok = value_begin < tokens.size();
+                std::size_t       semi        = value_begin;
+                bool              expr_ok     = value_begin < tokens.size();
                 while (expr_ok && semi < tokens.size())
                 {
                     if (tokens[semi].kind != TokenKind::Punctuation)
@@ -2083,9 +2111,9 @@ namespace heimdall
                     continue;
                 }
 
-                const std::size_t fix_begin = tokens[start].offset;
-                const std::size_t fix_end = tokens[semi].offset + tokens[semi].length;
-                std::string replacement = "auto [";
+                const std::size_t fix_begin   = tokens[start].offset;
+                const std::size_t fix_end     = tokens[semi].offset + tokens[semi].length;
+                std::string       replacement = "auto [";
                 for (std::size_t b = 0; b < bound.size(); ++b)
                 {
                     replacement += bound[b];
@@ -2096,18 +2124,19 @@ namespace heimdall
                 }
 
                 replacement += "] = ";
-                replacement += Trimmed(source.substr(tokens[value_begin].offset,
-                    tokens[semi].offset - tokens[value_begin].offset));
+                replacement +=
+                    Trimmed(source.substr(tokens[value_begin].offset,
+                                          tokens[semi].offset - tokens[value_begin].offset));
                 replacement += ';';
-                Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeStructuredBindings,
-                    "cpp/modernize-structured-bindings",
+                Diagnostic diagnostic = MakeDiagnostic(
+                    RuleId::ModernizeStructuredBindings, "cpp/modernize-structured-bindings",
                     "unpack with a structured binding instead of std::tie", fix_begin,
                     fix_end - fix_begin, lines.Lookup(fix_begin),
-                    {fix_begin, fix_end - fix_begin, std::move(replacement)});
+                    { fix_begin, fix_end - fix_begin, std::move(replacement) });
                 // `tie` assigns to existing variables while `auto [...]`
                 // declares copies: the user confirms the change.
                 diagnostic.fix_is_safe = false;
-                diagnostic.fix_title = "Replace std::tie with a structured binding";
+                diagnostic.fix_title   = "Replace std::tie with a structured binding";
                 diagnostics.push_back(std::move(diagnostic));
             }
 
@@ -2116,8 +2145,8 @@ namespace heimdall
             {
                 std::unordered_map<std::string_view, bool> saw_first;
                 std::unordered_map<std::string_view, bool> saw_second;
-                std::unordered_set<std::string_view> reported;
-                std::size_t cursor = 0;
+                std::unordered_set<std::string_view>       reported;
+                std::size_t                                cursor = 0;
                 for (std::size_t i = 0; i < tokens.size(); ++i)
                 {
                     if (tokens[i].kind != TokenKind::Punctuation ||
@@ -2170,12 +2199,12 @@ namespace heimdall
 
                     reported.insert(name);
                     const std::size_t begin = tokens[object].offset;
-                    const std::size_t end = tokens[member].offset + tokens[member].length;
-                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeStructuredBindings,
-                        "cpp/modernize-structured-bindings",
+                    const std::size_t end   = tokens[member].offset + tokens[member].length;
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::ModernizeStructuredBindings, "cpp/modernize-structured-bindings",
                         "member access to '" + std::string(name) +
-                        ".first/.second; consider a structured binding",
-                        begin, end - begin, lines.Lookup(begin), {0, 0, std::string()}, false));
+                            ".first/.second; consider a structured binding",
+                        begin, end - begin, lines.Lookup(begin), { 0, 0, std::string() }, false));
                 }
             }
         }
@@ -2192,7 +2221,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
@@ -2205,7 +2234,7 @@ namespace heimdall
 
                 // Range-based `for` has a top-level `:` and no `;`.
                 bool has_colon = false;
-                bool has_semi = false;
+                bool has_semi  = false;
                 {
                     std::size_t depth = 0;
                     for (std::size_t k = open; k <= close; ++k)
@@ -2244,11 +2273,10 @@ namespace heimdall
                     {
                         if (tokens[k].kind == TokenKind::Identifier)
                         {
-                            loop_variable =
-                                source.substr(tokens[k].offset, tokens[k].length);
+                            loop_variable = source.substr(tokens[k].offset, tokens[k].length);
                         }
                         else if (tokens[k].kind == TokenKind::Punctuation &&
-                            source.substr(tokens[k].offset, tokens[k].length) == ":")
+                                 source.substr(tokens[k].offset, tokens[k].length) == ":")
                         {
                             break;
                         }
@@ -2273,9 +2301,9 @@ namespace heimdall
                 else
                 {
                     // Single-statement body: runs to `;` at nesting depth 0.
-                    std::size_t paren = 0;
+                    std::size_t paren   = 0;
                     std::size_t bracket = 0;
-                    std::size_t brace = 0;
+                    std::size_t brace   = 0;
                     for (std::size_t k = body_begin; k < tokens.size(); ++k)
                     {
                         if (tokens[k].kind != TokenKind::Punctuation)
@@ -2326,21 +2354,21 @@ namespace heimdall
                     }
                 }
 
-                bool has_plus_equal = false;
+                bool has_plus_equal              = false;
                 bool plus_equal_on_loop_variable = false;
-                bool has_if = false;
-                bool has_increment = false;
-                bool has_push_back = false;
-                bool has_escape = false;
+                bool has_if                      = false;
+                bool has_increment               = false;
+                bool has_push_back               = false;
+                bool has_escape                  = false;
                 for (std::size_t k = body_begin; k <= body_end && k < tokens.size(); ++k)
                 {
                     if (tokens[k].kind == TokenKind::Identifier)
                     {
                         const auto text = source.substr(tokens[k].offset, tokens[k].length);
-                        has_if = has_if || text == "if";
-                        has_push_back = has_push_back || text == "push_back";
-                        has_escape = has_escape || text == "break" || text == "return" ||
-                            text == "goto" || text == "throw";
+                        has_if          = has_if || text == "if";
+                        has_push_back   = has_push_back || text == "push_back";
+                        has_escape      = has_escape || text == "break" || text == "return" ||
+                                          text == "goto" || text == "throw";
                     }
                     else if (tokens[k].kind == TokenKind::Punctuation)
                     {
@@ -2351,7 +2379,7 @@ namespace heimdall
                         }
                         else if (text == "+=")
                         {
-                            has_plus_equal = true;
+                            has_plus_equal           = true;
                             const std::size_t target = PrevSignificant(tokens, k);
                             if (target < tokens.size() && !loop_variable.empty() &&
                                 IsWord(source, tokens[target], loop_variable))
@@ -2367,31 +2395,30 @@ namespace heimdall
                     continue;
                 }
 
-                const std::size_t loop_begin = tokens[i].offset;
-                const std::size_t loop_end =
-                    tokens[body_end].offset + tokens[body_end].length;
+                const std::size_t loop_begin  = tokens[i].offset;
+                const std::size_t loop_end    = tokens[body_end].offset + tokens[body_end].length;
                 const std::size_t loop_length = loop_end - loop_begin;
                 if (is_range_for && has_plus_equal && !plus_equal_on_loop_variable)
                 {
-                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
-                        "cpp/modernize-algorithms",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms",
                         "loop accumulates a value; consider std::accumulate", loop_begin,
-                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                        loop_length, lines.Lookup(loop_begin), { 0, 0, std::string() }, false));
                 }
 
                 if (has_if && has_push_back)
                 {
-                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
-                        "cpp/modernize-algorithms",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms",
                         "conditional push_back in a loop; consider std::copy_if", loop_begin,
-                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                        loop_length, lines.Lookup(loop_begin), { 0, 0, std::string() }, false));
                 }
                 else if (has_if && has_increment)
                 {
-                    diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeAlgorithms,
-                        "cpp/modernize-algorithms",
+                    diagnostics.push_back(MakeDiagnostic(
+                        RuleId::ModernizeAlgorithms, "cpp/modernize-algorithms",
                         "conditional increment in a loop; consider std::count_if", loop_begin,
-                        loop_length, lines.Lookup(loop_begin), {0, 0, std::string()}, false));
+                        loop_length, lines.Lookup(loop_begin), { 0, 0, std::string() }, false));
                 }
             }
         }
@@ -2402,7 +2429,7 @@ namespace heimdall
             // have no target to order.
             struct IncludeEntry
             {
-                std::size_t directive;
+                std::size_t   directive;
                 IncludeTarget target;
             };
 
@@ -2417,24 +2444,20 @@ namespace heimdall
                 auto target = ReadIncludeTarget(source, directives[i]);
                 if (target)
                 {
-                    includes.push_back({i, *target});
+                    includes.push_back({ i, *target });
                 }
             }
 
-            auto group_index =[this](const IncludeTarget& target)
-            {
-                const auto& order = m_options.include_order;
-                const auto wanted = target.angle ? IncludeGroup::Angle
-                : IncludeGroup::Quote;
-                const auto it = std::find(order.begin(), order.end(), wanted);
+            auto group_index = [this](const IncludeTarget& target) {
+                const auto& order  = m_options.include_order;
+                const auto  wanted = target.angle ? IncludeGroup::Angle : IncludeGroup::Quote;
+                const auto  it     = std::find(order.begin(), order.end(), wanted);
                 return it == order.end() ? order.size()
-                : static_cast<std::size_t>(it - order.begin());
+                                         : static_cast<std::size_t>(it - order.begin());
             };
 
-            auto sorts_before =[&](const IncludeTarget& left,
-                const IncludeTarget& right)
-            {
-                const auto left_group = group_index(left);
+            auto sorts_before = [&](const IncludeTarget& left, const IncludeTarget& right) {
+                const auto left_group  = group_index(left);
                 const auto right_group = group_index(right);
                 if (left_group != right_group)
                 {
@@ -2442,10 +2465,11 @@ namespace heimdall
                 }
 
                 const auto left_name = left.text.substr(1, left.text.size() - kIncludeDelimCount);
-                const auto right_name = right.text.substr(1, right.text.size() - kIncludeDelimCount);
+                const auto right_name =
+                    right.text.substr(1, right.text.size() - kIncludeDelimCount);
                 return m_options.include_case_insensitive
-                ? CaseInsensitiveLess(left_name, right_name)
-                : left_name < right_name;
+                           ? CaseInsensitiveLess(left_name, right_name)
+                           : left_name < right_name;
             };
 
             // A block is a run of includes on adjacent lines. Blank
@@ -2458,7 +2482,7 @@ namespace heimdall
                 while (block_end < includes.size())
                 {
                     const auto& previous = directives[includes[block_end - 1].directive];
-                    const auto& current = directives[includes[block_end].directive];
+                    const auto& current  = directives[includes[block_end].directive];
                     if (current.offset != previous.offset + previous.length)
                     {
                         break;
@@ -2475,25 +2499,25 @@ namespace heimdall
                         order[i] = i;
                     }
 
-                    std::stable_sort(order.begin(), order.end(),
-                        [&](std::size_t left, std::size_t right)
-                        {
+                    std::stable_sort(
+                        order.begin(), order.end(), [&](std::size_t left, std::size_t right) {
                             return sorts_before(includes[block_begin + left].target,
-                            includes[block_begin + right].target);
-                    });
+                                                includes[block_begin + right].target);
+                        });
 
                     // The identity permutation means the block already
                     // follows the configured order.
                     if (!std::is_sorted(order.begin(), order.end()))
                     {
-                        const auto& first = directives[includes[block_begin].directive];
-                        const auto& last = directives[includes[block_end - 1].directive];
-                        const auto offset = first.offset;
-                        const auto length = last.offset + last.length - offset;
+                        const auto& first  = directives[includes[block_begin].directive];
+                        const auto& last   = directives[includes[block_end - 1].directive];
+                        const auto  offset = first.offset;
+                        const auto  length = last.offset + last.length - offset;
                         std::string replacement;
                         for (const auto index : order)
                         {
-                            const auto& directive = directives[includes[block_begin + index].directive];
+                            const auto& directive =
+                                directives[includes[block_begin + index].directive];
                             replacement.append(source.substr(directive.offset, directive.length));
                         }
 
@@ -2503,7 +2527,7 @@ namespace heimdall
                         diagnostics.push_back(MakeDiagnostic(
                             RuleId::UnsortedIncludes, "cpp/sort-includes",
                             "includes are not in the configured order", offset, length,
-                            lines.Lookup(offset), {offset, length, std::move(replacement)}));
+                            lines.Lookup(offset), { offset, length, std::move(replacement) }));
                     }
                 }
 
@@ -2514,59 +2538,58 @@ namespace heimdall
         return ApplyPolicy(std::move(diagnostics), source, tokens);
     }
 
-    std::vector<Diagnostic> RuleEngine::ApplyPolicy(std::vector<Diagnostic> diagnostics,
-        std::string_view source, const std::vector<Token>& tokens) const
+    std::vector<Diagnostic> RuleEngine::ApplyPolicy(std::vector<Diagnostic>   diagnostics,
+                                                    std::string_view          source,
+                                                    const std::vector<Token>& tokens) const
     {
         LineTable lines;
         lines.Build(source);
 
-        std::sort(diagnostics.begin(), diagnostics.end(),[](const Diagnostic& a, const Diagnostic& b)
-            {
-                return a.offset < b.offset;
-        });
+        std::sort(diagnostics.begin(), diagnostics.end(),
+                  [](const Diagnostic& a, const Diagnostic& b) { return a.offset < b.offset; });
 
         for (auto& diagnostic : diagnostics)
         {
-            for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+            for (auto override = m_options.overrides.rbegin();
+                 override != m_options.overrides.rend(); ++override)
             {
                 if (override->code == diagnostic.code)
                 {
-                    diagnostic.severity = override -> severity;
+                    diagnostic.severity = override->severity;
                     break;
                 }
             }
         }
 
-        std::erase_if(diagnostics,[this](const Diagnostic& diagnostic)
+        std::erase_if(diagnostics, [this](const Diagnostic& diagnostic) {
+            for (auto override = m_options.overrides.rbegin();
+                 override != m_options.overrides.rend(); ++override)
             {
-                for (auto override = m_options.overrides.rbegin(); override != m_options.overrides.rend(); ++override)
+                if (override->code == diagnostic.code)
                 {
-                    if (override->code == diagnostic.code)
-                    {
-                        return!override -> enabled;
+                    return !override->enabled;
                 }
             }
 
-                return false;
+            return false;
         });
         if (m_options.honor_suppressions && !diagnostics.empty())
         {
             const auto suppressions = FindSuppressions(source, tokens, lines);
-            std::erase_if(diagnostics,[&suppressions](const Diagnostic& diagnostic)
-                {
-                    return std::any_of(suppressions.begin(), suppressions.end(),[&diagnostic](const Suppression& s)
-                    {
+            std::erase_if(diagnostics, [&suppressions](const Diagnostic& diagnostic) {
+                return std::any_of(
+                    suppressions.begin(), suppressions.end(), [&diagnostic](const Suppression& s) {
                         return s.line == diagnostic.line &&
-                        (s.codes.empty() || Suppresses(s.codes, diagnostic.code));
-                });
+                               (s.codes.empty() || Suppresses(s.codes, diagnostic.code));
+                    });
             });
         }
 
         return diagnostics;
     }
 
-    std::string RuleEngine::ApplyFixes(std::string_view source,
-        const std::vector<Diagnostic>& diagnostics, bool include_unsafe)
+    std::string RuleEngine::ApplyFixes(
+        std::string_view source, const std::vector<Diagnostic>& diagnostics, bool include_unsafe)
     {
         std::vector<const TextEdit*> edits;
         edits.reserve(diagnostics.size());
@@ -2578,26 +2601,23 @@ namespace heimdall
             }
         }
 
-        std::sort(edits.begin(), edits.end(),[](const TextEdit* a, const TextEdit* b)
-            {
-                return a->offset > b->offset;
-        });
+        std::sort(edits.begin(), edits.end(),
+                  [](const TextEdit* a, const TextEdit* b) { return a->offset > b->offset; });
 
         std::string result(source);
         std::size_t previous_start = source.size();
         for (const TextEdit* edit : edits)
         {
-            const auto owner = std::find_if(diagnostics.begin(), diagnostics.end(),[edit](const Diagnostic& d)
-                {
-                    return d.has_fix && &d.fix == edit;
-            });
+            const auto owner =
+                std::find_if(diagnostics.begin(), diagnostics.end(),
+                             [edit](const Diagnostic& d) { return d.has_fix && &d.fix == edit; });
             // Safe fixes must stay within their diagnostic. Unsafe ones, applied
             // only on request, may edit elsewhere (a specifier before the type, a
             // keyword after the parameters) but are still bounds-checked.
             const bool in_range = owner != diagnostics.end() && edit->offset >= owner->offset &&
-                edit->offset - owner->offset <= owner->length &&
-                edit->length <= owner->length -(edit->offset - owner->offset);
-            if (owner == diagnostics.end() ||(!in_range && owner->fix_is_safe) ||
+                                  edit->offset - owner->offset <= owner->length &&
+                                  edit->length <= owner->length - (edit->offset - owner->offset);
+            if (owner == diagnostics.end() || (!in_range && owner->fix_is_safe) ||
                 edit->offset > source.size() || edit->length > source.size() - edit->offset ||
                 edit->offset + edit->length > previous_start)
             {

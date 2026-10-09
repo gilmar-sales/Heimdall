@@ -16,8 +16,11 @@
     "doc/doxygen-style": "warning"
   },
   "format": {
+    "use-tabs": true,
     "pointer-alignment": "left",
-    "reference-alignment": "left"
+    "reference-alignment": "left",
+    "align-consecutive-assignments": true,
+    "align-consecutive-macros": true
   },
   "include-order": {
     "groups": [

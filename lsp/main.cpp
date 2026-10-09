@@ -3,8 +3,8 @@
 #include <iostream>
 
 #if defined(_WIN32)
-#include <fcntl.h>
-#include <io.h>
+    #include <fcntl.h>
+    #include <io.h>
 #endif
 
 int main()

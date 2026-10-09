@@ -25,7 +25,8 @@ namespace heimdall
         Builtin,  // arg = BuiltinType
         Class,    // arg = SymbolId of a class declared in this translation unit
         Enum,     // arg = SymbolId of an enum declared in this translation unit
-        External, // arg = id in TypeModel::ExternalNames(): a library type such as `std::vector<int>`
+        External, // arg = id in TypeModel::ExternalNames(): a library type such as
+                  // `std::vector<int>`
         Pointer,  // arg = pointee
         LRef,     // arg = referee
         RRef,     // arg = referee
@@ -63,7 +64,7 @@ namespace heimdall
     // only happens while the Typer runs; a finished TypeModel is immutable.
     class TypeTable
     {
-    public:
+      public:
         static constexpr TypeId Unknown = 0;
 
         explicit TypeTable(std::pmr::memory_resource* resource);
@@ -86,10 +87,7 @@ namespace heimdall
 
         TypeId Array(TypeId element, std::uint32_t extent);
 
-        std::size_t Size() const noexcept
-        {
-            return m_kind.size();
-        }
+        std::size_t Size() const noexcept { return m_kind.size(); }
 
         TypeKind Kind(TypeId type) const noexcept
         {
@@ -106,10 +104,7 @@ namespace heimdall
             return type < m_extent.size() ? m_extent[type] : kNone;
         }
 
-        bool IsKnown(TypeId type) const noexcept
-        {
-            return Kind(type) != TypeKind::Unknown;
-        }
+        bool IsKnown(TypeId type) const noexcept { return Kind(type) != TypeKind::Unknown; }
 
         // Removes references: the type of an expression naming the object.
         TypeId Value(TypeId type) const noexcept;
@@ -122,13 +117,11 @@ namespace heimdall
 
         bool IsBuiltin(TypeId type, BuiltinType expected) const noexcept
         {
-            return Kind(type) == TypeKind::Builtin&& Arg(type) == static_cast<std::uint32_t>(expected);
+            return Kind(type) == TypeKind::Builtin &&
+                   Arg(type) == static_cast<std::uint32_t>(expected);
         }
 
-        bool IsBool(TypeId type) const noexcept
-        {
-            return IsBuiltin(type, BuiltinType::Bool);
-        }
+        bool IsBool(TypeId type) const noexcept { return IsBuiltin(type, BuiltinType::Bool); }
 
         // Integer and character types (not `bool`).
         bool IsInteger(TypeId type) const noexcept;
@@ -138,15 +131,9 @@ namespace heimdall
         // `bool`, integers, floating-point types.
         bool IsArithmetic(TypeId type) const noexcept;
 
-        bool IsPointer(TypeId type) const noexcept
-        {
-            return Kind(type) == TypeKind::Pointer;
-        }
+        bool IsPointer(TypeId type) const noexcept { return Kind(type) == TypeKind::Pointer; }
 
-        bool IsArray(TypeId type) const noexcept
-        {
-            return Kind(type) == TypeKind::Array;
-        }
+        bool IsArray(TypeId type) const noexcept { return Kind(type) == TypeKind::Array; }
 
         // Element of an array or pointee of a pointer.
         TypeId Element(TypeId type) const noexcept
@@ -158,13 +145,13 @@ namespace heimdall
         // The type, or the elements of the array, are const-qualified.
         bool IsConstQualified(TypeId type) const noexcept;
 
-    private:
+      private:
         struct Key
         {
             std::uint32_t arg;
             std::uint32_t extent;
-            TypeKind kind;
-            bool operator==(const Key&) const noexcept = default;
+            TypeKind      kind;
+            bool          operator==(const Key&) const noexcept = default;
         };
 
         struct KeyHash
@@ -172,9 +159,10 @@ namespace heimdall
             std::size_t operator()(const Key& key) const noexcept
             {
                 std::uint64_t hash = key.arg * 0x9E3779B97F4A7C15ull;
-                hash ^=(static_cast<std::uint64_t>(key.extent) << 8 | static_cast<std::uint64_t>(key.kind)) *
-                    0xC2B2AE3D27D4EB4Full;
-                return static_cast<std::size_t>(hash ^(hash >> 29));
+                hash ^= (static_cast<std::uint64_t>(key.extent) << 8 |
+                         static_cast<std::uint64_t>(key.kind)) *
+                        0xC2B2AE3D27D4EB4Full;
+                return static_cast<std::size_t>(hash ^ (hash >> 29));
             }
         }
 
@@ -182,9 +170,9 @@ namespace heimdall
 
         TypeId Intern(TypeKind kind, std::uint32_t arg, std::uint32_t extent = kNone);
 
-        std::pmr::vector<TypeKind> m_kind;
-        std::pmr::vector<std::uint32_t> m_arg;
-        std::pmr::vector<std::uint32_t> m_extent;
+        std::pmr::vector<TypeKind>                    m_kind;
+        std::pmr::vector<std::uint32_t>               m_arg;
+        std::pmr::vector<std::uint32_t>               m_extent;
         std::pmr::unordered_map<Key, TypeId, KeyHash> m_index;
     };
 
@@ -194,25 +182,16 @@ namespace heimdall
     // it) must outlive it.
     class TypeModel
     {
-    public:
+      public:
         explicit TypeModel(const SemanticModel& model, std::size_t arena_hint = 32 * 1024);
 
         TypeModel(TypeModel&&) noexcept = default;
 
-        const SemanticModel& Model() const noexcept
-        {
-            return *m_model;
-        }
+        const SemanticModel& Model() const noexcept { return *m_model; }
 
-        const TypeTable& Types() const noexcept
-        {
-            return m_types;
-        }
+        const TypeTable& Types() const noexcept { return m_types; }
 
-        const InternPool& ExternalNames() const noexcept
-        {
-            return m_externals;
-        }
+        const InternPool& ExternalNames() const noexcept { return m_externals; }
 
         // Variables, parameters and fields: the declared type. Functions: the
         // return type. Type aliases: the aliased type. Anything else, or anything
@@ -234,24 +213,18 @@ namespace heimdall
         // `std::vector<int>` -> `std::vector`; empty for anything else.
         std::string_view ExternalHead(TypeId type) const;
 
-        std::size_t ArenaBytes() const noexcept
-        {
-            return m_arena->Used();
-        }
+        std::size_t ArenaBytes() const noexcept { return m_arena->Used(); }
 
-        std::size_t ArenaAllocations() const noexcept
-        {
-            return m_arena->AllocationCount();
-        }
+        std::size_t ArenaAllocations() const noexcept { return m_arena->AllocationCount(); }
 
-    private:
+      private:
         friend class Typer;
         friend class TyperImpl;
 
-        std::unique_ptr<Arena> m_arena;
-        const SemanticModel* m_model;
-        InternPool m_externals;
-        TypeTable m_types;
+        std::unique_ptr<Arena>   m_arena;
+        const SemanticModel*     m_model;
+        InternPool               m_externals;
+        TypeTable                m_types;
         std::pmr::vector<TypeId> m_symbol_type;
         std::pmr::vector<TypeId> m_node_type;
     };
@@ -266,7 +239,7 @@ namespace heimdall
     // Computes the TypeModel in one pass over the symbols and expression nodes.
     class Typer
     {
-    public:
+      public:
         static TypeModel Type(const SemanticModel& model);
     };
 

@@ -35,16 +35,16 @@
 #include <vector>
 
 #if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <psapi.h>
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <psapi.h>
 #else
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
+    #include <signal.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
 #endif
 
 namespace
@@ -54,14 +54,14 @@ namespace
 
     struct MemorySample
     {
-        double working_set_mb = 0;
+        double working_set_mb      = 0;
         double peak_working_set_mb = 0;
     };
 
     // Child process with piped stdin/stdout (stderr discarded).
     class Child
     {
-    public:
+      public:
         bool Start(const std::string& executable);
 
         bool Write(std::string_view bytes);
@@ -76,15 +76,15 @@ namespace
 
         ~Child();
 
-    private:
+      private:
 #if defined(_WIN32)
         HANDLE m_process = nullptr;
-        HANDLE m_stdin = nullptr;
-        HANDLE m_stdout = nullptr;
+        HANDLE m_stdin   = nullptr;
+        HANDLE m_stdout  = nullptr;
 #else
-        pid_t m_pid = -1;
-        int m_stdin = -1;
-        int m_stdout = -1;
+        pid_t m_pid    = -1;
+        int   m_stdin  = -1;
+        int   m_stdout = -1;
 #endif
     };
 
@@ -92,9 +92,9 @@ namespace
 
     bool Child::Start(const std::string& executable)
     {
-        SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-        HANDLE child_stdin_read = nullptr;
-        HANDLE child_stdout_write = nullptr;
+        SECURITY_ATTRIBUTES inheritable { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+        HANDLE              child_stdin_read   = nullptr;
+        HANDLE              child_stdout_write = nullptr;
         if (!CreatePipe(&child_stdin_read, &m_stdin, &inheritable, 1 << 20))
         {
             return false;
@@ -108,20 +108,19 @@ namespace
         SetHandleInformation(m_stdin, HANDLE_FLAG_INHERIT, 0);
         SetHandleInformation(m_stdout, HANDLE_FLAG_INHERIT, 0);
 
-        HANDLE null_device = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inheritable,
-            OPEN_EXISTING, 0, nullptr);
-        STARTUPINFOA startup{};
-        startup.cb = sizeof(startup);
-        startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdInput = child_stdin_read;
+        HANDLE null_device = CreateFileA(
+            "NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, nullptr);
+        STARTUPINFOA startup {};
+        startup.cb         = sizeof(startup);
+        startup.dwFlags    = STARTF_USESTDHANDLES;
+        startup.hStdInput  = child_stdin_read;
         startup.hStdOutput = child_stdout_write;
-        startup.hStdError = null_device;
+        startup.hStdError  = null_device;
 
-        PROCESS_INFORMATION info{};
-        std::string command = "\"" + executable + "\"";
+        PROCESS_INFORMATION info {};
+        std::string         command = "\"" + executable + "\"";
         const BOOL started = CreateProcessA(nullptr, command.data(), nullptr, nullptr, TRUE,
-            CREATE_NO_WINDOW, nullptr,
-            nullptr, &startup, &info);
+                                            CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info);
         CloseHandle(child_stdin_read);
         CloseHandle(child_stdout_write);
         CloseHandle(null_device);
@@ -140,7 +139,8 @@ namespace
         while (!bytes.empty())
         {
             DWORD written = 0;
-            if (!WriteFile(m_stdin, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr))
+            if (!WriteFile(m_stdin, bytes.data(), static_cast<DWORD>(bytes.size()), &written,
+                           nullptr))
             {
                 return false;
             }
@@ -164,13 +164,15 @@ namespace
 
     MemorySample Child::Memory() const
     {
-        PROCESS_MEMORY_COUNTERS counters{};
+        PROCESS_MEMORY_COUNTERS counters {};
         counters.cb = sizeof(counters);
         MemorySample sample;
         if (GetProcessMemoryInfo(m_process, &counters, sizeof(counters)))
         {
-            sample.working_set_mb = static_cast<double>(counters.WorkingSetSize) /(1024.0 * 1024.0);
-            sample.peak_working_set_mb = static_cast<double>(counters.PeakWorkingSetSize) /(1024.0 * 1024.0);
+            sample.working_set_mb =
+                static_cast<double>(counters.WorkingSetSize) / (1024.0 * 1024.0);
+            sample.peak_working_set_mb =
+                static_cast<double>(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
         }
 
         return sample;
@@ -261,7 +263,7 @@ namespace
 
         close(to_child[0]);
         close(from_child[1]);
-        m_stdin = to_child[1];
+        m_stdin  = to_child[1];
         m_stdout = from_child[0];
         signal(SIGPIPE, SIG_IGN);
         return true;
@@ -367,11 +369,8 @@ namespace
     // time of every response (messages carrying an `"id"` and a `"result"`).
     class ResponseReader
     {
-    public:
-        explicit ResponseReader(Child& child) : m_thread([this, &child]
-            {
-                Loop(child);
-            }) {}
+      public:
+        explicit ResponseReader(Child& child) : m_thread([this, &child] { Loop(child); }) {}
 
         ~ResponseReader()
         {
@@ -385,11 +384,9 @@ namespace
         bool Await(std::int64_t id, std::chrono::milliseconds timeout, Clock::time_point& arrived)
         {
             std::unique_lock lock(m_mu);
-            const bool ok = m_cv.wait_for(lock, timeout,[&]
-                {
-                    return m_closed || m_arrivals.contains(id);
-            });
-            if (!ok ||!m_arrivals.contains(id))
+            const bool       ok =
+                m_cv.wait_for(lock, timeout, [&] { return m_closed || m_arrivals.contains(id); });
+            if (!ok || !m_arrivals.contains(id))
             {
                 return false;
             }
@@ -399,11 +396,11 @@ namespace
             return true;
         }
 
-    private:
+      private:
         void Loop(Child& child)
         {
             std::string pending;
-            char buffer[1 << 16];
+            char        buffer[1 << 16];
             for (;;)
             {
                 const std::size_t got = child.Read(buffer, sizeof(buffer));
@@ -428,7 +425,8 @@ namespace
                         break;
                     }
 
-                    const std::size_t length = std::strtoull(pending.c_str() + length_at + 15, nullptr, 10);
+                    const std::size_t length =
+                        std::strtoull(pending.c_str() + length_at + 15, nullptr, 10);
                     if (pending.size() < header_end + 4 + length)
                     {
                         break;
@@ -465,11 +463,11 @@ namespace
             m_cv.notify_all();
         }
 
-        std::mutex m_mu;
-        std::condition_variable m_cv;
+        std::mutex                                          m_mu;
+        std::condition_variable                             m_cv;
         std::unordered_map<std::int64_t, Clock::time_point> m_arrivals;
-        bool m_closed = false;
-        std::thread m_thread;
+        bool                                                m_closed = false;
+        std::thread                                         m_thread;
     };
 
     std::string JsonEscape(std::string_view text)
@@ -480,32 +478,32 @@ namespace
         {
             switch (c)
             {
-            case '"':
-                out += "\\\"";
-                break;
-            case '\\':
-                out += "\\\\";
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            case '\r':
-                out += "\\r";
-                break;
-            case '\t':
-                out += "\\t";
-                break;
-            default:
-                if (c < 0x20)
-                {
-                    char escaped[8];
-                    std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
-                    out += escaped;
-                }
-                else
-                {
-                    out += static_cast<char>(c);
-                }
+                case '"':
+                    out += "\\\"";
+                    break;
+                case '\\':
+                    out += "\\\\";
+                    break;
+                case '\n':
+                    out += "\\n";
+                    break;
+                case '\r':
+                    out += "\\r";
+                    break;
+                case '\t':
+                    out += "\\t";
+                    break;
+                default:
+                    if (c < 0x20)
+                    {
+                        char escaped[8];
+                        std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
+                        out += escaped;
+                    }
+                    else
+                    {
+                        out += static_cast<char>(c);
+                    }
             }
         }
 
@@ -524,32 +522,29 @@ namespace
             return 0;
         }
 
-        const double rank = fraction * static_cast<double>(sorted.size() - 1);
-        const auto low = static_cast<std::size_t>(rank);
+        const double      rank = fraction * static_cast<double>(sorted.size() - 1);
+        const auto        low  = static_cast<std::size_t>(rank);
         const std::size_t high = std::min(low + 1, sorted.size() - 1);
-        return sorted[low] +(sorted[high] - sorted[low]) * (rank - static_cast<double>(low));
+        return sorted[low] + (sorted[high] - sorted[low]) * (rank - static_cast<double>(low));
     }
 
     struct Options
     {
-        std::string server = HEIMDALL_LSP_EXE;
-        std::string stb_dir = HEIMDALL_STB_DIR;
-        std::vector<std::size_t> lines = {1000, 5000, 20000};
-        int iterations = 200;
-        int warmup = 10;
-        double budget_ms = 50.0;
-        bool enforce = false;
+        std::string              server     = HEIMDALL_LSP_EXE;
+        std::string              stb_dir    = HEIMDALL_STB_DIR;
+        std::vector<std::size_t> lines      = { 1000, 5000, 20000 };
+        int                      iterations = 200;
+        int                      warmup     = 10;
+        double                   budget_ms  = 50.0;
+        bool                     enforce    = false;
     };
 
-    bool ParseArguments(int argc, char**argv, Options& options)
+    bool ParseArguments(int argc, char** argv, Options& options)
     {
         for (int i = 1; i < argc; ++i)
         {
             const std::string_view flag = argv[i];
-            auto value =[&]()->const char *
-            {
-                return i + 1 < argc ? argv[++i] : nullptr;
-            };
+            auto value = [&]() -> const char* { return i + 1 < argc ? argv[++i] : nullptr; };
             if (flag == "--enforce")
             {
                 options.enforce = true;
@@ -618,7 +613,7 @@ namespace
                 }
 
                 options.lines.clear();
-                for (const char * p = v; *p;)
+                for (const char* p = v; *p;)
                 {
                     char* end = nullptr;
                     options.lines.push_back(std::strtoull(p, &end, 10));
@@ -636,28 +631,28 @@ namespace
             }
         }
 
-        return!options.server.empty() && options.iterations > 0;
+        return !options.server.empty() && options.iterations > 0;
     }
 
     struct Result
     {
-        std::size_t lines = 0;
-        std::size_t bytes = 0;
-        double open_ms = 0; // didOpen -> first completion answered (cold parse)
+        std::size_t         lines   = 0;
+        std::size_t         bytes   = 0;
+        double              open_ms = 0; // didOpen -> first completion answered (cold parse)
         std::vector<double> samples_ms;
-        double document_mb = 0; // working set after the run minus the idle server
-        double peak_mb = 0;
-        bool ok = false;
+        double              document_mb = 0; // working set after the run minus the idle server
+        double              peak_mb     = 0;
+        bool                ok          = false;
     };
 
     // Finds an indented line inside a function body: typing there gives the
     // completion engine a real scope to walk. Returns (line, column).
     bool PickTypingSite(const std::string& text, std::size_t& line, std::size_t& column)
     {
-        const std::size_t middle = text.size() / 2;
-        std::size_t line_start = text.find('\n', middle);
-        std::size_t current_line = static_cast<std::size_t>(std::count(text.begin(), text.begin() + middle,
-            '\n')) + 1;
+        const std::size_t middle     = text.size() / 2;
+        std::size_t       line_start = text.find('\n', middle);
+        std::size_t       current_line =
+            static_cast<std::size_t>(std::count(text.begin(), text.begin() + middle, '\n')) + 1;
         while (line_start != std::string::npos)
         {
             ++line_start;
@@ -667,10 +662,11 @@ namespace
                 ++indent;
             }
 
-            if (indent >= 4 && line_start + indent < text.size() && text[line_start + indent] != '\n' &&
-                text[line_start + indent] != '#' && text[line_start + indent] != '/')
+            if (indent >= 4 && line_start + indent < text.size() &&
+                text[line_start + indent] != '\n' && text[line_start + indent] != '#' &&
+                text[line_start + indent] != '/')
             {
-                line = current_line;
+                line   = current_line;
                 column = indent;
                 return true;
             }
@@ -685,7 +681,7 @@ namespace
     Result RunSize(const Options& options, std::size_t target_lines)
     {
         Result result;
-        auto document = heimdall::bench::BuildDocument(options.stb_dir, target_lines);
+        auto   document = heimdall::bench::BuildDocument(options.stb_dir, target_lines);
         if (!document)
         {
             std::fprintf(stderr, "cannot read stb headers from %s\n", options.stb_dir.c_str());
@@ -695,7 +691,7 @@ namespace
         result.lines = heimdall::bench::CountLines(*document);
         result.bytes = document->size();
 
-        std::size_t line = 0;
+        std::size_t line   = 0;
         std::size_t column = 0;
         if (!PickTypingSite(*document, line, column))
         {
@@ -710,15 +706,15 @@ namespace
             return result;
         }
 
-        ResponseReader reader(child);
-        const std::string uri = "file:///heimdall-bench/stb.cpp";
-        std::int64_t next_id = 1;
-        std::int64_t version = 1;
-        const auto timeout = std::chrono::seconds(60);
+        ResponseReader    reader(child);
+        const std::string uri     = "file:///heimdall-bench/stb.cpp";
+        std::int64_t      next_id = 1;
+        std::int64_t      version = 1;
+        const auto        timeout = std::chrono::seconds(60);
         Clock::time_point arrived;
 
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(next_id) +
-            ",\"method\":\"initialize\",\"params\":{\"initializationOptions\":{}}}"));
+                          ",\"method\":\"initialize\",\"params\":{\"initializationOptions\":{}}}"));
         if (!reader.Await(next_id++, timeout, arrived))
         {
             return result;
@@ -727,14 +723,14 @@ namespace
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"));
         const MemorySample idle = child.Memory();
 
-        auto complete =[&](std::size_t at_line, std::size_t at_column, Clock::time_point start,
-            double& elapsed_ms)
-        {
+        auto complete = [&](std::size_t at_line, std::size_t at_column, Clock::time_point start,
+                            double& elapsed_ms) {
             const std::int64_t id = next_id++;
-            child.Write(Frame("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
-                ",\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"" + uri +
-                "\"},\"position\":{\"line\":" + std::to_string(at_line) + ",\"character\":" +
-                std::to_string(at_column) + "}}}"));
+            child.Write(Frame(
+                "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
+                ",\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                uri + "\"},\"position\":{\"line\":" + std::to_string(at_line) +
+                ",\"character\":" + std::to_string(at_column) + "}}}"));
             if (!reader.Await(id, timeout, arrived))
             {
                 return false;
@@ -748,8 +744,10 @@ namespace
         const std::size_t lsp_line = line - 1;
 
         const auto open_start = Clock::now();
-        child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
-            uri + "\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"" + JsonEscape(*document) + "\"}}}"));
+        child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                          "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                          uri + "\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"" +
+                          JsonEscape(*document) + "\"}}}"));
         if (!complete(lsp_line, column, open_start, result.open_ms))
         {
             return result;
@@ -758,12 +756,15 @@ namespace
         std::size_t typed = 0;
         for (int i = 0; i < options.warmup + options.iterations; ++i)
         {
-            const std::size_t at = column + typed;
-            const auto start = Clock::now();
-            child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
-                uri + "\",\"version\":" + std::to_string(++version) + "},\"contentChanges\":[{\"range\":{\"start\":{\"line\":" +
-                std::to_string(lsp_line) + ",\"character\":" + std::to_string(at) + "},\"end\":{\"line\":" +
-                std::to_string(lsp_line) + ",\"character\":" + std::to_string(at) + "}},\"text\":\"a\"}]}}"));
+            const std::size_t at    = column + typed;
+            const auto        start = Clock::now();
+            child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                              "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                              uri + "\",\"version\":" + std::to_string(++version) +
+                              "},\"contentChanges\":[{\"range\":{\"start\":{\"line\":" +
+                              std::to_string(lsp_line) + ",\"character\":" + std::to_string(at) +
+                              "},\"end\":{\"line\":" + std::to_string(lsp_line) +
+                              ",\"character\":" + std::to_string(at) + "}},\"text\":\"a\"}]}}"));
             ++typed;
             double elapsed = 0;
             if (!complete(lsp_line, column + typed, start, elapsed))
@@ -782,10 +783,11 @@ namespace
         }
 
         const MemorySample loaded = child.Memory();
-        result.document_mb = std::max(0.0, loaded.working_set_mb - idle.working_set_mb);
-        result.peak_mb = std::max(0.0, loaded.peak_working_set_mb - idle.working_set_mb);
+        result.document_mb        = std::max(0.0, loaded.working_set_mb - idle.working_set_mb);
+        result.peak_mb            = std::max(0.0, loaded.peak_working_set_mb - idle.working_set_mb);
 
-        child.Write(Frame("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(next_id) + ",\"method\":\"shutdown\"}"));
+        child.Write(Frame("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(next_id) +
+                          ",\"method\":\"shutdown\"}"));
         reader.Await(next_id++, timeout, arrived);
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"));
         child.Wait();
@@ -795,26 +797,26 @@ namespace
 
 } // namespace
 
-int main(int argc, char**argv)
+int main(int argc, char** argv)
 {
     Options options;
     if (!ParseArguments(argc, argv, options))
     {
-        std::fprintf(stderr,
-            "usage: LspLatencyBench [--server <heimdall-lsp>] [--stb-dir DIR] [--lines 1000,5000,20000]\n"
+        std::fprintf(
+            stderr,
+            "usage: LspLatencyBench [--server <heimdall-lsp>] [--stb-dir DIR] [--lines "
+            "1000,5000,20000]\n"
             "                       [--iterations N] [--warmup N] [--budget-ms 50] [--enforce]\n");
         return 2;
     }
 
     std::printf("didChange(1 char) + completion, %d samples after %d warmup, budget %.0f ms\n\n",
-        options.iterations,
-        options.warmup, options.budget_ms);
-    std::printf("%8s %9s %10s %8s %8s %8s %8s %8s %11s %9s\n", "lines", "KiB", "open(ms)", "p50", "p95",
-        "p99", "max",
-        "budget", "doc MiB", "peak MiB");
+                options.iterations, options.warmup, options.budget_ms);
+    std::printf("%8s %9s %10s %8s %8s %8s %8s %8s %11s %9s\n", "lines", "KiB", "open(ms)", "p50",
+                "p95", "p99", "max", "budget", "doc MiB", "peak MiB");
 
     bool over_budget = false;
-    bool failed = false;
+    bool failed      = false;
     for (const std::size_t target : options.lines)
     {
         const Result result = RunSize(options, target);
@@ -827,16 +829,16 @@ int main(int argc, char**argv)
 
         auto sorted = result.samples_ms;
         std::sort(sorted.begin(), sorted.end());
-        const double p95 = Percentile(sorted, 0.95);
-        const bool over = p95 > options.budget_ms;
-        over_budget = over_budget || over;
+        const double p95  = Percentile(sorted, 0.95);
+        const bool   over = p95 > options.budget_ms;
+        over_budget       = over_budget || over;
         std::printf("%8zu %9.1f %10.1f %8.2f %8.2f %8.2f %8.2f %8s %11.1f %9.1f\n", result.lines,
-            static_cast<double>(result.bytes) / 1024.0, result.open_ms, Percentile(sorted, 0.50), p95,
-            Percentile(sorted, 0.99), sorted.empty() ? 0.0 : sorted.back(), over ? "OVER" : "ok",
-            result.document_mb,
-            result.peak_mb);
+                    static_cast<double>(result.bytes) / 1024.0, result.open_ms,
+                    Percentile(sorted, 0.50), p95, Percentile(sorted, 0.99),
+                    sorted.empty() ? 0.0 : sorted.back(), over ? "OVER" : "ok", result.document_mb,
+                    result.peak_mb);
         std::fflush(stdout);
     }
 
-    return failed ||(options.enforce && over_budget) ? 1 : 0;
+    return failed || (options.enforce && over_budget) ? 1 : 0;
 }

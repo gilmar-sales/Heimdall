@@ -58,4 +58,4 @@ namespace heimdall
         DocumentId m_document;
         std::shared_ptr<const ParseTree> m_syntax;
     };
-}
+} // namespace heimdall

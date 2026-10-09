@@ -46,7 +46,7 @@ namespace
     void BM_Parse(benchmark::State& state)
     {
         std::size_t corpus_bytes = 0;
-        const auto sources = LoadCorpus(state, corpus_bytes);
+        const auto  sources      = LoadCorpus(state, corpus_bytes);
         if (sources.empty())
         {
             return;
@@ -74,11 +74,11 @@ namespace
     {
         const std::string source =
             "namespace demo {\n"
-        "struct Widget { int value; };\n"
-        "int broken(\n"
-        "int use(Widget w) { return w.value; }\n"
-        "int factory(int left, int right) { return left + right; }\n"
-        "}\n";
+            "struct Widget { int value; };\n"
+            "int broken(\n"
+            "int use(Widget w) { return w.value; }\n"
+            "int factory(int left, int right) { return left + right; }\n"
+            "}\n";
         for (auto _ : state)
         {
             auto tree = heimdall::ParseTree::Parse(source);

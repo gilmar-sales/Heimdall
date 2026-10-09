@@ -1,5 +1,5 @@
-#include <Heimdall/PluginHost.hpp>
 #include <Heimdall/AnalysisEngine.hpp>
+#include <Heimdall/PluginHost.hpp>
 
 #include <gtest/gtest.h>
 
@@ -14,11 +14,11 @@ namespace
         Plugin plugin;
         plugin.name = std::move(name);
         PluginRule rule;
-        rule.code = std::move(code);
-        rule.interests = {PluginNodeKind::Return};
-        rule.on_node =[](const PluginContext& context, NodeId node, std::vector<PluginDiagnostic>& out)
-        {
-            out.push_back({context.NodeRange(node), "experimental return check"});
+        rule.code      = std::move(code);
+        rule.interests = { PluginNodeKind::Return };
+        rule.on_node   = [](const PluginContext& context, NodeId node,
+                            std::vector<PluginDiagnostic>& out) {
+            out.push_back({ context.NodeRange(node), "experimental return check" });
         };
         plugin.rules.push_back(std::move(rule));
         return plugin;
@@ -34,7 +34,7 @@ namespace
     TEST(PluginHostSpec, VersionDuplicateAndNativeShadowValidationIsTransactional)
     {
         PluginHost host;
-        auto wrong = Returns("wrong", "test/wrong");
+        auto       wrong   = Returns("wrong", "test/wrong");
         wrong.required_api = PluginApiVersion + 1;
         EXPECT_FALSE(host.Register(std::move(wrong)));
         EXPECT_EQ(host.Size(), 0);
@@ -52,13 +52,13 @@ namespace
     TEST(PluginHostSpec, HandlesBatchQueriesAndDiagnosticsUseOneSnapshot)
     {
         PluginHost host;
-        Plugin plugin;
+        Plugin     plugin;
         plugin.name = "query-test";
         PluginRule rule;
-        rule.code = "test/queries";
-        rule.interests = {PluginNodeKind::Return};
-        rule.on_node =[](const PluginContext& context, NodeId node, std::vector<PluginDiagnostic>& out)
-        {
+        rule.code      = "test/queries";
+        rule.interests = { PluginNodeKind::Return };
+        rule.on_node   = [](const PluginContext& context, NodeId node,
+                            std::vector<PluginDiagnostic>& out) {
             EXPECT_EQ(context.NodeKind(node), PluginNodeKind::Return);
             EXPECT_EQ(context.Document(), 0);
             EXPECT_FALSE(context.Children(node).empty());
@@ -66,7 +66,7 @@ namespace
             EXPECT_TRUE(context.Children(InvalidNode).empty());
             EXPECT_TRUE(context.Descendants(InvalidNode).empty());
             EXPECT_EQ(context.NodeRange(InvalidNode).length, 0);
-            const auto range = context.NodeRange(node);
+            const auto range  = context.NodeRange(node);
             const auto symbol = context.ResolveSymbol(range.offset + 7);
             EXPECT_NE(symbol, InvalidHandle);
             EXPECT_EQ(context.String(context.SymbolName(symbol)), "value");
@@ -75,11 +75,8 @@ namespace
             EXPECT_FALSE(context.SymbolsInScope(range.offset).empty());
             EXPECT_EQ(context.SymbolName(InvalidHandle), InvalidHandle);
             EXPECT_TRUE(context.String(InvalidHandle).empty());
-            out.push_back({range, "valid query diagnostic"});
-            out.push_back({
-                    {
-                        9999, 1
-                    }, "invalid diagnostic"});
+            out.push_back({ range, "valid query diagnostic" });
+            out.push_back({ { 9999, 1 }, "invalid diagnostic" });
         };
         plugin.rules.push_back(std::move(rule));
         ASSERT_TRUE(host.Register(std::move(plugin)));
@@ -93,9 +90,8 @@ namespace
     TEST(PluginHostSpec, ExceptionIsContainedAndOtherRulesContinue)
     {
         PluginHost host;
-        auto broken = Returns("broken", "test/broken");
-        broken.rules[0].on_node =[](const PluginContext&, NodeId, std::vector<PluginDiagnostic>&)
-        {
+        auto       broken       = Returns("broken", "test/broken");
+        broken.rules[0].on_node = [](const PluginContext&, NodeId, std::vector<PluginDiagnostic>&) {
             throw std::runtime_error("plugin failure");
         };
         ASSERT_TRUE(host.Register(std::move(broken)));
@@ -110,11 +106,10 @@ namespace
     TEST(PluginHostSpec, AnalysisEngineCoordinatesNativeAndPluginRules)
     {
         AnalysisEngine engine;
-        ScheduledRule native;
+        ScheduledRule  native;
         native.metadata.code = "test/native";
-        native.interests = {GrammarKind::ReturnStatement};
-        native.on_node =[](const AnalysisContext& context, NodeId node, DiagnosticSink& sink)
-        {
+        native.interests     = { GrammarKind::ReturnStatement };
+        native.on_node = [](const AnalysisContext& context, NodeId node, DiagnosticSink& sink) {
             sink.Emit(context.NodeRange(node), "native direct SoA view");
         };
         ASSERT_TRUE(engine.RegisterNative(std::move(native)));
@@ -124,9 +119,9 @@ namespace
         EXPECT_EQ(result.rules[0].execution_count, 1);
         EXPECT_EQ(result.rules[1].execution_count, 1);
         EXPECT_EQ(std::count_if(result.diagnostics.begin(), result.diagnostics.end(),
-            [](const Diagnostic& d)
-            {
-                return d.code == "test/plugin" || d.code == "test/native";
-            }), 2);
+                                [](const Diagnostic& d) {
+                                    return d.code == "test/plugin" || d.code == "test/native";
+                                }),
+                  2);
     }
-}
+} // namespace

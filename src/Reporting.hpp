@@ -3,10 +3,10 @@
 #include "CliOptions.hpp"
 #include "Pipeline.hpp"
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <filesystem>
 
 namespace heimdall::cli
 {

@@ -12,48 +12,47 @@ namespace
     using heimdall::DocScope;
 
     std::vector<heimdall::Diagnostic> Comments(const std::string& source,
-        DocScope scope = DocScope::Public)
+                                               DocScope           scope = DocScope::Public)
     {
-        const auto tree = heimdall::ParseTree::Parse(source);
+        const auto tree  = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeRequireDocComment(model, scope);
     }
 
     std::vector<heimdall::Diagnostic> Style(const std::string& source,
-        DocScope scope = DocScope::Public)
+                                            DocScope           scope = DocScope::Public)
     {
-        const auto tree = heimdall::ParseTree::Parse(source);
+        const auto tree  = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeDoxygenStyle(model, scope);
     }
 
     bool Mentions(const std::vector<heimdall::Diagnostic>& diagnostics, const std::string& text)
     {
-        return std::any_of(diagnostics.begin(), diagnostics.end(),
-            [&](const heimdall::Diagnostic& diagnostic)
-            {
+        return std::any_of(
+            diagnostics.begin(), diagnostics.end(), [&](const heimdall::Diagnostic& diagnostic) {
                 return diagnostic.message.find(text) != std::string::npos;
-        });
+            });
     }
 
     // A comment that satisfies every check, for the tests that break one thing.
     const std::string kGood =
         "/**\n"
-    " * @brief Calculates the area of a circle.\n"
-    " *\n"
-    " * Longer explanation.\n"
-    " *\n"
-    " * @param radius Radius in meters, at least 0.\n"
-    " * @return The area in square meters.\n"
-    " */\n"
-    "double area(double radius);\n";
+        " * @brief Calculates the area of a circle.\n"
+        " *\n"
+        " * Longer explanation.\n"
+        " *\n"
+        " * @param radius Radius in meters, at least 0.\n"
+        " * @return The area in square meters.\n"
+        " */\n"
+        "double area(double radius);\n";
 
 } // namespace
 
 TEST(DocFix, GeneratesACompleteTemplateAndRequiresReview)
 {
-    const std::string source = "template<class T>\nT convert(T value);\n";
-    const auto diagnostics = Comments(source);
+    const std::string source      = "template<class T>\nT convert(T value);\n";
+    const auto        diagnostics = Comments(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
     const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
@@ -68,15 +67,13 @@ TEST(DocFix, GeneratesACompleteTemplateAndRequiresReview)
 TEST(DocFix, RepairsStyleWithoutLosingDocumentation)
 {
     for (const std::string source :
-        {
-            "//! @brief Runs.\nvoid run();\n",
-            "/** @brief Runs. \\note Keep this. */\nvoid run();\n",
-            "/** @brief Runs. More details. */\nvoid run();\n",
-            "/**\n * @brief Runs.\n * More details.\n */\nvoid run();\n",
-            "/// @brief Runs.\n/// More details.\nvoid run();\n",
-            "/**\n * @brief Runs\n * with input. More details.\n */\nvoid run();\n",
-            "void run(); //!< @brief Runs.\n"
-    })
+         { "//! @brief Runs.\nvoid run();\n",
+           "/** @brief Runs. \\note Keep this. */\nvoid run();\n",
+           "/** @brief Runs. More details. */\nvoid run();\n",
+           "/**\n * @brief Runs.\n * More details.\n */\nvoid run();\n",
+           "/// @brief Runs.\n/// More details.\nvoid run();\n",
+           "/**\n * @brief Runs\n * with input. More details.\n */\nvoid run();\n",
+           "void run(); //!< @brief Runs.\n" })
     {
         SCOPED_TRACE(source);
         const auto diagnostics = Style(source);
@@ -108,23 +105,20 @@ TEST(DocFix, RepairsStyleWithoutLosingDocumentation)
 TEST(DocFix, RepairsMissingAndInvalidTagsTogether)
 {
     for (const std::string source :
-        {
-            "/** text */\nint f(int x);\n",
-            "/** @brief */\nvoid f();\n",
-            "/** @brief Runs. @param x */\nvoid f(int x);\n",
-            "/** @brief Runs. @param old Keep prose. */\nvoid f(int x);\n",
-            "/** @brief Runs. @param x First. @param x Duplicate. */\nvoid f(int x);\n",
-            "/** @brief Runs. @param x,x Duplicate. */\nvoid f(int x);\n",
-            "/** @brief Runs. @param[in] x @return */\nint f(int x);\n",
-            "/** @brief Runs. @param */\nvoid f(int x);\n",
-            "/** @brief Runs. @return Keep prose. */\nvoid f();\n",
-            "/** @brief Runs. @return */\nint f();\n",
-            "/** @brief Runs. */\nvoid f() { throw Error{}; }\n",
-            "/** @brief Runs. @throws Error */\nvoid f();\n",
-            "/** @brief Runs. @throws */\nvoid f();\n",
-            "/** @brief Container. */\ntemplate<class T> struct Container {};\n",
-            "int f(int x); ///< @brief Calculates.\n"
-    })
+         { "/** text */\nint f(int x);\n", "/** @brief */\nvoid f();\n",
+           "/** @brief Runs. @param x */\nvoid f(int x);\n",
+           "/** @brief Runs. @param old Keep prose. */\nvoid f(int x);\n",
+           "/** @brief Runs. @param x First. @param x Duplicate. */\nvoid f(int x);\n",
+           "/** @brief Runs. @param x,x Duplicate. */\nvoid f(int x);\n",
+           "/** @brief Runs. @param[in] x @return */\nint f(int x);\n",
+           "/** @brief Runs. @param */\nvoid f(int x);\n",
+           "/** @brief Runs. @return Keep prose. */\nvoid f();\n",
+           "/** @brief Runs. @return */\nint f();\n",
+           "/** @brief Runs. */\nvoid f() { throw Error{}; }\n",
+           "/** @brief Runs. @throws Error */\nvoid f();\n",
+           "/** @brief Runs. @throws */\nvoid f();\n",
+           "/** @brief Container. */\ntemplate<class T> struct Container {};\n",
+           "int f(int x); ///< @brief Calculates.\n" })
     {
         SCOPED_TRACE(source);
         const auto diagnostics = Style(source);
@@ -155,14 +149,14 @@ TEST(DocFix, PreservesCodeIndentationAndInlineCommands)
 {
     const std::string source =
         "//! @brief Runs.\n"
-    "//!\n"
-    "//! @code\n"
-    "//! if (ready) {\n"
-    "//!     run();\n"
-    "//! }\n"
-    "//! @endcode\n"
-    "//! @note Uses \\p ready.\n"
-    "void run();\n";
+        "//!\n"
+        "//! @code\n"
+        "//! if (ready) {\n"
+        "//!     run();\n"
+        "//! }\n"
+        "//! @endcode\n"
+        "//! @note Uses \\p ready.\n"
+        "void run();\n";
     const auto fixed = heimdall::RuleEngine::ApplyFixes(source, Style(source));
     EXPECT_NE(fixed.find(" *     run();"), std::string::npos);
     EXPECT_NE(fixed.find("Uses \\p ready."), std::string::npos);
@@ -171,9 +165,10 @@ TEST(DocFix, PreservesCodeIndentationAndInlineCommands)
 
 TEST(DocFix, PreservesIndentationCrlfAndDetachedDocumentation)
 {
-    const std::string source = "/** @file widget.hpp */\r\nstruct Widget\r\n{\r\n\tint get(int x);\r\n};\r\n";
+    const std::string source =
+        "/** @file widget.hpp */\r\nstruct Widget\r\n{\r\n\tint get(int x);\r\n};\r\n";
     const auto diagnostics = Comments(source);
-    const auto fixed = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
+    const auto fixed       = heimdall::RuleEngine::ApplyFixes(source, diagnostics, true);
     EXPECT_TRUE(fixed.starts_with("/** @file widget.hpp */\r\n"));
     EXPECT_NE(fixed.find("\t * @param x"), std::string::npos);
     EXPECT_NE(fixed.find("\t */\r\n\tint get"), std::string::npos);
@@ -194,8 +189,8 @@ TEST(DocRequireComment, ReportsAnUndocumentedFunctionClassAndEnum)
 {
     const std::string source =
         "void run();\n"
-    "struct Widget { int x; };\n"
-    "enum class Color { Red };\n";
+        "struct Widget { int x; };\n"
+        "enum class Color { Red };\n";
     const auto diagnostics = Comments(source);
     ASSERT_EQ(diagnostics.size(), 3u);
     for (const auto& diagnostic : diagnostics)
@@ -254,15 +249,15 @@ TEST(DocRequireComment, MembersFollowTheScope)
 {
     const std::string source =
         "/// @brief A class.\n"
-    "class A\n"
-    "{\n"
-    "public:\n"
-    "    void open();\n"
-    "protected:\n"
-    "    void hook();\n"
-    "private:\n"
-    "    void secret();\n"
-    "};\n";
+        "class A\n"
+        "{\n"
+        "public:\n"
+        "    void open();\n"
+        "protected:\n"
+        "    void hook();\n"
+        "private:\n"
+        "    void secret();\n"
+        "};\n";
     const auto in_public = Comments(source, DocScope::Public);
     ASSERT_EQ(in_public.size(), 2u);
     EXPECT_TRUE(Mentions(in_public, "'open'"));
@@ -286,8 +281,8 @@ TEST(DocRequireComment, InternalLinkageIsPrivateScope)
 {
     const std::string source =
         "static void hidden();\n"
-    "namespace { void anonymous(); }\n"
-    "namespace api { void visible(); }\n";
+        "namespace { void anonymous(); }\n"
+        "namespace api { void visible(); }\n";
     const auto in_public = Comments(source, DocScope::Public);
     ASSERT_EQ(in_public.size(), 1u);
     EXPECT_TRUE(Mentions(in_public, "'visible'"));
@@ -304,10 +299,10 @@ TEST(DocRequireComment, MembersOfAPrivateNestedClassArePrivate)
 {
     const std::string source =
         "/// x\n"
-    "class Outer\n"
-    "{\n"
-    "    struct Inner { void f(); };\n"
-    "};\n";
+        "class Outer\n"
+        "{\n"
+        "    struct Inner { void f(); };\n"
+        "};\n";
     EXPECT_TRUE(Comments(source, DocScope::Public).empty());
     EXPECT_EQ(Comments(source, DocScope::Private).size(), 2u);
 }
@@ -317,12 +312,15 @@ TEST(DocRequireComment, SkipsWhatIsDocumentedElsewhere)
     EXPECT_TRUE(Comments("/// x\nstruct A { A() = default; A(const A &) = delete; };\n").empty());
     // Only B::f, the declaration that introduces the function, needs the comment.
     EXPECT_EQ(Comments("/// x\nstruct B { virtual void f(); };\n"
-        "/// y\nstruct D : B { void f() override; };\n").size(), 1u);
+                       "/// y\nstruct D : B { void f() override; };\n")
+                  .size(),
+              1u);
     // And only the declaration in the class, not the definition outside it.
     EXPECT_EQ(Comments("/// x\nstruct S { void f(); };\nvoid S::f() {}\n").size(), 1u);
     EXPECT_TRUE(Comments("int main() { return 0; }\n").empty());
     EXPECT_TRUE(Comments("struct F;\nenum class E : int;\n").empty());
-    EXPECT_TRUE(Comments("/// x\ntemplate <class T> void f(T);\ntemplate <> void f<int>(int);\n").empty());
+    EXPECT_TRUE(
+        Comments("/// x\ntemplate <class T> void f(T);\ntemplate <> void f<int>(int);\n").empty());
 }
 
 TEST(DocRequireComment, ADefinitionAfterADocumentedDeclarationIsFine)
@@ -332,7 +330,8 @@ TEST(DocRequireComment, ADefinitionAfterADocumentedDeclarationIsFine)
 
 TEST(DocRequireComment, LocalDeclarationsAreSkipped)
 {
-    EXPECT_TRUE(Comments("/// x\nvoid f() { struct Local { void g(); }; }\n", DocScope::All).empty());
+    EXPECT_TRUE(
+        Comments("/// x\nvoid f() { struct Local { void g(); }; }\n", DocScope::All).empty());
 }
 
 TEST(DocRequireComment, MacroDecoratedDeclarationsKeepTheirComment)
@@ -342,11 +341,8 @@ TEST(DocRequireComment, MacroDecoratedDeclarationsKeepTheirComment)
 
 TEST(DocRequireComment, SurvivesBrokenInput)
 {
-    for (const char* source :
-        {
-            "/** unterminated", "struct A { void f(", "template <class T", "enum E {", "/// x\n",
-            "void f(int, , );\n", ""
-    })
+    for (const char* source : { "/** unterminated", "struct A { void f(", "template <class T",
+                                "enum E {", "/// x\n", "void f(int, , );\n", "" })
     {
         EXPECT_NO_THROW((void) Comments(source, DocScope::All)) << source;
         EXPECT_NO_THROW((void) Style(source, DocScope::All)) << source;
@@ -384,14 +380,16 @@ TEST(DocDoxygenStyle, AcceptsBriefAndShortAndBackslashSpelling)
 
 TEST(DocDoxygenStyle, ABriefHasOneSentence)
 {
-    EXPECT_TRUE(Mentions(Style("/// @brief Does it. Then does more.\nvoid f();\n"), "single sentence"));
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief Does it. Then does more.\nvoid f();\n"), "single sentence"));
     EXPECT_TRUE(Style("/// @brief Uses e.g. Foo and i.e. Bar.\nvoid f();\n").empty());
     EXPECT_TRUE(Style("/// @brief Does it with\n/// a wrapped line.\nvoid f();\n").empty());
 }
 
 TEST(DocDoxygenStyle, TheBriefIsSeparatedFromTheDetailsByABlankLine)
 {
-    EXPECT_TRUE(Mentions(Style("/// @brief Does it.\n/// More about it.\nvoid f();\n"), "blank line"));
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief Does it.\n/// More about it.\nvoid f();\n"), "blank line"));
     EXPECT_TRUE(Style("/// @brief Does it.\n///\n/// More about it.\nvoid f();\n").empty());
 }
 
@@ -402,7 +400,8 @@ TEST(DocDoxygenStyle, AnEmptyBriefIsReported)
 
 TEST(DocDoxygenStyle, EveryNamedParameterNeedsAParam)
 {
-    const std::string source = "/// @brief Adds.\n/// @param a First.\n/// @return Sum.\nint add(int a, int b);\n";
+    const std::string source =
+        "/// @brief Adds.\n/// @param a First.\n/// @return Sum.\nint add(int a, int b);\n";
     const auto diagnostics = Style(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_TRUE(Mentions(diagnostics, "'b' is not documented"));
@@ -420,14 +419,12 @@ TEST(DocDoxygenStyle, FindsTheNameOfComplexParameters)
 {
     const std::string source =
         "/// @brief x.\n"
-    "void f(int values[4], void (*callback)(int), std::function<void(int)> handler, const char *text = \"a,b\",\n"
-    "       std::pair<int, int> pair = {1, 2});\n";
+        "void f(int values[4], void (*callback)(int), std::function<void(int)> handler, const char "
+        "*text = \"a,b\",\n"
+        "       std::pair<int, int> pair = {1, 2});\n";
     const auto diagnostics = Style(source);
     ASSERT_EQ(diagnostics.size(), 5u);
-    for (const char* name :
-        {
-            "'values'", "'callback'", "'handler'", "'text'", "'pair'"
-    })
+    for (const char* name : { "'values'", "'callback'", "'handler'", "'text'", "'pair'" })
     {
         EXPECT_TRUE(Mentions(diagnostics, name)) << name;
     }
@@ -435,7 +432,10 @@ TEST(DocDoxygenStyle, FindsTheNameOfComplexParameters)
 
 TEST(DocDoxygenStyle, ParamAcceptsDirectionsListsAndBackslash)
 {
-    EXPECT_TRUE(Style("/// @brief x.\n/// @param[in] a In.\n/// @param[out] b Out.\nvoid f(int a, int *b);\n").empty());
+    EXPECT_TRUE(
+        Style(
+            "/// @brief x.\n/// @param[in] a In.\n/// @param[out] b Out.\nvoid f(int a, int *b);\n")
+            .empty());
     EXPECT_TRUE(Style("/// @brief x.\n/// @param a,b Both.\nvoid f(int a, int b);\n").empty());
     EXPECT_TRUE(Style("/// \\brief x.\n/// \\param a Value.\nvoid f(int a);\n").empty());
 }
@@ -443,19 +443,21 @@ TEST(DocDoxygenStyle, ParamAcceptsDirectionsListsAndBackslash)
 TEST(DocDoxygenStyle, ReportsAParamThatMatchesNothingOrRepeats)
 {
     const std::string unknown = "/// @brief x.\n/// @param a A.\n/// @param z Z.\nvoid f(int a);\n";
-    const auto stale = Style(unknown);
+    const auto        stale   = Style(unknown);
     ASSERT_EQ(stale.size(), 1u);
     EXPECT_TRUE(Mentions(stale, "'z' does not match"));
     EXPECT_EQ(stale[0].line, 3u);
 
-    EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @param a A.\n/// @param a Again.\nvoid f(int a);\n"),
-        "more than once"));
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief x.\n/// @param a A.\n/// @param a Again.\nvoid f(int a);\n"),
+                 "more than once"));
 }
 
 TEST(DocDoxygenStyle, ATagNeedsADescription)
 {
     EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @param a\nvoid f(int a);\n"), "no description"));
-    EXPECT_TRUE(Style("/// @brief x.\n/// @param a Value that\n/// continues.\nvoid f(int a);\n").empty());
+    EXPECT_TRUE(
+        Style("/// @brief x.\n/// @param a Value that\n/// continues.\nvoid f(int a);\n").empty());
 }
 
 TEST(DocDoxygenStyle, AFunctionThatReturnsAValueNeedsReturn)
@@ -474,7 +476,9 @@ TEST(DocDoxygenStyle, VoidConstructorsAndDestructorsNeedNoReturn)
     EXPECT_TRUE(Style("/// @brief x.\nvoid f();\n").empty());
     EXPECT_TRUE(Style("/// @brief x.\nauto f() -> void;\n").empty());
     EXPECT_TRUE(Style("/// @brief x.\n[[noreturn]] static inline void f();\n").empty());
-    EXPECT_TRUE(Style("/// @brief x.\nstruct S\n{\n    /// @brief Builds.\n    S();\n    /// @brief Destroys.\n    ~S();\n};\n").empty());
+    EXPECT_TRUE(Style("/// @brief x.\nstruct S\n{\n    /// @brief Builds.\n    S();\n    /// "
+                      "@brief Destroys.\n    ~S();\n};\n")
+                    .empty());
 }
 
 TEST(DocDoxygenStyle, PointerAndTemplateReturnsCount)
@@ -500,9 +504,17 @@ TEST(DocDoxygenStyle, ReturnOnAVoidFunctionIsReported)
 TEST(DocDoxygenStyle, ThrowRequiresThrows)
 {
     const std::string body = "{ if (a < 0) { throw 1; } }\n";
-    EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @param a A.\nvoid f(int a) " + body), "can throw"));
-    EXPECT_TRUE(Style("/// @brief x.\n/// @param a A.\n/// @throws int When a is negative.\nvoid f(int a) " + body).empty());
-    EXPECT_TRUE(Style("/// @brief x.\n/// @param a A.\n/// @exception int When negative.\nvoid f(int a) " + body).empty());
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief x.\n/// @param a A.\nvoid f(int a) " + body), "can throw"));
+    EXPECT_TRUE(
+        Style(
+            "/// @brief x.\n/// @param a A.\n/// @throws int When a is negative.\nvoid f(int a) " +
+            body)
+            .empty());
+    EXPECT_TRUE(
+        Style("/// @brief x.\n/// @param a A.\n/// @exception int When negative.\nvoid f(int a) " +
+              body)
+            .empty());
 }
 
 TEST(DocDoxygenStyle, ThrowsInsideATryOrANoexceptFunctionAreNotReported)
@@ -515,16 +527,16 @@ TEST(DocDoxygenStyle, AThrowsNeedsTheTypeAndTheCondition)
 {
     EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @throws\nvoid f();\n"), "exception type"));
     EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @throws std::runtime_error\nvoid f();\n"),
-        "exception type"));
+                         "exception type"));
 }
 
 TEST(DocDoxygenStyle, TemplateParametersNeedTparam)
 {
     const std::string source =
         "/// @brief x.\n"
-    "/// @tparam T Element.\n"
-    "template <typename T, typename U, int N = 3, template <class> class C = std::vector>\n"
-    "void f();\n";
+        "/// @tparam T Element.\n"
+        "template <typename T, typename U, int N = 3, template <class> class C = std::vector>\n"
+        "void f();\n";
     const auto diagnostics = Style(source);
     ASSERT_EQ(diagnostics.size(), 3u);
     EXPECT_TRUE(Mentions(diagnostics, "'U'"));
@@ -536,9 +548,11 @@ TEST(DocDoxygenStyle, UnnamedTemplateParametersNeedNothingAndClassesCount)
 {
     EXPECT_TRUE(Style("/// @brief x.\ntemplate <typename = void>\nvoid f();\n").empty());
     EXPECT_TRUE(Mentions(Style("/// @brief x.\ntemplate <class T>\nstruct S {};\n"), "'T'"));
-    EXPECT_TRUE(Style("/// @brief x.\n/// @tparam T Element.\ntemplate <class T>\nstruct S {};\n").empty());
-    EXPECT_TRUE(Mentions(Style("/// @brief x.\n/// @tparam Q None.\ntemplate <class T>\nstruct S {};\n"),
-        "'Q' does not match"));
+    EXPECT_TRUE(
+        Style("/// @brief x.\n/// @tparam T Element.\ntemplate <class T>\nstruct S {};\n").empty());
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief x.\n/// @tparam Q None.\ntemplate <class T>\nstruct S {};\n"),
+                 "'Q' does not match"));
 }
 
 TEST(DocDoxygenStyle, ClassesAndEnumsOnlyNeedABrief)
@@ -570,36 +584,39 @@ TEST(DocDoxygenStyle, FileBlocksAreNotDeclarationDocs)
 
 TEST(DocDoxygenStyle, InlineFormulasDoNotSwallowTheTagDescription)
 {
-    EXPECT_TRUE(Style("/**\n * @brief Area of \\f$ \\pi r^2 \\f$.\n *\n * @param r Radius \\f$ r \\f$ in meters.\n * @return Area.\n */\ndouble f(double r);\n").empty());
+    EXPECT_TRUE(Style("/**\n * @brief Area of \\f$ \\pi r^2 \\f$.\n *\n * @param r Radius \\f$ r "
+                      "\\f$ in meters.\n * @return Area.\n */\ndouble f(double r);\n")
+                    .empty());
 }
 
 TEST(DocDoxygenStyle, MultiLineBlockCommentsOfDoxygenAreParsed)
 {
     const std::string source =
         "/**\n"
-    " * @brief Calculates the area of a circle.\n"
-    " *\n"
-    " * @param radius The radius.\n"
-    " * @return The area.\n"
-    " * @throws std::invalid_argument If the radius is negative.\n"
-    " *\n"
-    " * @see other\n"
-    " * @note Thread-safe.\n"
-    " */\n"
-    "double f(double radius)\n"
-    "{\n"
-    "    if (radius < 0.0) { throw std::invalid_argument(\"x\"); }\n"
-    "    return radius;\n"
-    "}\n";
+        " * @brief Calculates the area of a circle.\n"
+        " *\n"
+        " * @param radius The radius.\n"
+        " * @return The area.\n"
+        " * @throws std::invalid_argument If the radius is negative.\n"
+        " *\n"
+        " * @see other\n"
+        " * @note Thread-safe.\n"
+        " */\n"
+        "double f(double radius)\n"
+        "{\n"
+        "    if (radius < 0.0) { throw std::invalid_argument(\"x\"); }\n"
+        "    return radius;\n"
+        "}\n";
     EXPECT_TRUE(Style(source).empty());
 }
 
 TEST(DocDoxygenStyle, OperatorsAndOutOfClassDefinitionsAreChecked)
 {
-    EXPECT_TRUE(Mentions(Style("/// @brief x.\nbool operator==(const A &lhs, const A &rhs);\n"),
-        "'lhs'"));
-    EXPECT_TRUE(Mentions(Style("struct S { int f(int a); };\n/// @brief x.\nint S::f(int a) { return a; }\n",
-        DocScope::All),
+    EXPECT_TRUE(
+        Mentions(Style("/// @brief x.\nbool operator==(const A &lhs, const A &rhs);\n"), "'lhs'"));
+    EXPECT_TRUE(Mentions(
+        Style("struct S { int f(int a); };\n/// @brief x.\nint S::f(int a) { return a; }\n",
+              DocScope::All),
         "'a' is not documented"));
 }
 
@@ -607,9 +624,9 @@ TEST(DocDoxygenStyle, ScopeLimitsWhichDeclarationsAreChecked)
 {
     const std::string source =
         "/// @brief x.\n"
-    "static int hidden();\n"
-    "/// @brief y.\n"
-    "int shown();\n";
+        "static int hidden();\n"
+        "/// @brief y.\n"
+        "int shown();\n";
     const auto in_public = Style(source, DocScope::Public);
     ASSERT_EQ(in_public.size(), 1u);
     EXPECT_TRUE(Mentions(in_public, "'shown'"));
@@ -628,33 +645,31 @@ TEST(DocDoxygenStyle, TrailingDocumentationIsChecked)
 
 TEST(DocRules, AreInTheCatalogAndOffByDefault)
 {
-    for (const auto code :
-        {
-            "doc/require-comment", "doc/doxygen-style"
-    })
+    for (const auto code : { "doc/require-comment", "doc/doxygen-style" })
     {
         ASSERT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
-        EXPECT_EQ(heimdall::FindRuleByCode(code) -> category, "doc");
+        EXPECT_EQ(heimdall::FindRuleByCode(code)->category, "doc");
         EXPECT_TRUE(heimdall::FindRuleByCode(code)->autofix);
     }
 
     const std::string source = "void f(int a);\n";
-    const auto tree = heimdall::ParseTree::Parse(source);
-    const auto model = heimdall::Binder::Bind(tree);
-    EXPECT_TRUE(heimdall::SemanticRules::AnalyzeDocumentation(model, heimdall::RuleEngine()).empty());
+    const auto        tree   = heimdall::ParseTree::Parse(source);
+    const auto        model  = heimdall::Binder::Bind(tree);
+    EXPECT_TRUE(
+        heimdall::SemanticRules::AnalyzeDocumentation(model, heimdall::RuleEngine()).empty());
     EXPECT_TRUE(heimdall::SemanticRules::Analyze(model).empty());
 }
 
 TEST(DocRules, RunWhenEnabledAndFollowTheEngineScope)
 {
     const std::string source = "void f(int a);\nstatic void g();\n";
-    const auto tree = heimdall::ParseTree::Parse(source);
-    const auto model = heimdall::Binder::Bind(tree);
+    const auto        tree   = heimdall::ParseTree::Parse(source);
+    const auto        model  = heimdall::Binder::Bind(tree);
 
     heimdall::RuleOptions options;
-    options.overrides.push_back({"doc/require-comment", true, heimdall::Severity::Error});
-    EXPECT_EQ(heimdall::SemanticRules::AnalyzeDocumentation(model,
-        heimdall::RuleEngine(options)).size(),
+    options.overrides.push_back({ "doc/require-comment", true, heimdall::Severity::Error });
+    EXPECT_EQ(
+        heimdall::SemanticRules::AnalyzeDocumentation(model, heimdall::RuleEngine(options)).size(),
         1u);
 
     options.doc_scope = DocScope::All;
@@ -667,20 +682,21 @@ TEST(DocRules, RunWhenEnabledAndFollowTheEngineScope)
     ASSERT_EQ(policed.size(), 2u);
     EXPECT_EQ(policed[0].severity, heimdall::Severity::Error);
 
-    options.overrides.push_back({"doc/doxygen-style", true, heimdall::Severity::Warning});
-    EXPECT_EQ(heimdall::SemanticRules::AnalyzeDocumentation(model,
-        heimdall::RuleEngine(options)).size(),
+    options.overrides.push_back({ "doc/doxygen-style", true, heimdall::Severity::Warning });
+    EXPECT_EQ(
+        heimdall::SemanticRules::AnalyzeDocumentation(model, heimdall::RuleEngine(options)).size(),
         2u);
 }
 
 TEST(DocRules, ASuppressionCommentSilencesAFinding)
 {
-    const std::string source = "void f(); // heimdall-disable-line doc/require-comment\n";
-    const auto tree = heimdall::ParseTree::Parse(source);
-    const auto model = heimdall::Binder::Bind(tree);
+    const std::string     source = "void f(); // heimdall-disable-line doc/require-comment\n";
+    const auto            tree   = heimdall::ParseTree::Parse(source);
+    const auto            model  = heimdall::Binder::Bind(tree);
     heimdall::RuleOptions options;
-    options.overrides.push_back({"doc/require-comment", true, heimdall::Severity::Warning});
+    options.overrides.push_back({ "doc/require-comment", true, heimdall::Severity::Warning });
     const heimdall::RuleEngine engine(options);
-    EXPECT_TRUE(engine.ApplyPolicy(heimdall::SemanticRules::AnalyzeDocumentation(model, engine),
-        tree).empty());
+    EXPECT_TRUE(
+        engine.ApplyPolicy(heimdall::SemanticRules::AnalyzeDocumentation(model, engine), tree)
+            .empty());
 }

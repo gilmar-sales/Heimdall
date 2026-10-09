@@ -13,13 +13,15 @@ namespace
 
     class Project
     {
-    public:
+      public:
         Project()
         {
-            static std::atomic<int> counter{0};
-            m_root = std::filesystem::temp_directory_path() /
+            static std::atomic<int> counter { 0 };
+            m_root =
+                std::filesystem::temp_directory_path() /
                 ("heimdall-include-analyzer-" + std::to_string(counter.fetch_add(1)) + "-" +
-                std::to_string(std::filesystem::file_time_type::clock::now().time_since_epoch().count()));
+                 std::to_string(
+                     std::filesystem::file_time_type::clock::now().time_since_epoch().count()));
             std::filesystem::create_directories(m_root / "inc");
             m_command.include_directories.push_back(m_root / "inc");
         }
@@ -32,7 +34,7 @@ namespace
 
         Project(const Project&) = delete;
 
-        Project& operator= (const Project&) = delete;
+        Project& operator=(const Project&) = delete;
 
         void Header(const std::string& name, std::string_view content)
         {
@@ -41,26 +43,21 @@ namespace
             std::ofstream(path, std::ios::binary) << content;
         }
 
-        const heimdall::CompileCommand* Command() const
-        {
-            return &m_command;
-        }
+        const heimdall::CompileCommand* Command() const { return &m_command; }
 
-        std::filesystem::path File(const std::string& name) const
-        {
-            return m_root / name;
-        }
+        std::filesystem::path File(const std::string& name) const { return m_root / name; }
 
-        std::vector<heimdall::Diagnostic> Analyze(std::string_view source,
-            const std::string& file = "main.cpp") const
+        std::vector<heimdall::Diagnostic> Analyze(std::string_view   source,
+                                                  const std::string& file = "main.cpp") const
         {
             const auto tree = heimdall::ParseTree::Parse(source, {});
-            const auto profile = heimdall::IncludeAnalyzer::BuildProfile(File(file), tree, &m_command);
+            const auto profile =
+                heimdall::IncludeAnalyzer::BuildProfile(File(file), tree, &m_command);
             return heimdall::IncludeAnalyzer::Analyze(tree, *profile);
         }
 
-    private:
-        std::filesystem::path m_root;
+      private:
+        std::filesystem::path    m_root;
         heimdall::CompileCommand m_command;
     };
 
@@ -85,8 +82,8 @@ TEST(IncludeAnalyzerSpec, ReportsIncludeWhoseNamesAreNeverUsed)
     project.Header("b.hpp", "#pragma once\nstruct Beta { int y; };\n");
     constexpr std::string_view source =
         "#include <a.hpp>\n"
-    "#include <b.hpp>\n"
-    "Alpha value;\n";
+        "#include <b.hpp>\n"
+        "Alpha value;\n";
     const auto diagnostics = project.Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].message, "included header <b.hpp> is not used directly");
@@ -98,7 +95,8 @@ TEST(IncludeAnalyzerSpec, ReportsIncludeWhoseNamesAreNeverUsed)
 TEST(IncludeAnalyzerSpec, RecognizesEveryKindOfProvidedName)
 {
     Project project;
-    project.Header("types.hpp",
+    project.Header(
+        "types.hpp",
         "#pragma once\n"
         "namespace lib {\n"
         "class Widget;\n"
@@ -112,11 +110,9 @@ TEST(IncludeAnalyzerSpec, RecognizesEveryKindOfProvidedName)
         "#define SQUARE(x) ((x) * (x))\n"
         "#define TYPES_VERSION 3\n");
     for (const std::string_view use :
-        {
-            "lib::Widget* w;", "int c = lib::Red;", "lib::Handle h;", "lib::Long l;",
-            "int n = lib::global_counter;", "int r = lib::helper(1);", "lib::Box<int> b;", "int s = SQUARE(2);",
-            "int v = TYPES_VERSION;"
-    })
+         { "lib::Widget* w;", "int c = lib::Red;", "lib::Handle h;", "lib::Long l;",
+           "int n = lib::global_counter;", "int r = lib::helper(1);", "lib::Box<int> b;",
+           "int s = SQUARE(2);", "int v = TYPES_VERSION;" })
     {
         const std::string source = "#include <types.hpp>\n" + std::string(use) + "\n";
         EXPECT_TRUE(project.Analyze(source).empty()) << use;
@@ -131,9 +127,9 @@ TEST(IncludeAnalyzerSpec, IgnoresNamesThatOnlyAppearInCommentsAndStrings)
     project.Header("a.hpp", "struct Alpha {};\n");
     constexpr std::string_view source =
         "#include <a.hpp>\n"
-    "// Alpha is documented here\n"
-    "const char * name = \"Alpha\";\n"
-    "int other;\n";
+        "// Alpha is documented here\n"
+        "const char * name = \"Alpha\";\n"
+        "int other;\n";
     EXPECT_EQ(project.Analyze(source).size(), 1);
 }
 
@@ -141,9 +137,10 @@ TEST(IncludeAnalyzerSpec, ClassMembersAndParametersDoNotCountAsProvidedNames)
 {
     Project project;
     project.Header("a.hpp",
-        "struct Alpha { int size; void resize(int count); };\n"
-        "inline int twice(int value) { int local = value; return local * 2; }\n");
-    EXPECT_EQ(project.Analyze("#include <a.hpp>\nint size; int count; int value; int local;\n").size(),
+                   "struct Alpha { int size; void resize(int count); };\n"
+                   "inline int twice(int value) { int local = value; return local * 2; }\n");
+    EXPECT_EQ(
+        project.Analyze("#include <a.hpp>\nint size; int count; int value; int local;\n").size(),
         1);
     EXPECT_TRUE(project.Analyze("#include <a.hpp>\nint x = twice(2);\n").empty());
 }
@@ -177,11 +174,11 @@ TEST(IncludeAnalyzerSpec, NeverReportsPrimaryHeaderPragmaKeepOrConditionalInclud
     project.Header("b.hpp", "struct Beta {};\n");
     constexpr std::string_view source =
         "#include <main.hpp>\n"
-    "#include <a.hpp> // IWYU pragma: keep\n"
-    "#ifdef FEATURE\n"
-    "#include <b.hpp>\n"
-    "#endif\n"
-    "int other;\n";
+        "#include <a.hpp> // IWYU pragma: keep\n"
+        "#ifdef FEATURE\n"
+        "#include <b.hpp>\n"
+        "#endif\n"
+        "int other;\n";
     EXPECT_TRUE(project.Analyze(source).empty());
 }
 
@@ -191,8 +188,8 @@ TEST(IncludeAnalyzerSpec, StaysSilentWhenTheHeaderOrItsClosureCannotBeResolved)
     project.Header("partial.hpp", "#include <missing_dependency.hpp>\nstruct Partial {};\n");
     constexpr std::string_view source =
         "#include <not_found.hpp>\n"
-    "#include <partial.hpp>\n"
-    "int other;\n";
+        "#include <partial.hpp>\n"
+        "int other;\n";
     EXPECT_TRUE(project.Analyze(source).empty());
 }
 
@@ -204,9 +201,9 @@ TEST(IncludeAnalyzerSpec, StaysSilentForHeadersUsedWithoutBeingNamed)
     project.Header("table.inc", "ENTRY(first)\n");
     constexpr std::string_view source =
         "#include <ops.hpp>\n"
-    "#include <hash.hpp>\n"
-    "#include <table.inc>\n"
-    "int other;\n";
+        "#include <hash.hpp>\n"
+        "#include <table.inc>\n"
+        "int other;\n";
     EXPECT_TRUE(project.Analyze(source).empty());
     EXPECT_TRUE(project.Analyze("#include <initializer_list>\nint other;\n").empty());
 }
@@ -224,10 +221,10 @@ TEST(IncludeAnalyzerSpec, IncludeGuardDoesNotMakeIncludesConditional)
     project.Header("a.hpp", "struct Alpha {};\n");
     constexpr std::string_view source =
         "#ifndef GUARD_HPP\n"
-    "#define GUARD_HPP\n"
-    "#include <a.hpp>\n"
-    "int other;\n"
-    "#endif\n";
+        "#define GUARD_HPP\n"
+        "#include <a.hpp>\n"
+        "int other;\n"
+        "#endif\n";
     EXPECT_EQ(project.Analyze(source).size(), 1);
 }
 
@@ -236,7 +233,8 @@ TEST(IncludeAnalyzerSpec, CountsMacroBodiesAndPreprocessorConditionsAsUses)
     Project project;
     project.Header("a.hpp", "struct Alpha {};\n#define FEATURE_A 1\n");
     EXPECT_TRUE(project.Analyze("#include <a.hpp>\n#define MAKE() Alpha{}\nint other;\n").empty());
-    EXPECT_TRUE(project.Analyze("#include <a.hpp>\n#ifdef FEATURE_A\nint other;\n#endif\n").empty());
+    EXPECT_TRUE(
+        project.Analyze("#include <a.hpp>\n#ifdef FEATURE_A\nint other;\n#endif\n").empty());
 }
 
 TEST(IncludeAnalyzerSpec, ExpandsEnumeratorsOfUnscopedEnums)
@@ -248,17 +246,17 @@ TEST(IncludeAnalyzerSpec, ExpandsEnumeratorsOfUnscopedEnums)
 
 TEST(IncludeAnalyzerSpec, FollowsIncludeNextIntoLaterSearchDirectories)
 {
-    Project project;
+    Project    project;
     const auto second = project.File("second");
     std::filesystem::create_directories(second);
     std::ofstream(second / "wrap.hpp", std::ios::binary) << "#define FROM_SECOND 1\n";
     project.Header("wrap.hpp", "#include_next <wrap.hpp>\n");
     heimdall::CompileCommand command;
-    command.include_directories = {project.File("inc"), second};
+    command.include_directories       = { project.File("inc"), second };
     constexpr std::string_view source = "#include <wrap.hpp>\nint v = FROM_SECOND;\n";
-    const auto tree = heimdall::ParseTree::Parse(source, {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree,
-        &command);
+    const auto                 tree   = heimdall::ParseTree::Parse(source, {});
+    const auto                 profile =
+        heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree, &command);
     EXPECT_TRUE(heimdall::IncludeAnalyzer::Analyze(tree, *profile).empty());
 }
 
@@ -266,14 +264,15 @@ TEST(IncludeAnalyzerSpec, QuickFixDeletesTheWholeDirectiveLineButIsNotSafe)
 {
     Project project;
     project.Header("a.hpp", "struct Alpha {};\n");
-    constexpr std::string_view source = "#include <a.hpp>\nint other;\n";
-    const auto diagnostics = project.Analyze(source);
+    constexpr std::string_view source      = "#include <a.hpp>\nint other;\n";
+    const auto                 diagnostics = project.Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_TRUE(diagnostics[0].has_fix);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), source);
     std::string fixed(source);
-    fixed.replace(diagnostics[0].fix.offset, diagnostics[0].fix.length, diagnostics[0].fix.replacement);
+    fixed.replace(diagnostics[0].fix.offset, diagnostics[0].fix.length,
+                  diagnostics[0].fix.replacement);
     EXPECT_EQ(fixed, "int other;\n");
 }
 
@@ -284,11 +283,11 @@ TEST(IncludeAnalyzerSpec, PolicyHonorsOverridesAndSuppressions)
     project.Header("b.hpp", "struct Beta {};\n");
     constexpr std::string_view source =
         "#include <a.hpp> // heimdall-disable-line cpp/no-unused-include\n"
-    "#include <b.hpp>\n"
-    "int other;\n";
+        "#include <b.hpp>\n"
+        "int other;\n";
     const auto tree = heimdall::ParseTree::Parse(source, {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree,
-        project.Command());
+    const auto profile =
+        heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree, project.Command());
     const auto raw = heimdall::IncludeAnalyzer::Analyze(tree, *profile);
     ASSERT_EQ(raw.size(), 2);
 
@@ -297,10 +296,10 @@ TEST(IncludeAnalyzerSpec, PolicyHonorsOverridesAndSuppressions)
     EXPECT_EQ(filtered[0].line, 2);
 
     heimdall::RuleOptions options;
-    options.overrides.push_back({"cpp/no-unused-include", true, heimdall::Severity::Error});
+    options.overrides.push_back({ "cpp/no-unused-include", true, heimdall::Severity::Error });
     EXPECT_EQ(heimdall::RuleEngine(options).ApplyPolicy(raw, tree)[0].severity,
-        heimdall::Severity::Error);
-    options.overrides.push_back({"cpp/no-unused-include", false, heimdall::Severity::Warning});
+              heimdall::Severity::Error);
+    options.overrides.push_back({ "cpp/no-unused-include", false, heimdall::Severity::Warning });
     EXPECT_TRUE(heimdall::RuleEngine(options).ApplyPolicy(raw, tree).empty());
 }
 
@@ -309,13 +308,13 @@ TEST(IncludeAnalyzerSpec, ProfileIsStaleOnlyWhenAHeaderChangesOnDisk)
     Project project;
     project.Header("a.hpp", "struct Alpha {};\n");
     constexpr std::string_view source = "#include <a.hpp>\nAlpha value;\n";
-    const auto tree = heimdall::ParseTree::Parse(source, {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree,
-        project.Command());
+    const auto                 tree   = heimdall::ParseTree::Parse(source, {});
+    const auto                 profile =
+        heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), tree, project.Command());
     EXPECT_TRUE(heimdall::IncludeAnalyzer::IsFresh(*profile));
-    EXPECT_EQ(profile->fingerprint,
-        heimdall::IncludeAnalyzer::Fingerprint(project.File("main.cpp"), tree,
-        project.Command()));
+    EXPECT_EQ(
+        profile->fingerprint,
+        heimdall::IncludeAnalyzer::Fingerprint(project.File("main.cpp"), tree, project.Command()));
     project.Header("a.hpp", "struct Alpha {};\nstruct Changed {};\n");
     EXPECT_FALSE(heimdall::IncludeAnalyzer::IsFresh(*profile));
 }
@@ -324,11 +323,11 @@ TEST(IncludeAnalyzerSpec, MismatchedProfileProducesNothing)
 {
     Project project;
     project.Header("a.hpp", "struct Alpha {};\n");
-    const auto before = heimdall::ParseTree::Parse("#include <a.hpp>\nint other;\n", {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("main.cpp"), before,
-        project.Command());
-    const auto after = heimdall::ParseTree::Parse("#include <a.hpp>\n#include <a.hpp>\nint other;\n",
-        {});
+    const auto before  = heimdall::ParseTree::Parse("#include <a.hpp>\nint other;\n", {});
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(
+        project.File("main.cpp"), before, project.Command());
+    const auto after =
+        heimdall::ParseTree::Parse("#include <a.hpp>\n#include <a.hpp>\nint other;\n", {});
     EXPECT_TRUE(heimdall::IncludeAnalyzer::Analyze(after, *profile).empty());
 }
 
@@ -336,7 +335,9 @@ TEST(IncludeAnalyzerSpec, MemberAccessNamesDoNotCountAsUses)
 {
     Project project;
     project.Header("a.hpp", "int size(int);\nstruct Alpha {};\n");
-    EXPECT_EQ(project.Analyze("#include <a.hpp>\nint f(auto s, auto* p) { return s.size + p->size; }\n").size(),
+    EXPECT_EQ(
+        project.Analyze("#include <a.hpp>\nint f(auto s, auto* p) { return s.size + p->size; }\n")
+            .size(),
         1);
     EXPECT_TRUE(project.Analyze("#include <a.hpp>\nint f() { return size(1); }\n").empty());
 }
@@ -358,22 +359,20 @@ TEST(IncludeAnalyzerSpec, StandardHeadersAreUsedWhenTheirNamesAreAndReportedOthe
     };
 
     const Case cases[] = {
-        {
-            "vector", "std::vector<int> v;"
-        },
-        {"string", "std::string s;"},
-        {"map", "std::map<int, int> m;"},
-        {"iostream", "void f() { std::cout << 1; }"},
-        {"algorithm", "void f(int* a) { std::sort(a, a + 3); }"},
-        {"memory", "auto p = std::make_unique<int>(1);"},
-        {"cstdio", "void f() { std::puts(\"x\"); }"},
-        {"climits", "int m = INT_MAX;"},
-        {"cstdint", "std::uint32_t n;"},
-        {"cassert", "void f() { assert(1); }"},
-        {"chrono", "auto d = std::chrono::seconds(1);"},
-        {"optional", "std::optional<int> o;"},
-        {"mutex", "std::mutex m;"},
-        {"utility", "auto p = std::pair<int, int>(1, 2);"},
+        { "vector", "std::vector<int> v;" },
+        { "string", "std::string s;" },
+        { "map", "std::map<int, int> m;" },
+        { "iostream", "void f() { std::cout << 1; }" },
+        { "algorithm", "void f(int* a) { std::sort(a, a + 3); }" },
+        { "memory", "auto p = std::make_unique<int>(1);" },
+        { "cstdio", "void f() { std::puts(\"x\"); }" },
+        { "climits", "int m = INT_MAX;" },
+        { "cstdint", "std::uint32_t n;" },
+        { "cassert", "void f() { assert(1); }" },
+        { "chrono", "auto d = std::chrono::seconds(1);" },
+        { "optional", "std::optional<int> o;" },
+        { "mutex", "std::mutex m;" },
+        { "utility", "auto p = std::pair<int, int>(1, 2);" },
     };
     for (const auto& test_case : cases)
     {
@@ -400,7 +399,8 @@ TEST(IncludeAnalyzerSpec, StandardHeaderNeededOnlyForAMemberCallIsStillReportedW
 namespace
 {
 
-    std::vector<heimdall::Diagnostic> ForwardDeclarationFindings(const std::vector<heimdall::Diagnostic>& all)
+    std::vector<heimdall::Diagnostic> ForwardDeclarationFindings(
+        const std::vector<heimdall::Diagnostic>& all)
     {
         std::vector<heimdall::Diagnostic> result;
         for (const auto& diagnostic : all)
@@ -429,14 +429,14 @@ TEST(ForwardDeclarationSpec, SuggestsForwardDeclarationForPointersAndReferences)
     project.Header("widget.hpp", "#pragma once\nclass Widget { public: int value; };\n");
     constexpr std::string_view source =
         "#pragma once\n"
-    "#include <widget.hpp>\n"
-    "class Panel\n"
-    "{\n"
-    "    Widget * m_widget;\n"
-    "    const Widget & m_other;\n"
-    "    void attach(Widget & widget);\n"
-    "    Widget * Find(const Widget * const needle);\n"
-    "};\n";
+        "#include <widget.hpp>\n"
+        "class Panel\n"
+        "{\n"
+        "    Widget * m_widget;\n"
+        "    const Widget & m_other;\n"
+        "    void attach(Widget & widget);\n"
+        "    Widget * Find(const Widget * const needle);\n"
+        "};\n";
     const auto findings = ForwardDeclarationFindings(project.Analyze(source, "panel.hpp"));
     ASSERT_EQ(findings.size(), 1);
     EXPECT_EQ(findings[0].line, 2);
@@ -451,20 +451,20 @@ TEST(ForwardDeclarationSpec, KeepsTheNamespaceAndKeywordOfTheDeclaration)
 {
     Project project;
     project.Header("ui.hpp",
-        "#pragma once\n"
-        "namespace app::ui {\n"
-        "struct Button { int id; };\n"
-        "class Label {};\n"
-        "}\n");
+                   "#pragma once\n"
+                   "namespace app::ui {\n"
+                   "struct Button { int id; };\n"
+                   "class Label {};\n"
+                   "}\n");
     constexpr std::string_view source =
         "#include <ui.hpp>\n"
-    "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n";
+        "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n";
     const auto findings = ForwardDeclarationFindings(project.Analyze(source, "form.hpp"));
     ASSERT_EQ(findings.size(), 1);
     EXPECT_EQ(ApplyFix(source, findings[0]),
-        "namespace app::ui { struct Button; }\n"
-        "namespace app::ui { class Label; }\n"
-        "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n");
+              "namespace app::ui { struct Button; }\n"
+              "namespace app::ui { class Label; }\n"
+              "struct Form { app::ui::Button * ok; app::ui::Label & caption; };\n");
 }
 
 TEST(ForwardDeclarationSpec, PreservesCrLfLineEndings)
@@ -493,21 +493,22 @@ TEST(ForwardDeclarationSpec, AcceptsInlineBodiesThatOnlyPassThePointerAround)
     project.Header("widget.hpp", "class Widget {};\n");
     constexpr std::string_view source =
         "#include <widget.hpp>\n"
-    "class Panel\n"
-    "{\n"
-    "public:\n"
-    "    Widget * Get() const { return m_widget; }\n"
-    "    void Set(Widget * widget) { m_widget = widget; }\n"
-    "private:\n"
-    "    Widget * m_widget = nullptr;\n"
-    "};\n";
+        "class Panel\n"
+        "{\n"
+        "public:\n"
+        "    Widget * Get() const { return m_widget; }\n"
+        "    void Set(Widget * widget) { m_widget = widget; }\n"
+        "private:\n"
+        "    Widget * m_widget = nullptr;\n"
+        "};\n";
     EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "panel.hpp")).size(), 1);
 }
 
 TEST(ForwardDeclarationSpec, StaysSilentWhenTheCompleteTypeIsNeeded)
 {
     Project project;
-    project.Header("widget.hpp", "#pragma once\nclass Widget { public: int value; void Run(); };\n");
+    project.Header("widget.hpp",
+                   "#pragma once\nclass Widget { public: int value; void Run(); };\n");
     const std::string_view cases[] = {
         "class A { Widget member; };\n",
         "class A : public Widget {};\n",
@@ -520,9 +521,11 @@ TEST(ForwardDeclarationSpec, StaysSilentWhenTheCompleteTypeIsNeeded)
         "#include <memory>\nstd::unique_ptr<Widget> owner;\n",
         "class A { Widget * m_widget; int Read() { return m_widget->value; } };\n",
         "class A { Widget & m_widget; int Read() { return (*&m_widget).value; } };\n",
-        "class A { Widget * m_widget; A(Widget * w) : m_widget(w), m_size(w->value) {} int m_size; };\n",
+        "class A { Widget * m_widget; A(Widget * w) : m_widget(w), m_size(w->value) {} int m_size; "
+        "};\n",
         "class A { Widget * m_widget; ~A() { delete m_widget; } };\n",
-        "class A { Widget * m_widget; Widget * Pick() { return static_cast<Widget *>(m_widget); } };\n",
+        "class A { Widget * m_widget; Widget * Pick() { return static_cast<Widget *>(m_widget); } "
+        "};\n",
         "#define MAKE(x) Widget * x\nint other;\n",
         "enum class Kind { A = sizeof(Widget) };\n",
     };
@@ -536,7 +539,8 @@ TEST(ForwardDeclarationSpec, StaysSilentWhenTheCompleteTypeIsNeeded)
 TEST(ForwardDeclarationSpec, StaysSilentWhenNamesAreNotPlainClasses)
 {
     Project project;
-    project.Header("mixed.hpp",
+    project.Header(
+        "mixed.hpp",
         "#pragma once\n"
         "template <typename T> class Box {};\n"
         "enum class Mode { A };\n"
@@ -548,15 +552,9 @@ TEST(ForwardDeclarationSpec, StaysSilentWhenNamesAreNotPlainClasses)
         "inline namespace v1 { class Versioned {}; }\n"
         "class Plain {};\n");
     const std::string_view cases[] = {
-        "Box<int> * a;\n",
-        "Mode * a;\n",
-        "Alias * a;\n",
-        "Long * a;\n",
-        "int a = helper(1);\n",
-        "int a = LIMIT;\n",
-        "Hidden * a;\n",
-        "Versioned * a;\n",
-        "Plain * a; int b = helper(1);\n",
+        "Box<int> * a;\n", "Mode * a;\n",          "Alias * a;\n",
+        "Long * a;\n",     "int a = helper(1);\n", "int a = LIMIT;\n",
+        "Hidden * a;\n",   "Versioned * a;\n",     "Plain * a; int b = helper(1);\n",
     };
     for (const auto text : cases)
     {
@@ -564,8 +562,9 @@ TEST(ForwardDeclarationSpec, StaysSilentWhenNamesAreNotPlainClasses)
         EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).empty()) << text;
     }
 
-    EXPECT_EQ(ForwardDeclarationFindings(project.Analyze("#include <mixed.hpp>\nPlain * a;\n",
-        "a.hpp")).size(),
+    EXPECT_EQ(
+        ForwardDeclarationFindings(project.Analyze("#include <mixed.hpp>\nPlain * a;\n", "a.hpp"))
+            .size(),
         1);
 }
 
@@ -574,12 +573,17 @@ TEST(ForwardDeclarationSpec, SkipsConditionalKeptAndPrimaryIncludes)
     Project project;
     project.Header("widget.hpp", "class Widget {};\n");
     project.Header("a.hpp", "class Widget2 {};\n");
-    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
-        "#ifdef FEATURE\n#include <widget.hpp>\n#endif\nWidget * w;\n", "b.hpp")).empty());
-    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
-        "#include <widget.hpp> // IWYU pragma: keep\nWidget * w;\n", "b.hpp")).empty());
-    EXPECT_TRUE(ForwardDeclarationFindings(project.Analyze(
-        "#include <a.hpp>\nWidget2 * w;\n", "a.hpp")).empty());
+    EXPECT_TRUE(ForwardDeclarationFindings(
+                    project.Analyze("#ifdef FEATURE\n#include <widget.hpp>\n#endif\nWidget * w;\n",
+                                    "b.hpp"))
+                    .empty());
+    EXPECT_TRUE(
+        ForwardDeclarationFindings(
+            project.Analyze("#include <widget.hpp> // IWYU pragma: keep\nWidget * w;\n", "b.hpp"))
+            .empty());
+    EXPECT_TRUE(
+        ForwardDeclarationFindings(project.Analyze("#include <a.hpp>\nWidget2 * w;\n", "a.hpp"))
+            .empty());
 }
 
 TEST(ForwardDeclarationSpec, ClassesDeclaredInNestedHeadersCanBeForwardDeclared)
@@ -587,8 +591,8 @@ TEST(ForwardDeclarationSpec, ClassesDeclaredInNestedHeadersCanBeForwardDeclared)
     Project project;
     project.Header("inner.hpp", "struct Inner {};\n");
     project.Header("outer.hpp", "#include <inner.hpp>\nclass Outer {};\n");
-    const auto findings = ForwardDeclarationFindings(project.Analyze(
-        "#include <outer.hpp>\nInner * a;\nOuter & b;\n", "c.hpp"));
+    const auto findings = ForwardDeclarationFindings(
+        project.Analyze("#include <outer.hpp>\nInner * a;\nOuter & b;\n", "c.hpp"));
     ASSERT_EQ(findings.size(), 1);
     EXPECT_NE(findings[0].message.find("Inner, Outer"), std::string::npos);
 }
@@ -597,10 +601,11 @@ TEST(ForwardDeclarationSpec, PolicyAndSuppressionApply)
 {
     Project project;
     project.Header("widget.hpp", "class Widget {};\n");
-    constexpr std::string_view source = "#include <widget.hpp> // heimdall-disable-line cpp/prefer-forward-declaration\nWidget * w;\n";
+    constexpr std::string_view source = "#include <widget.hpp> // heimdall-disable-line "
+                                        "cpp/prefer-forward-declaration\nWidget * w;\n";
     const auto tree = heimdall::ParseTree::Parse(source, {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("a.hpp"), tree,
-        project.Command());
+    const auto profile =
+        heimdall::IncludeAnalyzer::BuildProfile(project.File("a.hpp"), tree, project.Command());
     const auto raw = heimdall::IncludeAnalyzer::Analyze(tree, *profile);
     ASSERT_EQ(raw.size(), 1);
     EXPECT_TRUE(heimdall::RuleEngine().ApplyPolicy(raw, tree).empty());
@@ -614,7 +619,7 @@ TEST(ForwardDeclarationSpec, IncludeTargetTextIsNotMistakenForAMemberAccess)
     project.Header("widget.hpp", "class Widget {};\n");
     constexpr std::string_view source =
         "#include <widget.hpp>\n"
-    "void Attach(Widget * widget);\n";
+        "void Attach(Widget * widget);\n";
     EXPECT_EQ(ForwardDeclarationFindings(project.Analyze(source, "a.hpp")).size(), 1);
 }
 
@@ -642,8 +647,8 @@ TEST(CircularIncludeSpec, ReportsAnIncludeThatLeadsBackToTheFileAsAnError)
     Project project;
     project.Header("a.hpp", "#pragma once\n#include \"b.hpp\"\nstruct A {};\n");
     project.Header("b.hpp", "#pragma once\n#include \"a.hpp\"\nstruct B {};\n");
-    constexpr std::string_view source = "#pragma once\n#include \"b.hpp\"\nstruct A {};\n";
-    const auto findings = CircularFindings(project.Analyze(source, "inc/a.hpp"));
+    constexpr std::string_view source   = "#pragma once\n#include \"b.hpp\"\nstruct A {};\n";
+    const auto                 findings = CircularFindings(project.Analyze(source, "inc/a.hpp"));
     ASSERT_EQ(findings.size(), 1);
     EXPECT_EQ(findings[0].severity, heimdall::Severity::Error);
     EXPECT_EQ(findings[0].rule, heimdall::RuleId::CircularInclude);
@@ -660,7 +665,8 @@ TEST(CircularIncludeSpec, FindsIndirectCyclesAndSelfIncludes)
     project.Header("c.hpp", "#include \"a.hpp\"\n");
     EXPECT_EQ(CircularFindings(project.Analyze("#include \"b.hpp\"\n", "inc/a.hpp")).size(), 1);
     project.Header("self.hpp", "#include \"self.hpp\"\n");
-    EXPECT_EQ(CircularFindings(project.Analyze("#include \"self.hpp\"\n", "inc/self.hpp")).size(), 1);
+    EXPECT_EQ(CircularFindings(project.Analyze("#include \"self.hpp\"\n", "inc/self.hpp")).size(),
+              1);
 }
 
 TEST(CircularIncludeSpec, NoReportWithoutACycle)
@@ -668,8 +674,8 @@ TEST(CircularIncludeSpec, NoReportWithoutACycle)
     Project project;
     project.Header("a.hpp", "#include \"b.hpp\"\n");
     project.Header("b.hpp", "struct B {};\n");
-    EXPECT_TRUE(CircularFindings(project.Analyze("#include \"b.hpp\"\nB value;\n",
-        "inc/a.hpp")).empty());
+    EXPECT_TRUE(
+        CircularFindings(project.Analyze("#include \"b.hpp\"\nB value;\n", "inc/a.hpp")).empty());
 }
 
 TEST(CircularIncludeSpec, PolicyCanDowngradeOrDisableTheRule)
@@ -678,19 +684,19 @@ TEST(CircularIncludeSpec, PolicyCanDowngradeOrDisableTheRule)
     project.Header("a.hpp", "#include \"b.hpp\"\n");
     project.Header("b.hpp", "#include \"a.hpp\"\n");
     constexpr std::string_view source = "#include \"b.hpp\"\n";
-    const auto tree = heimdall::ParseTree::Parse(source, {});
-    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(project.File("inc/a.hpp"), tree,
-        project.Command());
+    const auto                 tree   = heimdall::ParseTree::Parse(source, {});
+    const auto                 profile =
+        heimdall::IncludeAnalyzer::BuildProfile(project.File("inc/a.hpp"), tree, project.Command());
     const auto raw = heimdall::IncludeAnalyzer::Analyze(tree, *profile);
     ASSERT_EQ(raw.size(), 1);
     heimdall::RuleOptions options;
-    options.overrides.push_back({"cpp/no-circular-include", true, heimdall::Severity::Warning});
+    options.overrides.push_back({ "cpp/no-circular-include", true, heimdall::Severity::Warning });
     EXPECT_EQ(heimdall::RuleEngine(options).ApplyPolicy(raw, tree)[0].severity,
-        heimdall::Severity::Warning);
-    options.overrides.push_back({"cpp/no-circular-include", false, heimdall::Severity::Warning});
+              heimdall::Severity::Warning);
+    options.overrides.push_back({ "cpp/no-circular-include", false, heimdall::Severity::Warning });
     EXPECT_TRUE(heimdall::RuleEngine(options).ApplyPolicy(raw, tree).empty());
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-circular-include") -> default_severity,
-        heimdall::Severity::Error);
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-circular-include")->default_severity,
+              heimdall::Severity::Error);
 }
 
 TEST(IncludeAnalyzerSpec, RebuildingAfterReorderingIncludesGivesTheSameFindings)
@@ -699,8 +705,10 @@ TEST(IncludeAnalyzerSpec, RebuildingAfterReorderingIncludesGivesTheSameFindings)
     project.Header("a.hpp", "struct Alpha {};\n");
     project.Header("b.hpp", "struct Beta {};\n");
     project.Header("c.hpp", "#include <a.hpp>\nstruct Gamma {};\n");
-    const auto first = project.Analyze("#include <a.hpp>\n#include <b.hpp>\n#include <c.hpp>\nAlpha x;\nGamma y;\n");
-    const auto second = project.Analyze("#include <c.hpp>\n#include <a.hpp>\n#include <b.hpp>\nAlpha x;\nGamma y;\n");
+    const auto first = project.Analyze(
+        "#include <a.hpp>\n#include <b.hpp>\n#include <c.hpp>\nAlpha x;\nGamma y;\n");
+    const auto second = project.Analyze(
+        "#include <c.hpp>\n#include <a.hpp>\n#include <b.hpp>\nAlpha x;\nGamma y;\n");
     ASSERT_EQ(first.size(), 1);
     ASSERT_EQ(second.size(), 1);
     EXPECT_EQ(first[0].message, second[0].message);
@@ -714,7 +722,8 @@ TEST(IncludeAnalyzerSpec, MemoizedClosuresNoticeHeaderEditsAndNewlyCreatedHeader
     constexpr std::string_view source = "#include <a.hpp>\n#include <later.hpp>\nChanged value;\n";
     // First pass fills the closure cache; `later.hpp` does not exist yet.
     EXPECT_EQ(project.Analyze(source).size(), 1);
-    project.Header("a.hpp", "struct Alpha {};\nstruct Changed { int padding_to_change_the_size; };\n");
+    project.Header("a.hpp",
+                   "struct Alpha {};\nstruct Changed { int padding_to_change_the_size; };\n");
     project.Header("later.hpp", "struct Later {};\n");
     const auto diagnostics = project.Analyze(source);
     ASSERT_EQ(diagnostics.size(), 1);

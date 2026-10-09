@@ -10,8 +10,8 @@ namespace heimdall
 {
 
     // ---- TypeTable ----------------------------------------------------------
-    TypeTable::TypeTable(std::pmr::memory_resource* resource)
-    : m_kind(resource), m_arg(resource), m_extent(resource), m_index(resource)
+    TypeTable::TypeTable(std::pmr::memory_resource* resource) :
+        m_kind(resource), m_arg(resource), m_extent(resource), m_index(resource)
     {
         // Id 0 is Unknown.
         m_kind.push_back(TypeKind::Unknown);
@@ -21,10 +21,7 @@ namespace heimdall
 
     TypeId TypeTable::Intern(TypeKind kind, std::uint32_t arg, std::uint32_t extent)
     {
-        const Key key
-        {
-            arg, extent, kind
-        };
+        const Key key { arg, extent, kind };
         if (const auto found = m_index.find(key); found != m_index.end())
         {
             return found->second;
@@ -85,15 +82,15 @@ namespace heimdall
     {
         switch (Kind(type))
         {
-        case TypeKind::Unknown:
-        case TypeKind::Const:
-        case TypeKind::LRef:
-        case TypeKind::RRef:
-            return type;
-        case TypeKind::Array:
-            return Array(Const(Arg(type)), Extent(type));
-        default:
-            return Intern(TypeKind::Const, type);
+            case TypeKind::Unknown:
+            case TypeKind::Const:
+            case TypeKind::LRef:
+            case TypeKind::RRef:
+                return type;
+            case TypeKind::Array:
+                return Array(Const(Arg(type)), Extent(type));
+            default:
+                return Intern(TypeKind::Const, type);
         }
     }
 
@@ -131,7 +128,8 @@ namespace heimdall
         }
 
         const auto arg = Arg(type);
-        return arg >= static_cast<std::uint32_t>(BuiltinType::Char) && arg <= static_cast<std::uint32_t>(BuiltinType::SizeT);
+        return arg >= static_cast<std::uint32_t>(BuiltinType::Char) &&
+               arg <= static_cast<std::uint32_t>(BuiltinType::SizeT);
     }
 
     bool TypeTable::IsFloating(TypeId type) const noexcept
@@ -142,7 +140,8 @@ namespace heimdall
         }
 
         const auto arg = Arg(type);
-        return arg >= static_cast<std::uint32_t>(BuiltinType::Float) && arg <= static_cast<std::uint32_t>(BuiltinType::LongDouble);
+        return arg >= static_cast<std::uint32_t>(BuiltinType::Float) &&
+               arg <= static_cast<std::uint32_t>(BuiltinType::LongDouble);
     }
 
     bool TypeTable::IsArithmetic(TypeId type) const noexcept
@@ -172,67 +171,79 @@ namespace heimdall
     }
 
     // ---- TypeModel ----------------------------------------------------------
-    TypeModel::TypeModel(const SemanticModel& model, std::size_t arena_hint)
-    : m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model), m_externals(m_arena->Resource()),
-        m_types(m_arena->Resource()), m_symbol_type(m_arena->Resource()),
-        m_node_type(m_arena->Resource()) {}
+    TypeModel::TypeModel(const SemanticModel& model, std::size_t arena_hint) :
+        m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model),
+        m_externals(m_arena->Resource()), m_types(m_arena->Resource()),
+        m_symbol_type(m_arena->Resource()), m_node_type(m_arena->Resource())
+    {
+    }
 
     std::string TypeModel::Spell(TypeId type) const
     {
-        static constexpr std::array<std::string_view, 22> kBuiltin{"void", "decltype(nullptr)", "bool",
-            "char",
-            "signed char", "unsigned char", "wchar_t", "char8_t", "char16_t", "char32_t", "short",
-            "unsigned short",
-            "int", "unsigned int", "long", "unsigned long", "long long", "unsigned long long", "size_t",
-            "float",
-            "double", "long double"};
+        static constexpr std::array<std::string_view, 22> kBuiltin {
+            "void",        "decltype(nullptr)",  "bool",    "char",
+            "signed char", "unsigned char",      "wchar_t", "char8_t",
+            "char16_t",    "char32_t",           "short",   "unsigned short",
+            "int",         "unsigned int",       "long",    "unsigned long",
+            "long long",   "unsigned long long", "size_t",  "float",
+            "double",      "long double"
+        };
         switch (m_types.Kind(type))
         {
-        case TypeKind::Builtin:
-            return std::string(kBuiltin[std::min<std::size_t>(m_types.Arg(type), kBuiltin.size() - 1)]);
-        case TypeKind::Class:
-        case TypeKind::Enum:
-            return std::string(m_model->Names().Text(m_model->Symbols().name[m_types.Arg(type)]));
-        case TypeKind::External:
-            return std::string(m_externals.Text(m_types.Arg(type)));
-        case TypeKind::Pointer:
-        {
-            // A pointer to an array reads `int(*)[2]`.
-            if (m_types.Kind(m_types.Arg(type)) == TypeKind::Array)
-            {
-                std::string dimensions;
-                auto element = m_types.Arg(type);
-                for (; m_types.Kind(element) == TypeKind::Array; element = m_types.Arg(element))
+            case TypeKind::Builtin:
+                return std::string(
+                    kBuiltin[std::min<std::size_t>(m_types.Arg(type), kBuiltin.size() - 1)]);
+            case TypeKind::Class:
+            case TypeKind::Enum:
+                return std::string(
+                    m_model->Names().Text(m_model->Symbols().name[m_types.Arg(type)]));
+            case TypeKind::External:
+                return std::string(m_externals.Text(m_types.Arg(type)));
+            case TypeKind::Pointer: {
+                // A pointer to an array reads `int(*)[2]`.
+                if (m_types.Kind(m_types.Arg(type)) == TypeKind::Array)
                 {
-                    dimensions += "[" +(m_types.Extent(element) == kNone ? std::string() : std::to_string(m_types.Extent(element))) + "]";
+                    std::string dimensions;
+                    auto        element = m_types.Arg(type);
+                    for (; m_types.Kind(element) == TypeKind::Array; element = m_types.Arg(element))
+                    {
+                        dimensions += "[" +
+                                      (m_types.Extent(element) == kNone
+                                           ? std::string()
+                                           : std::to_string(m_types.Extent(element))) +
+                                      "]";
+                    }
+
+                    return Spell(element) + "(*)" + dimensions;
                 }
 
-                return Spell(element) + "(*)" + dimensions;
+                return Spell(m_types.Arg(type)) + "*";
             }
+            case TypeKind::LRef:
+                return Spell(m_types.Arg(type)) + "&";
+            case TypeKind::RRef:
+                return Spell(m_types.Arg(type)) + "&&";
+            case TypeKind::Const:
+                return m_types.Kind(m_types.Arg(type)) == TypeKind::Pointer
+                           ? Spell(m_types.Arg(type)) + " const"
+                           : "const " + Spell(m_types.Arg(type));
+            case TypeKind::Array: {
+                // Outermost dimension first: `int[2][3]` is an array of 2 arrays of 3 ints.
+                std::string dimensions;
+                auto        element = type;
+                for (; m_types.Kind(element) == TypeKind::Array; element = m_types.Arg(element))
+                {
+                    dimensions += "[" +
+                                  (m_types.Extent(element) == kNone
+                                       ? std::string()
+                                       : std::to_string(m_types.Extent(element))) +
+                                  "]";
+                }
 
-            return Spell(m_types.Arg(type)) + "*";
-        }
-        case TypeKind::LRef:
-            return Spell(m_types.Arg(type)) + "&";
-        case TypeKind::RRef:
-            return Spell(m_types.Arg(type)) + "&&";
-        case TypeKind::Const:
-            return m_types.Kind(m_types.Arg(type)) == TypeKind::Pointer ? Spell(m_types.Arg(type)) + " const"
-            : "const " + Spell(m_types.Arg(type));
-        case TypeKind::Array:
-        {
-            // Outermost dimension first: `int[2][3]` is an array of 2 arrays of 3 ints.
-            std::string dimensions;
-            auto element = type;
-            for (; m_types.Kind(element) == TypeKind::Array; element = m_types.Arg(element))
-            {
-                dimensions += "[" +(m_types.Extent(element) == kNone ? std::string() : std::to_string(m_types.Extent(element))) + "]";
+                return Spell(element) + dimensions;
             }
-
-            return Spell(element) + dimensions;
-        }
-        default:
-            return "<unknown>";
+            default:
+                return "<unknown>";
         }
     }
 
@@ -254,31 +265,45 @@ namespace heimdall
         bool IsStringHead(std::string_view head)
         {
             return head == "std::string" || head == "std::wstring" || head == "std::basic_string" ||
-                head == "std::string_view" || head == "std::wstring_view" || head == "std::basic_string_view" ||
-                head == "std::u8string" || head == "std::u16string" || head == "std::u32string";
+                   head == "std::string_view" || head == "std::wstring_view" ||
+                   head == "std::basic_string_view" || head == "std::u8string" ||
+                   head == "std::u16string" || head == "std::u32string";
         }
 
     } // namespace
 
     bool IsStdContainerHead(std::string_view head)
     {
-        static constexpr std::array<std::string_view, 15> kHeads{"std::vector", "std::deque", "std::list",
-            "std::array", "std::span", "std::map", "std::set", "std::multimap", "std::multiset",
-            "std::unordered_map", "std::unordered_set", "std::unordered_multimap", "std::unordered_multiset",
-            "std::forward_list", "std::flat_map"};
+        static constexpr std::array<std::string_view, 15> kHeads {
+            "std::vector",
+            "std::deque",
+            "std::list",
+            "std::array",
+            "std::span",
+            "std::map",
+            "std::set",
+            "std::multimap",
+            "std::multiset",
+            "std::unordered_map",
+            "std::unordered_set",
+            "std::unordered_multimap",
+            "std::unordered_multiset",
+            "std::forward_list",
+            "std::flat_map"
+        };
         return IsStringHead(head) || std::find(kHeads.begin(), kHeads.end(), head) != kHeads.end();
     }
 
     bool IsStdIndexableHead(std::string_view head)
     {
-        return head == "std::vector" || head == "std::deque" || head == "std::array" || head == "std::span" ||
-            IsStringHead(head);
+        return head == "std::vector" || head == "std::deque" || head == "std::array" ||
+               head == "std::span" || IsStringHead(head);
     }
 
     namespace
     {
 
-        constexpr TypeId kPending = ~0u;
+        constexpr TypeId      kPending  = ~0u;
         constexpr std::size_t kMaxDepth = 192;
 
         bool IsWordChar(char c)
@@ -288,7 +313,8 @@ namespace heimdall
 
         void Append(std::string& out, std::string_view piece)
         {
-            if (!out.empty() && !piece.empty() && IsWordChar(out.back()) && IsWordChar(piece.front()))
+            if (!out.empty() && !piece.empty() && IsWordChar(out.back()) &&
+                IsWordChar(piece.front()))
             {
                 out += ' ';
             }
@@ -300,23 +326,23 @@ namespace heimdall
         {
             switch (tok)
             {
-            case Tok::KwSigned:
-            case Tok::KwUnsigned:
-            case Tok::KwShort:
-            case Tok::KwLong:
-            case Tok::KwInt:
-            case Tok::KwChar:
-            case Tok::KwBool:
-            case Tok::KwFloat:
-            case Tok::KwDouble:
-            case Tok::KwVoid:
-            case Tok::KwWchar:
-            case Tok::KwChar8:
-            case Tok::KwChar16:
-            case Tok::KwChar32:
-                return true;
-            default:
-                return false;
+                case Tok::KwSigned:
+                case Tok::KwUnsigned:
+                case Tok::KwShort:
+                case Tok::KwLong:
+                case Tok::KwInt:
+                case Tok::KwChar:
+                case Tok::KwBool:
+                case Tok::KwFloat:
+                case Tok::KwDouble:
+                case Tok::KwVoid:
+                case Tok::KwWchar:
+                case Tok::KwChar8:
+                case Tok::KwChar16:
+                case Tok::KwChar32:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -325,23 +351,23 @@ namespace heimdall
         {
             switch (tok)
             {
-            case Tok::KwStatic:
-            case Tok::KwExtern:
-            case Tok::KwConstexpr:
-            case Tok::KwConstinit:
-            case Tok::KwConsteval:
-            case Tok::KwInline:
-            case Tok::KwThreadLocal:
-            case Tok::KwRegister:
-            case Tok::KwMutable:
-            case Tok::KwVirtual:
-            case Tok::KwExplicit:
-            case Tok::KwFriend:
-            case Tok::KwVolatile:
-            case Tok::KwTypedef:
-                return true;
-            default:
-                return false;
+                case Tok::KwStatic:
+                case Tok::KwExtern:
+                case Tok::KwConstexpr:
+                case Tok::KwConstinit:
+                case Tok::KwConsteval:
+                case Tok::KwInline:
+                case Tok::KwThreadLocal:
+                case Tok::KwRegister:
+                case Tok::KwMutable:
+                case Tok::KwVirtual:
+                case Tok::KwExplicit:
+                case Tok::KwFriend:
+                case Tok::KwVolatile:
+                case Tok::KwTypedef:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -349,20 +375,20 @@ namespace heimdall
         {
             switch (tok)
             {
-            case Tok::Eq:
-            case Tok::PlusEq:
-            case Tok::MinusEq:
-            case Tok::StarEq:
-            case Tok::SlashEq:
-            case Tok::PercentEq:
-            case Tok::AmpEq:
-            case Tok::PipeEq:
-            case Tok::CaretEq:
-            case Tok::ShlEq:
-            case Tok::ShrEq:
-                return true;
-            default:
-                return false;
+                case Tok::Eq:
+                case Tok::PlusEq:
+                case Tok::MinusEq:
+                case Tok::StarEq:
+                case Tok::SlashEq:
+                case Tok::PercentEq:
+                case Tok::AmpEq:
+                case Tok::PipeEq:
+                case Tok::CaretEq:
+                case Tok::ShlEq:
+                case Tok::ShrEq:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -391,40 +417,41 @@ namespace heimdall
         {
             switch (type)
             {
-            case BuiltinType::Int:
-            case BuiltinType::UInt:
-                return 1;
-            case BuiltinType::Long:
-            case BuiltinType::ULong:
-                return 2;
-            default:
-                return 3;
+                case BuiltinType::Int:
+                case BuiltinType::UInt:
+                    return 1;
+                case BuiltinType::Long:
+                case BuiltinType::ULong:
+                    return 2;
+                default:
+                    return 3;
             }
         }
 
         bool IsUnsignedInt(BuiltinType type)
         {
-            return type == BuiltinType::UInt || type == BuiltinType::ULong || type == BuiltinType::ULongLong;
+            return type == BuiltinType::UInt || type == BuiltinType::ULong ||
+                   type == BuiltinType::ULongLong;
         }
 
         std::optional<BuiltinType> Promote(BuiltinType type)
         {
             switch (type)
             {
-            case BuiltinType::Bool:
-            case BuiltinType::Char:
-            case BuiltinType::SChar:
-            case BuiltinType::UChar:
-            case BuiltinType::Short:
-            case BuiltinType::UShort:
-                return BuiltinType::Int;
-            case BuiltinType::WChar:
-            case BuiltinType::Char8:
-            case BuiltinType::Char16:
-            case BuiltinType::Char32:
-                return std::nullopt;
-            default:
-                return type;
+                case BuiltinType::Bool:
+                case BuiltinType::Char:
+                case BuiltinType::SChar:
+                case BuiltinType::UChar:
+                case BuiltinType::Short:
+                case BuiltinType::UShort:
+                    return BuiltinType::Int;
+                case BuiltinType::WChar:
+                case BuiltinType::Char8:
+                case BuiltinType::Char16:
+                case BuiltinType::Char32:
+                    return std::nullopt;
+                default:
+                    return type;
             }
         }
 
@@ -432,15 +459,16 @@ namespace heimdall
 
     class TyperImpl
     {
-    public:
-        TyperImpl(TypeModel& out, const SemanticModel& model)
-        : m_out(out), m_model(model), m_tree(model.Tree()), m_types(out.m_types),
-            m_sig(model.Significant()),
-            m_symbols(model.Symbols()), m_nodes(model.Tree().NodesSoA()) {}
+      public:
+        TyperImpl(TypeModel& out, const SemanticModel& model) :
+            m_out(out), m_model(model), m_tree(model.Tree()), m_types(out.m_types),
+            m_sig(model.Significant()), m_symbols(model.Symbols()), m_nodes(model.Tree().NodesSoA())
+        {
+        }
 
         void Run();
 
-    private:
+      private:
         // Value category of an initializer, as far as the engine can tell: it
         // decides what `auto&&` deduces.
         enum class Category : std::uint8_t
@@ -452,30 +480,24 @@ namespace heimdall
 
         struct Base
         {
-            TypeId type = TypeTable::Unknown;
-            std::size_t next = 0;
-            bool ok = false;
-            bool is_auto = false;
-            bool is_const = false;
+            TypeId      type     = TypeTable::Unknown;
+            std::size_t next     = 0;
+            bool        ok       = false;
+            bool        is_auto  = false;
+            bool        is_const = false;
         }
 
         ;
 
         // ---- token helpers ---------------------------------------------------
-        const std::vector<Token>& Tokens() const
-        {
-            return m_tree.Tokens();
-        }
+        const std::vector<Token>& Tokens() const { return m_tree.Tokens(); }
 
-        std::string_view Text(std::uint32_t token) const
-        {
-            return m_tree.Text(Tokens()[token]);
-        }
+        std::string_view Text(std::uint32_t token) const { return m_tree.Text(Tokens()[token]); }
 
         std::size_t Pos(std::uint32_t token) const
         {
-            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(),
-                token) - m_sig.begin());
+            return static_cast<std::size_t>(
+                std::lower_bound(m_sig.begin(), m_sig.end(), token) - m_sig.begin());
         }
 
         Tok At(std::size_t pos) const
@@ -486,7 +508,7 @@ namespace heimdall
         bool WordAt(std::size_t pos) const
         {
             return pos < m_sig.size() && Tokens()[m_sig[pos]].kind == TokenKind::Identifier &&
-                Tokens()[m_sig[pos]].tok == Tok::None;
+                   Tokens()[m_sig[pos]].tok == Tok::None;
         }
 
         std::string_view TextAt(std::size_t pos) const
@@ -496,9 +518,9 @@ namespace heimdall
 
         std::pair<std::size_t, std::size_t> NodeSig(std::uint32_t node) const
         {
-            const auto n = m_nodes[node];
+            const auto n     = m_nodes[node];
             const auto begin = Pos(n.GetFirstToken());
-            return {begin, std::max(begin, Pos(n.GetFirstToken() + n.GetTokenCount()))};
+            return { begin, std::max(begin, Pos(n.GetFirstToken() + n.GetTokenCount())) };
         }
 
         std::size_t MatchParen(std::size_t open, std::size_t limit) const;
@@ -536,39 +558,23 @@ namespace heimdall
 
         TypeId OverloadReturn(SymbolId symbol);
 
-        Base ParseBase(
-            std::size_t begin,
-            std::size_t end,
-            ScopeId scope,
-            std::uint32_t before);
+        Base ParseBase(std::size_t begin, std::size_t end, ScopeId scope, std::uint32_t before);
 
-        TypeId ParseName(
-            std::size_t& pos,
-            std::size_t end,
-            ScopeId scope,
-            std::uint32_t before);
+        TypeId ParseName(std::size_t& pos, std::size_t end, ScopeId scope, std::uint32_t before);
 
         TypeId ApplyOperators(TypeId type, std::size_t begin, std::size_t end);
 
         TypeId ParseTypeTokens(
-            std::size_t begin,
-            std::size_t end,
-            ScopeId scope,
-            std::uint32_t before);
+            std::size_t begin, std::size_t end, ScopeId scope, std::uint32_t before);
 
-        TypeId DeclaratorType(
-            Base base,
-            std::uint32_t declarator,
-            SymbolKind kind,
-            TypeId init_type,
-            Category category);
+        TypeId DeclaratorType(Base          base,
+                              std::uint32_t declarator,
+                              SymbolKind    kind,
+                              TypeId        init_type,
+                              Category      category);
 
         TypeId DeduceAuto(
-            const Base& base,
-            std::size_t begin,
-            std::size_t end,
-            TypeId init,
-            Category category);
+            const Base& base, std::size_t begin, std::size_t end, TypeId init, Category category);
 
         TypeId DeducedReturn(std::uint32_t function, bool is_const);
 
@@ -578,8 +584,8 @@ namespace heimdall
         std::pair<TypeId, Category> OperandAt(std::size_t pos, ScopeId scope);
 
         // Type of the initializer of an `auto` variable, with its value category.
-        std::pair<TypeId,
-            Category> AutoInitializer(std::uint32_t node, std::uint32_t init, std::size_t name_pos);
+        std::pair<TypeId, Category> AutoInitializer(std::uint32_t node, std::uint32_t init,
+                                                    std::size_t name_pos);
 
         TypeId NumberType(std::string_view text);
 
@@ -620,23 +626,24 @@ namespace heimdall
 
         ScopeId EnclosingClass(ScopeId scope) const;
 
-        TypeModel& m_out;
-        const SemanticModel& m_model;
-        const ParseTree& m_tree;
-        TypeTable& m_types;
+        TypeModel&                             m_out;
+        const SemanticModel&                   m_model;
+        const ParseTree&                       m_tree;
+        TypeTable&                             m_types;
         const std::pmr::vector<std::uint32_t>& m_sig;
-        const SymbolTable& m_symbols;
-        const GrammarNodeSoA& m_nodes;
-        std::size_t m_depth = 0;
+        const SymbolTable&                     m_symbols;
+        const GrammarNodeSoA&                  m_nodes;
+        std::size_t                            m_depth = 0;
     };
 
     // ---- token helpers --------------------------------------------------------
     std::size_t TyperImpl::MatchParen(std::size_t open, std::size_t limit) const
     {
-        const Tok opening = At(open);
-        const Tok closing = opening == Tok::LParen ? Tok::RParen : opening == Tok::LBracket ? Tok::RBracket
-        : Tok::RBrace;
-        std::size_t depth = 0;
+        const Tok   opening = At(open);
+        const Tok   closing = opening == Tok::LParen     ? Tok::RParen
+                              : opening == Tok::LBracket ? Tok::RBracket
+                                                         : Tok::RBrace;
+        std::size_t depth   = 0;
         for (std::size_t i = open; i < limit && i < m_sig.size(); ++i)
         {
             if (At(i) == opening)
@@ -661,34 +668,34 @@ namespace heimdall
         {
             switch (At(i))
             {
-            case Tok::Lt:
-                ++depth;
-                break;
-            case Tok::Gt:
-                if (--depth == 0)
-                {
-                    return i;
-                }
+                case Tok::Lt:
+                    ++depth;
+                    break;
+                case Tok::Gt:
+                    if (--depth == 0)
+                    {
+                        return i;
+                    }
 
-                break;
-            case Tok::Shr:
-                depth -= 2;
-                if (depth <= 0)
-                {
-                    return depth == 0 ? i : limit;
-                }
+                    break;
+                case Tok::Shr:
+                    depth -= 2;
+                    if (depth <= 0)
+                    {
+                        return depth == 0 ? i : limit;
+                    }
 
-                break;
-            case Tok::LParen:
-            case Tok::LBracket:
-                i = MatchParen(i, limit);
-                break;
-            case Tok::Semi:
-            case Tok::LBrace:
-            case Tok::RBrace:
-                return limit;
-            default:
-                break;
+                    break;
+                case Tok::LParen:
+                case Tok::LBracket:
+                    i = MatchParen(i, limit);
+                    break;
+                case Tok::Semi:
+                case Tok::LBrace:
+                case Tok::RBrace:
+                    return limit;
+                default:
+                    break;
             }
         }
 
@@ -712,10 +719,10 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        const bool hex = s.size() > 1 && s[0] == '0' && s[1] == 'x';
-        const bool binary = s.size() > 1 && s[0] == '0' && s[1] == 'b';
+        const bool hex      = s.size() > 1 && s[0] == '0' && s[1] == 'x';
+        const bool binary   = s.size() > 1 && s[0] == '0' && s[1] == 'b';
         const bool is_float = hex ? s.find('p') != std::string::npos
-        : !binary && s.find_first_of(".e") != std::string::npos;
+                                  : !binary && s.find_first_of(".e") != std::string::npos;
         if (is_float)
         {
             const char last = s.back();
@@ -729,31 +736,32 @@ namespace heimdall
                 return m_types.Builtin(BuiltinType::LongDouble);
             }
 
-            return std::isdigit(static_cast<unsigned char>(last)) != 0 || last == '.' ? m_types.Builtin(BuiltinType::Double)
-            : TypeTable::Unknown;
+            return std::isdigit(static_cast<unsigned char>(last)) != 0 || last == '.'
+                       ? m_types.Builtin(BuiltinType::Double)
+                       : TypeTable::Unknown;
         }
 
-        std::size_t i = 0;
-        int base = 10;
+        std::size_t i    = 0;
+        int         base = 10;
         if (hex)
         {
             base = 16;
-            i = 2;
+            i    = 2;
         }
         else if (binary)
         {
             base = 2;
-            i = 2;
+            i    = 2;
         }
         else if (s.size() > 1 && s[0] == '0')
         {
             base = 8;
-            i = 1;
+            i    = 1;
         }
 
-        std::uint64_t value = 0;
-        bool overflow = false;
-        bool any = base == 8;
+        std::uint64_t value    = 0;
+        bool          overflow = false;
+        bool          any      = base == 8;
         for (; i < s.size(); ++i)
         {
             const int digit = DigitValue(s[i]);
@@ -763,13 +771,15 @@ namespace heimdall
             }
 
             any = true;
-            if (value >(~0ull - static_cast<std::uint64_t>(digit)) / static_cast<std::uint64_t>(base))
+            if (value >
+                (~0ull - static_cast<std::uint64_t>(digit)) / static_cast<std::uint64_t>(base))
             {
                 overflow = true;
             }
             else
             {
-                value = value * static_cast<std::uint64_t>(base) + static_cast<std::uint64_t>(digit);
+                value =
+                    value * static_cast<std::uint64_t>(base) + static_cast<std::uint64_t>(digit);
             }
         }
 
@@ -778,7 +788,7 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        bool has_unsigned = false;
+        bool        has_unsigned = false;
         std::string longs;
         for (; i < s.size(); ++i)
         {
@@ -797,13 +807,13 @@ namespace heimdall
         }
 
         // `lul` is not a valid suffix: the `l`s must be adjacent.
-        const auto suffix = s.substr(s.size() -(longs.size() +(has_unsigned ? 1 : 0)));
-        if (longs.size() > 2 ||(longs.size() == 2 && suffix.find("ll") == std::string::npos))
+        const auto suffix = s.substr(s.size() - (longs.size() + (has_unsigned ? 1 : 0)));
+        if (longs.size() > 2 || (longs.size() == 2 && suffix.find("ll") == std::string::npos))
         {
             return TypeTable::Unknown;
         }
 
-        const bool fits_int = value <= 0x7FFFFFFFull;
+        const bool fits_int  = value <= 0x7FFFFFFFull;
         const bool fits_uint = value <= 0xFFFFFFFFull;
         if (longs.empty())
         {
@@ -818,7 +828,8 @@ namespace heimdall
             }
 
             // Wider than int: long, unsigned or long long depending on the platform.
-            return base != 10 && fits_uint ? m_types.Builtin(BuiltinType::UInt) : TypeTable::Unknown;
+            return base != 10 && fits_uint ? m_types.Builtin(BuiltinType::UInt)
+                                           : TypeTable::Unknown;
         }
 
         if (longs.size() == 1)
@@ -853,7 +864,8 @@ namespace heimdall
 
         if (text[0] == 'u')
         {
-            return m_types.Builtin(text.size() > 1 && text[1] == '8' ? BuiltinType::Char8 : BuiltinType::Char16);
+            return m_types.Builtin(
+                text.size() > 1 && text[1] == '8' ? BuiltinType::Char8 : BuiltinType::Char16);
         }
 
         return TypeTable::Unknown;
@@ -891,25 +903,22 @@ namespace heimdall
     {
         switch (m_symbols.kind[symbol])
         {
-        case SymbolKind::Variable:
-        case SymbolKind::Parameter:
-            return VariableType(symbol);
-        case SymbolKind::Function:
-            return ReturnType(symbol);
-        case SymbolKind::TypeAlias:
-            return AliasTarget(symbol);
-        default:
-            return TypeTable::Unknown;
+            case SymbolKind::Variable:
+            case SymbolKind::Parameter:
+                return VariableType(symbol);
+            case SymbolKind::Function:
+                return ReturnType(symbol);
+            case SymbolKind::TypeAlias:
+                return AliasTarget(symbol);
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     // `[::] a [<...>] [:: b [<...>]]...` at `pos`: a type name. Library (`std::`)
     // names stay External; names declared in this file resolve to symbols.
     TypeId TyperImpl::ParseName(
-        std::size_t& pos,
-        std::size_t end,
-        ScopeId scope,
-        std::uint32_t before)
+        std::size_t& pos, std::size_t end, ScopeId scope, std::uint32_t before)
     {
         const bool global = At(pos) == Tok::ColonColon;
         if (global)
@@ -918,25 +927,25 @@ namespace heimdall
         }
 
         std::string text;
-        SymbolId current = kNone;
-        bool first = true;
-        bool is_std = false;
-        bool template_args = false;
-        bool dependent = false;
-        bool unresolved = false;
+        SymbolId    current       = kNone;
+        bool        first         = true;
+        bool        is_std        = false;
+        bool        template_args = false;
+        bool        dependent     = false;
+        bool        unresolved    = false;
         for (; pos < end && WordAt(pos);)
         {
             const auto spelled = TextAt(pos);
             Append(text, spelled);
-            const auto name = m_model.Names().Find(spelled);
-            SymbolId found = kNone;
+            const auto name  = m_model.Names().Find(spelled);
+            SymbolId   found = kNone;
             if (first)
             {
                 is_std = spelled == "std";
                 if (name != kNone)
                 {
                     found = global ? m_model.LookupLocal(SemanticModel::TranslationUnitScope, name)
-                    : m_model.Lookup(scope, name, before);
+                                   : m_model.Lookup(scope, name, before);
                 }
             }
             else if (current != kNone && name != kNone)
@@ -950,7 +959,7 @@ namespace heimdall
             }
 
             current = found;
-            first = false;
+            first   = false;
             ++pos;
             if (pos < end && At(pos) == Tok::Lt)
             {
@@ -1016,29 +1025,26 @@ namespace heimdall
 
         switch (m_symbols.kind[current])
         {
-        case SymbolKind::Class:
-            return template_args ||(m_symbols.flags[current] & SymbolFlag::Template) != 0 ? TypeTable::Unknown
-            : m_types.Class(current);
-        case SymbolKind::Enum:
-            return m_types.Enum(current);
-        case SymbolKind::TypeAlias:
-            return template_args ? TypeTable::Unknown : SymbolType(current);
-        default:
-            return TypeTable::Unknown;
+            case SymbolKind::Class:
+                return template_args || (m_symbols.flags[current] & SymbolFlag::Template) != 0
+                           ? TypeTable::Unknown
+                           : m_types.Class(current);
+            case SymbolKind::Enum:
+                return m_types.Enum(current);
+            case SymbolKind::TypeAlias:
+                return template_args ? TypeTable::Unknown : SymbolType(current);
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     TyperImpl::Base TyperImpl::ParseBase(
-        std::size_t begin,
-        std::size_t end,
-        ScopeId scope,
-        std::uint32_t before)
+        std::size_t begin, std::size_t end, ScopeId scope, std::uint32_t before)
     {
         Base result;
-        result.next = begin;
-        std::size_t pos = begin;
-        const auto skip_qualifiers =[&]()
-        {
+        result.next                 = begin;
+        std::size_t pos             = begin;
+        const auto  skip_qualifiers = [&]() {
             while (pos < end)
             {
                 const Tok tok = At(pos);
@@ -1061,39 +1067,40 @@ namespace heimdall
             return result;
         }
 
-        TypeId type = TypeTable::Unknown;
+        TypeId    type  = TypeTable::Unknown;
         const Tok first = At(pos);
         if (IsBuiltinWord(first))
         {
-            bool is_unsigned = false;
-            bool is_signed = false;
-            bool is_short = false;
-            int longs = 0;
+            bool               is_unsigned = false;
+            bool               is_signed   = false;
+            bool               is_short    = false;
+            int                longs       = 0;
             std::optional<Tok> core;
-            while (pos < end && (IsBuiltinWord(At(pos)) || At(pos) == Tok::KwConst || At(pos) == Tok::KwVolatile))
+            while (pos < end && (IsBuiltinWord(At(pos)) || At(pos) == Tok::KwConst ||
+                                 At(pos) == Tok::KwVolatile))
             {
                 switch (At(pos))
                 {
-                case Tok::KwUnsigned:
-                    is_unsigned = true;
-                    break;
-                case Tok::KwSigned:
-                    is_signed = true;
-                    break;
-                case Tok::KwShort:
-                    is_short = true;
-                    break;
-                case Tok::KwLong:
-                    ++longs;
-                    break;
-                case Tok::KwConst:
-                    result.is_const = true;
-                    break;
-                case Tok::KwVolatile:
-                    break;
-                default:
-                    core = At(pos);
-                    break;
+                    case Tok::KwUnsigned:
+                        is_unsigned = true;
+                        break;
+                    case Tok::KwSigned:
+                        is_signed = true;
+                        break;
+                    case Tok::KwShort:
+                        is_short = true;
+                        break;
+                    case Tok::KwLong:
+                        ++longs;
+                        break;
+                    case Tok::KwConst:
+                        result.is_const = true;
+                        break;
+                    case Tok::KwVolatile:
+                        break;
+                    default:
+                        core = At(pos);
+                        break;
                 }
 
                 ++pos;
@@ -1102,53 +1109,58 @@ namespace heimdall
             const Tok kind = core.value_or(Tok::KwInt);
             switch (kind)
             {
-            case Tok::KwVoid:
-                type = m_types.Builtin(BuiltinType::Void);
-                break;
-            case Tok::KwBool:
-                type = m_types.Builtin(BuiltinType::Bool);
-                break;
-            case Tok::KwFloat:
-                type = m_types.Builtin(BuiltinType::Float);
-                break;
-            case Tok::KwDouble:
-                type = m_types.Builtin(longs > 0 ? BuiltinType::LongDouble : BuiltinType::Double);
-                break;
-            case Tok::KwWchar:
-                type = m_types.Builtin(BuiltinType::WChar);
-                break;
-            case Tok::KwChar8:
-                type = m_types.Builtin(BuiltinType::Char8);
-                break;
-            case Tok::KwChar16:
-                type = m_types.Builtin(BuiltinType::Char16);
-                break;
-            case Tok::KwChar32:
-                type = m_types.Builtin(BuiltinType::Char32);
-                break;
-            case Tok::KwChar:
-                type = m_types.Builtin(is_unsigned ? BuiltinType::UChar : is_signed ? BuiltinType::SChar
-                    : BuiltinType::Char);
-                break;
-            default:
-                if (is_short)
-                {
-                    type = m_types.Builtin(is_unsigned ? BuiltinType::UShort : BuiltinType::Short);
-                }
-                else if (longs == 0)
-                {
-                    type = m_types.Builtin(is_unsigned ? BuiltinType::UInt : BuiltinType::Int);
-                }
-                else if (longs == 1)
-                {
-                    type = m_types.Builtin(is_unsigned ? BuiltinType::ULong : BuiltinType::Long);
-                }
-                else
-                {
-                    type = m_types.Builtin(is_unsigned ? BuiltinType::ULongLong : BuiltinType::LongLong);
-                }
+                case Tok::KwVoid:
+                    type = m_types.Builtin(BuiltinType::Void);
+                    break;
+                case Tok::KwBool:
+                    type = m_types.Builtin(BuiltinType::Bool);
+                    break;
+                case Tok::KwFloat:
+                    type = m_types.Builtin(BuiltinType::Float);
+                    break;
+                case Tok::KwDouble:
+                    type =
+                        m_types.Builtin(longs > 0 ? BuiltinType::LongDouble : BuiltinType::Double);
+                    break;
+                case Tok::KwWchar:
+                    type = m_types.Builtin(BuiltinType::WChar);
+                    break;
+                case Tok::KwChar8:
+                    type = m_types.Builtin(BuiltinType::Char8);
+                    break;
+                case Tok::KwChar16:
+                    type = m_types.Builtin(BuiltinType::Char16);
+                    break;
+                case Tok::KwChar32:
+                    type = m_types.Builtin(BuiltinType::Char32);
+                    break;
+                case Tok::KwChar:
+                    type = m_types.Builtin(is_unsigned ? BuiltinType::UChar
+                                           : is_signed ? BuiltinType::SChar
+                                                       : BuiltinType::Char);
+                    break;
+                default:
+                    if (is_short)
+                    {
+                        type =
+                            m_types.Builtin(is_unsigned ? BuiltinType::UShort : BuiltinType::Short);
+                    }
+                    else if (longs == 0)
+                    {
+                        type = m_types.Builtin(is_unsigned ? BuiltinType::UInt : BuiltinType::Int);
+                    }
+                    else if (longs == 1)
+                    {
+                        type =
+                            m_types.Builtin(is_unsigned ? BuiltinType::ULong : BuiltinType::Long);
+                    }
+                    else
+                    {
+                        type = m_types.Builtin(
+                            is_unsigned ? BuiltinType::ULongLong : BuiltinType::LongLong);
+                    }
 
-                break;
+                    break;
             }
         }
         else if (first == Tok::KwAuto)
@@ -1168,7 +1180,8 @@ namespace heimdall
                 dependent = true;
                 ++pos;
             }
-            else if (first == Tok::KwStruct || first == Tok::KwClass || first == Tok::KwUnion || first == Tok::KwEnum)
+            else if (first == Tok::KwStruct || first == Tok::KwClass || first == Tok::KwUnion ||
+                     first == Tok::KwEnum)
             {
                 ++pos;
             }
@@ -1182,7 +1195,7 @@ namespace heimdall
 
         skip_qualifiers();
         result.next = std::min(pos, end);
-        result.ok = true;
+        result.ok   = true;
         result.type = result.is_const && !result.is_auto ? m_types.Const(type) : type;
         return result;
     }
@@ -1195,22 +1208,22 @@ namespace heimdall
         {
             switch (At(i))
             {
-            case Tok::Star:
-                type = m_types.Pointer(type);
-                break;
-            case Tok::Amp:
-                type = m_types.LRef(type);
-                break;
-            case Tok::AmpAmp:
-                type = m_types.RRef(type);
-                break;
-            case Tok::KwConst:
-                type = m_types.Const(type);
-                break;
-            case Tok::KwVolatile:
-                break;
-            default:
-                return TypeTable::Unknown;
+                case Tok::Star:
+                    type = m_types.Pointer(type);
+                    break;
+                case Tok::Amp:
+                    type = m_types.LRef(type);
+                    break;
+                case Tok::AmpAmp:
+                    type = m_types.RRef(type);
+                    break;
+                case Tok::KwConst:
+                    type = m_types.Const(type);
+                    break;
+                case Tok::KwVolatile:
+                    break;
+                default:
+                    return TypeTable::Unknown;
             }
         }
 
@@ -1218,10 +1231,7 @@ namespace heimdall
     }
 
     TypeId TyperImpl::ParseTypeTokens(
-        std::size_t begin,
-        std::size_t end,
-        ScopeId scope,
-        std::uint32_t before)
+        std::size_t begin, std::size_t end, ScopeId scope, std::uint32_t before)
     {
         const auto base = ParseBase(begin, end, scope, before);
         if (!base.ok || base.is_auto)
@@ -1236,45 +1246,41 @@ namespace heimdall
     // the declarator, from the type and value category of the initializer
     // (template argument deduction, [dcl.type.auto.deduct]).
     TypeId TyperImpl::DeduceAuto(
-        const Base& base,
-        std::size_t begin,
-        std::size_t end,
-        TypeId init,
-        Category category)
+        const Base& base, std::size_t begin, std::size_t end, TypeId init, Category category)
     {
         if (init == TypeTable::Unknown)
         {
             return TypeTable::Unknown;
         }
 
-        int stars = 0;
-        bool lref = false;
-        bool rref = false;
+        int  stars         = 0;
+        bool lref          = false;
+        bool rref          = false;
         bool pointer_const = false;
         for (std::size_t i = begin; i < end; ++i)
         {
             switch (At(i))
             {
-            case Tok::Amp:
-                lref = true;
-                break;
-            case Tok::AmpAmp:
-                rref = true;
-                break;
-            case Tok::Star:
-                ++stars;
-                break;
-            case Tok::KwConst:
-                pointer_const = pointer_const || stars > 0;
-                break;
-            case Tok::KwVolatile:
-                break;
-            default:
-                return TypeTable::Unknown;
+                case Tok::Amp:
+                    lref = true;
+                    break;
+                case Tok::AmpAmp:
+                    rref = true;
+                    break;
+                case Tok::Star:
+                    ++stars;
+                    break;
+                case Tok::KwConst:
+                    pointer_const = pointer_const || stars > 0;
+                    break;
+                case Tok::KwVolatile:
+                    break;
+                default:
+                    return TypeTable::Unknown;
             }
         }
 
-        if (stars > 1 ||(lref&& rref) ||(stars == 1 && (lref || rref)))
+        if (stars > 1 || (lref && rref) || (stars == 1 && (lref || rref)))
         {
             return TypeTable::Unknown; // `auto**`, `auto*&`: not modelled
         }
@@ -1289,7 +1295,7 @@ namespace heimdall
             }
 
             const auto pointee = m_types.Element(deduced);
-            auto result = m_types.Pointer(base.is_const ? m_types.Const(pointee) : pointee);
+            auto       result  = m_types.Pointer(base.is_const ? m_types.Const(pointee) : pointee);
             return pointer_const ? m_types.Const(result) : result;
         }
 
@@ -1298,23 +1304,25 @@ namespace heimdall
             if (base.is_const)
             {
                 // `const auto&&` is no forwarding reference: it binds rvalues only.
-                return category == Category::PRValue ? m_types.RRef(m_types.Const(init)) : TypeTable::Unknown;
+                return category == Category::PRValue ? m_types.RRef(m_types.Const(init))
+                                                     : TypeTable::Unknown;
             }
 
             switch (category)
             {
-            case Category::LValue:
-                return m_types.LRef(init);
-            case Category::PRValue:
-                return m_types.RRef(init);
-            default:
-                return TypeTable::Unknown;
+                case Category::LValue:
+                    return m_types.LRef(init);
+                case Category::PRValue:
+                    return m_types.RRef(init);
+                default:
+                    return TypeTable::Unknown;
             }
         }
 
         if (lref)
         {
-            return m_types.LRef(base.is_const ? m_types.Const(m_types.Value(init)) : m_types.Value(init));
+            return m_types.LRef(
+                base.is_const ? m_types.Const(m_types.Value(init)) : m_types.Value(init));
         }
 
         // `auto x = e;` takes e's type without references, top const or arrays.
@@ -1324,11 +1332,7 @@ namespace heimdall
 
     // The type declared by `declarator` for the written base type `base`.
     TypeId TyperImpl::DeclaratorType(
-        Base base,
-        std::uint32_t declarator,
-        SymbolKind kind,
-        TypeId init_type,
-        Category category)
+        Base base, std::uint32_t declarator, SymbolKind kind, TypeId init_type, Category category)
     {
         if (declarator == kNone || FindChild(declarator, GrammarKind::FunctionSuffix) != kNone)
         {
@@ -1342,8 +1346,8 @@ namespace heimdall
         }
 
         const auto prefix_begin = Pos(m_nodes.FirstToken(declarator));
-        const auto prefix_end = Pos(m_nodes.FirstToken(name));
-        TypeId type = base.type;
+        const auto prefix_end   = Pos(m_nodes.FirstToken(name));
+        TypeId     type         = base.type;
         if (base.is_auto)
         {
             type = DeduceAuto(base, prefix_begin, prefix_end, init_type, category);
@@ -1369,17 +1373,18 @@ namespace heimdall
 
         for (auto it = suffixes.rbegin(); it != suffixes.rend(); ++it)
         {
-            const auto[b, e] = NodeSig(*it);
+            const auto [b, e]    = NodeSig(*it);
             std::uint32_t extent = kNone;
-            if (e == b + 3 && At(b) == Tok::LBracket && Tokens()[m_sig[b + 1]].kind == TokenKind::Number)
+            if (e == b + 3 && At(b) == Tok::LBracket &&
+                Tokens()[m_sig[b + 1]].kind == TokenKind::Number)
             {
-                const auto text = TextAt(b + 1);
-                std::uint64_t value = 0;
-                bool digits =!text.empty() && text.size() < 10;
+                const auto    text   = TextAt(b + 1);
+                std::uint64_t value  = 0;
+                bool          digits = !text.empty() && text.size() < 10;
                 for (const char c : text)
                 {
                     digits = digits && c >= '0' && c <= '9';
-                    value = value * 10 + static_cast<std::uint64_t>(c - '0');
+                    value  = value * 10 + static_cast<std::uint64_t>(c - '0');
                 }
 
                 if (digits)
@@ -1422,7 +1427,7 @@ namespace heimdall
         }
 
         std::uint32_t declarator = kNone;
-        std::uint32_t init = kNone;
+        std::uint32_t init       = kNone;
         for (const auto child : m_model.ChildrenOf(node))
         {
             std::uint32_t candidate = kNone;
@@ -1444,7 +1449,7 @@ namespace heimdall
             if (name != kNone && m_nodes.FirstToken(name) == m_symbols.decl_token[symbol])
             {
                 declarator = candidate;
-                init = m_nodes.Kind(child) == GrammarKind::InitDeclarator ? child : kNone;
+                init       = m_nodes.Kind(child) == GrammarKind::InitDeclarator ? child : kNone;
                 break;
             }
         }
@@ -1454,9 +1459,9 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        const auto[spec_begin, spec_end] = NodeSig(spec);
-        const auto scope = m_model.ScopeOfNode(node);
-        auto base = ParseBase(spec_begin, spec_end, scope, m_symbols.decl_token[symbol]);
+        const auto [spec_begin, spec_end] = NodeSig(spec);
+        const auto scope                  = m_model.ScopeOfNode(node);
+        auto       base = ParseBase(spec_begin, spec_end, scope, m_symbols.decl_token[symbol]);
         if (!base.ok)
         {
             return TypeTable::Unknown;
@@ -1473,11 +1478,12 @@ namespace heimdall
             base.type = ApplyOperators(base.type, base.next, spec_end);
         }
 
-        TypeId init_type = TypeTable::Unknown;
-        Category category = Category::Unknown;
+        TypeId   init_type = TypeTable::Unknown;
+        Category category  = Category::Unknown;
         if (base.is_auto)
         {
-            std::tie(init_type, category) = AutoInitializer(node, init, Pos(m_symbols.decl_token[symbol]));
+            std::tie(init_type, category) =
+                AutoInitializer(node, init, Pos(m_symbols.decl_token[symbol]));
         }
 
         return DeclaratorType(base, declarator, m_symbols.kind[symbol], init_type, category);
@@ -1487,7 +1493,7 @@ namespace heimdall
     std::pair<TypeId, TyperImpl::Category> TyperImpl::AutoInitializer(
         std::uint32_t node, std::uint32_t init, std::size_t name_pos)
     {
-        const std::pair<TypeId, Category> unknown{TypeTable::Unknown, Category::Unknown};
+        const std::pair<TypeId, Category> unknown { TypeTable::Unknown, Category::Unknown };
         if (m_nodes.Kind(node) == GrammarKind::ParameterDeclaration)
         {
             return unknown;
@@ -1498,15 +1504,16 @@ namespace heimdall
             const auto init_end = NodeSig(init).second;
             for (const auto child : m_model.ChildrenOf(init))
             {
-                if (m_nodes.Kind(child) == GrammarKind::Declarator || m_nodes.Kind(child) == GrammarKind::TypeSpecifier)
+                if (m_nodes.Kind(child) == GrammarKind::Declarator ||
+                    m_nodes.Kind(child) == GrammarKind::TypeSpecifier)
                 {
                     continue;
                 }
 
-                const auto[cb, ce] = NodeSig(child);
+                const auto [cb, ce] = NodeSig(child);
                 if (cb == name_pos + 2 && ce == init_end)
                 {
-                    return {NodeType(child), ValueCategory(child)};
+                    return { NodeType(child), ValueCategory(child) };
                 }
             }
 
@@ -1530,7 +1537,8 @@ namespace heimdall
             const auto range_begin = NodeSig(node).second + 1;
             for (const auto child : m_model.ChildrenOf(parent))
             {
-                if (m_nodes.Kind(child) == GrammarKind::DeclarationStatement || NodeSig(child).first != range_begin)
+                if (m_nodes.Kind(child) == GrammarKind::DeclarationStatement ||
+                    NodeSig(child).first != range_begin)
                 {
                     continue;
                 }
@@ -1547,7 +1555,7 @@ namespace heimdall
                     return unknown;
                 }
 
-                return {m_types.Element(range), Category::LValue};
+                return { m_types.Element(range), Category::LValue };
             }
         }
 
@@ -1558,28 +1566,29 @@ namespace heimdall
     {
         if (pos >= m_sig.size())
         {
-            return {TypeTable::Unknown, Category::Unknown};
+            return { TypeTable::Unknown, Category::Unknown };
         }
 
         const auto token = m_sig[pos];
         if (Tokens()[token].kind == TokenKind::Identifier && Tokens()[token].tok == Tok::None)
         {
             // The grammar builds no expression node here, so the name is looked up.
-            const auto name = m_model.Names().Find(Text(token));
+            const auto name   = m_model.Names().Find(Text(token));
             const auto symbol = name == kNone ? kNone : m_model.Lookup(scope, name, token);
-            if (symbol == kNone ||
-                (m_symbols.kind[symbol] != SymbolKind::Variable && m_symbols.kind[symbol] != SymbolKind::Parameter))
+            if (symbol == kNone || (m_symbols.kind[symbol] != SymbolKind::Variable &&
+                                    m_symbols.kind[symbol] != SymbolKind::Parameter))
             {
-                return {TypeTable::Unknown, Category::Unknown};
+                return { TypeTable::Unknown, Category::Unknown };
             }
 
-            return {m_types.Value(SymbolType(symbol)), Category::LValue};
+            return { m_types.Value(SymbolType(symbol)), Category::LValue };
         }
 
-        const auto type = LiteralTypeAt(pos);
-        const bool string =
-            Tokens()[token].kind == TokenKind::StringLiteral || Tokens()[token].kind == TokenKind::RawStringLiteral;
-        return {type, type != TypeTable::Unknown && !string ? Category::PRValue : Category::Unknown};
+        const auto type   = LiteralTypeAt(pos);
+        const bool string = Tokens()[token].kind == TokenKind::StringLiteral ||
+                            Tokens()[token].kind == TokenKind::RawStringLiteral;
+        return { type,
+                 type != TypeTable::Unknown && !string ? Category::PRValue : Category::Unknown };
     }
 
     TyperImpl::Category TyperImpl::ValueCategory(std::uint32_t node)
@@ -1589,82 +1598,83 @@ namespace heimdall
             return Category::Unknown;
         }
 
-        const auto[begin, end] = NodeSig(node);
-        const auto kids = m_model.ChildrenOf(node);
+        const auto [begin, end] = NodeSig(node);
+        const auto kids         = m_model.ChildrenOf(node);
         switch (m_nodes.Kind(node))
         {
-        case GrammarKind::LiteralExpression:
-            return OperandAt(begin, m_model.ScopeOfNode(node)).second;
-        case GrammarKind::IdentifierExpression:
-        {
-            if (end != begin + 1)
-            {
+            case GrammarKind::LiteralExpression:
+                return OperandAt(begin, m_model.ScopeOfNode(node)).second;
+            case GrammarKind::IdentifierExpression: {
+                if (end != begin + 1)
+                {
+                    return Category::Unknown;
+                }
+
+                const auto tok = At(begin);
+                if (tok == Tok::KwTrue || tok == Tok::KwFalse || tok == Tok::KwNullptr ||
+                    tok == Tok::KwThis)
+                {
+                    return Category::PRValue;
+                }
+
+                return OperandAt(begin, m_model.ScopeOfNode(node)).second;
+            }
+            case GrammarKind::ParenthesizedExpression:
+                return kids.size() == 1 ? ValueCategory(kids[0]) : Category::Unknown;
+            case GrammarKind::CastExpression:
+                return Category::PRValue; // `(T&)x` would be an lvalue, but a cast to a reference
+                                          // is not modeled
+            case GrammarKind::UnaryExpression: {
+                if (kids.empty())
+                {
+                    return Category::Unknown;
+                }
+
+                if (Pos(m_nodes.FirstToken(kids[0])) != begin + 1)
+                {
+                    return Category::PRValue; // `x++`
+                }
+
+                const Tok first = At(begin);
+                return first == Tok::Star || first == Tok::PlusPlus || first == Tok::MinusMinus
+                           ? Category::LValue
+                           : Category::PRValue;
+            }
+            case GrammarKind::SubscriptExpression: {
+                if (kids.empty())
+                {
+                    return Category::Unknown;
+                }
+
+                const auto base = m_types.Strip(NodeType(kids[0]));
+                return m_types.IsArray(base) || m_types.IsPointer(base)
+                           ? Category::LValue
+                           : Category::Unknown;
+            }
+            case GrammarKind::BinaryExpression: {
+                if (kids.size() != 2 || !SameStart(kids[0], node))
+                {
+                    return Category::Unknown;
+                }
+
+                const Tok op = At(NodeSig(kids[0]).second);
+                if (op == Tok::Comma)
+                {
+                    return Category::Unknown;
+                }
+
+                return IsAssignment(op) ? Category::LValue : Category::PRValue;
+            }
+            default:
                 return Category::Unknown;
-            }
-
-            const auto tok = At(begin);
-            if (tok == Tok::KwTrue || tok == Tok::KwFalse || tok == Tok::KwNullptr || tok == Tok::KwThis)
-            {
-                return Category::PRValue;
-            }
-
-            return OperandAt(begin, m_model.ScopeOfNode(node)).second;
-        }
-        case GrammarKind::ParenthesizedExpression:
-            return kids.size() == 1 ? ValueCategory(kids[0]) : Category::Unknown;
-        case GrammarKind::CastExpression:
-            return Category::PRValue; // `(T&)x` would be an lvalue, but a cast to a reference is not modeled
-        case GrammarKind::UnaryExpression:
-        {
-            if (kids.empty())
-            {
-                return Category::Unknown;
-            }
-
-            if (Pos(m_nodes.FirstToken(kids[0])) != begin + 1)
-            {
-                return Category::PRValue; // `x++`
-            }
-
-            const Tok first = At(begin);
-            return first == Tok::Star || first == Tok::PlusPlus || first == Tok::MinusMinus ? Category::LValue
-            : Category::PRValue;
-        }
-        case GrammarKind::SubscriptExpression:
-        {
-            if (kids.empty())
-            {
-                return Category::Unknown;
-            }
-
-            const auto base = m_types.Strip(NodeType(kids[0]));
-            return m_types.IsArray(base) || m_types.IsPointer(base) ? Category::LValue : Category::Unknown;
-        }
-        case GrammarKind::BinaryExpression:
-        {
-            if (kids.size() != 2 ||!SameStart(kids[0], node))
-            {
-                return Category::Unknown;
-            }
-
-            const Tok op = At(NodeSig(kids[0]).second);
-            if (op == Tok::Comma)
-            {
-                return Category::Unknown;
-            }
-
-            return IsAssignment(op) ? Category::LValue : Category::PRValue;
-        }
-        default:
-            return Category::Unknown;
         }
     }
 
     TypeId TyperImpl::DeducedReturn(std::uint32_t function, bool is_const)
     {
-        TypeId deduced = TypeTable::Unknown;
-        bool first = true;
-        const auto end = m_nodes.SubtreeEnd(function);
+        TypeId     deduced = TypeTable::Unknown;
+        bool       first   = true;
+        const auto end     = m_nodes.SubtreeEnd(function);
         for (std::uint32_t node = function + 1; node < end;)
         {
             const auto kind = m_nodes.Kind(node);
@@ -1682,8 +1692,8 @@ namespace heimdall
                 continue;
             }
 
-            const auto[begin, stop] = NodeSig(node);
-            TypeId type = TypeTable::Unknown;
+            const auto [begin, stop] = NodeSig(node);
+            TypeId type              = TypeTable::Unknown;
             if (begin + 1 < stop && At(begin + 1) == Tok::Semi)
             {
                 type = m_types.Builtin(BuiltinType::Void);
@@ -1710,7 +1720,7 @@ namespace heimdall
                 }
 
                 deduced = type;
-                first = false;
+                first   = false;
             }
             else if (type != TypeTable::Unknown && type != deduced)
             {
@@ -1736,21 +1746,21 @@ namespace heimdall
         }
 
         const auto node = m_symbols.decl_node[symbol];
-        if (node >= m_nodes.size() ||
-            (m_nodes.Kind(node) != GrammarKind::FunctionDeclaration && m_nodes.Kind(node) != GrammarKind::FunctionDefinition))
+        if (node >= m_nodes.size() || (m_nodes.Kind(node) != GrammarKind::FunctionDeclaration &&
+                                       m_nodes.Kind(node) != GrammarKind::FunctionDefinition))
         {
             return TypeTable::Unknown;
         }
 
-        const auto spec = FindChild(node, GrammarKind::TypeSpecifier);
+        const auto spec       = FindChild(node, GrammarKind::TypeSpecifier);
         const auto declarator = FindChild(node, GrammarKind::Declarator);
         if (spec == kNone || declarator == kNone)
         {
             return TypeTable::Unknown;
         }
 
-        const auto[spec_begin, spec_end] = NodeSig(spec);
-        const auto scope = m_model.ScopeOfNode(node);
+        const auto [spec_begin, spec_end] = NodeSig(spec);
+        const auto scope                  = m_model.ScopeOfNode(node);
         const auto base = ParseBase(spec_begin, spec_end, scope, m_symbols.decl_token[symbol]);
         if (!base.ok)
         {
@@ -1759,7 +1769,7 @@ namespace heimdall
 
         if (base.is_auto)
         {
-            auto suffix = FindChild(declarator, GrammarKind::FunctionSuffix);
+            auto suffix   = FindChild(declarator, GrammarKind::FunctionSuffix);
             auto trailing = FindChild(declarator, GrammarKind::TrailingReturnType);
             if (trailing == kNone && suffix != kNone)
             {
@@ -1771,7 +1781,8 @@ namespace heimdall
                 // Deduced from the body: plain `auto` / `const auto` only.
                 const auto declared = FindChild(declarator, GrammarKind::DeclaredName);
                 if (m_nodes.Kind(node) != GrammarKind::FunctionDefinition || declared == kNone ||
-                    base.next < spec_end || m_nodes.FirstToken(declared) != m_nodes.FirstToken(declarator))
+                    base.next < spec_end ||
+                    m_nodes.FirstToken(declared) != m_nodes.FirstToken(declarator))
                 {
                     return TypeTable::Unknown;
                 }
@@ -1786,8 +1797,9 @@ namespace heimdall
             }
 
             std::size_t end = begin;
-            while (end < m_sig.size() && At(end) != Tok::LBrace && At(end) != Tok::Semi && At(end) != Tok::Eq &&
-                At(end) != Tok::KwRequires && At(end) != Tok::KwOverride && At(end) != Tok::KwFinal)
+            while (end < m_sig.size() && At(end) != Tok::LBrace && At(end) != Tok::Semi &&
+                   At(end) != Tok::Eq && At(end) != Tok::KwRequires && At(end) != Tok::KwOverride &&
+                   At(end) != Tok::KwFinal)
             {
                 if (At(end) == Tok::LParen || At(end) == Tok::LBracket)
                 {
@@ -1797,7 +1809,8 @@ namespace heimdall
                 ++end;
             }
 
-            return ParseTypeTokens(begin, std::min(end, m_sig.size()), scope, m_symbols.decl_token[symbol]);
+            return ParseTypeTokens(
+                begin, std::min(end, m_sig.size()), scope, m_symbols.decl_token[symbol]);
         }
 
         const auto name = FindChild(declarator, GrammarKind::DeclaredName);
@@ -1807,8 +1820,8 @@ namespace heimdall
         }
 
         const auto prefix_begin = Pos(m_nodes.FirstToken(declarator));
-        const auto prefix_end = Pos(m_nodes.FirstToken(name));
-        TypeId type = base.type;
+        const auto prefix_end   = Pos(m_nodes.FirstToken(name));
+        TypeId     type         = base.type;
         if (base.next < spec_end)
         {
             type = ApplyOperators(type, base.next, spec_end);
@@ -1834,8 +1847,8 @@ namespace heimdall
                 return TypeTable::Unknown;
             }
 
-            const auto[begin, end] = NodeSig(node);
-            const auto name_pos = Pos(m_symbols.decl_token[symbol]);
+            const auto [begin, end] = NodeSig(node);
+            const auto name_pos     = Pos(m_symbols.decl_token[symbol]);
             if (name_pos + 2 >= end || At(name_pos + 1) != Tok::Eq)
             {
                 return TypeTable::Unknown;
@@ -1848,7 +1861,8 @@ namespace heimdall
             }
 
             (void) begin;
-            return ParseTypeTokens(name_pos + 2, stop, m_model.ScopeOfNode(node), m_symbols.decl_token[symbol]);
+            return ParseTypeTokens(
+                name_pos + 2, stop, m_model.ScopeOfNode(node), m_symbols.decl_token[symbol]);
         }
 
         // `typedef T Name;` reads like a variable declaration.
@@ -1859,10 +1873,10 @@ namespace heimdall
     TypeId TyperImpl::OverloadReturn(SymbolId symbol)
     {
         TypeId shared = TypeTable::Unknown;
-        bool first = true;
-        for (auto candidate = m_model.LookupLocal(m_symbols.scope[symbol],
-            m_symbols.name[symbol]); candidate != kNone;
-            candidate = m_symbols.next_same_name[candidate])
+        bool   first  = true;
+        for (auto candidate = m_model.LookupLocal(m_symbols.scope[symbol], m_symbols.name[symbol]);
+             candidate != kNone;
+             candidate = m_symbols.next_same_name[candidate])
         {
             if (m_symbols.kind[candidate] != SymbolKind::Function)
             {
@@ -1875,13 +1889,13 @@ namespace heimdall
             }
 
             const auto type = SymbolType(candidate);
-            if (type == TypeTable::Unknown ||(!first && type != shared))
+            if (type == TypeTable::Unknown || (!first && type != shared))
             {
                 return TypeTable::Unknown;
             }
 
             shared = type;
-            first = false;
+            first  = false;
         }
 
         return shared;
@@ -1893,7 +1907,7 @@ namespace heimdall
         const auto kind = m_types.Kind(type);
         if (kind == TypeKind::Builtin)
         {
-            return!m_types.IsBuiltin(type, BuiltinType::Void);
+            return !m_types.IsBuiltin(type, BuiltinType::Void);
         }
 
         return kind == TypeKind::Pointer || kind == TypeKind::Enum;
@@ -1902,7 +1916,8 @@ namespace heimdall
     ScopeId TyperImpl::EnclosingClass(ScopeId scope) const
     {
         const auto& scopes = m_model.Scopes();
-        for (std::size_t steps = 0; scope != kNone && scope < scopes.Size() && steps <= scopes.Size(); ++steps)
+        for (std::size_t steps = 0;
+             scope != kNone && scope < scopes.Size() && steps <= scopes.Size(); ++steps)
         {
             if (scopes.kind[scope] == ScopeKind::Class)
             {
@@ -1944,7 +1959,7 @@ namespace heimdall
     {
         a = m_types.Strip(a);
         b = m_types.Strip(b);
-        if (!m_types.IsArithmetic(a) ||!m_types.IsArithmetic(b))
+        if (!m_types.IsArithmetic(a) || !m_types.IsArithmetic(b))
         {
             return TypeTable::Unknown;
         }
@@ -1952,9 +1967,7 @@ namespace heimdall
         const auto ba = static_cast<BuiltinType>(m_types.Arg(a));
         const auto bb = static_cast<BuiltinType>(m_types.Arg(b));
         for (const auto floating :
-            {
-                BuiltinType::LongDouble, BuiltinType::Double, BuiltinType::Float
-        })
+             { BuiltinType::LongDouble, BuiltinType::Double, BuiltinType::Float })
         {
             if (ba == floating || bb == floating)
             {
@@ -1969,7 +1982,7 @@ namespace heimdall
 
         const auto pa = Promote(ba);
         const auto pb = Promote(bb);
-        if (!pa ||!pb)
+        if (!pa || !pb)
         {
             return TypeTable::Unknown;
         }
@@ -1985,14 +1998,15 @@ namespace heimdall
         }
 
         const auto unsigned_type = IsUnsignedInt(*pa) ? *pa : *pb;
-        const auto signed_type = IsUnsignedInt(*pa) ? *pb : *pa;
+        const auto signed_type   = IsUnsignedInt(*pa) ? *pb : *pa;
         if (Rank(unsigned_type) >= Rank(signed_type))
         {
             return m_types.Builtin(unsigned_type);
         }
 
-        return signed_type == BuiltinType::LongLong && unsigned_type == BuiltinType::UInt ? m_types.Builtin(signed_type)
-        : TypeTable::Unknown;
+        return signed_type == BuiltinType::LongLong && unsigned_type == BuiltinType::UInt
+                   ? m_types.Builtin(signed_type)
+                   : TypeTable::Unknown;
     }
 
     TypeId TyperImpl::NodeType(std::uint32_t node)
@@ -2025,48 +2039,46 @@ namespace heimdall
     {
         switch (m_nodes.Kind(node))
         {
-        case GrammarKind::LiteralExpression:
-            return LiteralType(node);
-        case GrammarKind::IdentifierExpression:
-            return IdentifierType(node);
-        case GrammarKind::ParenthesizedExpression:
-        {
-            const auto kids = m_model.ChildrenOf(node);
-            return kids.size() == 1 ? NodeType(kids[0]) : TypeTable::Unknown;
-        }
-        case GrammarKind::CastExpression:
-        {
-            // `(T) operand` is a T: the parser only builds the node when T is certainly a type.
-            const auto kids = m_model.ChildrenOf(node);
-            if (kids.empty() || m_nodes.Kind(kids[0]) != GrammarKind::TypeSpecifier)
-            {
-                return TypeTable::Unknown;
+            case GrammarKind::LiteralExpression:
+                return LiteralType(node);
+            case GrammarKind::IdentifierExpression:
+                return IdentifierType(node);
+            case GrammarKind::ParenthesizedExpression: {
+                const auto kids = m_model.ChildrenOf(node);
+                return kids.size() == 1 ? NodeType(kids[0]) : TypeTable::Unknown;
             }
+            case GrammarKind::CastExpression: {
+                // `(T) operand` is a T: the parser only builds the node when T is certainly a type.
+                const auto kids = m_model.ChildrenOf(node);
+                if (kids.empty() || m_nodes.Kind(kids[0]) != GrammarKind::TypeSpecifier)
+                {
+                    return TypeTable::Unknown;
+                }
 
-            NodeType(kids.back());
-            const auto[begin, end] = NodeSig(kids[0]);
-            return ParseTypeTokens(begin, end, m_model.ScopeOfNode(node), m_sig[begin]);
-        }
-        case GrammarKind::UnaryExpression:
-            return UnaryType(node);
-        case GrammarKind::BinaryExpression:
-            return BinaryType(node);
-        case GrammarKind::ConditionalExpression:
-            return ConditionalType(node);
-        case GrammarKind::CallExpression:
-            return CallType(node);
-        case GrammarKind::SubscriptExpression:
-            return SubscriptType(node);
-        case GrammarKind::MemberExpression:
-            return MemberType(node, false);
-        default:
-            return TypeTable::Unknown;
+                NodeType(kids.back());
+                const auto [begin, end] = NodeSig(kids[0]);
+                return ParseTypeTokens(begin, end, m_model.ScopeOfNode(node), m_sig[begin]);
+            }
+            case GrammarKind::UnaryExpression:
+                return UnaryType(node);
+            case GrammarKind::BinaryExpression:
+                return BinaryType(node);
+            case GrammarKind::ConditionalExpression:
+                return ConditionalType(node);
+            case GrammarKind::CallExpression:
+                return CallType(node);
+            case GrammarKind::SubscriptExpression:
+                return SubscriptType(node);
+            case GrammarKind::MemberExpression:
+                return MemberType(node, false);
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     TypeId TyperImpl::LiteralType(std::uint32_t node)
     {
-        const auto[begin, end] = NodeSig(node);
+        const auto [begin, end] = NodeSig(node);
         return begin < end ? LiteralTypeAt(begin) : TypeTable::Unknown;
     }
 
@@ -2075,41 +2087,41 @@ namespace heimdall
         const auto& token = Tokens()[m_sig[begin]];
         switch (token.tok)
         {
-        case Tok::KwTrue:
-        case Tok::KwFalse:
-            return m_types.Builtin(BuiltinType::Bool);
-        case Tok::KwNullptr:
-            return m_types.Builtin(BuiltinType::NullptrT);
-        default:
-            break;
+            case Tok::KwTrue:
+            case Tok::KwFalse:
+                return m_types.Builtin(BuiltinType::Bool);
+            case Tok::KwNullptr:
+                return m_types.Builtin(BuiltinType::NullptrT);
+            default:
+                break;
         }
 
         switch (token.kind)
         {
-        case TokenKind::Number:
-            return NumberType(Text(m_sig[begin]));
-        case TokenKind::CharacterLiteral:
-            return CharType(Text(m_sig[begin]));
-        case TokenKind::StringLiteral:
-        case TokenKind::RawStringLiteral:
-        {
-            // Plain narrow literals only: `"..."` and `R"(...)"`.
-            const auto text = Text(m_sig[begin]);
-            if (!text.empty() && (text[0] == '"' ||(text[0] == 'R' && text.size() > 1 && text[1] == '"')))
-            {
-                return m_types.Pointer(m_types.Const(m_types.Builtin(BuiltinType::Char)));
-            }
+            case TokenKind::Number:
+                return NumberType(Text(m_sig[begin]));
+            case TokenKind::CharacterLiteral:
+                return CharType(Text(m_sig[begin]));
+            case TokenKind::StringLiteral:
+            case TokenKind::RawStringLiteral: {
+                // Plain narrow literals only: `"..."` and `R"(...)"`.
+                const auto text = Text(m_sig[begin]);
+                if (!text.empty() &&
+                    (text[0] == '"' || (text[0] == 'R' && text.size() > 1 && text[1] == '"')))
+                {
+                    return m_types.Pointer(m_types.Const(m_types.Builtin(BuiltinType::Char)));
+                }
 
-            return TypeTable::Unknown;
-        }
-        default:
-            return TypeTable::Unknown;
+                return TypeTable::Unknown;
+            }
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     TypeId TyperImpl::IdentifierType(std::uint32_t node)
     {
-        const auto[begin, end] = NodeSig(node);
+        const auto [begin, end] = NodeSig(node);
         if (end != begin + 1)
         {
             return TypeTable::Unknown;
@@ -2119,13 +2131,13 @@ namespace heimdall
         // The grammar reads these keywords as identifiers.
         switch (Tokens()[token].tok)
         {
-        case Tok::KwTrue:
-        case Tok::KwFalse:
-            return m_types.Builtin(BuiltinType::Bool);
-        case Tok::KwNullptr:
-            return m_types.Builtin(BuiltinType::NullptrT);
-        default:
-            break;
+            case Tok::KwTrue:
+            case Tok::KwFalse:
+                return m_types.Builtin(BuiltinType::Bool);
+            case Tok::KwNullptr:
+                return m_types.Builtin(BuiltinType::NullptrT);
+            default:
+                break;
         }
 
         if (Tokens()[token].tok == Tok::KwThis)
@@ -2146,95 +2158,103 @@ namespace heimdall
         }
 
         const auto kind = m_symbols.kind[symbol];
-        return kind == SymbolKind::Variable || kind == SymbolKind::Parameter ? SymbolType(symbol) : TypeTable::Unknown;
+        return kind == SymbolKind::Variable || kind == SymbolKind::Parameter
+                   ? SymbolType(symbol)
+                   : TypeTable::Unknown;
     }
 
     TypeId TyperImpl::UnaryType(std::uint32_t node)
     {
-        const auto kids = m_model.ChildrenOf(node);
-        const auto[begin, end] = NodeSig(node);
+        const auto kids         = m_model.ChildrenOf(node);
+        const auto [begin, end] = NodeSig(node);
         if (kids.empty() || end <= begin)
         {
             return TypeTable::Unknown;
         }
 
-        const Tok first = At(begin);
-        const bool prefix = (first == Tok::Plus || first == Tok::Minus || first == Tok::Bang || first == Tok::Tilde ||
-            first == Tok::Star || first == Tok::Amp || first == Tok::PlusPlus ||
-            first == Tok::MinusMinus) &&
+        const Tok  first = At(begin);
+        const bool prefix =
+            (first == Tok::Plus || first == Tok::Minus || first == Tok::Bang ||
+             first == Tok::Tilde || first == Tok::Star || first == Tok::Amp ||
+             first == Tok::PlusPlus || first == Tok::MinusMinus) &&
             Pos(m_nodes.FirstToken(kids[0])) == begin + 1;
         TypeId operand = TypeTable::Unknown;
-        Tok op = Tok::None;
+        Tok    op      = Tok::None;
         if (prefix)
         {
-            op = first;
+            op      = first;
             operand = NodeType(kids[0]);
         }
         else
         {
             const Tok last = At(end - 1);
-            if ((last != Tok::PlusPlus && last != Tok::MinusMinus) ||!SameStart(kids[0], node))
+            if ((last != Tok::PlusPlus && last != Tok::MinusMinus) || !SameStart(kids[0], node))
             {
                 return TypeTable::Unknown;
             }
 
-            op = last;
+            op      = last;
             operand = NodeType(kids[0]);
         }
 
         const auto stripped = m_types.Strip(operand);
         switch (op)
         {
-        case Tok::Bang:
-            return IsScalar(stripped) || m_types.IsArray(stripped) ? m_types.Builtin(BuiltinType::Bool)
-            : TypeTable::Unknown;
-        case Tok::Plus:
-        case Tok::Minus:
-            return m_types.IsPointer(stripped) && op == Tok::Plus ? stripped : Promoted(stripped);
-        case Tok::Tilde:
-            return m_types.IsInteger(stripped) ? Promoted(stripped) : TypeTable::Unknown;
-        case Tok::Star:
-            if (m_types.IsPointer(stripped) || m_types.IsArray(stripped))
-            {
-                return m_types.Value(m_types.Element(stripped));
-            }
+            case Tok::Bang:
+                return IsScalar(stripped) || m_types.IsArray(stripped)
+                           ? m_types.Builtin(BuiltinType::Bool)
+                           : TypeTable::Unknown;
+            case Tok::Plus:
+            case Tok::Minus:
+                return m_types.IsPointer(stripped) && op == Tok::Plus
+                           ? stripped
+                           : Promoted(stripped);
+            case Tok::Tilde:
+                return m_types.IsInteger(stripped) ? Promoted(stripped) : TypeTable::Unknown;
+            case Tok::Star:
+                if (m_types.IsPointer(stripped) || m_types.IsArray(stripped))
+                {
+                    return m_types.Value(m_types.Element(stripped));
+                }
 
-            return TypeTable::Unknown;
-        case Tok::Amp:
-            if (operand == TypeTable::Unknown || m_types.Kind(stripped) == TypeKind::Class ||
-                m_types.Kind(stripped) == TypeKind::External)
-            {
-                return TypeTable::Unknown; // `operator&` may be overloaded
-            }
+                return TypeTable::Unknown;
+            case Tok::Amp:
+                if (operand == TypeTable::Unknown || m_types.Kind(stripped) == TypeKind::Class ||
+                    m_types.Kind(stripped) == TypeKind::External)
+                {
+                    return TypeTable::Unknown; // `operator&` may be overloaded
+                }
 
-            return m_types.Pointer(m_types.Value(operand));
-        case Tok::PlusPlus:
-        case Tok::MinusMinus:
-            return m_types.IsArithmetic(stripped) || m_types.IsPointer(stripped) ? stripped : TypeTable::Unknown;
-        default:
-            return TypeTable::Unknown;
+                return m_types.Pointer(m_types.Value(operand));
+            case Tok::PlusPlus:
+            case Tok::MinusMinus:
+                return m_types.IsArithmetic(stripped) || m_types.IsPointer(stripped)
+                           ? stripped
+                           : TypeTable::Unknown;
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     TypeId TyperImpl::BinaryType(std::uint32_t node)
     {
         const auto kids = m_model.ChildrenOf(node);
-        if (kids.size() != 2 ||!SameStart(kids[0], node))
+        if (kids.size() != 2 || !SameStart(kids[0], node))
         {
             return TypeTable::Unknown;
         }
 
-        const auto op_pos = NodeSig(kids[0]).second;
-        const Tok op = At(op_pos);
-        const auto left_type = NodeType(kids[0]);
+        const auto op_pos     = NodeSig(kids[0]).second;
+        const Tok  op         = At(op_pos);
+        const auto left_type  = NodeType(kids[0]);
         const auto right_type = NodeType(kids[1]);
         if (op == Tok::Comma)
         {
             return right_type;
         }
 
-        const auto left = m_types.Decay(m_types.Strip(left_type));
-        const auto right = m_types.Decay(m_types.Strip(right_type));
+        const auto left    = m_types.Decay(m_types.Strip(left_type));
+        const auto right   = m_types.Decay(m_types.Strip(right_type));
         const auto boolean = m_types.Builtin(BuiltinType::Bool);
         if (IsAssignment(op))
         {
@@ -2243,58 +2263,62 @@ namespace heimdall
 
         switch (op)
         {
-        case Tok::AmpAmp:
-        case Tok::PipePipe:
-        case Tok::EqEq:
-        case Tok::BangEq:
-        case Tok::Lt:
-        case Tok::Gt:
-        case Tok::Le:
-        case Tok::Ge:
-            return IsScalar(left) && IsScalar(right) ? boolean : TypeTable::Unknown;
-        case Tok::Plus:
-            if (m_types.IsPointer(left) && m_types.IsInteger(right))
-            {
-                return left;
-            }
+            case Tok::AmpAmp:
+            case Tok::PipePipe:
+            case Tok::EqEq:
+            case Tok::BangEq:
+            case Tok::Lt:
+            case Tok::Gt:
+            case Tok::Le:
+            case Tok::Ge:
+                return IsScalar(left) && IsScalar(right) ? boolean : TypeTable::Unknown;
+            case Tok::Plus:
+                if (m_types.IsPointer(left) && m_types.IsInteger(right))
+                {
+                    return left;
+                }
 
-            if (m_types.IsInteger(left) && m_types.IsPointer(right))
-            {
-                return right;
-            }
+                if (m_types.IsInteger(left) && m_types.IsPointer(right))
+                {
+                    return right;
+                }
 
-            return Arithmetic(left, right);
-        case Tok::Minus:
-            if (m_types.IsPointer(left) && m_types.IsInteger(right))
-            {
-                return left;
-            }
+                return Arithmetic(left, right);
+            case Tok::Minus:
+                if (m_types.IsPointer(left) && m_types.IsInteger(right))
+                {
+                    return left;
+                }
 
-            return Arithmetic(left, right);
-        case Tok::Star:
-        case Tok::Slash:
-            return Arithmetic(left, right);
-        case Tok::Percent:
-            return m_types.IsInteger(left) && m_types.IsInteger(right) ? Arithmetic(left,
-                right) : TypeTable::Unknown;
-        case Tok::Shl:
-        case Tok::Shr:
-            return m_types.IsInteger(left) && m_types.IsInteger(right) ? Promoted(left) : TypeTable::Unknown;
-        case Tok::Amp:
-        case Tok::Pipe:
-        case Tok::Caret:
-            return (m_types.IsInteger(left) || m_types.IsBool(left)) && (m_types.IsInteger(right) || m_types.IsBool(right))
-            ? Arithmetic(left, right)
-            : TypeTable::Unknown;
-        default:
-            return TypeTable::Unknown;
+                return Arithmetic(left, right);
+            case Tok::Star:
+            case Tok::Slash:
+                return Arithmetic(left, right);
+            case Tok::Percent:
+                return m_types.IsInteger(left) && m_types.IsInteger(right)
+                           ? Arithmetic(left, right)
+                           : TypeTable::Unknown;
+            case Tok::Shl:
+            case Tok::Shr:
+                return m_types.IsInteger(left) && m_types.IsInteger(right)
+                           ? Promoted(left)
+                           : TypeTable::Unknown;
+            case Tok::Amp:
+            case Tok::Pipe:
+            case Tok::Caret:
+                return (m_types.IsInteger(left) || m_types.IsBool(left)) &&
+                               (m_types.IsInteger(right) || m_types.IsBool(right))
+                           ? Arithmetic(left, right)
+                           : TypeTable::Unknown;
+            default:
+                return TypeTable::Unknown;
         }
     }
 
     TypeId TyperImpl::ConditionalType(std::uint32_t node)
     {
         const auto kids = m_model.ChildrenOf(node);
-        if (kids.size() != 3 ||!SameStart(kids[0], node))
+        if (kids.size() != 3 || !SameStart(kids[0], node))
         {
             return TypeTable::Unknown;
         }
@@ -2329,7 +2353,7 @@ namespace heimdall
     TypeId TyperImpl::SubscriptType(std::uint32_t node)
     {
         const auto kids = m_model.ChildrenOf(node);
-        if (kids.size() != 2 ||!SameStart(kids[0], node))
+        if (kids.size() != 2 || !SameStart(kids[0], node))
         {
             return TypeTable::Unknown;
         }
@@ -2343,7 +2367,8 @@ namespace heimdall
         if (m_types.Kind(base) == TypeKind::Class)
         {
             const auto name = m_model.Names().Find("operator[]");
-            const auto member = name == kNone ? kNone : m_model.LookupMember(m_types.Arg(base), name);
+            const auto member =
+                name == kNone ? kNone : m_model.LookupMember(m_types.Arg(base), name);
             if (member != kNone && m_symbols.kind[member] == SymbolKind::Function)
             {
                 return OverloadReturn(member);
@@ -2362,7 +2387,8 @@ namespace heimdall
             return TypeTable::Unknown;
         }
 
-        if (member == "size" || member == "max_size" ||(member == "length" && IsStringHead(head)) ||
+        if (member == "size" || member == "max_size" ||
+            (member == "length" && IsStringHead(head)) ||
             (member == "capacity" && (head == "std::vector" || IsStringHead(head))))
         {
             return m_types.Builtin(BuiltinType::SizeT);
@@ -2376,21 +2402,21 @@ namespace heimdall
     TypeId TyperImpl::MemberType(std::uint32_t node, bool as_call)
     {
         const auto kids = m_model.ChildrenOf(node);
-        if (kids.size() != 2 ||!SameStart(kids[0], node))
+        if (kids.size() != 2 || !SameStart(kids[0], node))
         {
             return TypeTable::Unknown;
         }
 
-        const auto op_pos = NodeSig(kids[0]).second;
-        const Tok op = At(op_pos);
-        const auto[name_begin, name_end] = NodeSig(kids[1]);
-        if (name_end != name_begin + 1 ||!WordAt(name_begin) || name_begin != op_pos + 1)
+        const auto op_pos                 = NodeSig(kids[0]).second;
+        const Tok  op                     = At(op_pos);
+        const auto [name_begin, name_end] = NodeSig(kids[1]);
+        if (name_end != name_begin + 1 || !WordAt(name_begin) || name_begin != op_pos + 1)
         {
             return TypeTable::Unknown;
         }
 
         SymbolId member = kNone;
-        TypeId object = TypeTable::Unknown;
+        TypeId   object = TypeTable::Unknown;
         if (op == Tok::ColonColon)
         {
             member = m_model.ResolveToken(m_sig[name_begin]);
@@ -2430,13 +2456,15 @@ namespace heimdall
             return kind == SymbolKind::Function ? OverloadReturn(member) : TypeTable::Unknown;
         }
 
-        return kind == SymbolKind::Variable || kind == SymbolKind::Parameter ? SymbolType(member) : TypeTable::Unknown;
+        return kind == SymbolKind::Variable || kind == SymbolKind::Parameter
+                   ? SymbolType(member)
+                   : TypeTable::Unknown;
     }
 
     // `static_cast<T>(...)` and friends: the callee is `kw < T >`.
     TypeId TyperImpl::CastType(std::uint32_t callee)
     {
-        const auto[begin, end] = NodeSig(callee);
+        const auto [begin, end] = NodeSig(callee);
         if (end < begin + 4 || At(begin + 1) != Tok::Lt || At(end - 1) != Tok::Gt)
         {
             return TypeTable::Unknown;
@@ -2448,7 +2476,7 @@ namespace heimdall
     TypeId TyperImpl::CallType(std::uint32_t node)
     {
         const auto kids = m_model.ChildrenOf(node);
-        if (kids.empty() ||!SameStart(kids[0], node))
+        if (kids.empty() || !SameStart(kids[0], node))
         {
             return TypeTable::Unknown;
         }
@@ -2456,69 +2484,68 @@ namespace heimdall
         const auto callee = kids[0];
         switch (m_nodes.Kind(callee))
         {
-        case GrammarKind::IdentifierExpression:
-        {
-            const auto[begin, end] = NodeSig(callee);
-            if (end != begin + 1)
-            {
+            case GrammarKind::IdentifierExpression: {
+                const auto [begin, end] = NodeSig(callee);
+                if (end != begin + 1)
+                {
+                    return TypeTable::Unknown;
+                }
+
+                const Tok tok = At(begin);
+                if (tok == Tok::KwSizeof || tok == Tok::KwAlignof)
+                {
+                    return m_types.Builtin(BuiltinType::SizeT);
+                }
+
+                if (tok == Tok::KwNoexcept)
+                {
+                    return m_types.Builtin(BuiltinType::Bool);
+                }
+
+                if (IsBuiltinWord(tok))
+                {
+                    return ParseTypeTokens(begin, end, m_model.ScopeOfNode(callee), m_sig[begin]);
+                }
+
+                if (!WordAt(begin))
+                {
+                    return TypeTable::Unknown;
+                }
+
+                const auto symbol = m_model.ResolveToken(m_sig[begin]);
+                if (symbol == kNone)
+                {
+                    return TypeTable::Unknown;
+                }
+
+                switch (m_symbols.kind[symbol])
+                {
+                    case SymbolKind::Function:
+                        return OverloadReturn(symbol);
+                    case SymbolKind::Class:
+                        return (m_symbols.flags[symbol] & SymbolFlag::Template) != 0
+                                   ? TypeTable::Unknown
+                                   : m_types.Class(symbol);
+                    case SymbolKind::TypeAlias:
+                        return SymbolType(symbol);
+                    default:
+                        return TypeTable::Unknown;
+                }
+            }
+            case GrammarKind::TemplateIdExpression: {
+                const Tok tok = At(NodeSig(callee).first);
+                if (tok == Tok::KwStaticCast || tok == Tok::KwDynamicCast ||
+                    tok == Tok::KwReinterpretCast || tok == Tok::KwConstCast)
+                {
+                    return CastType(callee);
+                }
+
                 return TypeTable::Unknown;
             }
-
-            const Tok tok = At(begin);
-            if (tok == Tok::KwSizeof || tok == Tok::KwAlignof)
-            {
-                return m_types.Builtin(BuiltinType::SizeT);
-            }
-
-            if (tok == Tok::KwNoexcept)
-            {
-                return m_types.Builtin(BuiltinType::Bool);
-            }
-
-            if (IsBuiltinWord(tok))
-            {
-                return ParseTypeTokens(begin, end, m_model.ScopeOfNode(callee), m_sig[begin]);
-            }
-
-            if (!WordAt(begin))
-            {
-                return TypeTable::Unknown;
-            }
-
-            const auto symbol = m_model.ResolveToken(m_sig[begin]);
-            if (symbol == kNone)
-            {
-                return TypeTable::Unknown;
-            }
-
-            switch (m_symbols.kind[symbol])
-            {
-            case SymbolKind::Function:
-                return OverloadReturn(symbol);
-            case SymbolKind::Class:
-                return (m_symbols.flags[symbol] & SymbolFlag::Template) != 0 ? TypeTable::Unknown
-                : m_types.Class(symbol);
-            case SymbolKind::TypeAlias:
-                return SymbolType(symbol);
+            case GrammarKind::MemberExpression:
+                return MemberType(callee, true);
             default:
                 return TypeTable::Unknown;
-            }
-        }
-        case GrammarKind::TemplateIdExpression:
-        {
-            const Tok tok = At(NodeSig(callee).first);
-            if (tok == Tok::KwStaticCast || tok == Tok::KwDynamicCast || tok == Tok::KwReinterpretCast ||
-                tok == Tok::KwConstCast)
-            {
-                return CastType(callee);
-            }
-
-            return TypeTable::Unknown;
-        }
-        case GrammarKind::MemberExpression:
-            return MemberType(callee, true);
-        default:
-            return TypeTable::Unknown;
         }
     }
 
@@ -2535,21 +2562,21 @@ namespace heimdall
         {
             switch (m_nodes.Kind(node))
             {
-            case GrammarKind::LiteralExpression:
-            case GrammarKind::IdentifierExpression:
-            case GrammarKind::ParenthesizedExpression:
-            case GrammarKind::CastExpression:
-            case GrammarKind::UnaryExpression:
-            case GrammarKind::BinaryExpression:
-            case GrammarKind::ConditionalExpression:
-            case GrammarKind::CallExpression:
-            case GrammarKind::SubscriptExpression:
-            case GrammarKind::MemberExpression:
-                NodeType(node);
-                break;
-            default:
-                m_out.m_node_type[node] = TypeTable::Unknown;
-                break;
+                case GrammarKind::LiteralExpression:
+                case GrammarKind::IdentifierExpression:
+                case GrammarKind::ParenthesizedExpression:
+                case GrammarKind::CastExpression:
+                case GrammarKind::UnaryExpression:
+                case GrammarKind::BinaryExpression:
+                case GrammarKind::ConditionalExpression:
+                case GrammarKind::CallExpression:
+                case GrammarKind::SubscriptExpression:
+                case GrammarKind::MemberExpression:
+                    NodeType(node);
+                    break;
+                default:
+                    m_out.m_node_type[node] = TypeTable::Unknown;
+                    break;
             }
         }
     }
@@ -2557,7 +2584,7 @@ namespace heimdall
     TypeModel Typer::Type(const SemanticModel& model)
     {
         const auto nodes = model.Tree().NodesSoA().size();
-        TypeModel result(model, std::max<std::size_t>(32 * 1024, nodes * 24));
+        TypeModel  result(model, std::max<std::size_t>(32 * 1024, nodes * 24));
         TyperImpl(result, model).Run();
         return result;
     }

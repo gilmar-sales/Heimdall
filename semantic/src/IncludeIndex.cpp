@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <deque>
 #include <cstdio>
+#include <deque>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -25,27 +25,25 @@ namespace heimdall
         struct IncludeRef
         {
             std::string name;
-            bool angled = false;
-            bool next = false;
+            bool        angled = false;
+            bool        next   = false;
         };
 
         std::vector<IncludeRef> ScanIncludes(std::string_view text)
         {
-            std::vector<IncludeRef> refs;
-            const std::vector<Token> tokens = Lexer(text).Lex();
-            auto significant =[&](std::size_t i)->std::size_t
-            {
+            std::vector<IncludeRef>  refs;
+            const std::vector<Token> tokens      = Lexer(text).Lex();
+            auto                     significant = [&](std::size_t i) -> std::size_t {
                 while (i < tokens.size() && (tokens[i].kind == TokenKind::Whitespace ||
-                    tokens[i].kind == TokenKind::LineComment ||
-                    tokens[i].kind == TokenKind::BlockComment))
+                                             tokens[i].kind == TokenKind::LineComment ||
+                                             tokens[i].kind == TokenKind::BlockComment))
                 {
                     ++i;
                 }
 
                 return i;
             };
-            auto text_of =[&](std::size_t i)->std::string_view
-            {
+            auto text_of = [&](std::size_t i) -> std::string_view {
                 return text.substr(tokens[i].offset, tokens[i].length);
             };
             for (std::size_t i = 0; i < tokens.size(); ++i)
@@ -72,19 +70,21 @@ namespace heimdall
 
                 if (tokens[i].kind == TokenKind::StringLiteral)
                 {
-                    std::string_view quoted = text_of(i);
-                    const std::size_t open = quoted.find('"');
-                    const std::size_t close = quoted.rfind('"');
-                    if (open != std::string_view::npos && close != std::string_view::npos && close > open)
+                    std::string_view  quoted = text_of(i);
+                    const std::size_t open   = quoted.find('"');
+                    const std::size_t close  = quoted.rfind('"');
+                    if (open != std::string_view::npos && close != std::string_view::npos &&
+                        close > open)
                     {
-                        refs.push_back({std::string(quoted.substr(open + 1, close - open - 1)), false, next});
+                        refs.push_back({ std::string(quoted.substr(open + 1, close - open - 1)),
+                                         false, next });
                     }
                 }
                 else if (tokens[i].kind == TokenKind::Punctuation && text_of(i) == "<")
                 {
                     // Header names contain no `>`; slice raw source up to it.
                     const std::size_t start = tokens[i].offset + tokens[i].length;
-                    std::size_t stop = start;
+                    std::size_t       stop  = start;
                     while (stop < text.size() && text[stop] != '>' && text[stop] != '\n')
                     {
                         ++stop;
@@ -105,7 +105,7 @@ namespace heimdall
 
                         if (!name.empty())
                         {
-                            refs.push_back({std::string(name), true, next});
+                            refs.push_back({ std::string(name), true, next });
                         }
                     }
                 }
@@ -117,17 +117,16 @@ namespace heimdall
         std::filesystem::path NormalizedAbsolute(const std::filesystem::path& path)
         {
             std::error_code ec;
-            auto absolute = std::filesystem::absolute(path, ec);
+            auto            absolute = std::filesystem::absolute(path, ec);
             return (ec ? path : absolute).lexically_normal();
         }
 
-        std::filesystem::path TryResolve(
-            const std::string& name,
-            bool angled,
-            const std::filesystem::path& including_dir,
-            const CompileCommand* command,
-            const std::vector<std::filesystem::path>& system_dirs,
-            const SourceOverlay* overlay = nullptr)
+        std::filesystem::path TryResolve(const std::string&                        name,
+                                         bool                                      angled,
+                                         const std::filesystem::path&              including_dir,
+                                         const CompileCommand*                     command,
+                                         const std::vector<std::filesystem::path>& system_dirs,
+                                         const SourceOverlay* overlay = nullptr)
         {
             std::vector<std::filesystem::path> dirs;
             if (!angled)
@@ -140,14 +139,14 @@ namespace heimdall
                 if (command != nullptr)
                 {
                     dirs.insert(dirs.end(), command->quote_directories.begin(),
-                        command->quote_directories.end());
+                                command->quote_directories.end());
                 }
             }
 
             if (command != nullptr)
             {
                 dirs.insert(dirs.end(), command->include_directories.begin(),
-                    command->include_directories.end());
+                            command->include_directories.end());
             }
 
             dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
@@ -183,23 +182,22 @@ namespace heimdall
             }
 
             const auto relative = path.lexically_relative(dir);
-            return!relative.empty() && *relative.begin() != "..";
+            return !relative.empty() && *relative.begin() != "..";
         }
 
         // `#include_next`: continue the angled search after the directory that
         // supplied `current`.
-        std::filesystem::path TryResolveNext(
-            const std::string& name,
-            const std::filesystem::path& current,
-            const CompileCommand* command,
-            const std::vector<std::filesystem::path>& system_dirs,
-            const SourceOverlay* overlay = nullptr)
+        std::filesystem::path TryResolveNext(const std::string&                        name,
+                                             const std::filesystem::path&              current,
+                                             const CompileCommand*                     command,
+                                             const std::vector<std::filesystem::path>& system_dirs,
+                                             const SourceOverlay* overlay = nullptr)
         {
             std::vector<std::filesystem::path> dirs;
             if (command != nullptr)
             {
                 dirs.insert(dirs.end(), command->include_directories.begin(),
-                    command->include_directories.end());
+                            command->include_directories.end());
             }
 
             dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
@@ -239,7 +237,8 @@ namespace heimdall
 
         std::string DriverOf(const CompileCommand* command)
         {
-            if (command != nullptr && !command->arguments.empty() && !command->arguments.front().empty())
+            if (command != nullptr && !command->arguments.empty() &&
+                !command->arguments.front().empty())
             {
                 return command->arguments.front();
             }
@@ -248,16 +247,18 @@ namespace heimdall
         }
 
         std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes,
-            const SourceOverlay* overlay = nullptr)
+                             const SourceOverlay* overlay = nullptr)
         {
             if (overlay)
                 if (const auto source = overlay->Find(path))
                     return source->size() <= max_bytes ? *source : std::string {};
             std::error_code ec;
-            const auto size = std::filesystem::file_size(path, ec);
-            if (ec || size > max_bytes) return {};
+            const auto      size = std::filesystem::file_size(path, ec);
+            if (ec || size > max_bytes)
+                return {};
             std::ifstream in(path, std::ios::binary);
-            if (!in) return {};
+            if (!in)
+                return {};
             std::string content;
             content.resize(static_cast<std::size_t>(size));
             in.read(content.data(), static_cast<std::streamsize>(content.size()));
@@ -268,8 +269,8 @@ namespace heimdall
         // Name `X` of a leading `#ifndef X` / `#define X` include guard, or empty.
         std::string IncludeGuardOf(std::string_view text)
         {
-            auto directive_name =[](std::string_view line, std::string_view keyword)->std::string
-            {
+            auto directive_name =
+                [](std::string_view line, std::string_view keyword) -> std::string {
                 std::size_t i = 0;
                 while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
                 {
@@ -299,7 +300,8 @@ namespace heimdall
                 }
 
                 std::size_t end = i;
-                while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
+                while (end < line.size() &&
+                       (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
                 {
                     ++end;
                 }
@@ -307,8 +309,8 @@ namespace heimdall
                 return std::string(line.substr(i, end - i));
             };
             std::string guard;
-            bool in_block_comment = false;
-            std::size_t pos = 0;
+            bool        in_block_comment = false;
+            std::size_t pos              = 0;
             while (pos < text.size())
             {
                 std::size_t end = text.find('\n', pos);
@@ -318,7 +320,7 @@ namespace heimdall
                 }
 
                 std::string_view line = text.substr(pos, end - pos);
-                pos = end + 1;
+                pos                   = end + 1;
                 if (in_block_comment)
                 {
                     in_block_comment = line.find("*/") == std::string_view::npos;
@@ -360,16 +362,19 @@ namespace heimdall
         // so without this every `#if __cplusplus >= ...` guard in the standard
         // library selects nothing and the class bodies never reach the index.
         // Object-like macros only; empty when the compiler cannot be run.
-        Preprocessor::MacroMap CompilerMacros(const CompileCommand* command,
-            const std::vector<std::filesystem::path>& headers, const SourceOverlay* overlay)
+        Preprocessor::MacroMap CompilerMacros(const CompileCommand*                     command,
+                                              const std::vector<std::filesystem::path>& headers,
+                                              const SourceOverlay*                      overlay)
         {
-            Preprocessor::MacroMap macros;
-            static std::atomic<unsigned> counter{0};
-            std::error_code ec;
-            const std::filesystem::path scratch = std::filesystem::temp_directory_path(ec) /
+            Preprocessor::MacroMap       macros;
+            static std::atomic<unsigned> counter { 0 };
+            std::error_code              ec;
+            const std::filesystem::path  scratch =
+                std::filesystem::temp_directory_path(ec) /
                 ("heimdall-macros-" + std::to_string(counter.fetch_add(1)) + "-" +
-                std::to_string(std::hash<std::thread::id>{}
-                (std::this_thread::get_id()) % 100000) + ".cpp");
+                 std::to_string(
+                     std::hash<std::thread::id> {}(std::this_thread::get_id()) % 100000) +
+                 ".cpp");
             if (ec)
             {
                 return macros;
@@ -389,23 +394,24 @@ namespace heimdall
             }
 
             std::string flags;
-            bool has_standard = false;
+            bool        has_standard = false;
             if (command != nullptr)
             {
                 for (std::size_t i = 1; i < command->arguments.size(); ++i)
                 {
                     const std::string& argument = command->arguments[i];
-                    const bool takes_next = argument == "-isystem" || argument == "-iquote" ||
-                        argument == "-idirafter" || argument == "-I" || argument == "-D" || argument == "-U";
+                    const bool takes_next       = argument == "-isystem" || argument == "-iquote" ||
+                                                  argument == "-idirafter" || argument == "-I" ||
+                                                  argument == "-D" || argument == "-U";
                     if (takes_next && i + 1 < command->arguments.size())
                     {
                         flags += " " + argument + " \"" + command->arguments[++i] + "\"";
                     }
                     else if (argument.starts_with("-std=") || argument.starts_with("-stdlib=") ||
-                        argument.starts_with("-D") || argument.starts_with("-U") ||
-                        argument.starts_with("-I") || argument.starts_with("-isystem") ||
-                        argument.starts_with("-nostd") || argument.starts_with("--target") ||
-                        argument.starts_with("-m"))
+                             argument.starts_with("-D") || argument.starts_with("-U") ||
+                             argument.starts_with("-I") || argument.starts_with("-isystem") ||
+                             argument.starts_with("-nostd") || argument.starts_with("--target") ||
+                             argument.starts_with("-m"))
                     {
                         has_standard = has_standard || argument.starts_with("-std=");
                         flags += " \"" + argument + "\"";
@@ -415,25 +421,27 @@ namespace heimdall
 
             if (!has_standard)
             {
-                const CppStandard standard = command != nullptr ? command->standard : CppStandard::Cpp20;
-                flags += standard == CppStandard::Cpp26 ? " -std=c++26"
-                : standard == CppStandard::Cpp23 ? " -std=c++23" : " -std=c++20";
+                const CppStandard standard =
+                    command != nullptr ? command->standard : CppStandard::Cpp20;
+                flags += standard == CppStandard::Cpp26   ? " -std=c++26"
+                         : standard == CppStandard::Cpp23 ? " -std=c++23"
+                                                          : " -std=c++20";
             }
 
             const std::string driver = DriverOf(command);
 #if defined(_WIN32)
             const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
-                scratch.string() + "\" 2>nul\"";
-            std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(line.c_str(), "r"), _pclose);
+                                     scratch.string() + "\" 2>nul\"";
+            std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(line.c_str(), "r"), _pclose);
 #else
             const std::string line = "\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
-                scratch.string() + "\" 2>/dev/null";
-            std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(line.c_str(), "r"), pclose);
+                                     scratch.string() + "\" 2>/dev/null";
+            std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(line.c_str(), "r"), pclose);
 #endif
             if (pipe)
             {
                 std::string text;
-                char buffer[4096];
+                char        buffer[4096];
                 while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
                 {
                     text += buffer;
@@ -473,7 +481,8 @@ namespace heimdall
                         continue; // function-like macros stay unexpanded
                     }
 
-                    macros.emplace(std::string(row.substr(0, name_end)), std::string(row.substr(name_end + 1)));
+                    macros.emplace(std::string(row.substr(0, name_end)),
+                                   std::string(row.substr(name_end + 1)));
                 }
             }
 
@@ -495,7 +504,7 @@ namespace heimdall
 
         bool IsReservedName(std::string_view name)
         {
-            return!name.empty() && name.front() == '_';
+            return !name.empty() && name.front() == '_';
         }
 
         std::string ScopePathKey(const std::vector<std::string>& path)
@@ -516,7 +525,7 @@ namespace heimdall
     {
         // Thread-safe memoization: previously a bare static map (data race as
         // soon as workers arrive) populated on the I/O thread via popen.
-        static std::mutex mutex;
+        static std::mutex                                                          mutex;
         static std::unordered_map<std::string, std::vector<std::filesystem::path>> cache;
         const std::string key(compiler.empty() ? "c++" : compiler);
         {
@@ -530,10 +539,10 @@ namespace heimdall
         std::vector<std::filesystem::path> dirs;
 #if defined(_WIN32)
         const std::string command = "\"" + key + "\" -xc++ -E -v - <nul 2>&1";
-        std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(command.c_str(), "r"), _pclose);
+        std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(command.c_str(), "r"), _pclose);
 #else
         const std::string command = "\"" + key + "\" -xc++ -E -v - </dev/null 2>&1";
-        std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(command.c_str(), "r"), pclose);
+        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
 #endif
         if (pipe)
         {
@@ -591,45 +600,41 @@ namespace heimdall
 
     std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(
         const std::filesystem::path& base_dir,
-        std::string_view text,
-        const CompileCommand* command,
-        const Limits& limits,
-        ResolveReport* report,
-        const SourceOverlay* overlay)
+        std::string_view             text,
+        const CompileCommand*        command,
+        const Limits&                limits,
+        ResolveReport*               report,
+        const SourceOverlay*         overlay)
     {
         const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
-        std::vector<std::filesystem::path> normalized_system;
+        std::vector<std::filesystem::path>       normalized_system;
         normalized_system.reserve(system_dirs.size());
         for (const auto& dir : system_dirs)
         {
             normalized_system.push_back(NormalizedAbsolute(dir));
         }
 
-        auto in_system =[&](const std::filesystem::path& file)
-        {
-            return std::any_of(normalized_system.begin(), normalized_system.end(),
-                [&](const std::filesystem::path& dir)
-                {
-                    return IsUnder(file, dir);
-            });
+        auto in_system = [&](const std::filesystem::path& file) {
+            return std::any_of(
+                normalized_system.begin(), normalized_system.end(),
+                [&](const std::filesystem::path& dir) { return IsUnder(file, dir); });
         };
-        auto incomplete =[&]
-        {
+        auto incomplete = [&] {
             if (report != nullptr)
             {
                 report->complete = false;
             }
         };
         std::vector<std::filesystem::path> ordered;
-        std::unordered_set<std::string> visited;
+        std::unordered_set<std::string>    visited;
         // Worklist of (including directory, include name, angled, depth).
         struct Work
         {
             std::filesystem::path dir;
-            std::string name;
-            bool angled = false;
-            bool next = false;
-            int depth = 0;
+            std::string           name;
+            bool                  angled = false;
+            bool                  next   = false;
+            int                   depth  = 0;
             std::filesystem::path from;
         };
 
@@ -637,23 +642,19 @@ namespace heimdall
         // with the header cap a depth-first walk spent the whole budget inside
         // the last <standard header> and never reached the project's own headers.
         std::deque<Work> stack;
-        auto enqueue =[&](const std::filesystem::path& dir, int depth, std::string_view source,
-            const std::filesystem::path& from)
-        {
+        auto enqueue = [&](const std::filesystem::path& dir, int depth, std::string_view source,
+                           const std::filesystem::path& from) {
             const std::vector<IncludeRef> refs = ScanIncludes(source);
-            for (const bool angled :
-                {
-                    false, true
-            })
+            for (const bool angled : { false, true })
             {
                 for (const auto& ref : refs)
                 {
-                    if (ref.angled != angled ||(ref.next && !limits.follow_include_next))
+                    if (ref.angled != angled || (ref.next && !limits.follow_include_next))
                     {
                         continue;
                     }
 
-                    stack.push_back({dir, ref.name, ref.angled, ref.next, depth, from});
+                    stack.push_back({ dir, ref.name, ref.angled, ref.next, depth, from });
                 }
             }
         };
@@ -663,7 +664,7 @@ namespace heimdall
         {
             Work work = std::move(stack.front());
             stack.pop_front();
-            const bool from_system =!work.from.empty() && in_system(work.from);
+            const bool from_system = !work.from.empty() && in_system(work.from);
             if (work.depth > limits.max_depth)
             {
                 if (!from_system)
@@ -674,9 +675,10 @@ namespace heimdall
                 continue;
             }
 
-            const auto resolved = work.next
-            ? TryResolveNext(work.name, work.from, command, system_dirs, overlay)
-            : TryResolve(work.name, work.angled, work.dir, command, system_dirs, overlay);
+            const auto resolved =
+                work.next
+                    ? TryResolveNext(work.name, work.from, command, system_dirs, overlay)
+                    : TryResolve(work.name, work.angled, work.dir, command, system_dirs, overlay);
             if (resolved.empty())
             {
                 if (!from_system)
@@ -699,14 +701,14 @@ namespace heimdall
             {
                 if (overlay)
                     if (const auto source = overlay->Find(resolved))
-                {
-                    if (!source->empty())
                     {
-                        incomplete();
-                    }
+                        if (!source->empty())
+                        {
+                            incomplete();
+                        }
 
-                    continue;
-                }
+                        continue;
+                    }
 
                 std::error_code size_ec;
                 if (std::filesystem::file_size(resolved, size_ec) != 0 || size_ec)
@@ -735,14 +737,12 @@ namespace heimdall
         {
             // Standard headers have no extension; skip sources and binaries.
             static const std::unordered_set<std::string> accepted = {
-                "", ".h", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".inc", ".def", ".tpp", ".ipp", ".tcc", ".cuh",
+                "",     ".h",   ".hh",  ".hpp", ".hxx", ".h++", ".inl",
+                ".inc", ".def", ".tpp", ".ipp", ".tcc", ".cuh",
             };
             std::string extension = path.extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(),
-                [](unsigned char c)
-                {
-                    return static_cast<char>(std::tolower(c));
-            });
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             return accepted.contains(extension);
         }
 
@@ -769,10 +769,10 @@ namespace heimdall
 
     std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(
         const std::filesystem::path& base_dir,
-        bool angled,
-        std::string_view typed,
-        const CompileCommand* command,
-        std::size_t max_results)
+        bool                         angled,
+        std::string_view             typed,
+        const CompileCommand*        command,
+        std::size_t                  max_results)
     {
         // `typed` is what follows the opening delimiter: `dir/sub/na`.
         std::string_view directory_part;
@@ -780,7 +780,7 @@ namespace heimdall
         if (const auto slash = typed.find_last_of("/\\"); slash != std::string_view::npos)
         {
             directory_part = typed.substr(0, slash + 1);
-            name_prefix = typed.substr(slash + 1);
+            name_prefix    = typed.substr(slash + 1);
         }
 
         // Search order mirrors the compiler: `"..."` looks next to the including
@@ -788,14 +788,14 @@ namespace heimdall
         struct Root
         {
             std::filesystem::path path;
-            IncludeOrigin origin;
+            IncludeOrigin         origin;
         };
 
-        std::vector<Root> roots;
+        std::vector<Root>           roots;
         const std::filesystem::path typed_directory(directory_part);
         if (typed_directory.is_absolute())
         {
-            roots.push_back({{}, IncludeOrigin::Absolute});
+            roots.push_back({ {}, IncludeOrigin::Absolute });
         }
         else
         {
@@ -803,14 +803,14 @@ namespace heimdall
             {
                 if (!base_dir.empty())
                 {
-                    roots.push_back({base_dir, IncludeOrigin::Local});
+                    roots.push_back({ base_dir, IncludeOrigin::Local });
                 }
 
                 if (command != nullptr)
                 {
                     for (const auto& dir : command->quote_directories)
                     {
-                        roots.push_back({dir, IncludeOrigin::Quote});
+                        roots.push_back({ dir, IncludeOrigin::Quote });
                     }
                 }
             }
@@ -819,26 +819,27 @@ namespace heimdall
             {
                 for (const auto& dir : command->include_directories)
                 {
-                    roots.push_back({dir, IncludeOrigin::Include});
+                    roots.push_back({ dir, IncludeOrigin::Include });
                 }
             }
 
             for (const auto& dir : SystemIncludes(DriverOf(command)))
             {
-                roots.push_back({dir, IncludeOrigin::System});
+                roots.push_back({ dir, IncludeOrigin::System });
             }
         }
 
-        std::vector<IncludeCandidate> result;
+        std::vector<IncludeCandidate>   result;
         std::unordered_set<std::string> seen;
         for (const auto& root : roots)
         {
-            const std::filesystem::path directory = root.origin == IncludeOrigin::Absolute
-            ? typed_directory
-            : NormalizedAbsolute(root.path / typed_directory);
-            std::error_code ec;
-            std::filesystem::directory_iterator iterator(directory,
-                std::filesystem::directory_options::skip_permission_denied, ec);
+            const std::filesystem::path directory =
+                root.origin == IncludeOrigin::Absolute
+                    ? typed_directory
+                    : NormalizedAbsolute(root.path / typed_directory);
+            std::error_code                     ec;
+            std::filesystem::directory_iterator iterator(
+                directory, std::filesystem::directory_options::skip_permission_denied, ec);
             if (ec)
             {
                 continue;
@@ -847,14 +848,15 @@ namespace heimdall
             for (const auto& entry : iterator)
             {
                 const std::string name = entry.path().filename().string();
-                if (name.empty() || name.front() == '.' ||!StartsWithNoCase(name, name_prefix))
+                if (name.empty() || name.front() == '.' || !StartsWithNoCase(name, name_prefix))
                 {
                     continue;
                 }
 
                 std::error_code type_ec;
-                const bool is_directory = entry.is_directory(type_ec);
-                if (type_ec ||(!is_directory && (!entry.is_regular_file(type_ec) ||!IsIncludableFile(entry.path()))))
+                const bool      is_directory = entry.is_directory(type_ec);
+                if (type_ec || (!is_directory && (!entry.is_regular_file(type_ec) ||
+                                                  !IsIncludableFile(entry.path()))))
                 {
                     continue;
                 }
@@ -865,22 +867,22 @@ namespace heimdall
                     continue;
                 }
 
-                result.push_back({std::move(label), is_directory, root.origin, directory});
+                result.push_back({ std::move(label), is_directory, root.origin, directory });
             }
         }
 
         // Project directories before system ones (the cap must never drop a
         // project header in favour of a system one); inside an origin,
         // directories first because they lead to the rest of the tree.
-        std::sort(result.begin(), result.end(),[](const IncludeCandidate& a, const IncludeCandidate& b)
-            {
-                if (a.origin != b.origin)
-                {
-                    return a.origin < b.origin;
-            }
+        std::sort(result.begin(), result.end(),
+                  [](const IncludeCandidate& a, const IncludeCandidate& b) {
+                      if (a.origin != b.origin)
+                      {
+                          return a.origin < b.origin;
+                      }
 
-                return a.directory != b.directory ? a.directory : a.label < b.label;
-        });
+                      return a.directory != b.directory ? a.directory : a.label < b.label;
+                  });
         if (result.size() > max_results)
         {
             result.resize(max_results);
@@ -890,14 +892,13 @@ namespace heimdall
     }
 
     std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text,
-        std::size_t offset)
+                                                                 std::size_t      offset)
     {
-        offset = std::min(offset, text.size());
-        const std::size_t line_begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
-        const std::string_view line = text.substr(line_begin, offset - line_begin);
-        std::size_t i = 0;
-        auto skip_blanks =[&]
-        {
+        offset                             = std::min(offset, text.size());
+        const std::size_t      line_begin  = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
+        const std::string_view line        = text.substr(line_begin, offset - line_begin);
+        std::size_t            i           = 0;
+        auto                   skip_blanks = [&] {
             while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
             {
                 ++i;
@@ -926,12 +927,12 @@ namespace heimdall
         }
 
         skip_blanks();
-        if (i >= line.size() ||(line[i] != '<' && line[i] != '"'))
+        if (i >= line.size() || (line[i] != '<' && line[i] != '"'))
         {
             return std::nullopt;
         }
 
-        const bool angled = line[i] == '<';
+        const bool angled  = line[i] == '<';
         const char closing = angled ? '>' : '"';
         ++i;
         if (line.substr(i).find(closing) != std::string_view::npos)
@@ -939,18 +940,17 @@ namespace heimdall
             return std::nullopt;
         }
 
-        return IncludeContext{angled, line_begin + i};
+        return IncludeContext { angled, line_begin + i };
     }
 
-    std::filesystem::path IncludeIndex::ResolveIncludeAt(
-        const std::filesystem::path& base_dir,
-        std::string_view text,
-        std::size_t offset,
-        const CompileCommand* command)
+    std::filesystem::path IncludeIndex::ResolveIncludeAt(const std::filesystem::path& base_dir,
+                                                         std::string_view             text,
+                                                         std::size_t                  offset,
+                                                         const CompileCommand*        command)
     {
-        offset = std::min(offset, text.size());
+        offset                  = std::min(offset, text.size());
         const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
-        std::size_t end = text.find('\n', offset);
+        std::size_t       end   = text.find('\n', offset);
         if (end == std::string_view::npos)
         {
             end = text.size();
@@ -964,11 +964,11 @@ namespace heimdall
         }
 
         return TryResolve(refs.front().name, refs.front().angled, base_dir, command,
-            SystemIncludes(DriverOf(command)));
+                          SystemIncludes(DriverOf(command)));
     }
 
-    std::string IncludeIndex::IncludeFingerprint(const std::filesystem::path& base_dir,
-        std::string_view text, const CompileCommand* command)
+    std::string IncludeIndex::IncludeFingerprint(
+        const std::filesystem::path& base_dir, std::string_view text, const CompileCommand* command)
     {
         // Raw line scan: no lexer, no filesystem access. Only the file's own
         // include lines matter; nested headers are covered by CacheKey's mtimes.
@@ -984,9 +984,10 @@ namespace heimdall
                 end = text.size();
             }
 
-            std::string_view line = text.substr(pos, end - pos);
-            std::size_t first = 0;
-            while (first < line.size() && (line[first] == ' ' || line[first] == '\t' || line[first] == '\r'))
+            std::string_view line  = text.substr(pos, end - pos);
+            std::size_t      first = 0;
+            while (first < line.size() &&
+                   (line[first] == ' ' || line[first] == '\t' || line[first] == '\r'))
             {
                 ++first;
             }
@@ -999,10 +1000,9 @@ namespace heimdall
                     ++word;
                 }
 
-                const std::size_t word_end = line.find_first_of(" \t\r(", word);
-                const std::string_view directive = line.substr(word, word_end == std::string_view::npos
-                    ? word_end
-                    : word_end - word);
+                const std::size_t      word_end  = line.find_first_of(" \t\r(", word);
+                const std::string_view directive = line.substr(
+                    word, word_end == std::string_view::npos ? word_end : word_end - word);
                 if (directive == "include" || directive == "include_next")
                 {
                     fingerprint.append(line);
@@ -1048,14 +1048,14 @@ namespace heimdall
     }
 
     std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
-        const CompileCommand* command, const SourceOverlay* overlay)
+                                       const CompileCommand* command, const SourceOverlay* overlay)
     {
         std::string key;
         for (const auto& header : headers)
         {
             std::error_code ec;
-            const auto size = std::filesystem::file_size(header, ec);
-            const auto time = std::filesystem::last_write_time(header, ec);
+            const auto      size = std::filesystem::file_size(header, ec);
+            const auto      time = std::filesystem::last_write_time(header, ec);
             key += header.string();
             key += '\0';
             key += std::to_string(ec ? 0 : size);
@@ -1091,22 +1091,22 @@ namespace heimdall
         return key;
     }
 
-    IncludeIndex IncludeIndex::Build(
-        const std::vector<std::filesystem::path>& headers,
-        const CompileCommand* command,
-        const Limits& limits,
-        const SourceOverlay* overlay)
+    IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& headers,
+                                     const CompileCommand*                     command,
+                                     const Limits&                             limits,
+                                     const SourceOverlay*                      overlay)
     {
         IncludeIndex index;
         // Path -> position in index.m_scopes: merging is O(1) per scope instead of
         // the previous linear MergeScope scan (O(S^2) over hundreds of scopes for
         // <vector>+<string>+<algorithm>).
         std::unordered_map<std::string, std::size_t> positions;
-        ParserOptions options;
+        ParserOptions                                options;
         if (command != nullptr)
         {
             options.standard = command->standard;
-            options.shared_macros = std::make_shared<const Preprocessor::MacroMap>(command->defines);
+            options.shared_macros =
+                std::make_shared<const Preprocessor::MacroMap>(command->defines);
             if (!command->undefines.empty())
             {
                 auto filtered = std::make_shared<Preprocessor::MacroMap>(command->defines);
@@ -1125,8 +1125,11 @@ namespace heimdall
             if (!probed.contains("__cplusplus"))
             {
                 // No compiler to ask: at least select the right language branch.
-                probed["__cplusplus"] = options.standard == CppStandard::Cpp26 ? "202400L"
-                : options.standard == CppStandard::Cpp23 ? "202302L" : "202002L";
+                probed["__cplusplus"] =
+                    options.standard == CppStandard::Cpp26 ? "202400L"
+                    : options.standard == CppStandard::Cpp23
+                        ? "202302L"
+                        : "202002L";
             }
 
             // The project's own -D/-U win over what the compiler reports.
@@ -1143,7 +1146,8 @@ namespace heimdall
                 }
             }
 
-            options.shared_macros = std::make_shared<const Preprocessor::MacroMap>(std::move(probed));
+            options.shared_macros =
+                std::make_shared<const Preprocessor::MacroMap>(std::move(probed));
         }
 
         // Headers are independent: read + parse them on a worker fan-out, then
@@ -1157,8 +1161,8 @@ namespace heimdall
             {
                 for (std::size_t h = 0; h < headers.size(); ++h)
                 {
-                    const auto content = std::make_shared<const std::string>(ReadFile(headers[h], limits.max_file_bytes,
-                        overlay));
+                    const auto content = std::make_shared<const std::string>(
+                        ReadFile(headers[h], limits.max_file_bytes, overlay));
                     index.m_sources[h] = content;
                     if (content->empty())
                     {
@@ -1183,37 +1187,36 @@ namespace heimdall
 
                 workers = std::max<unsigned>(workers, 1);
                 workers = std::min<unsigned>(workers, static_cast<unsigned>(headers.size()));
-                std::atomic<std::size_t> next = 0;
+                std::atomic<std::size_t>  next = 0;
                 std::vector<std::jthread> pool;
                 pool.reserve(workers);
                 for (unsigned w = 0; w < workers; ++w)
                 {
-                    pool.emplace_back([&]
+                    pool.emplace_back([&] {
+                        while (true)
                         {
-                            while (true)
+                            const std::size_t h = next.fetch_add(1, std::memory_order_relaxed);
+                            if (h >= headers.size())
                             {
-                                const std::size_t h = next.fetch_add(1, std::memory_order_relaxed);
-                                if (h >= headers.size())
-                                {
-                                    return;
+                                return;
                             }
 
-                                const auto content = std::make_shared<const std::string>(ReadFile(headers[h], limits.max_file_bytes,
-                                overlay));
-                                index.m_sources[h] = content;
-                                if (content->empty())
-                                {
-                                    continue;
+                            const auto content = std::make_shared<const std::string>(
+                                ReadFile(headers[h], limits.max_file_bytes, overlay));
+                            index.m_sources[h] = content;
+                            if (content->empty())
+                            {
+                                continue;
                             }
 
                             // An exception escaping a worker thread is std::terminate.
-                                try
-                                {
-                                    per_header[h] = CompletionEngine::IndexScopes(*content, options);
+                            try
+                            {
+                                per_header[h] = CompletionEngine::IndexScopes(*content, options);
                             }
-                                catch (...)
-                                {
-                                    per_header[h] = {};
+                            catch (...)
+                            {
+                                per_header[h] = {};
                             }
                         }
                     });
@@ -1257,23 +1260,21 @@ namespace heimdall
                 }
 
                 IndexedScope filtered;
-                filtered.path = scope.path;
-                filtered.kind = scope.kind;
-                filtered.members = std::move(scope.members);
-                filtered.bases = std::move(scope.bases);
+                filtered.path            = scope.path;
+                filtered.kind            = scope.kind;
+                filtered.members         = std::move(scope.members);
+                filtered.bases           = std::move(scope.bases);
                 filtered.template_params = std::move(scope.template_params);
-                filtered.layout_unknown = scope.layout_unknown;
-                std::erase_if(filtered.members,
-                    [](const CompletionItem& member)
-                    {
-                        return IsReservedName(member.label);
+                filtered.layout_unknown  = scope.layout_unknown;
+                std::erase_if(filtered.members, [](const CompletionItem& member) {
+                    return IsReservedName(member.label);
                 });
-                if (!filtered.members.empty() ||!filtered.bases.empty())
+                if (!filtered.members.empty() || !filtered.bases.empty())
                 {
                     const std::string key = ScopePathKey(filtered.path);
                     if (const auto found = positions.find(key); found != positions.end())
                     {
-                        auto& entry = index.m_scopes[found->second];
+                        auto& entry          = index.m_scopes[found->second];
                         entry.layout_unknown = entry.layout_unknown || filtered.layout_unknown;
                         if (entry.template_params.empty())
                         {
@@ -1281,10 +1282,11 @@ namespace heimdall
                         }
 
                         entry.members.insert(entry.members.end(), filtered.members.begin(),
-                            filtered.members.end());
+                                             filtered.members.end());
                         for (auto& base : filtered.bases)
                         {
-                            if (std::find(entry.bases.begin(), entry.bases.end(), base) == entry.bases.end())
+                            if (std::find(entry.bases.begin(), entry.bases.end(), base) ==
+                                entry.bases.end())
                             {
                                 entry.bases.push_back(std::move(base));
                             }
@@ -1303,15 +1305,14 @@ namespace heimdall
         return index;
     }
 
-    IncludeIndex IncludeIndex::Build(
-        const std::filesystem::path& base_dir,
-        std::string_view text,
-        const CompileCommand* command,
-        const Limits& limits,
-        const SourceOverlay* overlay)
+    IncludeIndex IncludeIndex::Build(const std::filesystem::path& base_dir,
+                                     std::string_view             text,
+                                     const CompileCommand*        command,
+                                     const Limits&                limits,
+                                     const SourceOverlay*         overlay)
     {
-        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr, overlay), command, limits,
-            overlay);
+        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr, overlay), command,
+                     limits, overlay);
     }
 
 } // namespace heimdall

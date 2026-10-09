@@ -60,7 +60,8 @@ namespace heimdall::cli
         created_path = directory / std::string(heimdall::RuleConfigFileName);
         if (std::filesystem::exists(created_path, ec) && !ec && !options.force)
         {
-            error = "config already exists: " + created_path.string() + " (use --force to overwrite)";
+            error =
+                "config already exists: " + created_path.string() + " (use --force to overwrite)";
             return false;
         }
 

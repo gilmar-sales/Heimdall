@@ -1,6 +1,6 @@
-#include <Heimdall/ParseTree.hpp>
 #include "detail/GrammarParser.hpp"
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,19 +19,19 @@ namespace heimdall
 
     namespace
     {
-        constexpr int kTwo = 2;
-        constexpr int kThree = 3;
-        constexpr int kFour = 4;
-        constexpr int kFive = 5;
-        constexpr int kSix = 6;
-        constexpr int kSeven = 7;
-        constexpr int kEight = 8;
-        constexpr int kNine = 9;
-        constexpr int kTen = 10;
-        constexpr int kEleven = 11;
-        constexpr int kTwelve = 12;
-        constexpr int kThirteen = 13;
-        constexpr int kFourteen = 14;
+        constexpr int kTwo          = 2;
+        constexpr int kThree        = 3;
+        constexpr int kFour         = 4;
+        constexpr int kFive         = 5;
+        constexpr int kSix          = 6;
+        constexpr int kSeven        = 7;
+        constexpr int kEight        = 8;
+        constexpr int kNine         = 9;
+        constexpr int kTen          = 10;
+        constexpr int kEleven       = 11;
+        constexpr int kTwelve       = 12;
+        constexpr int kThirteen     = 13;
+        constexpr int kFourteen     = 14;
         constexpr int kScratchBytes = 32768;
 
         // Predefined macros that only decorate a declaration (`_GLIBCXX_NOEXCEPT`,
@@ -42,14 +42,17 @@ namespace heimdall
         // the significant-token view; the tokens stay in the tree.
         bool IsDecorationMacro(std::string_view value)
         {
-            const std::vector<Token> tokens = Lexer(value).Lex();
-            static constexpr std::string_view allowed[] = {"noexcept", "constexpr", "consteval", "constinit",
-                "inline", "const", "volatile", "static", "explicit", "extern", "__inline", "__inline__",
-                "__attribute__", "__declspec", "__extension__", "__restrict", "__restrict__", "__const",
-                "__volatile__", "alignas", "nodiscard", "__nodiscard__", "deprecated", "__deprecated__"};
-            int nest = 0;
+            const std::vector<Token>          tokens    = Lexer(value).Lex();
+            static constexpr std::string_view allowed[] = {
+                "noexcept",   "constexpr",     "consteval",     "constinit",     "inline",
+                "const",      "volatile",      "static",        "explicit",      "extern",
+                "__inline",   "__inline__",    "__attribute__", "__declspec",    "__extension__",
+                "__restrict", "__restrict__",  "__const",       "__volatile__",  "alignas",
+                "nodiscard",  "__nodiscard__", "deprecated",    "__deprecated__"
+            };
+            int  nest            = 0;
             bool opens_namespace = false;
-            bool saw_brace = false;
+            bool saw_brace       = false;
             for (const auto& token : tokens)
             {
                 if (token.kind == TokenKind::Whitespace)
@@ -104,67 +107,76 @@ namespace heimdall
             }
 
             // Braces are only decoration when they belong to a namespace open/close.
-            return!saw_brace || opens_namespace || value.find_first_not_of(" 	}") == std::string_view::npos;
+            return !saw_brace || opens_namespace ||
+                   value.find_first_not_of(" 	}") == std::string_view::npos;
         }
 
     } // namespace
 
     class GrammarParser
     {
-    public:
-        GrammarParser(
-            ParseTree& tree,
-            const PreprocessorResult& preprocessing,
-            std::stop_token stop,
-            const Preprocessor::MacroMap* macros,
-            const ParseReuse* reuse,
-            const TypeNameOracle* type_names)
-        : m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names)
+      public:
+        GrammarParser(ParseTree&                    tree,
+                      const PreprocessorResult&     preprocessing,
+                      std::stop_token               stop,
+                      const Preprocessor::MacroMap* macros,
+                      const ParseReuse*             reuse,
+                      const TypeNameOracle*         type_names) :
+            m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names)
         {
             m_names_hash = type_names != nullptr ? type_names->Fingerprint() : 0;
             // identifier text -> "is a decoration macro", memoized per parse
             std::unordered_map<std::string_view, bool> decoration;
             for (const auto& diagnostic : preprocessing.diagnostics)
             {
-                tree.m_diagnostics.push_back({diagnostic.offset, diagnostic.message});
+                tree.m_diagnostics.push_back({ diagnostic.offset, diagnostic.message });
             }
 
-            std::size_t active_cursor = 0;
+            std::size_t active_cursor    = 0;
             std::size_t directive_cursor = 0;
             for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
             {
                 const auto& token = tree.Tokens()[i];
                 while (active_cursor < preprocessing.active_ranges.size() &&
-                    preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <= token.offset)
+                       preprocessing.active_ranges[active_cursor].offset +
+                               preprocessing.active_ranges[active_cursor].length <=
+                           token.offset)
                 {
                     ++active_cursor;
                 }
 
                 while (directive_cursor < preprocessing.directives.size() &&
-                    preprocessing.directives[directive_cursor].offset + preprocessing.directives[directive_cursor].length <= token.offset)
+                       preprocessing.directives[directive_cursor].offset +
+                               preprocessing.directives[directive_cursor].length <=
+                           token.offset)
                 {
                     ++directive_cursor;
                 }
 
-                const bool active = active_cursor < preprocessing.active_ranges.size() &&
+                const bool active =
+                    active_cursor < preprocessing.active_ranges.size() &&
                     preprocessing.active_ranges[active_cursor].offset <= token.offset;
-                const bool directive = directive_cursor < preprocessing.directives.size() &&
+                const bool directive =
+                    directive_cursor < preprocessing.directives.size() &&
                     preprocessing.directives[directive_cursor].offset <= token.offset;
-                if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
-                    token.kind != TokenKind::BlockComment)
+                if ((active || directive) && token.kind != TokenKind::Whitespace &&
+                    token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
                 {
-                    if (macros != nullptr && (!macros->empty() ||!preprocessing.local_macros.empty()) && !directive &&
+                    if (macros != nullptr &&
+                        (!macros->empty() || !preprocessing.local_macros.empty()) && !directive &&
                         token.kind == TokenKind::Identifier)
                     {
-                        const std::string_view word = tree.m_source.substr(token.offset, token.length);
+                        const std::string_view word =
+                            tree.m_source.substr(token.offset, token.length);
                         auto cached = decoration.find(word);
                         if (cached == decoration.end())
                         {
                             const auto local = preprocessing.local_macros.find(std::string(word));
                             const auto found = macros->find(word);
-                            const bool is_decoration = local != preprocessing.local_macros.end()
-                            ? IsDecorationMacro(local->second)
-                            : found != macros->end() && IsDecorationMacro(found->second);
+                            const bool is_decoration =
+                                local != preprocessing.local_macros.end()
+                                    ? IsDecorationMacro(local->second)
+                                    : found != macros->end() && IsDecorationMacro(found->second);
                             cached = decoration.emplace(word, is_decoration).first;
                         }
 
@@ -204,7 +216,7 @@ namespace heimdall
                 {
                     if (!stack.empty() && Closes(m_sig_tok[stack.back()], t))
                     {
-                        m_match[i] = stack.back();
+                        m_match[i]            = stack.back();
                         m_match[stack.back()] = i;
                         stack.pop_back();
                     }
@@ -226,13 +238,13 @@ namespace heimdall
                             {
                                 const std::uint32_t open_tok = m_sig[stack[k]];
                                 tree.m_diagnostics.push_back(
-                                    {tree.Tokens()[open_tok].offset, "unclosed delimiter"});
+                                    { tree.Tokens()[open_tok].offset, "unclosed delimiter" });
                             }
 
-                            m_match[i] = stack[found];
+                            m_match[i]            = stack[found];
                             m_match[stack[found]] = i;
                             stack.erase(stack.begin() + static_cast<std::ptrdiff_t>(found),
-                                stack.end());
+                                        stack.end());
                         }
                     }
                 }
@@ -251,27 +263,27 @@ namespace heimdall
             ParseScope(0, m_sig.size(), ParseTree::RootNode, false);
         }
 
-    private:
+      private:
         static constexpr std::uint32_t Invalid = static_cast<std::uint32_t>(-1);
 
         alignas(alignof(std::max_align_t)) std::array<std::byte, kScratchBytes> m_scratch_buffer;
-        std::pmr::monotonic_buffer_resource m_scratch{m_scratch_buffer.data(),
-            m_scratch_buffer.size()};
-        ParseTree& m_tree;
-        std::stop_token m_stop;
-        std::pmr::vector<std::uint32_t> m_sig{&m_scratch};
+        std::pmr::monotonic_buffer_resource m_scratch { m_scratch_buffer.data(),
+                                                        m_scratch_buffer.size() };
+        ParseTree&                          m_tree;
+        std::stop_token                     m_stop;
+        std::pmr::vector<std::uint32_t>     m_sig { &m_scratch };
 
-        std::pmr::vector<Tok> m_sig_tok{&m_scratch};
-        std::pmr::vector<std::uint32_t> m_match{&m_scratch};
-        std::uint32_t m_last_expression_node = Invalid;
-        const ParseReuse* m_reuse = nullptr;
-        const TypeNameOracle* m_oracle = nullptr;
+        std::pmr::vector<Tok>           m_sig_tok { &m_scratch };
+        std::pmr::vector<std::uint32_t> m_match { &m_scratch };
+        std::uint32_t                   m_last_expression_node = Invalid;
+        const ParseReuse*               m_reuse                = nullptr;
+        const TypeNameOracle*           m_oracle               = nullptr;
         // File-level names (flags above) and their order-independent hash, seeded
         // with the oracle's fingerprint; block scopes live on a stack.
         struct BlockName
         {
             std::string_view name;
-            std::uint8_t flags;
+            std::uint8_t     flags;
         };
 
         // Open-addressing table (power-of-two size, linear probing) over views into the
@@ -279,26 +291,27 @@ namespace heimdall
         struct NameSlot
         {
             std::string_view name;
-            std::uint64_t hash = 0;
-            std::uint8_t flags = 0;
+            std::uint64_t    hash  = 0;
+            std::uint8_t     flags = 0;
         };
 
-        std::vector<NameSlot> m_slots;
-        std::size_t m_slot_count = 0;
-        std::uint64_t m_names_hash = 0;
-        std::vector<BlockName> m_block_names;
+        std::vector<NameSlot>    m_slots;
+        std::size_t              m_slot_count = 0;
+        std::uint64_t            m_names_hash = 0;
+        std::vector<BlockName>   m_block_names;
         std::vector<std::size_t> m_block_starts;
-        std::size_t m_registered_upto = 0;
-        std::uint64_t m_item_names_hash = 0;
+        std::size_t              m_registered_upto = 0;
+        std::uint64_t            m_item_names_hash = 0;
         // Top-level item currently being parsed (see FinishItem / TryReuseItem).
-        bool m_item_open = false;
-        std::size_t m_item_first_sig = 0;
+        bool        m_item_open       = false;
+        std::size_t m_item_first_sig  = 0;
         std::size_t m_item_node_begin = 0;
         std::size_t m_item_diag_begin = 0;
 
         std::string_view Text(std::size_t sig) const
         {
-            if (sig >= m_sig.size()) return {};
+            if (sig >= m_sig.size())
+                return {};
             const auto& token = m_tree.Tokens()[m_sig[sig]];
             return m_tree.m_source.substr(token.offset, token.length);
         }
@@ -306,18 +319,15 @@ namespace heimdall
         static bool Closes(Tok open, Tok close)
         {
             return (open == Tok::LParen && close == Tok::RParen) ||
-                (open == Tok::LBracket && close == Tok::RBracket) ||
-                (open == Tok::LBrace && close == Tok::RBrace);
+                   (open == Tok::LBracket && close == Tok::RBracket) ||
+                   (open == Tok::LBrace && close == Tok::RBrace);
         }
 
-        std::size_t Add(
-            GrammarKind kind,
-            std::size_t begin,
-            std::size_t end,
-            std::size_t parent)
+        std::size_t Add(GrammarKind kind, std::size_t begin, std::size_t end, std::size_t parent)
         {
             const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
-            const std::size_t past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
+            const std::size_t past =
+                end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
             const std::uint32_t index = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
             m_tree.m_nodes_soa.push_back(
                 static_cast<std::uint8_t>(kind),
@@ -361,26 +371,31 @@ namespace heimdall
 
         void SetNodeRange(std::size_t node, std::size_t begin, std::size_t end)
         {
-            m_tree.m_nodes_soa.first_token[node] = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
-            const auto past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+            m_tree.m_nodes_soa.first_token[node] =
+                begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
+            const auto past                      = end > begin && end - 1 < m_sig.size()
+                                                       ? m_sig[end - 1] + 1
+                                                       : m_tree.m_nodes_soa.first_token[node];
             m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
-            m_tree.m_nodes_aos_dirty = true;
+            m_tree.m_nodes_aos_dirty             = true;
         }
 
         bool IsDirective(std::size_t sig) const
         {
-            if (sig >= m_sig.size() ||(!Is(sig, "#") && !Is(sig, "%:")))
+            if (sig >= m_sig.size() || (!Is(sig, "#") && !Is(sig, "%:")))
             {
                 return false;
             }
 
             const auto offset = m_tree.Tokens()[m_sig[sig]].offset;
 
-            const auto nl = offset == 0 ? std::string_view::npos : m_tree.m_source.rfind('\n', offset - 1);
+            const auto nl =
+                offset == 0 ? std::string_view::npos : m_tree.m_source.rfind('\n', offset - 1);
             const auto line_start = nl == std::string_view::npos ? 0 : nl + 1;
             for (auto i = line_start; i < offset; ++i)
             {
-                if (m_tree.m_source[i] != ' ' && m_tree.m_source[i] != '\t' && m_tree.m_source[i] != '\r')
+                if (m_tree.m_source[i] != ' ' && m_tree.m_source[i] != '\t' &&
+                    m_tree.m_source[i] != '\r')
                 {
                     return false;
                 }
@@ -391,9 +406,9 @@ namespace heimdall
 
         std::size_t SkipDirective(std::size_t sig, std::size_t end, std::size_t parent)
         {
-            const auto start = sig;
-            const auto offset = m_tree.Tokens()[m_sig[sig]].offset;
-            auto line_end = m_tree.m_source.find('\n', offset);
+            const auto start    = sig;
+            const auto offset   = m_tree.Tokens()[m_sig[sig]].offset;
+            auto       line_end = m_tree.m_source.find('\n', offset);
             if (line_end == std::string_view::npos)
             {
                 line_end = m_tree.m_source.size();
@@ -452,14 +467,16 @@ namespace heimdall
             std::size_t angle_depth = 0;
             for (auto i = begin; i < end;)
             {
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i] + 1;
                     continue;
                 }
 
                 if (Is(i, "<") && i > begin &&
-                    (m_tree.Tokens()[m_sig[i - 1]].kind == TokenKind::Identifier || Is(i - 1, ">") || Is(i - 1, ">>")))
+                    (m_tree.Tokens()[m_sig[i - 1]].kind == TokenKind::Identifier ||
+                     Is(i - 1, ">") || Is(i - 1, ">>")))
                 {
                     ++angle_depth;
                 }
@@ -492,7 +509,8 @@ namespace heimdall
             std::size_t depth = 1;
             for (auto i = open + 1; i < end;)
             {
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i] + 1;
                     continue;
@@ -538,7 +556,8 @@ namespace heimdall
                     return i;
                 }
 
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i] + 1;
                 }
@@ -560,7 +579,8 @@ namespace heimdall
                     return i;
                 }
 
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i] + 1;
                 }
@@ -575,76 +595,75 @@ namespace heimdall
 
         bool IsIdentifierToken(std::size_t sig) const
         {
-            return sig < m_sig.size() &&
-                m_tree.Tokens()[m_sig[sig]].kind == TokenKind::Identifier;
+            return sig < m_sig.size() && m_tree.Tokens()[m_sig[sig]].kind == TokenKind::Identifier;
         }
 
         static bool IsBuiltinType(std::string_view text)
         {
             switch (text.size())
             {
-            case kThree:
-                return text == "int";
-            case kFour:
-                switch (text[0])
-                {
-                case 'v':
-                    return text == "void";
-                case 'b':
-                    return text == "bool";
-                case 'c':
-                    return text == "char";
-                case 'l':
-                    return text == "long";
-                case 'a':
-                    return text == "auto";
+                case kThree:
+                    return text == "int";
+                case kFour:
+                    switch (text[0])
+                    {
+                        case 'v':
+                            return text == "void";
+                        case 'b':
+                            return text == "bool";
+                        case 'c':
+                            return text == "char";
+                        case 'l':
+                            return text == "long";
+                        case 'a':
+                            return text == "auto";
+                        default:
+                            return false;
+                    }
+                case kFive:
+                    switch (text[0])
+                    {
+                        case 's':
+                            return text == "short";
+                        case 'f':
+                            return text == "float";
+                        default:
+                            return false;
+                    }
+                case kSix:
+                    switch (text[0])
+                    {
+                        case 'd':
+                            return text == "double";
+                        case 's':
+                            return text == "signed";
+                        default:
+                            return false;
+                    }
+                case kSeven:
+                    switch (text[0])
+                    {
+                        case 'w':
+                            return text == "wchar_t";
+                        case 'c':
+                            return text == "char8_t";
+                        default:
+                            return false;
+                    }
+                case kEight:
+                    switch (text[0])
+                    {
+                        case 'u':
+                            return text == "unsigned";
+                        case 'c':
+                            return text == "char16_t" || text == "char32_t";
+                        case 'd':
+                            return text == "decltype";
+                        default:
+                            return false;
+                    }
                 default:
                     return false;
-                }
-            case kFive:
-                switch (text[0])
-                {
-                case 's':
-                    return text == "short";
-                case 'f':
-                    return text == "float";
-                default:
-                    return false;
-                }
-            case kSix:
-                switch (text[0])
-                {
-                case 'd':
-                    return text == "double";
-                case 's':
-                    return text == "signed";
-                default:
-                    return false;
-                }
-            case kSeven:
-                switch (text[0])
-                {
-                case 'w':
-                    return text == "wchar_t";
-                case 'c':
-                    return text == "char8_t";
-                default:
-                    return false;
-                }
-            case kEight:
-                switch (text[0])
-                {
-                case 'u':
-                    return text == "unsigned";
-                case 'c':
-                    return text == "char16_t" || text == "char32_t";
-                case 'd':
-                    return text == "decltype";
-                default:
-                    return false;
-                }
-            default:
-                return false;
             }
         }
 
@@ -657,68 +676,69 @@ namespace heimdall
 
             switch (text.size())
             {
-            case kFour:
-                return text == "enum";
-            case kFive:
-                switch (text[0])
-                {
-                case 'c':
-                    return text == "const" || text == "class";
-                case 'u':
-                    return text == "union";
+                case kFour:
+                    return text == "enum";
+                case kFive:
+                    switch (text[0])
+                    {
+                        case 'c':
+                            return text == "const" || text == "class";
+                        case 'u':
+                            return text == "union";
+                        default:
+                            return false;
+                    }
+                case kSix:
+                    switch (text[0])
+                    {
+                        case 's':
+                            return text == "static" || text == "struct";
+                        case 'e':
+                            return text == "extern";
+                        case 'i':
+                            return text == "inline";
+                        case 'f':
+                            return text == "friend";
+                        default:
+                            return false;
+                    }
+                case kSeven:
+                    switch (text[0])
+                    {
+                        case 'v':
+                            return text == "virtual";
+                        case 't':
+                            return text == "typedef";
+                        case 'm':
+                            return text == "mutable";
+                        default:
+                            return false;
+                    }
+                case kEight:
+                    switch (text[0])
+                    {
+                        case 'v':
+                            return text == "volatile";
+                        case 'e':
+                            return text == "explicit";
+                        case 't':
+                            return text == "typename";
+                        default:
+                            return false;
+                    }
+                case kNine:
+                    switch (text[0])
+                    {
+                        case 'c':
+                            return text == "constexpr" || text == "consteval" ||
+                                   text == "constinit";
+                        default:
+                            return false;
+                    }
+                case kTwelve:
+                    return text == "thread_local";
                 default:
                     return false;
-                }
-            case kSix:
-                switch (text[0])
-                {
-                case 's':
-                    return text == "static" || text == "struct";
-                case 'e':
-                    return text == "extern";
-                case 'i':
-                    return text == "inline";
-                case 'f':
-                    return text == "friend";
-                default:
-                    return false;
-                }
-            case kSeven:
-                switch (text[0])
-                {
-                case 'v':
-                    return text == "virtual";
-                case 't':
-                    return text == "typedef";
-                case 'm':
-                    return text == "mutable";
-                default:
-                    return false;
-                }
-            case kEight:
-                switch (text[0])
-                {
-                case 'v':
-                    return text == "volatile";
-                case 'e':
-                    return text == "explicit";
-                case 't':
-                    return text == "typename";
-                default:
-                    return false;
-                }
-            case kNine:
-                switch (text[0])
-                {
-                case 'c':
-                    return text == "constexpr" || text == "consteval" || text == "constinit";
-                default:
-                    return false;
-                }
-            case kTwelve:
-                return text == "thread_local";
-            default:
-                return false;
             }
         }
 
@@ -737,7 +757,7 @@ namespace heimdall
         bool IsAlignasStart(std::size_t i, std::size_t end) const
         {
             return i + 1 < end && Is(i, "alignas") && Is(i + 1, "(") && m_match[i + 1] != Invalid &&
-                m_match[i + 1] < end;
+                   m_match[i + 1] < end;
         }
 
         std::size_t SkipAttributes(std::size_t i, std::size_t end, std::size_t parent)
@@ -745,7 +765,7 @@ namespace heimdall
             while (IsAttributeStart(i, end) || IsAlignasStart(i, end))
             {
                 const bool alignas_spec = Is(i, "alignas");
-                const auto outer_close = alignas_spec ? m_match[i + 1] : m_match[i];
+                const auto outer_close  = alignas_spec ? m_match[i + 1] : m_match[i];
                 if (outer_close == Invalid || outer_close >= end)
                 {
                     break;
@@ -793,8 +813,7 @@ namespace heimdall
         std::size_t FindTopLevelRequires(std::size_t begin, std::size_t end) const
         {
             std::unordered_map<std::size_t, std::size_t> close_cache;
-            auto template_close =[&](std::size_t open)->std::size_t
-            {
+            auto template_close = [&](std::size_t open) -> std::size_t {
                 if (const auto hit = close_cache.find(open); hit != close_cache.end())
                 {
                     return hit->second;
@@ -807,7 +826,8 @@ namespace heimdall
             std::size_t angle_depth = 0;
             for (auto i = begin; i < end;)
             {
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i] + 1;
                     continue;
@@ -868,7 +888,7 @@ namespace heimdall
                     ++head;
                 }
 
-                if (head >= end ||!IsIdentifierToken(head))
+                if (head >= end || !IsIdentifierToken(head))
                 {
                     break;
                 }
@@ -904,13 +924,10 @@ namespace heimdall
         }
 
         std::size_t ParseQualifiedName(
-            std::size_t begin,
-            std::size_t end,
-            std::size_t parent,
-            std::size_t& name_pos)
+            std::size_t begin, std::size_t end, std::size_t parent, std::size_t& name_pos)
         {
             name_pos = Invalid;
-            auto i = ParseNestedNamePrefix(begin, end, parent);
+            auto i   = ParseNestedNamePrefix(begin, end, parent);
             if (i < end && Is(i, "::"))
             {
                 ++i;
@@ -963,7 +980,7 @@ namespace heimdall
 
             if (i < end && IsIdentifierToken(i))
             {
-                name_pos = i;
+                name_pos   = i;
                 auto after = i + 1;
                 if (after < end && Is(after, "<"))
                 {
@@ -984,9 +1001,9 @@ namespace heimdall
         // Creates one TypeSpecifier node plus NestedNameSpecifier / AttributeSpecifier children.
         std::size_t ParseDeclSpecifiers(std::size_t begin, std::size_t end, std::size_t parent)
         {
-            auto i = SkipAttributes(begin, end, parent);
+            auto       i          = SkipAttributes(begin, end, parent);
             const auto spec_start = i;
-            bool saw_type = false;
+            bool       saw_type   = false;
             while (i < end)
             {
                 i = SkipAttributes(i, end, parent);
@@ -996,9 +1013,10 @@ namespace heimdall
                 }
 
                 const auto text = Text(i);
-                if (text == "decltype" && i + 1 < end && Is(i + 1, "(") && m_match[i + 1] != Invalid)
+                if (text == "decltype" && i + 1 < end && Is(i + 1, "(") &&
+                    m_match[i + 1] != Invalid)
                 {
-                    i = m_match[i + 1] + 1;
+                    i        = m_match[i + 1] + 1;
                     saw_type = true;
                     continue;
                 }
@@ -1006,10 +1024,10 @@ namespace heimdall
                 if (text == "struct" || text == "class" || text == "union" || text == "enum")
                 {
                     ++i;
-                    i = SkipAttributes(i, end, parent);
+                    i                 = SkipAttributes(i, end, parent);
                     std::size_t dummy = Invalid;
-                    i = ParseQualifiedName(i, end, parent, dummy);
-                    saw_type = true;
+                    i                 = ParseQualifiedName(i, end, parent, dummy);
+                    saw_type          = true;
 
                     // Inline definition `struct S [final] [: Base] { ... } name(args);`:
                     // the body belongs to the type specifier, not to the declarator.
@@ -1027,7 +1045,8 @@ namespace heimdall
                         }
                     }
 
-                    if (body < end && Is(body, "{") && m_match[body] != Invalid && m_match[body] < end)
+                    if (body < end && Is(body, "{") && m_match[body] != Invalid &&
+                        m_match[body] < end)
                     {
                         i = m_match[body] + 1;
                     }
@@ -1037,15 +1056,18 @@ namespace heimdall
 
                 if (IsDeclSpecifierKeyword(text))
                 {
-                    if (text == "explicit" && i + 1 < end && Is(i + 1, "(") && m_match[i + 1] != Invalid)
+                    if (text == "explicit" && i + 1 < end && Is(i + 1, "(") &&
+                        m_match[i + 1] != Invalid)
                     {
                         i = m_match[i + 1] + 1;
                         continue;
                     }
 
-                    // `signed long`, `unsigned long long`, `long double` etc. all stay in specifiers.
+                    // `signed long`, `unsigned long long`, `long double` etc. all stay in
+                    // specifiers.
                     ++i;
-                    saw_type |= IsBuiltinType(text) || text == "struct" || text == "class" ||
+                    saw_type |=
+                        IsBuiltinType(text) || text == "struct" || text == "class" ||
                         text == "union" || text == "enum" || text == "typename" || text == "auto";
                     // A user type name directly after `typename` belongs to the specifiers.
                     if ((text == "typename" || text == "const" || text == "volatile") && i < end)
@@ -1073,7 +1095,7 @@ namespace heimdall
 
                             if (look < end && IsIdentifierToken(look))
                             {
-                                i = after;
+                                i        = after;
                                 saw_type = true;
                             }
                         }
@@ -1082,14 +1104,14 @@ namespace heimdall
                     continue;
                 }
 
-                // User-defined type: nested-name-specifier? identifier [<...>] (but not the declarator name).
-                // Only absorb a type when none has been seen yet; otherwise the identifier
-                // is the declarator name (e.g. `left` in `int left`).
+                // User-defined type: nested-name-specifier? identifier [<...>] (but not the
+                // declarator name). Only absorb a type when none has been seen yet; otherwise the
+                // identifier is the declarator name (e.g. `left` in `int left`).
                 if ((IsIdentifierToken(i) || Is(i, "::")) && !saw_type)
                 {
-                    const auto save = i;
+                    const auto  save  = i;
                     std::size_t dummy = Invalid;
-                    const auto after = ParseQualifiedName(i, end, parent, dummy);
+                    const auto  after = ParseQualifiedName(i, end, parent, dummy);
                     if (after == save)
                     {
                         break;
@@ -1106,12 +1128,14 @@ namespace heimdall
                     // constructor declarator, not a user-defined return type.
                     // A parenthesized pointer/reference declarator still needs
                     // the preceding name as its type: `Widget (*factory)(int)`.
-                    const bool grouped_declarator = Is(look, "(") && look + 1 < end &&
-                        (Is(look + 1, "*") || Is(look + 1, "&") || Is(look + 1, "&&") || Is(look + 1, "("));
-                    if (look < end && (IsIdentifierToken(look) || grouped_declarator || Is(look, "~") ||
-                        Is(look, "operator") || Is(look, "::")))
+                    const bool grouped_declarator =
+                        Is(look, "(") && look + 1 < end &&
+                        (Is(look + 1, "*") || Is(look + 1, "&") || Is(look + 1, "&&") ||
+                         Is(look + 1, "("));
+                    if (look < end && (IsIdentifierToken(look) || grouped_declarator ||
+                                       Is(look, "~") || Is(look, "operator") || Is(look, "::")))
                     {
-                        i = after;
+                        i        = after;
                         saw_type = true;
                         break;
                     }
@@ -1119,19 +1143,21 @@ namespace heimdall
                     // `const A::B *` (unnamed parameter): once a cv-qualifier/specifier has
                     // been consumed, a name followed only by pointer/reference operators
                     // is the type; leaving it as a declarator name would strand `A::`.
-                    if (spec_start < save && (look >= end || Is(look, ",") || Is(look, "=") || Is(look, ")")))
+                    if (spec_start < save &&
+                        (look >= end || Is(look, ",") || Is(look, "=") || Is(look, ")")))
                     {
-                        i = after;
+                        i        = after;
                         saw_type = true;
                         break;
                     }
 
                     // `A f` where f is missing (e.g. end of parameter) still counts as type,
                     // but a lone `name{...}` / `name[...]` is a declarator with init/suffix.
-                    if (after == end ||(after < end && (Is(after, ",") || Is(after, "=") || Is(after, ";") ||
-                        Is(after, ")") || Is(after, "requires"))))
+                    if (after == end ||
+                        (after < end && (Is(after, ",") || Is(after, "=") || Is(after, ";") ||
+                                         Is(after, ")") || Is(after, "requires"))))
                     {
-                        i = after;
+                        i        = after;
                         saw_type = true;
                         break;
                     }
@@ -1294,12 +1320,13 @@ namespace heimdall
                 return op <= end ? op : end;
             }
 
-            if (i < end && (IsIdentifierToken(i) || Is(i, "decltype") || Is(i, "sizeof") || Is(i, "alignof") ||
-                Is(i, "noexcept") || Is(i, "true") || Is(i, "false") || Is(i, "nullptr") ||
-                m_tree.Tokens()[m_sig[i]].kind == TokenKind::Number ||
-                m_tree.Tokens()[m_sig[i]].kind == TokenKind::StringLiteral ||
-                m_tree.Tokens()[m_sig[i]].kind == TokenKind::CharacterLiteral ||
-                m_tree.Tokens()[m_sig[i]].kind == TokenKind::RawStringLiteral))
+            if (i < end &&
+                (IsIdentifierToken(i) || Is(i, "decltype") || Is(i, "sizeof") || Is(i, "alignof") ||
+                 Is(i, "noexcept") || Is(i, "true") || Is(i, "false") || Is(i, "nullptr") ||
+                 m_tree.Tokens()[m_sig[i]].kind == TokenKind::Number ||
+                 m_tree.Tokens()[m_sig[i]].kind == TokenKind::StringLiteral ||
+                 m_tree.Tokens()[m_sig[i]].kind == TokenKind::CharacterLiteral ||
+                 m_tree.Tokens()[m_sig[i]].kind == TokenKind::RawStringLiteral))
             {
                 ++i;
                 if (i < end && Is(i, "<"))
@@ -1313,7 +1340,8 @@ namespace heimdall
                     }
                 }
 
-                while (i + 1 < end && Is(i, "::") && (IsIdentifierToken(i + 1) || Is(i + 1, "template")))
+                while (i + 1 < end && Is(i, "::") &&
+                       (IsIdentifierToken(i + 1) || Is(i + 1, "template")))
                 {
                     ++i;
                     if (Is(i, "template"))
@@ -1377,13 +1405,14 @@ namespace heimdall
                     continue;
                 }
 
-                if (Is(i, "<") && i > pos && (IsIdentifierToken(i - 1) || Is(i - 1, ">") || Is(i - 1, ">>")))
+                if (Is(i, "<") && i > pos &&
+                    (IsIdentifierToken(i - 1) || Is(i - 1, ">") || Is(i - 1, ">>")))
                 {
                     const auto close = FindTemplateClose(i - 1, end);
                     if (close != Invalid && close + 1 < end &&
                         (Is(close + 1, "(") || Is(close + 1, "{") || Is(close + 1, "::") ||
-                        Is(close + 1, ",") || Is(close + 1, ">") || Is(close + 1, ">>") ||
-                        IsIdentifierToken(close + 1)))
+                         Is(close + 1, ",") || Is(close + 1, ">") || Is(close + 1, ">>") ||
+                         IsIdentifierToken(close + 1)))
                     {
                         i = close + 1;
                         continue;
@@ -1395,19 +1424,21 @@ namespace heimdall
                 {
                     ++i;
                     const auto mid = ConstraintExtent(i, end);
-                    i = mid;
+                    i              = mid;
                     if (i < end && Is(i, ":"))
                     {
                         ++i;
                     }
 
                     const auto rhs = ConstraintExtent(i, end);
-                    i = rhs;
+                    i              = rhs;
                     continue;
                 }
 
-                static constexpr std::string_view binary_ops[] = {"||", "&&", "|", "^", "&", "==", "!=",
-                    "<=", ">=", "<=>", "<<", ">>", "<", ">", "+", "-", "*", "/", "%"};
+                static constexpr std::string_view binary_ops[] = {
+                    "||", "&&", "|", "^", "&", "==", "!=", "<=", ">=", "<=>",
+                    "<<", ">>", "<", ">", "+", "-",  "*",  "/",  "%"
+                };
                 bool is_binary = false;
                 for (const auto op : binary_ops)
                 {
@@ -1442,7 +1473,8 @@ namespace heimdall
                             ++look;
                         }
 
-                        if (look < end && (Is(look, "(") || Is(look, ";") || Is(look, ",") || Is(look, "=")))
+                        if (look < end &&
+                            (Is(look, "(") || Is(look, ";") || Is(look, ",") || Is(look, "=")))
                         {
                             // Ambiguous pointer-vs-binary: prefer declaration split unless the
                             // `(`/`;` clearly belongs to the constraint (e.g. call args).
@@ -1452,7 +1484,7 @@ namespace heimdall
                         }
                     }
 
-                    i = rhs;
+                    i         = rhs;
                     is_binary = true;
                     break;
                 }
@@ -1469,8 +1501,8 @@ namespace heimdall
             return i;
         }
 
-        // For `requires Constraint decl`, find where the constraint ends and the declaration begins.
-        // Parses the constraint extent without mutating the tree, then verifies the
+        // For `requires Constraint decl`, find where the constraint ends and the declaration
+        // begins. Parses the constraint extent without mutating the tree, then verifies the
         // remainder looks like a declaration.
         std::size_t FindLeadingRequiresSplit(std::size_t req, std::size_t end) const
         {
@@ -1559,7 +1591,8 @@ namespace heimdall
             std::size_t angle_depth = 0;
             for (auto i = begin; i < end; ++i)
             {
-                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
                 {
                     i = m_match[i];
                     continue;
@@ -1596,9 +1629,10 @@ namespace heimdall
 
         // Parse `( params ) [cv/ref/noexcept/attrs] [-> type] [requires ...]` at pos==open.
         // Returns position after the suffix. Creates FunctionSuffix + children.
-        std::size_t ParseFunctionSuffix(std::size_t open, std::size_t end, std::size_t declarator_node)
+        std::size_t ParseFunctionSuffix(std::size_t open, std::size_t end,
+                                        std::size_t declarator_node)
         {
-            if (open >= end ||!Is(open, "(") || m_match[open] == Invalid)
+            if (open >= end || !Is(open, "(") || m_match[open] == Invalid)
             {
                 return open;
             }
@@ -1610,7 +1644,7 @@ namespace heimdall
             }
 
             const auto suffix = Add(GrammarKind::FunctionSuffix, open, close + 1, declarator_node);
-            auto part = open + 1;
+            auto       part   = open + 1;
             if (part == close && open > 0)
             {
                 // `()` empty parameter list: no ParameterDeclaration children.
@@ -1618,25 +1652,28 @@ namespace heimdall
 
             while (part < close)
             {
-                const auto comma = FindComma(part, close);
+                const auto comma    = FindComma(part, close);
                 const bool ellipsis = comma == part + 1 && Is(part, "...");
                 if (!ellipsis && comma > part)
                 {
                     // Skip `void` alone in `()` / `(void)`.
                     const bool lone_void = comma == close && part + 1 == comma && Is(part, "void");
-                    if (!lone_void || close -(open + 1) != 1)
+                    if (!lone_void || close - (open + 1) != 1)
                     {
                         if (!(lone_void && part == open + 1))
                         {
-                            const auto parameter = Add(GrammarKind::ParameterDeclaration, part, comma, suffix);
+                            const auto parameter =
+                                Add(GrammarKind::ParameterDeclaration, part, comma, suffix);
                             const auto consumed = AddTypeAndDeclarator(part, comma, parameter);
                             // A parameter that stops early while the next one clearly begins
                             // means the separating comma was forgotten.
-                            if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
+                            if (consumed > part && consumed < comma &&
+                                LooksLikeDeclarationStart(consumed, comma))
                             {
-                                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
-                                        std::string("expected ',' before '") +
-                                        std::string(Text(consumed)) + "'"});
+                                m_tree.m_diagnostics.push_back(
+                                    { m_tree.Tokens()[m_sig[consumed]].offset,
+                                      std::string("expected ',' before '") +
+                                          std::string(Text(consumed)) + "'" });
                                 SetNodeRange(parameter, part, consumed);
                                 part = consumed;
                                 continue;
@@ -1654,10 +1691,9 @@ namespace heimdall
             }
 
             auto tail = close + 1;
-            tail = SkipAttributes(tail, end, suffix);
-            while (tail < end && (Is(tail, "const") || Is(tail, "volatile") || Is(tail, "&") || Is(tail,
-                "&&") ||
-                Is(tail, "override") || Is(tail, "final")))
+            tail      = SkipAttributes(tail, end, suffix);
+            while (tail < end && (Is(tail, "const") || Is(tail, "volatile") || Is(tail, "&") ||
+                                  Is(tail, "&&") || Is(tail, "override") || Is(tail, "final")))
             {
                 ++tail;
             }
@@ -1675,7 +1711,7 @@ namespace heimdall
                 tail = SkipAttributes(tail, end, suffix);
             }
             else if (tail < end && Is(tail, "throw") && tail + 1 < end && Is(tail + 1, "(") &&
-                m_match[tail + 1] != Invalid)
+                     m_match[tail + 1] != Invalid)
             {
                 const auto spec_end = m_match[tail + 1] + 1;
                 Add(GrammarKind::NoexceptSpecifier, tail, spec_end, suffix);
@@ -1685,8 +1721,9 @@ namespace heimdall
             if (tail < end && Is(tail, "->"))
             {
                 auto type_end = tail + 1;
-                while (type_end < end && (Is(type_end, "*") || Is(type_end, "&") || Is(type_end, "&&") ||
-                    Is(type_end, "const") || Is(type_end, "volatile")))
+                while (type_end < end &&
+                       (Is(type_end, "*") || Is(type_end, "&") || Is(type_end, "&&") ||
+                        Is(type_end, "const") || Is(type_end, "volatile")))
                 {
                     ++type_end;
                 }
@@ -1694,7 +1731,7 @@ namespace heimdall
                 std::size_t dummy = Invalid;
                 // Reuse qualified-name scanning for the trailing type core.
                 const auto name_start = type_end;
-                type_end = ParseQualifiedName(type_end, end, suffix, dummy);
+                type_end              = ParseQualifiedName(type_end, end, suffix, dummy);
                 if (type_end == name_start)
                 {
                     ++type_end;
@@ -1718,7 +1755,8 @@ namespace heimdall
         }
 
         // Parse one declarator (no top-level comma) with full pointer / core / suffix grammar.
-        // Creates Declarator node with DeclaredName, PointerOperator, ArraySuffix, FunctionSuffix, etc.
+        // Creates Declarator node with DeclaredName, PointerOperator, ArraySuffix, FunctionSuffix,
+        // etc.
         std::size_t ParseSingleDeclarator(std::size_t begin, std::size_t end, std::size_t parent)
         {
             if (begin >= end)
@@ -1727,7 +1765,7 @@ namespace heimdall
             }
 
             const auto declarator = Add(GrammarKind::Declarator, begin, end, parent);
-            auto i = SkipAttributes(begin, end, declarator);
+            auto       i          = SkipAttributes(begin, end, declarator);
             // Leading pointer operators: `*`, `&`, `&&` with cv-qualifiers and attributes.
             while (i < end && (Is(i, "*") || Is(i, "&") || Is(i, "&&")))
             {
@@ -1746,8 +1784,9 @@ namespace heimdall
             std::size_t core_end = i;
             if (i < end && Is(i, "(") && m_match[i] != Invalid && m_match[i] < end)
             {
-                // Parenthesized declarator: `(*fp)`, `(&ref)`, `(name)` for function pointers/references.
-                const auto inner_open = i;
+                // Parenthesized declarator: `(*fp)`, `(&ref)`, `(name)` for function
+                // pointers/references.
+                const auto inner_open  = i;
                 const auto inner_close = m_match[i];
                 // Emit inner pointer operators and name recursively.
                 ParseSingleDeclarator(inner_open + 1, inner_close, declarator);
@@ -1779,14 +1818,16 @@ namespace heimdall
                 }
                 else if (core_end == i)
                 {
-                    // Abstract declarator (e.g. lone `void` parameter or `...`): nothing more to parse.
+                    // Abstract declarator (e.g. lone `void` parameter or `...`): nothing more to
+                    // parse.
                     SetNodeRange(declarator, begin, core_end);
                     return core_end;
                 }
             }
 
             auto tail = core_end;
-            // Suffix loop: arrays, function parameter lists, trailing return, noexcept, attributes, bitfield.
+            // Suffix loop: arrays, function parameter lists, trailing return, noexcept, attributes,
+            // bitfield.
             while (tail < end)
             {
                 tail = SkipAttributes(tail, end, declarator);
@@ -1797,7 +1838,7 @@ namespace heimdall
 
                 if (Is(tail, "[") && m_match[tail] != Invalid && m_match[tail] < end)
                 {
-                    const auto close = m_match[tail];
+                    const auto close  = m_match[tail];
                     const auto suffix = Add(GrammarKind::ArraySuffix, tail, close + 1, declarator);
                     if (close > tail + 1)
                     {
@@ -1816,9 +1857,9 @@ namespace heimdall
 
                 if (Is(tail, "->"))
                 {
-                    auto type_end = tail + 1;
-                    std::size_t dummy = Invalid;
-                    type_end = ParseQualifiedName(type_end, end, declarator, dummy);
+                    auto        type_end = tail + 1;
+                    std::size_t dummy    = Invalid;
+                    type_end             = ParseQualifiedName(type_end, end, declarator, dummy);
                     Add(GrammarKind::TrailingReturnType, tail, type_end, declarator);
                     tail = type_end;
                     continue;
@@ -1855,10 +1896,7 @@ namespace heimdall
         }
 
         std::size_t AddTypeAndDeclarator(
-            std::size_t begin,
-            std::size_t end,
-            std::size_t parent,
-            bool include_type = true)
+            std::size_t begin, std::size_t end, std::size_t parent, bool include_type = true)
         {
             if (begin >= end)
             {
@@ -1877,9 +1915,9 @@ namespace heimdall
             }
 
             // Trailing requires-clause: split `decl requires Constraint` at top level.
-            auto declarator_end = end;
-            std::size_t trailing_req = Invalid;
-            const auto req_pos = FindTopLevelRequires(begin, end);
+            auto        declarator_end = end;
+            std::size_t trailing_req   = Invalid;
+            const auto  req_pos        = FindTopLevelRequires(begin, end);
             if (req_pos != Invalid && !IsRequiresExpressionAt(req_pos, end))
             {
                 // Distinguish initializer `= requires...` (constraint as initializer) from a
@@ -1887,7 +1925,8 @@ namespace heimdall
                 bool has_equals_before = false;
                 for (auto k = begin; k < req_pos;)
                 {
-                    if ((Is(k, "(") || Is(k, "[") || Is(k, "{")) && m_match[k] != Invalid && m_match[k] > k)
+                    if ((Is(k, "(") || Is(k, "[") || Is(k, "{")) && m_match[k] != Invalid &&
+                        m_match[k] > k)
                     {
                         k = m_match[k] + 1;
                         continue;
@@ -1904,7 +1943,7 @@ namespace heimdall
 
                 if (!has_equals_before)
                 {
-                    trailing_req = req_pos;
+                    trailing_req   = req_pos;
                     declarator_end = req_pos;
                 }
             }
@@ -1990,14 +2029,16 @@ namespace heimdall
                 {
                     // Walk back over pointer operators to find declarator start.
                     spec_end = first_name;
-                    // The shared TypeSpecifier ends before pointer operators; keep them in declarator.
-                    // Find where pointer run starts by scanning from begin for `*`/`&` after type.
-                    // Heuristic: spec_end for suffix parsing is begin of pointer run or name.
+                    // The shared TypeSpecifier ends before pointer operators; keep them in
+                    // declarator. Find where pointer run starts by scanning from begin for `*`/`&`
+                    // after type. Heuristic: spec_end for suffix parsing is begin of pointer run or
+                    // name.
                     auto scan = begin;
                     // Consume attributes + decl-specifier keywords + user type to locate split.
-                    // Reuse ParseDeclSpecifiers extent by probing with a temporary node then rolling back.
+                    // Reuse ParseDeclSpecifiers extent by probing with a temporary node then
+                    // rolling back.
                     const auto nodes_before = m_tree.m_nodes_soa.size();
-                    const auto probe_end = ParseDeclSpecifiers(begin, code_end, parent);
+                    const auto probe_end    = ParseDeclSpecifiers(begin, code_end, parent);
                     // Remove the duplicate TypeSpecifier + children emitted by the probe.
                     while (m_tree.m_nodes_soa.size() > nodes_before)
                     {
@@ -2051,8 +2092,8 @@ namespace heimdall
 
             if (init_pos < end && Is(init_pos, "="))
             {
-                const auto expr_end = ParseExpression(init_pos + 1, declarator_end == end ? end : declarator_end,
-                    parent);
+                const auto expr_end = ParseExpression(
+                    init_pos + 1, declarator_end == end ? end : declarator_end, parent);
                 if (expr_end > consumed)
                 {
                     consumed = expr_end;
@@ -2069,7 +2110,7 @@ namespace heimdall
             {
                 // Direct-list initialization `Type name(args)`: parse args as expressions.
                 const auto close = m_match[init_pos];
-                auto arg = init_pos + 1;
+                auto       arg   = init_pos + 1;
                 while (arg < close)
                 {
                     const auto next = FindComma(arg, close);
@@ -2096,17 +2137,15 @@ namespace heimdall
         }
 
         void AddDeclarationDetails(
-            std::size_t begin,
-            std::size_t end,
-            std::size_t parent,
-            bool parameter = false)
+            std::size_t begin, std::size_t end, std::size_t parent, bool parameter = false)
         {
             if (begin >= end)
             {
                 return;
             }
 
-            // Leading requires-clause: `requires Constraint decl` (constrained template / function).
+            // Leading requires-clause: `requires Constraint decl` (constrained template /
+            // function).
             auto body_start = begin;
             if (Is(body_start, "requires") && !IsRequiresExpressionAt(body_start, end))
             {
@@ -2120,9 +2159,9 @@ namespace heimdall
 
             // C++ declarations share one specifier sequence across comma-separated
             // declarators; keep that prefix explicit instead of duplicating it.
-            const auto first_comma = FindComma(body_start, end);
-            const auto nodes_before = m_tree.m_nodes_soa.size();
-            const auto spec_end = ParseDeclSpecifiers(body_start, first_comma, parent);
+            const auto first_comma     = FindComma(body_start, end);
+            const auto nodes_before    = m_tree.m_nodes_soa.size();
+            const auto spec_end        = ParseDeclSpecifiers(body_start, first_comma, parent);
             const bool has_shared_type = spec_end > body_start;
             if (!has_shared_type)
             {
@@ -2141,15 +2180,15 @@ namespace heimdall
             auto part = body_start;
             while (part < end)
             {
-                const auto comma = FindComma(part, end);
-                const auto declarator = Add(GrammarKind::InitDeclarator, part, comma, parent);
-                std::size_t consumed = part;
+                const auto  comma      = FindComma(part, end);
+                const auto  declarator = Add(GrammarKind::InitDeclarator, part, comma, parent);
+                std::size_t consumed   = part;
                 if (part == body_start && has_shared_type)
                 {
                     // First declarator reuses the shared TypeSpecifier node above.
                     const auto code_begin = spec_end;
-                    const auto init = TopLevelAssignment(code_begin, comma);
-                    const auto code_end = init < comma ? init : comma;
+                    const auto init       = TopLevelAssignment(code_begin, comma);
+                    const auto code_end   = init < comma ? init : comma;
                     if (code_begin < code_end)
                     {
                         consumed = ParseSingleDeclarator(code_begin, code_end, declarator);
@@ -2191,11 +2230,12 @@ namespace heimdall
                 // begins: the previous member lost its terminating semicolon. Report it
                 // and re-parse the remainder as another declaration so cascading gaps
                 // (two missing semicolons in a row) are all surfaced.
-                if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
+                if (consumed > part && consumed < comma &&
+                    LooksLikeDeclarationStart(consumed, comma))
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
-                            std::string("expected ';' before '") +
-                            std::string(Text(consumed)) + "'"});
+                    m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[consumed]].offset,
+                                                     std::string("expected ';' before '") +
+                                                         std::string(Text(consumed)) + "'" });
                     SetNodeRange(declarator, part, consumed);
                     part = consumed;
                     continue;
@@ -2229,7 +2269,7 @@ namespace heimdall
             }
 
             const auto close = m_match[open];
-            auto part = open + 1;
+            auto       part  = open + 1;
             // `()` and `(void)` carry no parameters.
             if (part == close)
             {
@@ -2246,7 +2286,8 @@ namespace heimdall
                 const auto comma = FindComma(part, close);
                 if (comma > part && !(comma == part + 1 && Is(part, "...")))
                 {
-                    const auto parameter = Add(GrammarKind::ParameterDeclaration, part, comma, parent);
+                    const auto parameter =
+                        Add(GrammarKind::ParameterDeclaration, part, comma, parent);
                     AddTypeAndDeclarator(part, comma, parameter);
                 }
 
@@ -2286,8 +2327,8 @@ namespace heimdall
                 return GrammarKind::SwitchStatement;
             }
 
-            if (Is(begin, "break") || Is(begin, "continue") || Is(begin, "goto") || Is(begin, "throw") ||
-                Is(begin, "co_yield"))
+            if (Is(begin, "break") || Is(begin, "continue") || Is(begin, "goto") ||
+                Is(begin, "throw") || Is(begin, "co_yield"))
             {
                 return GrammarKind::JumpStatement;
             }
@@ -2305,10 +2346,12 @@ namespace heimdall
                 return GrammarKind::DeclarationStatement;
             }
 
-            constexpr std::string_view type_words[] = {"auto", "bool", "char", "char8_t", "char16_t",
-                "char32_t",
-                "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t",
-                "const", "constexpr", "static", "struct", "class", "enum", "typename", "using"};
+            constexpr std::string_view type_words[] = {
+                "auto",     "bool",  "char",    "char8_t",  "char16_t",  "char32_t",
+                "double",   "float", "int",     "long",     "short",     "signed",
+                "unsigned", "void",  "wchar_t", "const",    "constexpr", "static",
+                "struct",   "class", "enum",    "typename", "using"
+            };
             for (const auto word : type_words)
             {
                 if (Text(begin) == word)
@@ -2320,7 +2363,8 @@ namespace heimdall
             if (m_tree.Tokens()[m_sig[begin]].kind == TokenKind::Identifier)
             {
                 auto i = begin + 1;
-                while (i + 1 < end && Is(i, "::") && m_tree.Tokens()[m_sig[i + 1]].kind == TokenKind::Identifier)
+                while (i + 1 < end && Is(i, "::") &&
+                       m_tree.Tokens()[m_sig[i + 1]].kind == TokenKind::Identifier)
                 {
                     i += kTwo;
                 }
@@ -2439,10 +2483,7 @@ namespace heimdall
         }
 
         std::size_t ParseExpression(
-            std::size_t pos,
-            std::size_t end,
-            std::size_t parent,
-            int minimum = 1)
+            std::size_t pos, std::size_t end, std::size_t parent, int minimum = 1)
         {
             if (pos >= end)
             {
@@ -2450,12 +2491,12 @@ namespace heimdall
                 return pos;
             }
 
-            const auto begin = pos;
+            const auto  begin       = pos;
             GrammarKind prefix_kind = GrammarKind::ErrorExpression;
-            std::size_t root = Invalid;
-            const auto first = Text(pos);
-            if (first == "+" || first == "-" || first == "!" || first == "~" || first == "*" || first == "&" ||
-                first == "++" || first == "--" || first == "co_await")
+            std::size_t root        = Invalid;
+            const auto  first       = Text(pos);
+            if (first == "+" || first == "-" || first == "!" || first == "~" || first == "*" ||
+                first == "&" || first == "++" || first == "--" || first == "co_await")
             {
                 root = Add(GrammarKind::UnaryExpression, begin, begin + 1, parent);
                 ++pos;
@@ -2464,11 +2505,12 @@ namespace heimdall
                 prefix_kind = GrammarKind::UnaryExpression;
             }
             else if (first == "(" && m_match[pos] != Invalid && m_match[pos] < end &&
-                IsCastTypeId(pos + 1, m_match[pos]) && StartsCastOperand(m_match[pos] + 1, end))
+                     IsCastTypeId(pos + 1, m_match[pos]) &&
+                     StartsCastOperand(m_match[pos] + 1, end))
             {
                 // `(T) operand`, with `T` known to be a type: a cast, not a group.
                 const auto close = m_match[pos];
-                root = Add(GrammarKind::CastExpression, begin, close + 1, parent);
+                root             = Add(GrammarKind::CastExpression, begin, close + 1, parent);
                 Add(GrammarKind::TypeSpecifier, pos + 1, close, root);
                 pos = ParseExpression(close + 1, end, root, kFourteen);
                 SetNodeRange(root, begin, pos);
@@ -2478,17 +2520,17 @@ namespace heimdall
             {
                 const auto close = m_match[pos];
                 const auto node = Add(GrammarKind::ParenthesizedExpression, pos, close + 1, parent);
-                auto inner = pos + 1;
+                auto       inner = pos + 1;
                 ParseExpression(inner, close, node);
-                pos = close + 1;
-                root = node;
+                pos         = close + 1;
+                root        = node;
                 prefix_kind = GrammarKind::ParenthesizedExpression;
                 (void) node;
             }
             else if (first == "[" && m_match[pos] != Invalid && m_match[pos] < end)
             {
                 const std::size_t capture_close = m_match[pos];
-                std::size_t body = capture_close + 1;
+                std::size_t       body          = capture_close + 1;
                 if (Is(body, "("))
                 {
                     body = SkipGroup(body, end);
@@ -2501,17 +2543,18 @@ namespace heimdall
 
                 if (Is(body, "{") && m_match[body] != Invalid)
                 {
-                    const auto lambda = Add(GrammarKind::LambdaExpression, pos, m_match[body] + 1, parent);
+                    const auto lambda =
+                        Add(GrammarKind::LambdaExpression, pos, m_match[body] + 1, parent);
                     std::size_t body_pos = body;
                     ParseCompound(body_pos, m_match[body] + 1, lambda);
-                    pos = m_match[body] + 1;
-                    root = lambda;
+                    pos         = m_match[body] + 1;
+                    root        = lambda;
                     prefix_kind = GrammarKind::LambdaExpression;
                 }
                 else
                 {
-                    root = Add(GrammarKind::ErrorExpression, pos, capture_close + 1, parent);
-                    pos = capture_close + 1;
+                    root        = Add(GrammarKind::ErrorExpression, pos, capture_close + 1, parent);
+                    pos         = capture_close + 1;
                     prefix_kind = GrammarKind::ErrorExpression;
                 }
             }
@@ -2531,15 +2574,16 @@ namespace heimdall
                 if (Is(body, "{") && m_match[body] != Invalid)
                 {
                     const auto close = m_match[body];
-                    const auto node = Add(GrammarKind::RequiresExpression, pos, close + 1, parent);
-                    auto requirement = body + 1;
+                    const auto node  = Add(GrammarKind::RequiresExpression, pos, close + 1, parent);
+                    auto       requirement = body + 1;
                     while (requirement < close)
                     {
-                        const auto semi = FindSemicolon(requirement, close);
+                        const auto semi            = FindSemicolon(requirement, close);
                         const auto requirement_end = semi < close ? semi + 1 : close;
                         if (requirement_end > requirement)
                         {
-                            const auto item = Add(GrammarKind::Requirement, requirement, requirement_end, node);
+                            const auto item =
+                                Add(GrammarKind::Requirement, requirement, requirement_end, node);
                             if (semi < close && semi > requirement)
                             {
                                 ParseExpression(requirement, semi, item);
@@ -2549,14 +2593,14 @@ namespace heimdall
                         requirement = requirement_end;
                     }
 
-                    pos = close + 1;
-                    root = node;
+                    pos         = close + 1;
+                    root        = node;
                     prefix_kind = GrammarKind::RequiresExpression;
                 }
                 else
                 {
-                    root = Add(GrammarKind::ErrorExpression, pos, body, parent);
-                    pos = body;
+                    root        = Add(GrammarKind::ErrorExpression, pos, body, parent);
+                    pos         = body;
                     prefix_kind = GrammarKind::ErrorExpression;
                 }
             }
@@ -2567,10 +2611,10 @@ namespace heimdall
                 prefix_kind = GrammarKind::IdentifierExpression;
             }
             else if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Number ||
-                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::StringLiteral ||
-                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::CharacterLiteral ||
-                m_tree.Tokens()[m_sig[pos]].kind == TokenKind::RawStringLiteral || first == "true" || first == "false" ||
-                first == "nullptr")
+                     m_tree.Tokens()[m_sig[pos]].kind == TokenKind::StringLiteral ||
+                     m_tree.Tokens()[m_sig[pos]].kind == TokenKind::CharacterLiteral ||
+                     m_tree.Tokens()[m_sig[pos]].kind == TokenKind::RawStringLiteral ||
+                     first == "true" || first == "false" || first == "nullptr")
             {
                 root = Add(GrammarKind::LiteralExpression, pos, pos + 1, parent);
                 ++pos;
@@ -2578,14 +2622,15 @@ namespace heimdall
             }
             else if (first == "{" && m_match[pos] != Invalid && m_match[pos] < end)
             {
-                root = Add(GrammarKind::LiteralExpression, pos, m_match[pos] + 1, parent);
-                pos = m_match[pos] + 1;
+                root        = Add(GrammarKind::LiteralExpression, pos, m_match[pos] + 1, parent);
+                pos         = m_match[pos] + 1;
                 prefix_kind = GrammarKind::LiteralExpression;
             }
             else
             {
-                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset, "expected expression"});
-                root = Add(GrammarKind::ErrorExpression, pos, pos + 1, parent);
+                m_tree.m_diagnostics.push_back(
+                    { m_tree.Tokens()[m_sig[pos]].offset, "expected expression" });
+                root                   = Add(GrammarKind::ErrorExpression, pos, pos + 1, parent);
                 m_last_expression_node = root;
                 return pos + 1;
             }
@@ -2599,12 +2644,13 @@ namespace heimdall
                 if ((op == "(" || op == "[") && m_match[pos] != Invalid && m_match[pos] < end)
                 {
                     const auto close = m_match[pos];
-                    const auto node_kind = op == "(" ? GrammarKind::CallExpression : GrammarKind::SubscriptExpression;
+                    const auto node_kind =
+                        op == "(" ? GrammarKind::CallExpression : GrammarKind::SubscriptExpression;
                     const auto node = Add(node_kind, begin, close + 1, parent);
                     if (root != Invalid)
                     {
                         m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                        m_tree.m_nodes_aos_dirty = true;
+                        m_tree.m_nodes_aos_dirty        = true;
                     }
 
                     if (op == "(")
@@ -2626,7 +2672,7 @@ namespace heimdall
                         ParseExpression(pos + 1, close, node);
                     }
 
-                    pos = close + 1;
+                    pos  = close + 1;
                     root = node;
                     continue;
                 }
@@ -2642,7 +2688,7 @@ namespace heimdall
                     if (root != Invalid)
                     {
                         m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                        m_tree.m_nodes_aos_dirty = true;
+                        m_tree.m_nodes_aos_dirty        = true;
                     }
 
                     Add(GrammarKind::IdentifierExpression, pos + 1, pos + kTwo, node);
@@ -2652,44 +2698,55 @@ namespace heimdall
                 }
 
                 if (op == "<" && root != Invalid &&
-                    (static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::IdentifierExpression ||
-                    static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::MemberExpression ||
-                    static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::TemplateIdExpression))
+                    (static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
+                         GrammarKind::IdentifierExpression ||
+                     static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
+                         GrammarKind::MemberExpression ||
+                     static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
+                         GrammarKind::TemplateIdExpression))
                 {
-                    const auto close = FindTemplateClose(pos, end);
+                    const auto close          = FindTemplateClose(pos, end);
                     const auto after_template = close == Invalid ? end : close + 1;
-                    const auto follows_template = after_template == end ||
-                        Is(after_template, "(") || Is(after_template, "{") || Is(after_template, "::") ||
-                        Is(after_template, ",") || Is(after_template, ">") || Is(after_template, ">>") ||
-                        Is(after_template, ";") || Is(after_template, ")") || Is(after_template, "]") ||
-                        Is(after_template, ".") || Is(after_template, "->") || Is(after_template, "?") ||
-                        Is(after_template, ":") || Is(after_template, "||") || Is(after_template, "&&") ||
-                        Is(after_template, "|") || Is(after_template, "^") || Is(after_template, "&") ||
-                        Is(after_template, "==") || Is(after_template, "!=") || Is(after_template, "<") ||
-                        Is(after_template, ">") || Is(after_template, "<=") || Is(after_template, ">=") ||
-                        Is(after_template, "<=>") || Is(after_template, "<<") || Is(after_template, ">>") ||
-                        Is(after_template, "+") || Is(after_template, "-") || Is(after_template, "*") ||
-                        Is(after_template, "/") || Is(after_template, "%") || Is(after_template, "++") ||
+                    const auto follows_template =
+                        after_template == end || Is(after_template, "(") ||
+                        Is(after_template, "{") || Is(after_template, "::") ||
+                        Is(after_template, ",") || Is(after_template, ">") ||
+                        Is(after_template, ">>") || Is(after_template, ";") ||
+                        Is(after_template, ")") || Is(after_template, "]") ||
+                        Is(after_template, ".") || Is(after_template, "->") ||
+                        Is(after_template, "?") || Is(after_template, ":") ||
+                        Is(after_template, "||") || Is(after_template, "&&") ||
+                        Is(after_template, "|") || Is(after_template, "^") ||
+                        Is(after_template, "&") || Is(after_template, "==") ||
+                        Is(after_template, "!=") || Is(after_template, "<") ||
+                        Is(after_template, ">") || Is(after_template, "<=") ||
+                        Is(after_template, ">=") || Is(after_template, "<=>") ||
+                        Is(after_template, "<<") || Is(after_template, ">>") ||
+                        Is(after_template, "+") || Is(after_template, "-") ||
+                        Is(after_template, "*") || Is(after_template, "/") ||
+                        Is(after_template, "%") || Is(after_template, "++") ||
                         Is(after_template, "--") ||
                         m_tree.Tokens()[m_sig[after_template]].kind == TokenKind::Identifier;
                     if (close != Invalid && follows_template)
                     {
-                        const auto node = Add(GrammarKind::TemplateIdExpression, begin, close + 1, parent);
+                        const auto node =
+                            Add(GrammarKind::TemplateIdExpression, begin, close + 1, parent);
                         m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                        m_tree.m_nodes_aos_dirty = true;
-                        auto arg = pos + 1;
+                        m_tree.m_nodes_aos_dirty        = true;
+                        auto arg                        = pos + 1;
                         while (arg < close)
                         {
                             const auto comma = FindComma(arg, close);
                             if (comma == arg)
                             {
-                                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[arg]].offset,
-                                        "expected template argument"});
+                                m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[arg]].offset,
+                                                                 "expected template argument" });
                                 ++arg;
                                 continue;
                             }
 
-                            const auto argument = Add(GrammarKind::TemplateArgument, arg, comma, node);
+                            const auto argument =
+                                Add(GrammarKind::TemplateArgument, arg, comma, node);
                             if (arg < comma)
                             {
                                 ParseExpression(arg, comma, argument);
@@ -2703,7 +2760,7 @@ namespace heimdall
                             arg = comma + 1;
                         }
 
-                        pos = close + 1;
+                        pos  = close + 1;
                         root = node;
                         continue;
                     }
@@ -2715,7 +2772,7 @@ namespace heimdall
                     if (root != Invalid)
                     {
                         m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                        m_tree.m_nodes_aos_dirty = true;
+                        m_tree.m_nodes_aos_dirty        = true;
                     }
 
                     ++pos;
@@ -2729,7 +2786,7 @@ namespace heimdall
                     if (root != Invalid)
                     {
                         m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                        m_tree.m_nodes_aos_dirty = true;
+                        m_tree.m_nodes_aos_dirty        = true;
                     }
 
                     ++pos;
@@ -2750,12 +2807,12 @@ namespace heimdall
                 // continue the expression and signals a missing ';'.
                 if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Identifier && pos > begin &&
                     (m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::Number ||
-                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::StringLiteral ||
-                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
-                    m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
+                     m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::StringLiteral ||
+                     m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
+                     m_tree.Tokens()[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
                 {
                     const auto& previous = m_tree.Tokens()[m_sig[pos - 1]];
-                    const auto& current = m_tree.Tokens()[m_sig[pos]];
+                    const auto& current  = m_tree.Tokens()[m_sig[pos]];
                     if (current.offset == previous.offset + previous.length)
                     {
                         ++pos;
@@ -2767,11 +2824,14 @@ namespace heimdall
                 // expression-start token after the type/keyword continues this
                 // expression rather than starting a new declaration.
                 const bool after_paren =
-                    root != Invalid && static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) == GrammarKind::ParenthesizedExpression;
+                    root != Invalid && static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
+                                           GrammarKind::ParenthesizedExpression;
                 const auto token_kind_here = m_tree.Tokens()[m_sig[pos]].kind;
                 const bool operand_start =
-                    token_kind_here == TokenKind::Identifier || token_kind_here == TokenKind::Number ||
-                    token_kind_here == TokenKind::StringLiteral || token_kind_here == TokenKind::CharacterLiteral ||
+                    token_kind_here == TokenKind::Identifier ||
+                    token_kind_here == TokenKind::Number ||
+                    token_kind_here == TokenKind::StringLiteral ||
+                    token_kind_here == TokenKind::CharacterLiteral ||
                     token_kind_here == TokenKind::RawStringLiteral || Is(pos, "::");
                 if ((after_paren || operand_pending) && operand_start)
                 {
@@ -2799,12 +2859,12 @@ namespace heimdall
                 if (root != Invalid)
                 {
                     m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
-                    m_tree.m_nodes_aos_dirty = true;
+                    m_tree.m_nodes_aos_dirty        = true;
                 }
 
                 ++pos;
                 const bool right_associative = precedence == kTwo;
-                pos = ParseExpression(pos, end, node, precedence +(right_associative ? 0 : 1));
+                pos = ParseExpression(pos, end, node, precedence + (right_associative ? 0 : 1));
                 SetNodeRange(node, begin, pos);
                 root = node;
             }
@@ -2840,7 +2900,8 @@ namespace heimdall
                 auto colon = pos + 1;
                 while (colon < end && !Is(colon, ":") && !Is(colon, "}"))
                 {
-                    if ((Is(colon, "(") || Is(colon, "[") || Is(colon, "{")) && m_match[colon] != Invalid)
+                    if ((Is(colon, "(") || Is(colon, "[") || Is(colon, "{")) &&
+                        m_match[colon] != Invalid)
                     {
                         colon = m_match[colon] + 1;
                     }
@@ -2856,8 +2917,8 @@ namespace heimdall
                 }
                 else
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset,
-                            "expected ':' after case label"});
+                    m_tree.m_diagnostics.push_back(
+                        { m_tree.Tokens()[m_sig[pos]].offset, "expected ':' after case label" });
                 }
 
                 Add(GrammarKind::CaseLabel, pos, colon, parent);
@@ -2889,13 +2950,14 @@ namespace heimdall
                 }
                 else
                 {
-                    m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
-                            "expected while after do statement"});
+                    m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[start]].offset,
+                                                     "expected while after do statement" });
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                const auto past =
+                    pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
                 m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
-                m_tree.m_nodes_aos_dirty = true;
+                m_tree.m_nodes_aos_dirty             = true;
                 return;
             }
 
@@ -2922,25 +2984,29 @@ namespace heimdall
                     }
                     else
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[catch_start]].offset,
-                                "expected compound statement after catch clause"});
+                        m_tree.m_diagnostics.push_back(
+                            { m_tree.Tokens()[m_sig[catch_start]].offset,
+                              "expected compound statement after catch clause" });
                     }
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                const auto past =
+                    pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
                 m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
-                m_tree.m_nodes_aos_dirty = true;
+                m_tree.m_nodes_aos_dirty             = true;
                 return;
             }
 
-            const bool control = keyword == "if" || keyword == "while" || keyword == "for" ||
-                keyword == "switch";
+            const bool control =
+                keyword == "if" || keyword == "while" || keyword == "for" || keyword == "switch";
             if (control)
             {
-                const auto kind = keyword == "if" ? GrammarKind::IfStatement :
-                keyword == "switch" ? GrammarKind::SwitchStatement : GrammarKind::LoopStatement;
+                const auto kind = keyword == "if"       ? GrammarKind::IfStatement
+                                  : keyword == "switch" ? GrammarKind::SwitchStatement
+                                                        : GrammarKind::LoopStatement;
                 const auto node = Add(kind, start, start + 1, parent);
-                m_block_starts.push_back(m_block_names.size()); // `for (int i...)` is visible to the body only
+                m_block_starts.push_back(
+                    m_block_names.size()); // `for (int i...)` is visible to the body only
                 ++pos;
                 if (keyword == "if")
                 {
@@ -2964,9 +3030,11 @@ namespace heimdall
                         if (first_sep < close)
                         {
                             const auto second_sep = FindSemicolon(first_sep + 1, close);
-                            if (StatementKind(pos + 1, first_sep) == GrammarKind::DeclarationStatement)
+                            if (StatementKind(pos + 1, first_sep) ==
+                                GrammarKind::DeclarationStatement)
                             {
-                                const auto init = Add(GrammarKind::DeclarationStatement, pos + 1, first_sep, node);
+                                const auto init = Add(GrammarKind::DeclarationStatement, pos + 1,
+                                                      first_sep, node);
                                 AddDeclarationDetails(pos + 1, first_sep, init);
                                 RegisterNodes(init, m_tree.m_nodes_soa.size());
                             }
@@ -2990,7 +3058,8 @@ namespace heimdall
                             auto colon = pos + 1;
                             while (colon < close && !Is(colon, ":"))
                             {
-                                if ((Is(colon, "(") || Is(colon, "[") || Is(colon, "{")) && m_match[colon] != Invalid)
+                                if ((Is(colon, "(") || Is(colon, "[") || Is(colon, "{")) &&
+                                    m_match[colon] != Invalid)
                                 {
                                     colon = m_match[colon] + 1;
                                 }
@@ -3002,7 +3071,8 @@ namespace heimdall
 
                             if (colon < close)
                             {
-                                const auto init = Add(GrammarKind::DeclarationStatement, pos + 1, colon, node);
+                                const auto init =
+                                    Add(GrammarKind::DeclarationStatement, pos + 1, colon, node);
                                 AddDeclarationDetails(pos + 1, colon, init);
                                 RegisterNodes(init, m_tree.m_nodes_soa.size());
                                 if (colon + 1 < close)
@@ -3038,9 +3108,10 @@ namespace heimdall
                     }
                 }
 
-                const auto past = pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
+                const auto past =
+                    pos > start ? m_sig[pos - 1] + 1 : m_tree.m_nodes_soa.first_token[node];
                 m_tree.m_nodes_soa.token_count[node] = past - m_tree.m_nodes_soa.first_token[node];
-                m_tree.m_nodes_aos_dirty = true;
+                m_tree.m_nodes_aos_dirty             = true;
                 PopBlock();
                 return;
             }
@@ -3052,7 +3123,8 @@ namespace heimdall
                 {
                     for (auto i = start + 1; i < semicolon; ++i)
                     {
-                        if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+                        if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                            m_match[i] > i)
                         {
                             i = m_match[i];
                             continue;
@@ -3060,8 +3132,9 @@ namespace heimdall
 
                         if (Is(i, "return") || Is(i, "co_return"))
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[i]].offset,
-                                    "expected ';' before return statement"});
+                            m_tree.m_diagnostics.push_back(
+                                { m_tree.Tokens()[m_sig[i]].offset,
+                                  "expected ';' before return statement" });
                             Add(GrammarKind::Error, start, i, parent);
                             pos = i;
                             return;
@@ -3069,17 +3142,17 @@ namespace heimdall
                     }
                 }
 
-                pos = semicolon + 1;
-                const auto kind = StatementKind(start, pos);
-                const auto node = Add(kind, start, pos, parent);
-                auto expression_begin = start;
+                pos                         = semicolon + 1;
+                const auto kind             = StatementKind(start, pos);
+                const auto node             = Add(kind, start, pos, parent);
+                auto       expression_begin = start;
                 if (kind == GrammarKind::ReturnStatement)
                 {
                     ++expression_begin;
                 }
 
-                if (expression_begin < semicolon &&
-                    (kind == GrammarKind::ReturnStatement || kind == GrammarKind::ExpressionStatement))
+                if (expression_begin < semicolon && (kind == GrammarKind::ReturnStatement ||
+                                                     kind == GrammarKind::ExpressionStatement))
                 {
                     const auto expr_end = ParseExpression(expression_begin, semicolon, node);
                     // Tokens left over that look like the next statement mean the `;`
@@ -3088,9 +3161,9 @@ namespace heimdall
                     if (expr_end > expression_begin && expr_end < semicolon &&
                         LooksLikeDeclarationStart(expr_end, semicolon))
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[expr_end]].offset,
-                                std::string("expected ';' before '") +
-                                std::string(Text(expr_end)) + "'"});
+                        m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[expr_end]].offset,
+                                                         std::string("expected ';' before '") +
+                                                             std::string(Text(expr_end)) + "'" });
                         SetNodeRange(node, start, expr_end);
                         pos = expr_end;
                     }
@@ -3109,8 +3182,8 @@ namespace heimdall
                 return;
             }
 
-            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
-                    "expected ';' before end of compound statement"});
+            m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[start]].offset,
+                                             "expected ';' before end of compound statement" });
             while (pos < end && !Is(pos, "}") && !Is(pos, ";"))
             {
                 ++pos;
@@ -3132,17 +3205,18 @@ namespace heimdall
         std::size_t ParseCompound(std::size_t& pos, std::size_t end, std::size_t parent)
         {
             const auto start = pos++;
-            const auto node = Add(GrammarKind::CompoundStatement, start, start + 1, parent);
+            const auto node  = Add(GrammarKind::CompoundStatement, start, start + 1, parent);
             m_block_starts.push_back(m_block_names.size());
             if (parent < m_tree.m_nodes_soa.size() &&
-                static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[parent]) == GrammarKind::FunctionDefinition)
+                static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[parent]) ==
+                    GrammarKind::FunctionDefinition)
             {
                 DeclareParameters(parent);
             }
 
             while (pos < end && !Is(pos, "}"))
             {
-                const auto before = pos;
+                const auto before       = pos;
                 const auto nodes_before = m_tree.m_nodes_soa.size();
                 if (IsDirective(pos))
                 {
@@ -3154,9 +3228,12 @@ namespace heimdall
                     // Only statements that can declare something are worth scanning.
                     if (nodes_before < m_tree.m_nodes_soa.size())
                     {
-                        const auto first_kind = static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[nodes_before]);
-                        if (first_kind == GrammarKind::DeclarationStatement || first_kind == GrammarKind::RecordDefinition ||
-                            first_kind == GrammarKind::UsingDeclaration || first_kind == GrammarKind::Declaration)
+                        const auto first_kind =
+                            static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[nodes_before]);
+                        if (first_kind == GrammarKind::DeclarationStatement ||
+                            first_kind == GrammarKind::RecordDefinition ||
+                            first_kind == GrammarKind::UsingDeclaration ||
+                            first_kind == GrammarKind::Declaration)
                         {
                             RegisterNodes(nodes_before, m_tree.m_nodes_soa.size());
                         }
@@ -3175,14 +3252,15 @@ namespace heimdall
             }
             else
             {
-                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
-                        "expected '}' to close compound statement"});
+                m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[start]].offset,
+                                                 "expected '}' to close compound statement" });
             }
 
             PopBlock();
 
-            auto& record = m_tree.m_nodes_soa;
-            const auto past = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1 : record.first_token[node];
+            auto&      record = m_tree.m_nodes_soa;
+            const auto past   = pos > start && pos - 1 < m_sig.size() ? m_sig[pos - 1] + 1
+                                                                      : record.first_token[node];
             record.token_count[node] = past - record.first_token[node];
             m_tree.m_nodes_aos_dirty = true;
             return node;
@@ -3202,11 +3280,11 @@ namespace heimdall
                 }
 
                 const auto comma = FindComma(pos, end);
-                const auto stop = comma < end ? comma : end;
+                const auto stop  = comma < end ? comma : end;
                 if (stop > pos)
                 {
                     const auto enumerator = Add(GrammarKind::Enumerator, pos, stop, parent);
-                    auto name = SkipAttributes(pos, stop, enumerator);
+                    auto       name       = SkipAttributes(pos, stop, enumerator);
                     if (IsIdentifierToken(name) && name < stop)
                     {
                         Add(GrammarKind::DeclaredName, name, name + 1, enumerator);
@@ -3246,9 +3324,9 @@ namespace heimdall
                     // and re-parse the remainder as its own enumerator.
                     if (rest > pos && rest < stop && IsIdentifierToken(rest))
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[rest]].offset,
-                                std::string("expected ',' before '") +
-                                std::string(Text(rest)) + "'"});
+                        m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[rest]].offset,
+                                                         std::string("expected ',' before '") +
+                                                             std::string(Text(rest)) + "'" });
                         SetNodeRange(enumerator, pos, rest);
                         pos = rest;
                         continue;
@@ -3271,8 +3349,9 @@ namespace heimdall
             for (auto i = begin; i < end; ++i)
             {
                 const auto text = Text(i);
-                if (text.size() == 1 && (text[0] == '(' || text[0] == '[' || text[0] == '{' ||
-                    text[0] == ')' || text[0] == ']' || text[0] == '}') &&
+                if (text.size() == 1 &&
+                    (text[0] == '(' || text[0] == '[' || text[0] == '{' || text[0] == ')' ||
+                     text[0] == ']' || text[0] == '}') &&
                     (m_match[i] == Invalid || m_match[i] < begin || m_match[i] >= end))
                 {
                     return false;
@@ -3291,7 +3370,7 @@ namespace heimdall
         // scopes and at file level) and asks the TypeNameOracle about the rest (the
         // included headers). A name nobody knows keeps the shape-based reading, so
         // missing information never changes what the parser did before.
-        static constexpr std::uint8_t kNameType = 1;
+        static constexpr std::uint8_t kNameType  = 1;
         static constexpr std::uint8_t kNameValue = 2;
 
         static std::uint64_t HashName(std::string_view name)
@@ -3309,8 +3388,9 @@ namespace heimdall
         // What one entry contributes to the order-independent hash of the table.
         static std::uint64_t MixEntry(std::uint64_t hash, std::uint8_t flags)
         {
-            hash = (hash ^(static_cast<std::uint64_t>(flags) * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull;
-            return hash ^(hash >> 32);
+            hash = (hash ^ (static_cast<std::uint64_t>(flags) * 0x9E3779B97F4A7C15ull)) *
+                   0xBF58476D1CE4E5B9ull;
+            return hash ^ (hash >> 32);
         }
 
         NameSlot* FindSlot(std::string_view name, std::uint64_t hash)
@@ -3345,7 +3425,7 @@ namespace heimdall
 
             if (!m_block_starts.empty())
             {
-                m_block_names.push_back({name, flags});
+                m_block_names.push_back({ name, flags });
                 return;
             }
 
@@ -3362,10 +3442,10 @@ namespace heimdall
                 }
             }
 
-            const std::uint64_t hash = HashName(name);
-            NameSlot* slot = FindSlot(name, hash);
-            const std::uint8_t before = slot->flags;
-            const auto merged = static_cast<std::uint8_t>(before | flags);
+            const std::uint64_t hash   = HashName(name);
+            NameSlot*           slot   = FindSlot(name, hash);
+            const std::uint8_t  before = slot->flags;
+            const auto          merged = static_cast<std::uint8_t>(before | flags);
             if (merged == before)
             {
                 return;
@@ -3401,17 +3481,15 @@ namespace heimdall
 
             if (!m_slots.empty())
             {
-                const NameSlot* slot = const_cast<GrammarParser*>(this)->FindSlot(name, HashName(name));
+                const NameSlot* slot =
+                    const_cast<GrammarParser*>(this)->FindSlot(name, HashName(name));
                 if (slot->flags != 0)
                 {
                     return slot->flags;
                 }
             }
 
-            return m_oracle != nullptr && m_oracle->IsType(name) ? kNameType : std::uint8_t
-            {
-                0
-            };
+            return m_oracle != nullptr && m_oracle->IsType(name) ? kNameType : std::uint8_t { 0 };
         }
 
         std::string_view RawText(std::uint32_t token) const
@@ -3422,13 +3500,14 @@ namespace heimdall
 
         static bool StartsTag(std::string_view word)
         {
-            return word == "class" || word == "struct" || word == "union" || word == "enum" || word == "typedef";
+            return word == "class" || word == "struct" || word == "union" || word == "enum" ||
+                   word == "typedef";
         }
 
         std::size_t SigOf(std::uint32_t token) const
         {
-            return static_cast<std::size_t>(std::lower_bound(m_sig.begin(), m_sig.end(),
-                token) - m_sig.begin());
+            return static_cast<std::size_t>(
+                std::lower_bound(m_sig.begin(), m_sig.end(), token) - m_sig.begin());
         }
 
         // Name introduced by `class X`, `struct [[a]] X`, `enum class X`, `union X`
@@ -3462,7 +3541,7 @@ namespace heimdall
                 else
                 {
                     const auto close = m_match[i];
-                    i = close != Invalid && close > i ? close + 1 : i + 1;
+                    i                = close != Invalid && close > i ? close + 1 : i + 1;
                     // `[[` ... `]]`: skip the inner pair too
                     if (i < m_sig.size() && Is(i, "]"))
                     {
@@ -3471,7 +3550,8 @@ namespace heimdall
                 }
             }
 
-            if (i < m_sig.size() && IsIdentifierToken(i) && m_sig_tok[i] == Tok::None && !Is(i + 1, "::"))
+            if (i < m_sig.size() && IsIdentifierToken(i) && m_sig_tok[i] == Tok::None &&
+                !Is(i + 1, "::"))
             {
                 return Text(i);
             }
@@ -3485,106 +3565,112 @@ namespace heimdall
         void RegisterNodes(std::size_t from, std::size_t to)
         {
             const auto& nodes = m_tree.m_nodes_soa;
-            to = std::min(to, nodes.size());
+            to                = std::min(to, nodes.size());
             for (std::size_t n = from; n < to; ++n)
             {
                 const std::uint32_t first = nodes.first_token[n];
-                const auto kind = static_cast<GrammarKind>(nodes.kind[n]);
+                const auto          kind  = static_cast<GrammarKind>(nodes.kind[n]);
                 switch (kind)
                 {
-                case GrammarKind::CompoundStatement:
-                case GrammarKind::LambdaExpression:
-                case GrammarKind::ParameterDeclaration:
-                {
-                    // Everything inside starts before `limit`, and whatever follows starts at or
-                    // after it: the end of the subtree is found by bisection instead of a walk.
-                    const std::uint32_t limit = first + nodes.token_count[n];
-                    std::size_t low = n + 1;
-                    std::size_t high = to;
-                    while (low < high)
-                    {
-                        const std::size_t mid = low +(high - low) / 2;
-                        if (nodes.first_token[mid] < limit)
+                    case GrammarKind::CompoundStatement:
+                    case GrammarKind::LambdaExpression:
+                    case GrammarKind::ParameterDeclaration: {
+                        // Everything inside starts before `limit`, and whatever follows starts at
+                        // or after it: the end of the subtree is found by bisection instead of a
+                        // walk.
+                        const std::uint32_t limit = first + nodes.token_count[n];
+                        std::size_t         low   = n + 1;
+                        std::size_t         high  = to;
+                        while (low < high)
                         {
-                            low = mid + 1;
+                            const std::size_t mid = low + (high - low) / 2;
+                            if (nodes.first_token[mid] < limit)
+                            {
+                                low = mid + 1;
+                            }
+                            else
+                            {
+                                high = mid;
+                            }
                         }
-                        else
-                        {
-                            high = mid;
-                        }
-                    }
 
-                    n = low - 1;
-                    break;
-                }
-                case GrammarKind::RecordDefinition:
-                    Declare(TagNameAt(SigOf(first)), kNameType);
-                    break;
-                case GrammarKind::UsingDeclaration:
-                {
-                    const auto head = SigOf(first);
-                    if (Is(head, "using") && IsIdentifierToken(head + 1) && Is(head + 2, "="))
-                    {
-                        Declare(Text(head + 1), kNameType);
+                        n = low - 1;
+                        break;
                     }
-
-                    break;
-                }
-                case GrammarKind::Declaration:
-                case GrammarKind::DeclarationStatement:
-                    // `struct Foo;` and `typedef struct Foo Bar;` name types too.
-                    if (StartsTag(RawText(first)))
-                    {
+                    case GrammarKind::RecordDefinition:
                         Declare(TagNameAt(SigOf(first)), kNameType);
-                    }
+                        break;
+                    case GrammarKind::UsingDeclaration: {
+                        const auto head = SigOf(first);
+                        if (Is(head, "using") && IsIdentifierToken(head + 1) && Is(head + 2, "="))
+                        {
+                            Declare(Text(head + 1), kNameType);
+                        }
 
-                    break;
-                case GrammarKind::Enumerator:
-                    Declare(RawText(first), kNameValue);
-                    break;
-                case GrammarKind::DeclaredName:
-                {
-                    const auto declarator = nodes.parent[n];
-                    if (declarator >= nodes.size() || static_cast<GrammarKind>(nodes.kind[declarator]) != GrammarKind::Declarator)
-                    {
                         break;
                     }
+                    case GrammarKind::Declaration:
+                    case GrammarKind::DeclarationStatement:
+                        // `struct Foo;` and `typedef struct Foo Bar;` name types too.
+                        if (StartsTag(RawText(first)))
+                        {
+                            Declare(TagNameAt(SigOf(first)), kNameType);
+                        }
 
-                    // One token: unqualified. `A::f` is a member defined out of line, already known.
-                    if (nodes.token_count[n] != 1 || m_tree.Tokens()[first].kind != TokenKind::Identifier)
-                    {
                         break;
-                    }
-
-                    // Climb out of the declarator to the declaration that owns it. Only a
-                    // plain variable declaration records a value: functions are not recorded
-                    // (a constructor shares its class's name, and `f * x;` is never a
-                    // declaration of something called f), nor are parameters.
-                    std::size_t owner = nodes.parent[n];
-                    while (owner < nodes.size())
-                    {
-                        const auto owner_kind = static_cast<GrammarKind>(nodes.kind[owner]);
-                        if (owner_kind != GrammarKind::Declarator && owner_kind != GrammarKind::InitDeclarator)
+                    case GrammarKind::Enumerator:
+                        Declare(RawText(first), kNameValue);
+                        break;
+                    case GrammarKind::DeclaredName: {
+                        const auto declarator = nodes.parent[n];
+                        if (declarator >= nodes.size() ||
+                            static_cast<GrammarKind>(nodes.kind[declarator]) !=
+                                GrammarKind::Declarator)
                         {
                             break;
                         }
 
-                        owner = nodes.parent[owner];
-                    }
+                        // One token: unqualified. `A::f` is a member defined out of line, already
+                        // known.
+                        if (nodes.token_count[n] != 1 ||
+                            m_tree.Tokens()[first].kind != TokenKind::Identifier)
+                        {
+                            break;
+                        }
 
-                    if (owner >= nodes.size() ||
-                        (static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::Declaration &&
-                        static_cast<GrammarKind>(nodes.kind[owner]) != GrammarKind::DeclarationStatement))
-                    {
+                        // Climb out of the declarator to the declaration that owns it. Only a
+                        // plain variable declaration records a value: functions are not recorded
+                        // (a constructor shares its class's name, and `f * x;` is never a
+                        // declaration of something called f), nor are parameters.
+                        std::size_t owner = nodes.parent[n];
+                        while (owner < nodes.size())
+                        {
+                            const auto owner_kind = static_cast<GrammarKind>(nodes.kind[owner]);
+                            if (owner_kind != GrammarKind::Declarator &&
+                                owner_kind != GrammarKind::InitDeclarator)
+                            {
+                                break;
+                            }
+
+                            owner = nodes.parent[owner];
+                        }
+
+                        if (owner >= nodes.size() ||
+                            (static_cast<GrammarKind>(nodes.kind[owner]) !=
+                                 GrammarKind::Declaration &&
+                             static_cast<GrammarKind>(nodes.kind[owner]) !=
+                                 GrammarKind::DeclarationStatement))
+                        {
+                            break;
+                        }
+
+                        const bool typedef_declaration =
+                            owner < nodes.size() && RawText(nodes.first_token[owner]) == "typedef";
+                        Declare(RawText(first), typedef_declaration ? kNameType : kNameValue);
                         break;
                     }
-
-                    const bool typedef_declaration = owner < nodes.size() && RawText(nodes.first_token[owner]) == "typedef";
-                    Declare(RawText(first), typedef_declaration ? kNameType : kNameValue);
-                    break;
-                }
-                default:
-                    break;
+                    default:
+                        break;
                 }
             }
         }
@@ -3609,8 +3695,8 @@ namespace heimdall
         // Parameters of the function whose body is about to be parsed.
         void DeclareParameters(std::size_t function)
         {
-            const auto& nodes = m_tree.m_nodes_soa;
-            const std::size_t size = nodes.size();
+            const auto&       nodes = m_tree.m_nodes_soa;
+            const std::size_t size  = nodes.size();
             for (std::size_t n = function + 1; n < size; ++n)
             {
                 if (static_cast<GrammarKind>(nodes.kind[n]) != GrammarKind::ParameterDeclaration)
@@ -3638,9 +3724,8 @@ namespace heimdall
         // any `*`, `&`, `const`.
         bool IsCastTypeId(std::size_t begin, std::size_t end) const
         {
-            std::size_t i = begin;
-            const auto qualifiers =[&]()
-            {
+            std::size_t i          = begin;
+            const auto  qualifiers = [&]() {
                 while (i < end && (Is(i, "const") || Is(i, "volatile")))
                 {
                     ++i;
@@ -3652,8 +3737,7 @@ namespace heimdall
                 return false;
             }
 
-            const auto builtin =[&](std::size_t at)
-            {
+            const auto builtin = [&](std::size_t at) {
                 const auto text = Text(at);
                 return IsBuiltinType(text) && text != "auto" && text != "decltype";
             };
@@ -3666,7 +3750,8 @@ namespace heimdall
             }
             else
             {
-                if (Is(i, "typename") || Is(i, "struct") || Is(i, "class") || Is(i, "union") || Is(i, "enum"))
+                if (Is(i, "typename") || Is(i, "struct") || Is(i, "class") || Is(i, "union") ||
+                    Is(i, "enum"))
                 {
                     ++i;
                 }
@@ -3708,8 +3793,8 @@ namespace heimdall
 
                 // Most parenthesized expressions fail on shape alone: look the name up last.
                 std::size_t tail = i;
-                while (tail < end && (Is(tail, "*") || Is(tail, "&") || Is(tail, "&&") || Is(tail, "const") ||
-                    Is(tail, "volatile")))
+                while (tail < end && (Is(tail, "*") || Is(tail, "&") || Is(tail, "&&") ||
+                                      Is(tail, "const") || Is(tail, "volatile")))
                 {
                     ++tail;
                 }
@@ -3718,7 +3803,8 @@ namespace heimdall
             }
 
             qualifiers();
-            while (i < end && (Is(i, "*") || Is(i, "&") || Is(i, "&&") || Is(i, "const") || Is(i, "volatile")))
+            while (i < end &&
+                   (Is(i, "*") || Is(i, "&") || Is(i, "&&") || Is(i, "const") || Is(i, "volatile")))
             {
                 ++i;
             }
@@ -3736,33 +3822,33 @@ namespace heimdall
             const auto& token = m_tree.Tokens()[m_sig[pos]];
             switch (token.kind)
             {
-            case TokenKind::Number:
-            case TokenKind::StringLiteral:
-            case TokenKind::CharacterLiteral:
-            case TokenKind::RawStringLiteral:
-                return true;
-            case TokenKind::Identifier:
-            {
-                const auto text = Text(pos);
-                return text != "and" && text != "or" && text != "xor" && text != "and_eq" && text != "or_eq" &&
-                    text != "xor_eq" && text != "not_eq" && text != "bitand" && text != "bitor" && text != "const" &&
-                    text != "volatile" && text != "noexcept" && text != "override" && text != "final" &&
-                    text != "requires";
-            }
-            default:
-                break;
+                case TokenKind::Number:
+                case TokenKind::StringLiteral:
+                case TokenKind::CharacterLiteral:
+                case TokenKind::RawStringLiteral:
+                    return true;
+                case TokenKind::Identifier: {
+                    const auto text = Text(pos);
+                    return text != "and" && text != "or" && text != "xor" && text != "and_eq" &&
+                           text != "or_eq" && text != "xor_eq" && text != "not_eq" &&
+                           text != "bitand" && text != "bitor" && text != "const" &&
+                           text != "volatile" && text != "noexcept" && text != "override" &&
+                           text != "final" && text != "requires";
+                }
+                default:
+                    break;
             }
 
             const auto text = Text(pos);
-            return text == "(" || text == "!" || text == "~" || text == "-" || text == "+" || text == "*" ||
-                text == "&" || text == "++" || text == "--" || text == "::";
+            return text == "(" || text == "!" || text == "~" || text == "-" || text == "+" ||
+                   text == "*" || text == "&" || text == "++" || text == "--" || text == "::";
         }
 
         void BeginItem(std::size_t pos)
         {
             m_item_names_hash = m_names_hash;
-            m_item_open = true;
-            m_item_first_sig = pos;
+            m_item_open       = true;
+            m_item_first_sig  = pos;
             m_item_node_begin = m_tree.m_nodes_soa.size();
             m_item_diag_begin = m_tree.m_diagnostics.size();
         }
@@ -3777,31 +3863,33 @@ namespace heimdall
             }
 
             m_item_open = false;
-            TopLevelItem item{};
-            item.node_begin = static_cast<std::uint32_t>(m_item_node_begin);
-            item.node_end = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
-            item.diag_begin = static_cast<std::uint32_t>(m_item_diag_begin);
-            item.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
-            item.sig_count = static_cast<std::uint32_t>(pos - m_item_first_sig);
-            item.names_hash = m_item_names_hash;
+            TopLevelItem item {};
+            item.node_begin  = static_cast<std::uint32_t>(m_item_node_begin);
+            item.node_end    = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
+            item.diag_begin  = static_cast<std::uint32_t>(m_item_diag_begin);
+            item.diag_end    = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
+            item.sig_count   = static_cast<std::uint32_t>(pos - m_item_first_sig);
+            item.names_hash  = m_item_names_hash;
             item.first_token = m_sig[m_item_first_sig];
-            item.token_end = pos > m_item_first_sig ? m_sig[pos - 1] + 1 : item.first_token;
-            bool reusable = complete && pos > m_item_first_sig && item.node_end > item.node_begin &&
+            item.token_end   = pos > m_item_first_sig ? m_sig[pos - 1] + 1 : item.first_token;
+            bool reusable =
+                complete && pos > m_item_first_sig && item.node_end > item.node_begin &&
                 !IsDirective(m_item_first_sig) && BracketsClosedWithin(m_item_first_sig, pos);
             // Error recovery may scan arbitrarily far ahead, so only items that parsed
             // cleanly and ended on `;` or `}` are known to depend on nothing beyond them.
             reusable = reusable && item.diag_end == item.diag_begin && pos > m_item_first_sig &&
-                (Is(pos - 1, ";") || Is(pos - 1, "}"));
+                       (Is(pos - 1, ";") || Is(pos - 1, "}"));
             for (auto n = item.node_begin; reusable && n < item.node_end; ++n)
             {
-                const GrammarKind kind = static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[n]);
+                const GrammarKind   kind = static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[n]);
                 const std::uint32_t first_token = m_tree.m_nodes_soa.first_token[n];
                 const std::uint32_t token_count = m_tree.m_nodes_soa.token_count[n];
-                const std::uint32_t parent = m_tree.m_nodes_soa.parent[n];
+                const std::uint32_t parent      = m_tree.m_nodes_soa.parent[n];
                 reusable = kind != GrammarKind::Error && kind != GrammarKind::ErrorExpression &&
-                    first_token >= item.first_token && first_token < item.token_end &&
-                    first_token + token_count <= item.token_end &&
-                    (parent == ParseTree::RootNode ||(parent >= item.node_begin && parent < item.node_end));
+                           first_token >= item.first_token && first_token < item.token_end &&
+                           first_token + token_count <= item.token_end &&
+                           (parent == ParseTree::RootNode ||
+                            (parent >= item.node_begin && parent < item.node_end));
             }
 
             item.reusable = reusable;
@@ -3817,20 +3905,20 @@ namespace heimdall
                 return false;
             }
 
-            const ParseTree& prev = *m_reuse->previous;
-            const auto& items = prev.m_items;
-            const std::size_t edit = m_reuse->offset;
-            const std::size_t old_end = edit + m_reuse->old_length;
-            const std::size_t new_end = edit + m_reuse->new_length;
-            const std::ptrdiff_t shift = static_cast<std::ptrdiff_t>(m_reuse->new_length) -
-                static_cast<std::ptrdiff_t>(m_reuse->old_length);
-            const std::uint32_t token = m_sig[pos];
-            const std::size_t offset = m_tree.Tokens()[token].offset;
-            bool after = false;
-            std::size_t old_offset = offset;
+            const ParseTree&     prev       = *m_reuse->previous;
+            const auto&          items      = prev.m_items;
+            const std::size_t    edit       = m_reuse->offset;
+            const std::size_t    old_end    = edit + m_reuse->old_length;
+            const std::size_t    new_end    = edit + m_reuse->new_length;
+            const std::ptrdiff_t shift      = static_cast<std::ptrdiff_t>(m_reuse->new_length) -
+                                              static_cast<std::ptrdiff_t>(m_reuse->old_length);
+            const std::uint32_t  token      = m_sig[pos];
+            const std::size_t    offset     = m_tree.Tokens()[token].offset;
+            bool                 after      = false;
+            std::size_t          old_offset = offset;
             if (offset >= new_end)
             {
-                after = true;
+                after      = true;
                 old_offset = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(offset) - shift);
             }
             else if (offset >= edit)
@@ -3838,11 +3926,11 @@ namespace heimdall
                 return false;
             }
 
-            const auto found = std::lower_bound(items.begin(), items.end(), old_offset,
-                [&prev](const TopLevelItem& item, std::size_t value)
-                {
-                    return prev.Tokens()[item.first_token].offset < value;
-            });
+            const auto found =
+                std::lower_bound(items.begin(), items.end(), old_offset,
+                                 [&prev](const TopLevelItem& item, std::size_t value) {
+                                     return prev.Tokens()[item.first_token].offset < value;
+                                 });
             if (found == items.end() || prev.Tokens()[found->first_token].offset != old_offset ||
                 !found->reusable)
             {
@@ -3868,18 +3956,18 @@ namespace heimdall
                 // The item must end before the edit, and so must the token after it:
                 // the parser may peek one token past an item to decide where it ends.
                 const auto& last = prev.Tokens()[item.token_end - 1];
-                const auto next = found + 1;
-                if (static_cast<std::size_t>(last.offset) + last.length >= edit || next == items.end() ||
-                    prev.Tokens()[next->first_token].offset >= edit)
+                const auto  next = found + 1;
+                if (static_cast<std::size_t>(last.offset) + last.length >= edit ||
+                    next == items.end() || prev.Tokens()[next->first_token].offset >= edit)
                 {
                     return false;
                 }
             }
 
             const std::size_t token_count = item.token_end - item.first_token;
-            const std::size_t after_sig = pos + item.sig_count;
+            const std::size_t after_sig   = pos + item.sig_count;
             if (after_sig > end || token + token_count > m_tree.Tokens().size() ||
-                m_sig[after_sig - 1] != token +(item.token_end - 1 - item.first_token) ||
+                m_sig[after_sig - 1] != token + (item.token_end - 1 - item.first_token) ||
                 (after_sig < m_sig.size() && m_sig[after_sig] < token + token_count) ||
                 !BracketsClosedWithin(pos, after_sig))
             {
@@ -3887,41 +3975,44 @@ namespace heimdall
             }
 
             const std::ptrdiff_t byte_shift = after ? shift : 0;
-            const std::ptrdiff_t token_shift = static_cast<std::ptrdiff_t>(token) -
-                static_cast<std::ptrdiff_t>(item.first_token);
+            const std::ptrdiff_t token_shift =
+                static_cast<std::ptrdiff_t>(token) - static_cast<std::ptrdiff_t>(item.first_token);
             const auto& last_new = m_tree.Tokens()[token + token_count - 1];
             const auto& last_old = prev.Tokens()[item.token_end - 1];
             if (static_cast<std::ptrdiff_t>(last_new.offset) !=
-                static_cast<std::ptrdiff_t>(last_old.offset) + byte_shift ||
+                    static_cast<std::ptrdiff_t>(last_old.offset) + byte_shift ||
                 last_new.length != last_old.length)
             {
                 return false;
             }
 
-            const std::uint32_t node_base = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
-            auto& nodes = m_tree.m_nodes_soa;
-            const auto& old_nodes = prev.m_nodes_soa;
-            const std::size_t node_count = item.node_end - item.node_begin;
+            const std::uint32_t node_base  = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
+            auto&               nodes      = m_tree.m_nodes_soa;
+            const auto&         old_nodes  = prev.m_nodes_soa;
+            const std::size_t   node_count = item.node_end - item.node_begin;
             // Copy unchanged columns in contiguous batches, then remap only the
             // version-dependent indices. One resize replaces five push_backs per node.
             nodes.resize(node_base + node_count);
-            std::copy_n(old_nodes.kind.begin() + item.node_begin, node_count, nodes.kind.begin() + node_base);
+            std::copy_n(old_nodes.kind.begin() + item.node_begin, node_count,
+                        nodes.kind.begin() + node_base);
             std::copy_n(old_nodes.token_count.begin() + item.node_begin, node_count,
-                nodes.token_count.begin() + node_base);
+                        nodes.token_count.begin() + node_base);
             for (auto n = item.node_begin; n < item.node_end; ++n)
             {
-                const std::uint32_t first_token = static_cast<std::uint32_t>(static_cast<std::ptrdiff_t>(prev.m_nodes_soa.first_token[n]) + token_shift);
+                const std::uint32_t first_token = static_cast<std::uint32_t>(
+                    static_cast<std::ptrdiff_t>(prev.m_nodes_soa.first_token[n]) + token_shift);
                 std::uint32_t parent = prev.m_nodes_soa.parent[n];
                 if (parent != ParseTree::RootNode)
                 {
                     parent = parent - item.node_begin + node_base;
                 }
 
-                const std::uint32_t subtree_end = prev.m_nodes_soa.subtree_end[n] - item.node_begin + node_base;
+                const std::uint32_t subtree_end =
+                    prev.m_nodes_soa.subtree_end[n] - item.node_begin + node_base;
 
-                const auto target = node_base + n - item.node_begin;
+                const auto target         = node_base + n - item.node_begin;
                 nodes.first_token[target] = first_token;
-                nodes.parent[target] = parent;
+                nodes.parent[target]      = parent;
                 nodes.subtree_end[target] = subtree_end;
             }
 
@@ -3934,31 +4025,28 @@ namespace heimdall
             for (auto d = item.diag_begin; d < item.diag_end; ++d)
             {
                 GrammarDiagnostic diagnostic = prev.m_diagnostics[d];
-                diagnostic.offset = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(diagnostic.offset) + byte_shift);
+                diagnostic.offset            = static_cast<std::size_t>(
+                    static_cast<std::ptrdiff_t>(diagnostic.offset) + byte_shift);
                 m_tree.m_diagnostics.push_back(std::move(diagnostic));
             }
 
             TopLevelItem copy = item;
-            copy.first_token = token;
-            copy.token_end = static_cast<std::uint32_t>(token + token_count);
-            copy.node_begin = node_base;
-            copy.node_end = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
-            copy.diag_begin = diag_base;
-            copy.diag_end = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
+            copy.first_token  = token;
+            copy.token_end    = static_cast<std::uint32_t>(token + token_count);
+            copy.node_begin   = node_base;
+            copy.node_end     = static_cast<std::uint32_t>(m_tree.m_nodes_soa.size());
+            copy.diag_begin   = diag_base;
+            copy.diag_end     = static_cast<std::uint32_t>(m_tree.m_diagnostics.size());
             m_tree.m_items.push_back(copy);
             ++m_tree.m_reused_items;
             pos = after_sig;
             return true;
         }
 
-        void ParseScope(
-            std::size_t begin,
-            std::size_t end,
-            std::size_t parent,
-            bool member_scope)
+        void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
         {
             const bool top_level = parent == ParseTree::RootNode;
-            auto pos = begin;
+            auto       pos       = begin;
             while (pos < end)
             {
                 if (m_tree.m_cancelled || m_stop.stop_requested())
@@ -4008,16 +4096,17 @@ namespace heimdall
                     const auto semi = FindSemicolon(pos, end);
                     if (semi < end)
                     {
-                        const auto kind = Is(exported_head, "module") ? GrammarKind::ModuleDeclaration
-                        : GrammarKind::ImportDeclaration;
+                        const auto kind = Is(exported_head, "module")
+                                              ? GrammarKind::ModuleDeclaration
+                                              : GrammarKind::ImportDeclaration;
                         Add(kind, pos, semi + 1, parent);
                         pos = semi + 1;
                         continue;
                     }
                 }
 
-                auto declaration_start = pos;
-                const bool is_template = Is(pos, "template");
+                auto       declaration_start = pos;
+                const bool is_template       = Is(pos, "template");
                 if (is_template)
                 {
                     auto angle = pos + 1;
@@ -4028,8 +4117,8 @@ namespace heimdall
 
                     if (angle == end)
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[pos]].offset,
-                                "expected template parameter list"});
+                        m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[pos]].offset,
+                                                         "expected template parameter list" });
                         Add(GrammarKind::Error, pos, end, parent);
                         break;
                     }
@@ -4063,27 +4152,30 @@ namespace heimdall
                     declaration_start = angle;
                     if (declaration_start >= end)
                     {
-                        m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
-                                "expected declaration after template parameter list"});
+                        m_tree.m_diagnostics.push_back(
+                            { m_tree.Tokens()[m_sig[start]].offset,
+                              "expected declaration after template parameter list" });
                         Add(GrammarKind::Error, start, end, parent);
                         break;
                     }
                 }
 
-                std::size_t leading_req = Invalid;
+                std::size_t leading_req     = Invalid;
                 std::size_t leading_req_end = Invalid;
-                if (Is(declaration_start, "requires") && !IsRequiresExpressionAt(declaration_start, end))
+                if (Is(declaration_start, "requires") &&
+                    !IsRequiresExpressionAt(declaration_start, end))
                 {
                     const auto split = FindLeadingRequiresSplit(declaration_start, end);
                     if (split != Invalid && split > declaration_start)
                     {
-                        leading_req = declaration_start;
-                        leading_req_end = split;
+                        leading_req       = declaration_start;
+                        leading_req_end   = split;
                         declaration_start = split;
                     }
                 }
 
-                // Check for language linkage specification: extern "C" { ... } or extern "C++" { ... }
+                // Check for language linkage specification: extern "C" { ... } or extern "C++" {
+                // ... }
                 bool language_linkage = false;
                 if (Is(declaration_start, "extern") && declaration_start + 1 < end)
                 {
@@ -4099,7 +4191,8 @@ namespace heimdall
                 }
 
                 const bool namespace_decl = Is(declaration_start, "namespace");
-                const bool record_decl = Is(declaration_start, "class") || Is(declaration_start, "struct") ||
+                const bool record_decl =
+                    Is(declaration_start, "class") || Is(declaration_start, "struct") ||
                     Is(declaration_start, "union") || Is(declaration_start, "enum");
                 std::size_t brace = end;
                 for (auto i = declaration_start; i < end;)
@@ -4130,21 +4223,23 @@ namespace heimdall
                     const auto semi = FindSemicolon(declaration_start, end);
                     if (semi < end)
                     {
-                        const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1,
-                            parent) : parent;
+                        const auto item_parent =
+                            is_template
+                                ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent)
+                                : parent;
                         if (leading_req != Invalid)
                         {
                             ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
                         }
 
-                        const auto concept_node = Add(GrammarKind::ConceptDefinition, declaration_start, semi + 1,
-                            item_parent);
+                        const auto concept_node = Add(GrammarKind::ConceptDefinition,
+                                                      declaration_start, semi + 1, item_parent);
                         for (auto i = declaration_start + 1; i < semi; ++i)
                             if (Is(i, "="))
-                        {
-                            ParseExpression(i + 1, semi, concept_node);
-                            break;
-                        }
+                            {
+                                ParseExpression(i + 1, semi, concept_node);
+                                break;
+                            }
 
                         pos = semi + 1;
                         continue;
@@ -4153,9 +4248,9 @@ namespace heimdall
 
                 if (brace < end)
                 {
-                    const bool closed = m_match[brace] != Invalid;
-                    const auto close = closed ? m_match[brace] : end;
-                    bool has_function_parens = false;
+                    const bool closed              = m_match[brace] != Invalid;
+                    const auto close               = closed ? m_match[brace] : end;
+                    bool       has_function_parens = false;
                     for (auto i = declaration_start; i < brace; ++i)
                     {
                         if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < brace)
@@ -4164,33 +4259,40 @@ namespace heimdall
                         }
                     }
 
-                    const bool function_body = has_function_parens && !namespace_decl && !record_decl;
+                    const bool function_body =
+                        has_function_parens && !namespace_decl && !record_decl;
                     if (!namespace_decl && !record_decl && !function_body && !language_linkage)
                     {
-                        const auto semi = FindSemicolon(brace +(closed ? 1 : 0), end);
+                        const auto semi = FindSemicolon(brace + (closed ? 1 : 0), end);
                         if (semi < end)
                         {
-                            const auto wrapper = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent)
-                            : parent;
+                            const auto wrapper =
+                                is_template
+                                    ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent)
+                                    : parent;
                             if (leading_req != Invalid)
                             {
                                 ParseRequiresConstraint(leading_req, leading_req_end, wrapper);
                             }
 
-                            const auto declaration = Add(GrammarKind::Declaration, declaration_start, semi + 1, wrapper);
+                            const auto declaration =
+                                Add(GrammarKind::Declaration, declaration_start, semi + 1, wrapper);
                             AddDeclarationDetails(declaration_start, semi, declaration);
                             pos = semi + 1;
                             continue;
                         }
                     }
 
-                    const auto node_kind = language_linkage ? GrammarKind::LanguageLinkageSpec :
-                    namespace_decl ? GrammarKind::NamespaceDefinition :
-                    record_decl ? GrammarKind::RecordDefinition :
-                    function_body ? GrammarKind::FunctionDefinition : GrammarKind::Error;
+                    const auto node_kind =
+                        language_linkage ? GrammarKind::LanguageLinkageSpec
+                        : namespace_decl ? GrammarKind::NamespaceDefinition
+                        : record_decl    ? GrammarKind::RecordDefinition
+                        : function_body  ? GrammarKind::FunctionDefinition
+                                         : GrammarKind::Error;
                     const auto item_end = closed ? close + 1 : close;
-                    const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, item_end,
-                        parent) : parent;
+                    const auto item_parent =
+                        is_template ? Add(GrammarKind::TemplateDeclaration, start, item_end, parent)
+                                    : parent;
                     if (leading_req != Invalid && node_kind != GrammarKind::NamespaceDefinition &&
                         node_kind != GrammarKind::RecordDefinition)
                     {
@@ -4207,30 +4309,35 @@ namespace heimdall
 
                     if (node_kind == GrammarKind::LanguageLinkageSpec)
                     {
-                        // Parse the contents of the language linkage specification (like a namespace)
+                        // Parse the contents of the language linkage specification (like a
+                        // namespace)
                         ParseScope(brace + 1, close, node, false);
 
                         if (!closed)
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[brace]].offset,
-                                    "expected '}' to close language linkage specification"});
+                            m_tree.m_diagnostics.push_back(
+                                { m_tree.Tokens()[m_sig[brace]].offset,
+                                  "expected '}' to close language linkage specification" });
                         }
                     }
-                    else if (node_kind == GrammarKind::NamespaceDefinition || node_kind == GrammarKind::RecordDefinition)
+                    else if (node_kind == GrammarKind::NamespaceDefinition ||
+                             node_kind == GrammarKind::RecordDefinition)
                     {
-                        if (node_kind == GrammarKind::RecordDefinition && Is(declaration_start, "enum"))
+                        if (node_kind == GrammarKind::RecordDefinition &&
+                            Is(declaration_start, "enum"))
                         {
                             ParseEnumerators(brace + 1, close, node);
                         }
                         else
                         {
-                            ParseScope(brace + 1, close, node, node_kind == GrammarKind::RecordDefinition);
+                            ParseScope(brace + 1, close, node,
+                                       node_kind == GrammarKind::RecordDefinition);
                         }
 
                         if (!closed)
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[brace]].offset,
-                                    "expected '}' to close definition"});
+                            m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[brace]].offset,
+                                                             "expected '}' to close definition" });
                         }
                     }
                     else if (node_kind == GrammarKind::FunctionDefinition)
@@ -4251,8 +4358,9 @@ namespace heimdall
                 const auto semi = FindSemicolon(pos, end);
                 if (semi < end)
                 {
-                    const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1,
-                        parent) : parent;
+                    const auto item_parent =
+                        is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent)
+                                    : parent;
                     if (leading_req != Invalid)
                     {
                         ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
@@ -4269,33 +4377,37 @@ namespace heimdall
 
                     if (function_declaration)
                     {
-                        const auto function = Add(GrammarKind::FunctionDeclaration, declaration_start, semi + 1,
-                            item_parent);
-                        const auto consumed = AddTypeAndDeclarator(declaration_start, semi, function);
+                        const auto function = Add(GrammarKind::FunctionDeclaration,
+                                                  declaration_start, semi + 1, item_parent);
+                        const auto consumed =
+                            AddTypeAndDeclarator(declaration_start, semi, function);
                         // The declarator parse stopped short of the `;` while a new
                         // declaration clearly begins: the function lost its `;`.
                         if (consumed > declaration_start && consumed < semi &&
                             LooksLikeDeclarationStart(consumed, semi))
                         {
-                            m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[consumed]].offset,
-                                    std::string("expected ';' before '") +
-                                    std::string(Text(consumed)) + "'"});
+                            m_tree.m_diagnostics.push_back(
+                                { m_tree.Tokens()[m_sig[consumed]].offset,
+                                  std::string("expected ';' before '") +
+                                      std::string(Text(consumed)) + "'" });
                         }
                     }
                     else
                     {
-                        const auto declaration_kind = Is(declaration_start, "concept") ? GrammarKind::ConceptDefinition :
-                        Is(declaration_start, "using") ? GrammarKind::UsingDeclaration :
-                        GrammarKind::Declaration;
-                        const auto declaration = Add(declaration_kind, declaration_start, semi + 1, item_parent);
+                        const auto declaration_kind =
+                            Is(declaration_start, "concept") ? GrammarKind::ConceptDefinition
+                            : Is(declaration_start, "using") ? GrammarKind::UsingDeclaration
+                                                             : GrammarKind::Declaration;
+                        const auto declaration =
+                            Add(declaration_kind, declaration_start, semi + 1, item_parent);
                         if (declaration_kind == GrammarKind::ConceptDefinition)
                         {
                             for (auto i = declaration_start + 1; i < semi; ++i)
                                 if (Is(i, "="))
-                            {
-                                ParseExpression(i + 1, semi, declaration);
-                                break;
-                            }
+                                {
+                                    ParseExpression(i + 1, semi, declaration);
+                                    break;
+                                }
                         }
                         else if (declaration_kind != GrammarKind::UsingDeclaration)
                         {
@@ -4307,8 +4419,9 @@ namespace heimdall
                     continue;
                 }
 
-                m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[start]].offset,
-                        "expected ';' or definition body before end of scope"});
+                m_tree.m_diagnostics.push_back(
+                    { m_tree.Tokens()[m_sig[start]].offset,
+                      "expected ';' or definition body before end of scope" });
                 Add(GrammarKind::Error, start, end, parent);
                 break;
             }
@@ -4324,21 +4437,14 @@ namespace heimdall
     namespace detail
     {
 
-        void ParseWithGrammar(
-            ParseTree& tree,
-            const PreprocessorResult& preprocessing,
-            std::stop_token stop,
-            const Preprocessor::MacroMap* macros,
-            const ParseReuse* reuse,
-            const TypeNameOracle* type_names)
+        void ParseWithGrammar(ParseTree&                    tree,
+                              const PreprocessorResult&     preprocessing,
+                              std::stop_token               stop,
+                              const Preprocessor::MacroMap* macros,
+                              const ParseReuse*             reuse,
+                              const TypeNameOracle*         type_names)
         {
-            GrammarParser parser(
-                tree,
-                preprocessing,
-                std::move(stop),
-                macros,
-                reuse,
-                type_names);
+            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse, type_names);
             parser.Run();
         }
 

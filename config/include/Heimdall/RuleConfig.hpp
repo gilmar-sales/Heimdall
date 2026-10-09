@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace heimdall
@@ -16,20 +17,21 @@ namespace heimdall
 
     struct RuleConfiguration
     {
-        RuleOptions options;
-        FormatOptions format_options;
-        bool root = false;
-        bool has_suppressions = false;
-        bool has_include_order = false;
-        bool has_doc_scope = false;
-        bool has_pointer_alignment = false;
-        bool has_reference_alignment = false;
-        bool has_blank_line_between_methods = false;
-        bool has_max_parameters_per_line = false;
+        RuleOptions              options;
+        FormatOptions            format_options;
+        bool                     root                           = false;
+        bool                     has_suppressions               = false;
+        bool                     has_include_order              = false;
+        bool                     has_doc_scope                  = false;
+        bool                     has_pointer_alignment          = false;
+        bool                     has_reference_alignment        = false;
+        bool                     has_blank_line_between_methods = false;
+        bool                     has_max_parameters_per_line    = false;
+        std::vector<std::string> format_overrides;
     };
 
-    std::expected<RuleConfiguration,
-        std::string> LoadRuleConfiguration(const std::filesystem::path& path);
+    std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(
+        const std::filesystem::path& path);
 
     std::expected<std::vector<RuleConfiguration>, std::string> FindConfigurations(
         const std::filesystem::path& directory);

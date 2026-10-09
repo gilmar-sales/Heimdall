@@ -13,7 +13,7 @@ namespace
     void BM_RuleEngine(benchmark::State& state)
     {
         std::vector<std::string> sources;
-        std::size_t source_bytes = 0;
+        std::size_t              source_bytes = 0;
         for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
@@ -39,7 +39,7 @@ namespace
         }
 
         const heimdall::RuleEngine engine;
-        std::size_t diagnostic_count = 0;
+        std::size_t                diagnostic_count = 0;
         for (auto _ : state)
         {
             diagnostic_count = 0;

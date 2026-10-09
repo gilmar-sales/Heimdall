@@ -3,8 +3,8 @@
 #include <string>
 #include <string_view>
 
-#include <simdjson/dom/object.h>
 #include <simdjson/dom/element.h>
+#include <simdjson/dom/object.h>
 
 namespace heimdall::lsp
 {

@@ -13,36 +13,36 @@ namespace heimdall::cli
         {
             switch (c)
             {
-            case '"':
-                out += "\\\"";
-                break;
-            case '\\':
-                out += "\\\\";
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            case '\r':
-                out += "\\r";
-                break;
-            case '\t':
-                out += "\\t";
-                break;
-            default:
-                constexpr unsigned char kControlCharLimit = ' ';
-                constexpr int kHexDigitBits = 4;
-                constexpr unsigned char kLowNibbleMask = 0x0f;
-                if (c < kControlCharLimit)
-                {
-                    constexpr char hex[] = "0123456789abcdef";
-                    out += "\\u00";
-                    out += hex[c >> kHexDigitBits];
-                    out += hex[c & kLowNibbleMask];
-                }
-                else
-                {
-                    out += static_cast<char>(c);
-                }
+                case '"':
+                    out += "\\\"";
+                    break;
+                case '\\':
+                    out += "\\\\";
+                    break;
+                case '\n':
+                    out += "\\n";
+                    break;
+                case '\r':
+                    out += "\\r";
+                    break;
+                case '\t':
+                    out += "\\t";
+                    break;
+                default:
+                    constexpr unsigned char kControlCharLimit = ' ';
+                    constexpr int           kHexDigitBits     = 4;
+                    constexpr unsigned char kLowNibbleMask    = 0x0f;
+                    if (c < kControlCharLimit)
+                    {
+                        constexpr char hex[] = "0123456789abcdef";
+                        out += "\\u00";
+                        out += hex[c >> kHexDigitBits];
+                        out += hex[c & kLowNibbleMask];
+                    }
+                    else
+                    {
+                        out += static_cast<char>(c);
+                    }
             }
         }
 
@@ -64,10 +64,9 @@ namespace heimdall::cli
     int ReportResults(const std::vector<FileResult>& results, const Options& options)
     {
         constexpr int kExitUsageError = 2;
-        bool failed = false;
-        bool has_diagnostics = false;
-        const auto severity_name =[](heimdall::Severity severity)
-        {
+        bool          failed          = false;
+        bool          has_diagnostics = false;
+        const auto    severity_name   = [](heimdall::Severity severity) {
             return severity == heimdall::Severity::Error ? "error" : "warning";
         };
         if (options.command == Command::Parse && options.json)
@@ -89,8 +88,9 @@ namespace heimdall::cli
                 }
 
                 first_file = false;
-                std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"standard\":\""
-                << JsonEscape(result.standard_name) << "\",\"nodes\":[";
+                std::cout << "{\"file\":\"" << JsonEscape(result.path.string())
+                          << "\",\"standard\":\"" << JsonEscape(result.standard_name)
+                          << "\",\"nodes\":[";
                 bool first_node = true;
                 for (const auto& node : result.nodes)
                 {
@@ -100,8 +100,9 @@ namespace heimdall::cli
                     }
 
                     first_node = false;
-                    std::cout << "{\"kind\":\"" << JsonEscape(node.kind) << "\",\"parent\":" << node.parent
-                    << ",\"offset\":" << node.offset << ",\"length\":" << node.length << '}';
+                    std::cout << "{\"kind\":\"" << JsonEscape(node.kind)
+                              << "\",\"parent\":" << node.parent << ",\"offset\":" << node.offset
+                              << ",\"length\":" << node.length << '}';
                 }
 
                 std::cout << "],\"diagnostics\":[";
@@ -114,9 +115,10 @@ namespace heimdall::cli
                     }
 
                     first_diag = false;
-                    std::cout << "{\"line\":" << diagnostic.line << ",\"column\":" << diagnostic.column
-                    << ",\"severity\":\"error\",\"code\":\"" << JsonEscape(diagnostic.code)
-                    << "\",\"message\":\"" << JsonEscape(diagnostic.message) << "\"}";
+                    std::cout << "{\"line\":" << diagnostic.line << ",\"column\":"
+                              << diagnostic.column << ",\"severity\":\"error\",\"code\":\""
+                              << JsonEscape(diagnostic.code) << "\",\"message\":\""
+                              << JsonEscape(diagnostic.message) << "\"}";
                     has_diagnostics = true;
                 }
 
@@ -142,13 +144,15 @@ namespace heimdall::cli
                 {
                     if (result.has_semantic_context)
                     {
-                        std::cerr << result.path.string() << ": semantic context: " << result.type_count
-                        << " types, " << result.declaration_count << " pointer declarations, "
-                        << result.ambiguous_count << " unresolved forms\n";
+                        std::cerr << result.path.string()
+                                  << ": semantic context: " << result.type_count << " types, "
+                                  << result.declaration_count << " pointer declarations, "
+                                  << result.ambiguous_count << " unresolved forms\n";
                     }
                     else
                     {
-                        std::cerr << result.path.string() << ": no matching compile command; semantic checks skipped\n";
+                        std::cerr << result.path.string()
+                                  << ": no matching compile command; semantic checks skipped\n";
                     }
                 }
 
@@ -160,11 +164,12 @@ namespace heimdall::cli
                     }
 
                     first = false;
-                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
-                    << ",\"column\":" << diagnostic.column << ",\"severity\":\""
-                    << severity_name(diagnostic.severity) << "\",\"code\":\""
-                    << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
-                    << "\"}";
+                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string())
+                              << "\",\"line\":" << diagnostic.line
+                              << ",\"column\":" << diagnostic.column << ",\"severity\":\""
+                              << severity_name(diagnostic.severity) << "\",\"code\":\""
+                              << JsonEscape(diagnostic.code) << "\",\"message\":\""
+                              << JsonEscape(diagnostic.message) << "\"}";
                     has_diagnostics = true;
                 }
 
@@ -176,10 +181,11 @@ namespace heimdall::cli
                     }
 
                     first = false;
-                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
-                    << ",\"column\":" << diagnostic.column << ",\"severity\":\"warning\",\"code\":\""
-                    << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
-                    << "\"}";
+                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string())
+                              << "\",\"line\":" << diagnostic.line << ",\"column\":"
+                              << diagnostic.column << ",\"severity\":\"warning\",\"code\":\""
+                              << JsonEscape(diagnostic.code) << "\",\"message\":\""
+                              << JsonEscape(diagnostic.message) << "\"}";
                     has_diagnostics = true;
                 }
 
@@ -191,10 +197,11 @@ namespace heimdall::cli
                     }
 
                     first = false;
-                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
-                    << ",\"column\":" << diagnostic.column << ",\"severity\":\"error\",\"code\":\""
-                    << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
-                    << "\"}";
+                    std::cout << "{\"file\":\"" << JsonEscape(result.path.string())
+                              << "\",\"line\":" << diagnostic.line << ",\"column\":"
+                              << diagnostic.column << ",\"severity\":\"error\",\"code\":\""
+                              << JsonEscape(diagnostic.code) << "\",\"message\":\""
+                              << JsonEscape(diagnostic.message) << "\"}";
                     has_diagnostics = true;
                 }
             }
@@ -214,13 +221,15 @@ namespace heimdall::cli
 
                 for (const auto& diagnostic : result.syntax_diagnostics)
                 {
-                    std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
-                    << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';
+                    std::cout << result.path.string() << ':' << diagnostic.line << ':'
+                              << diagnostic.column << ": error " << diagnostic.code << ": "
+                              << diagnostic.message << '\n';
                 }
 
-                has_diagnostics |=!result.syntax_diagnostics.empty();
-                std::cout << result.path.string() << ": parsed " << result.nodes.size() << " nodes (standard "
-                << result.standard_name << "): " << result.syntax_diagnostics.size() << " syntax errors\n";
+                has_diagnostics |= !result.syntax_diagnostics.empty();
+                std::cout << result.path.string() << ": parsed " << result.nodes.size()
+                          << " nodes (standard " << result.standard_name
+                          << "): " << result.syntax_diagnostics.size() << " syntax errors\n";
             }
         }
         else
@@ -238,13 +247,15 @@ namespace heimdall::cli
                 {
                     if (result.has_semantic_context)
                     {
-                        std::cerr << result.path.string() << ": semantic context: " << result.type_count
-                        << " known types, " << result.declaration_count << " pointer declarations, "
-                        << result.ambiguous_count << " unresolved forms\n";
+                        std::cerr << result.path.string()
+                                  << ": semantic context: " << result.type_count << " known types, "
+                                  << result.declaration_count << " pointer declarations, "
+                                  << result.ambiguous_count << " unresolved forms\n";
                     }
                     else
                     {
-                        std::cerr << result.path.string() << ": no matching compile command; semantic checks skipped\n";
+                        std::cerr << result.path.string()
+                                  << ": no matching compile command; semantic checks skipped\n";
                     }
                 }
 
@@ -254,7 +265,8 @@ namespace heimdall::cli
                     {
                         if (result.changed && !WriteFile(result.path, result.output))
                         {
-                            std::cerr << result.path.string() << ": failed to write formatted file\n";
+                            std::cerr
+                                << result.path.string() << ": failed to write formatted file\n";
                             failed = true;
                         }
                     }
@@ -266,27 +278,30 @@ namespace heimdall::cli
                     continue;
                 }
 
-                has_diagnostics |=!result.diagnostics.empty();
+                has_diagnostics |= !result.diagnostics.empty();
                 for (const auto& diagnostic : result.diagnostics)
                 {
-                    std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column << ": "
-                    << severity_name(diagnostic.severity) << ' ' << diagnostic.code << ": "
-                    << diagnostic.message << '\n';
+                    std::cout << result.path.string() << ':' << diagnostic.line << ':'
+                              << diagnostic.column << ": " << severity_name(diagnostic.severity)
+                              << ' ' << diagnostic.code << ": " << diagnostic.message << '\n';
                 }
 
                 for (const auto& diagnostic : result.semantic_diagnostics)
                 {
-                    std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
-                    << ": warning " << diagnostic.code << ": " << diagnostic.message << '\n';
+                    std::cout << result.path.string() << ':' << diagnostic.line << ':'
+                              << diagnostic.column << ": warning " << diagnostic.code << ": "
+                              << diagnostic.message << '\n';
                 }
 
                 for (const auto& diagnostic : result.syntax_diagnostics)
                 {
-                    std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
-                    << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';
+                    std::cout << result.path.string() << ':' << diagnostic.line << ':'
+                              << diagnostic.column << ": error " << diagnostic.code << ": "
+                              << diagnostic.message << '\n';
                 }
 
-                has_diagnostics |=!result.semantic_diagnostics.empty() ||!result.syntax_diagnostics.empty();
+                has_diagnostics |=
+                    !result.semantic_diagnostics.empty() || !result.syntax_diagnostics.empty();
                 if (options.fix && result.changed && !WriteFile(result.path, result.output))
                 {
                     std::cerr << result.path.string() << ": failed to write fixes\n";
@@ -300,7 +315,8 @@ namespace heimdall::cli
             return kExitUsageError;
         }
 
-        if ((options.command == Command::Check || options.command == Command::Parse) && has_diagnostics)
+        if ((options.command == Command::Check || options.command == Command::Parse) &&
+            has_diagnostics)
         {
             return 1;
         }

@@ -28,12 +28,13 @@ namespace heimdall
         auto it = std::upper_bound(m_line_starts.begin(), m_line_starts.end(), offset);
         if (it == m_line_starts.begin())
         {
-            return {1, static_cast<std::uint32_t>(offset + 1)};
+            return { 1, static_cast<std::uint32_t>(offset + 1) };
         }
 
         --it;
         const std::size_t line = static_cast<std::size_t>(it - m_line_starts.begin());
-        return {static_cast<std::uint32_t>(line + 1), static_cast<std::uint32_t>(offset - *it + 1)};
+        return { static_cast<std::uint32_t>(line + 1),
+                 static_cast<std::uint32_t>(offset - *it + 1) };
     }
 
 } // namespace heimdall

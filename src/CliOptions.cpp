@@ -69,12 +69,12 @@ namespace heimdall::cli
         return false;
     }
 
-    bool ParseOptions(int argc, char**argv, Options& options)
+    bool ParseOptions(int argc, char** argv, Options& options)
     {
-        constexpr int kMinArgcForCommand = 2;
-        constexpr int kFirstOptionIndex = 2;
-        constexpr std::string_view kStdPrefix = "--std=";
-        constexpr std::string_view kPointerAlignmentPrefix = "--pointer-alignment=";
+        constexpr int              kMinArgcForCommand        = 2;
+        constexpr int              kFirstOptionIndex         = 2;
+        constexpr std::string_view kStdPrefix                = "--std=";
+        constexpr std::string_view kPointerAlignmentPrefix   = "--pointer-alignment=";
         constexpr std::string_view kReferenceAlignmentPrefix = "--reference-alignment=";
         if (argc < kMinArgcForCommand)
         {
@@ -155,7 +155,7 @@ namespace heimdall::cli
             }
             else if (arg == "--fix-unsafe")
             {
-                options.fix = true;
+                options.fix        = true;
                 options.fix_unsafe = true;
             }
             else if (arg == "--semantic")
@@ -168,21 +168,22 @@ namespace heimdall::cli
             }
             else if (arg == "--config" && i + 1 < argc)
             {
-                options.rule_config = argv[++i];
+                options.rule_config          = argv[++i];
                 options.rule_config_explicit = true;
             }
             else if (arg == "--rule" && i + 1 < argc)
             {
                 const std::string_view value = argv[++i];
-                const auto equal = value.find('=');
+                const auto             equal = value.find('=');
                 if (equal == std::string_view::npos || equal == 0)
                 {
-                    std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
+                    std::cerr << "invalid --rule value: " << value
+                              << " (expected code=off|warning|error)\n";
                     return false;
                 }
 
                 heimdall::RuleOverride override;
-                override.code = value.substr(0, equal);
+                override.code      = value.substr(0, equal);
                 const auto setting = value.substr(equal + 1);
                 if (setting == "off")
                 {
@@ -198,49 +199,57 @@ namespace heimdall::cli
                 }
                 else
                 {
-                    std::cerr << "invalid --rule value: " << value << " (expected code=off|warning|error)\n";
+                    std::cerr << "invalid --rule value: " << value
+                              << " (expected code=off|warning|error)\n";
                     return false;
                 }
 
                 options.rule_overrides.push_back(std::move(override));
             }
             else if ((arg == "--std" && i + 1 < argc) ||
-                (arg.starts_with(kStdPrefix) && arg.size() > kStdPrefix.size()))
+                     (arg.starts_with(kStdPrefix) && arg.size() > kStdPrefix.size()))
             {
                 const std::string_view value =
-                    arg.starts_with(kStdPrefix) ? std::string_view(arg).substr(kStdPrefix.size()) :
-                std::string_view(argv[++i]);
+                    arg.starts_with(kStdPrefix) ? std::string_view(arg).substr(kStdPrefix.size())
+                                                : std::string_view(argv[++i]);
                 if (!ParseStandardValue(value, options.standard))
                 {
-                    std::cerr << "invalid --std value: " << value << " (expected c++20, c++23 or c++26)\n";
+                    std::cerr << "invalid --std value: " << value
+                              << " (expected c++20, c++23 or c++26)\n";
                     return false;
                 }
 
                 options.std_override = true;
             }
             else if ((arg == "--pointer-alignment" && i + 1 < argc) ||
-                (arg.starts_with("--pointer-alignment=") && arg.size() > kPointerAlignmentPrefix.size()))
+                     (arg.starts_with("--pointer-alignment=") &&
+                      arg.size() > kPointerAlignmentPrefix.size()))
             {
-                const std::string_view value = arg.starts_with(kPointerAlignmentPrefix)
-                ? std::string_view(arg).substr(kPointerAlignmentPrefix.size())
-                : std::string_view(argv[++i]);
+                const std::string_view value =
+                    arg.starts_with(kPointerAlignmentPrefix)
+                        ? std::string_view(arg).substr(kPointerAlignmentPrefix.size())
+                        : std::string_view(argv[++i]);
                 if (!ParsePointerAlignment(value, options.pointer_alignment))
                 {
-                    std::cerr << "invalid --pointer-alignment value: " << value << " (expected left or right)\n";
+                    std::cerr << "invalid --pointer-alignment value: " << value
+                              << " (expected left or right)\n";
                     return false;
                 }
 
                 options.pointer_alignment_override = true;
             }
             else if ((arg == "--reference-alignment" && i + 1 < argc) ||
-                (arg.starts_with("--reference-alignment=") && arg.size() > kReferenceAlignmentPrefix.size()))
+                     (arg.starts_with("--reference-alignment=") &&
+                      arg.size() > kReferenceAlignmentPrefix.size()))
             {
-                const std::string_view value = arg.starts_with(kReferenceAlignmentPrefix)
-                ? std::string_view(arg).substr(kReferenceAlignmentPrefix.size())
-                : std::string_view(argv[++i]);
+                const std::string_view value =
+                    arg.starts_with(kReferenceAlignmentPrefix)
+                        ? std::string_view(arg).substr(kReferenceAlignmentPrefix.size())
+                        : std::string_view(argv[++i]);
                 if (!ParseReferenceAlignment(value, options.reference_alignment))
                 {
-                    std::cerr << "invalid --reference-alignment value: " << value << " (expected left or right)\n";
+                    std::cerr << "invalid --reference-alignment value: " << value
+                              << " (expected left or right)\n";
                     return false;
                 }
 
@@ -249,10 +258,11 @@ namespace heimdall::cli
             else if (arg == "--jobs" && i + 1 < argc)
             {
                 const std::string_view value = argv[++i];
-                std::size_t jobs = 0;
-                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), jobs);
-                if (parsed.ec != std::errc{}
-                    || parsed.ptr != value.data() + value.size() || jobs == 0)
+                std::size_t            jobs  = 0;
+                const auto             parsed =
+                    std::from_chars(value.data(), value.data() + value.size(), jobs);
+                if (parsed.ec != std::errc {} || parsed.ptr != value.data() + value.size() ||
+                    jobs == 0)
                 {
                     std::cerr << "invalid --jobs value: " << value << '\n';
                     return false;
@@ -312,7 +322,8 @@ namespace heimdall::cli
             return false;
         }
 
-        if (!options.rule_overrides.empty() && options.command != Command::Lint && options.command != Command::Check)
+        if (!options.rule_overrides.empty() && options.command != Command::Lint &&
+            options.command != Command::Check)
         {
             std::cerr << "--rule is only supported by lint/check\n";
             return false;
@@ -321,12 +332,13 @@ namespace heimdall::cli
         if ((options.pointer_alignment_override || options.reference_alignment_override) &&
             options.command != Command::Format)
         {
-            std::cerr << "--pointer-alignment and --reference-alignment are only supported by format\n";
+            std::cerr
+                << "--pointer-alignment and --reference-alignment are only supported by format\n";
             return false;
         }
 
-        if (options.rule_config_explicit && options.command != Command::Lint && options.command != Command::Check &&
-            options.command != Command::Format)
+        if (options.rule_config_explicit && options.command != Command::Lint &&
+            options.command != Command::Check && options.command != Command::Format)
         {
             std::cerr << "--config is only supported by lint/check/format\n";
             return false;

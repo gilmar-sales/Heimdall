@@ -13,96 +13,103 @@ namespace heimdall
         struct BoundStorage
         {
             std::shared_ptr<const ParseTree> tree;
-            SemanticModel model;
+            SemanticModel                    model;
 
-            explicit BoundStorage(std::shared_ptr<const ParseTree> syntax)
-            : tree(std::move(syntax)), model(Binder::Bind(*tree)) {}
+            explicit BoundStorage(std::shared_ptr<const ParseTree> syntax) :
+                tree(std::move(syntax)), model(Binder::Bind(*tree))
+            {
+            }
         };
 
         struct TypedStorage
         {
             std::shared_ptr<const SemanticModel> model;
-            TypeModel types;
+            TypeModel                            types;
 
-            explicit TypedStorage(std::shared_ptr<const SemanticModel> semantic)
-            : model(std::move(semantic)), types(Typer::Type(*model)) {}
+            explicit TypedStorage(std::shared_ptr<const SemanticModel> semantic) :
+                model(std::move(semantic)), types(Typer::Type(*model))
+            {
+            }
         };
 
         struct SyntaxStorage
         {
-            mutable std::mutex mutex;
+            mutable std::mutex                       mutex;
             mutable std::shared_ptr<const ParseTree> tree;
             mutable std::shared_ptr<const ParseTree> base;
-            Lexer::TextEdit edit;
-            mutable AnalysisMetrics metrics;
+            Lexer::TextEdit                          edit;
+            mutable AnalysisMetrics                  metrics;
         };
 
         struct DocumentAnalysis
         {
-            std::filesystem::path path;
-            std::shared_ptr<const std::string> source;
-            std::int64_t version = 0;
-            ParserOptions options;
-            std::vector<std::string> include_targets;
-            std::shared_ptr<SyntaxStorage> syntax = std::make_shared<SyntaxStorage>();
-            mutable std::mutex mutex;
+            std::filesystem::path                        path;
+            std::shared_ptr<const std::string>           source;
+            std::int64_t                                 version = 0;
+            ParserOptions                                options;
+            std::vector<std::string>                     include_targets;
+            std::shared_ptr<SyntaxStorage>               syntax = std::make_shared<SyntaxStorage>();
+            mutable std::mutex                           mutex;
             mutable std::shared_ptr<const SemanticModel> semantic;
-            mutable std::shared_ptr<const TypeModel> types;
+            mutable std::shared_ptr<const TypeModel>     types;
             mutable std::shared_ptr<const HeaderSummary> summary;
-            mutable AnalysisMetrics metrics;
+            mutable AnalysisMetrics                      metrics;
         };
 
         struct ProjectStorage
         {
-            std::mutex mutex;
+            std::mutex                          mutex;
             std::shared_ptr<const ProjectIndex> index;
-            AnalysisMetrics metrics;
+            AnalysisMetrics                     metrics;
         };
 
         struct SymbolIndexStorage
         {
-            std::mutex mutex;
+            std::mutex                                mutex;
             std::shared_ptr<const ProjectSymbolIndex> index;
-            AnalysisMetrics metrics;
+            AnalysisMetrics                           metrics;
         };
 
         struct WorkspaceState
         {
             WorkspaceState() = default;
 
-            WorkspaceState(const WorkspaceState& other)
-            : revision(other.revision), documents(other.documents), paths(other.paths),
+            WorkspaceState(const WorkspaceState& other) :
+                revision(other.revision), documents(other.documents), paths(other.paths),
                 dependencies(other.dependencies), dependents(other.dependents),
                 explicit_dependencies(other.explicit_dependencies), compilation(other.compilation),
-                project(other.project) {}
+                project(other.project)
+            {
+            }
 
-            std::uint64_t revision = 0;
+            std::uint64_t                                        revision = 0;
             std::vector<std::shared_ptr<const DocumentAnalysis>> documents;
-            std::unordered_map<std::string, DocumentId> paths;
-            std::vector<std::vector<DocumentId>> dependencies;
-            std::vector<std::vector<DocumentId>> dependents;
-            std::vector<bool> explicit_dependencies;
-            std::shared_ptr<const CompileDatabase> compilation;
-            std::shared_ptr<const ProjectIndex> project;
-            std::shared_ptr<ProjectStorage> project_cache = std::make_shared<ProjectStorage>();
-            std::shared_ptr<SymbolIndexStorage> symbol_cache = std::make_shared<SymbolIndexStorage>();
+            std::unordered_map<std::string, DocumentId>          paths;
+            std::vector<std::vector<DocumentId>>                 dependencies;
+            std::vector<std::vector<DocumentId>>                 dependents;
+            std::vector<bool>                                    explicit_dependencies;
+            std::shared_ptr<const CompileDatabase>               compilation;
+            std::shared_ptr<const ProjectIndex>                  project;
+            std::shared_ptr<ProjectStorage>     project_cache = std::make_shared<ProjectStorage>();
+            std::shared_ptr<SymbolIndexStorage> symbol_cache =
+                std::make_shared<SymbolIndexStorage>();
         };
-    }
+    } // namespace detail
 
     namespace
     {
         using Clock = std::chrono::steady_clock;
         std::uint64_t Elapsed(Clock::time_point start)
         {
-            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                Clock::now() - start).count());
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
         }
 
         std::string PathKey(const std::filesystem::path& path)
         {
             std::error_code error;
-            auto absolute = std::filesystem::absolute(path, error);
-            auto key = (error ? path : absolute).lexically_normal().generic_string();
+            auto            absolute = std::filesystem::absolute(path, error);
+            auto            key = (error ? path : absolute).lexically_normal().generic_string();
 #ifdef _WIN32
             // Windows paths are case-insensitive; use ASCII folding without locale.
             for (auto& c : key)
@@ -118,30 +125,31 @@ namespace heimdall
 
         std::shared_ptr<detail::DocumentAnalysis> NewDocument(const detail::DocumentAnalysis& old)
         {
-            auto document = std::make_shared<detail::DocumentAnalysis>();
-            document->path = old.path;
-            document->source = old.source;
-            document->version = old.version;
-            document->options = old.options;
+            auto document             = std::make_shared<detail::DocumentAnalysis>();
+            document->path            = old.path;
+            document->source          = old.source;
+            document->version         = old.version;
+            document->options         = old.options;
             document->include_targets = old.include_targets;
             return document;
         }
 
         bool SameOptions(const ParserOptions& a, const ParserOptions& b)
         {
-            return a.standard == b.standard && a.Macros() == b.Macros() && a.type_names == b.type_names;
+            return a.standard == b.standard && a.Macros() == b.Macros() &&
+                   a.type_names == b.type_names;
         }
 
         void InvalidateDependents(detail::WorkspaceState& state, DocumentId changed)
         {
-            std::vector<bool> affected(state.documents.size(), false);
-            std::vector<DocumentId> queue{changed};
+            std::vector<bool>       affected(state.documents.size(), false);
+            std::vector<DocumentId> queue { changed };
             affected[changed] = true;
             for (std::size_t next = 0; next < queue.size(); ++next)
             {
                 for (DocumentId id : state.dependents[queue[next]])
                 {
-                    if (affected[id] ||!state.documents[id])
+                    if (affected[id] || !state.documents[id])
                     {
                         continue;
                     }
@@ -149,8 +157,8 @@ namespace heimdall
                     affected[id] = true;
                     queue.push_back(id);
                     // Syntax remains valid; only the semantic dependency changed.
-                    auto document = NewDocument(*state.documents[id]);
-                    document->syntax = state.documents[id]->syntax;
+                    auto document       = NewDocument(*state.documents[id]);
+                    document->syntax    = state.documents[id]->syntax;
                     state.documents[id] = std::move(document);
                 }
             }
@@ -169,26 +177,28 @@ namespace heimdall
                     continue;
                 }
 
-                auto body = source.substr(directive.offset, directive.length);
+                auto               body = source.substr(directive.offset, directive.length);
                 std::vector<Token> significant;
                 for (const auto& token : Lexer(body).Lex())
                 {
-                    if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
+                    if (token.kind != TokenKind::Whitespace &&
+                        token.kind != TokenKind::LineComment &&
                         token.kind != TokenKind::BlockComment)
                     {
                         significant.push_back(token);
                     }
                 }
 
-                if (significant.size() < 3 || body.substr(significant[1].offset,
-                    significant[1].length) != "include")
+                if (significant.size() < 3 ||
+                    body.substr(significant[1].offset, significant[1].length) != "include")
                 {
                     continue;
                 }
 
-                const auto& header = significant[2];
-                const auto spelling = body.substr(header.offset, header.length);
-                if (header.kind == TokenKind::StringLiteral && spelling.size() >= 2 && spelling.front() == '"')
+                const auto& header   = significant[2];
+                const auto  spelling = body.substr(header.offset, header.length);
+                if (header.kind == TokenKind::StringLiteral && spelling.size() >= 2 &&
+                    spelling.front() == '"')
                 {
                     includes.emplace_back(spelling);
                 }
@@ -234,26 +244,28 @@ namespace heimdall
                 }
 
                 const auto& document = *state.documents[id];
-                const auto command = state.compilation ? state.compilation->FindOrNearest(document.path) : nullptr;
+                const auto  command =
+                    state.compilation ? state.compilation->FindOrNearest(document.path) : nullptr;
                 std::vector<DocumentId> edges;
                 for (const auto& target : document.include_targets)
                 {
-                    const auto name = target.substr(1, target.size() - 2);
+                    const auto                         name = target.substr(1, target.size() - 2);
                     std::vector<std::filesystem::path> directories;
                     if (target.front() == '"')
                     {
                         directories.push_back(document.path.parent_path());
                         if (command)
                         {
-                            directories.insert(directories.end(), command->quote_directories.begin(),
-                                command->quote_directories.end());
+                            directories.insert(directories.end(),
+                                               command->quote_directories.begin(),
+                                               command->quote_directories.end());
                         }
                     }
 
                     if (command)
                     {
                         directories.insert(directories.end(), command->include_directories.begin(),
-                            command->include_directories.end());
+                                           command->include_directories.end());
                     }
 
                     for (const auto& directory : directories)
@@ -283,9 +295,9 @@ namespace heimdall
                 }
 
                 state.dependencies[id] = std::move(edges);
-                auto replacement = NewDocument(document);
-                replacement->syntax = document.syntax;
-                state.documents[id] = std::move(replacement);
+                auto replacement       = NewDocument(document);
+                replacement->syntax    = document.syntax;
+                state.documents[id]    = std::move(replacement);
                 changed.push_back(id);
             }
 
@@ -299,7 +311,7 @@ namespace heimdall
         ParserOptions CommandOptions(const CompileCommand& command)
         {
             ParserOptions options;
-            options.standard = command.standard;
+            options.standard          = command.standard;
             options.predefined_macros = command.defines;
             for (const auto& name : command.undefines)
             {
@@ -308,12 +320,15 @@ namespace heimdall
 
             return options;
         }
+    } // namespace
+
+    AnalysisSnapshot::AnalysisSnapshot(std::shared_ptr<const detail::WorkspaceState> state) :
+        m_state(std::move(state))
+    {
     }
 
-    AnalysisSnapshot::AnalysisSnapshot(std::shared_ptr<const detail::WorkspaceState> state)
-    : m_state(std::move(state)) {}
-
-    std::shared_ptr<const detail::DocumentAnalysis> AnalysisSnapshot::Document(DocumentId document) const
+    std::shared_ptr<const detail::DocumentAnalysis> AnalysisSnapshot::Document(
+        DocumentId document) const
     {
         return Contains(document) ? m_state->documents[document] : nullptr;
     }
@@ -385,25 +400,28 @@ namespace heimdall
     const CompileCommand* AnalysisSnapshot::Command(DocumentId document) const
     {
         return Contains(document) && m_state->compilation
-        ? m_state->compilation->FindOrNearest(Path(document)) : nullptr;
+                   ? m_state->compilation->FindOrNearest(Path(document))
+                   : nullptr;
     }
 
     std::span<const CompileCommand> AnalysisSnapshot::CompilationCommands() const
     {
-        return m_state && m_state->compilation ? std::span<const CompileCommand>(m_state->compilation->Commands())
-        : std::span<const CompileCommand> {};
+        return m_state && m_state->compilation
+                   ? std::span<const CompileCommand>(m_state->compilation->Commands())
+                   : std::span<const CompileCommand> {};
     }
 
     std::span<const DocumentId> AnalysisSnapshot::Dependencies(DocumentId document) const
     {
         return Contains(document) ? std::span<const DocumentId>(m_state->dependencies[document])
-        : std::span<const DocumentId> {};
+                                  : std::span<const DocumentId> {};
     }
 
     std::shared_ptr<const ParseTree> AnalysisSnapshot::Syntax(DocumentId document) const
     {
         auto data = Document(document);
-        if (!data) return {};
+        if (!data)
+            return {};
         std::lock_guard lock(data->syntax->mutex);
         if (data->syntax->tree)
         {
@@ -411,11 +429,12 @@ namespace heimdall
             return data->syntax->tree;
         }
 
-        auto start = Clock::now();
-        const auto& edit = data->syntax->edit;
-        ParseReuse reuse{data->syntax->base.get(), edit.offset, edit.old_length, edit.new_length};
-        data->syntax->tree = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(data->source,
-            data->options, {}, {}, data->syntax->base ? &reuse : nullptr));
+        auto        start = Clock::now();
+        const auto& edit  = data->syntax->edit;
+        ParseReuse  reuse { data->syntax->base.get(), edit.offset, edit.old_length,
+                            edit.new_length };
+        data->syntax->tree = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(
+            data->source, data->options, {}, {}, data->syntax->base ? &reuse : nullptr));
         data->syntax->base.reset();
         ++data->syntax->metrics.parse_count;
         data->syntax->metrics.parse_ns += Elapsed(start);
@@ -425,8 +444,9 @@ namespace heimdall
     std::shared_ptr<const SemanticModel> AnalysisSnapshot::Semantic(DocumentId document) const
     {
         auto data = Document(document);
-        if (!data) return {};
-        auto syntax = Syntax(document);
+        if (!data)
+            return {};
+        auto            syntax = Syntax(document);
         std::lock_guard lock(data->mutex);
         if (data->semantic)
         {
@@ -434,8 +454,8 @@ namespace heimdall
             return data->semantic;
         }
 
-        auto start = Clock::now();
-        auto bound = std::make_shared<detail::BoundStorage>(std::move(syntax));
+        auto start     = Clock::now();
+        auto bound     = std::make_shared<detail::BoundStorage>(std::move(syntax));
         data->semantic = std::shared_ptr<const SemanticModel>(bound, &bound->model);
         ++data->metrics.bind_count;
         data->metrics.bind_ns += Elapsed(start);
@@ -445,8 +465,9 @@ namespace heimdall
     std::shared_ptr<const TypeModel> AnalysisSnapshot::Types(DocumentId document) const
     {
         auto data = Document(document);
-        if (!data) return {};
-        auto semantic = Semantic(document);
+        if (!data)
+            return {};
+        auto            semantic = Semantic(document);
         std::lock_guard lock(data->mutex);
         if (data->types)
         {
@@ -454,8 +475,8 @@ namespace heimdall
             return data->types;
         }
 
-        auto start = Clock::now();
-        auto typed = std::make_shared<detail::TypedStorage>(std::move(semantic));
+        auto start  = Clock::now();
+        auto typed  = std::make_shared<detail::TypedStorage>(std::move(semantic));
         data->types = std::shared_ptr<const TypeModel>(typed, &typed->types);
         ++data->metrics.type_count;
         data->metrics.type_ns += Elapsed(start);
@@ -477,7 +498,7 @@ namespace heimdall
         std::lock_guard lock(m_state->project_cache->mutex);
         if (!m_state->project_cache->index)
         {
-            const auto start = Clock::now();
+            const auto                                        start = Clock::now();
             std::vector<std::shared_ptr<const HeaderSummary>> summaries;
             for (auto id : Documents())
             {
@@ -490,13 +511,15 @@ namespace heimdall
                     }
                 }
 
-                if (extension == ".h" || extension == ".hpp" || extension == ".hh" || extension == ".hxx")
+                if (extension == ".h" || extension == ".hpp" || extension == ".hh" ||
+                    extension == ".hxx")
                 {
                     summaries.push_back(Summary(id));
                 }
             }
 
-            m_state->project_cache->index = std::make_shared<const ProjectIndex>(ProjectIndex::FromSummaries(std::move(summaries)));
+            m_state->project_cache->index = std::make_shared<const ProjectIndex>(
+                ProjectIndex::FromSummaries(std::move(summaries)));
             ++m_state->project_cache->metrics.project_index_count;
             m_state->project_cache->metrics.project_index_ns += Elapsed(start);
         }
@@ -504,9 +527,8 @@ namespace heimdall
         return m_state->project_cache->index;
     }
 
-    std::expected<std::shared_ptr<const ProjectSymbolIndex>,
-        SymbolIndexError> AnalysisSnapshot::SymbolIndex(
-        std::stop_token stop) const
+    std::expected<std::shared_ptr<const ProjectSymbolIndex>, SymbolIndexError> AnalysisSnapshot::
+        SymbolIndex(std::stop_token stop) const
     {
         if (stop.stop_requested())
         {
@@ -533,13 +555,14 @@ namespace heimdall
         if (!m_state->symbol_cache->index)
         {
             const auto start = Clock::now();
-            auto index = ProjectSymbolIndex::Build(*this, {}, stop);
+            auto       index = ProjectSymbolIndex::Build(*this, {}, stop);
             if (!index)
             {
                 return std::unexpected(index.error());
             }
 
-            m_state->symbol_cache->index = std::make_shared<const ProjectSymbolIndex>(std::move(*index));
+            m_state->symbol_cache->index =
+                std::make_shared<const ProjectSymbolIndex>(std::move(*index));
             ++m_state->symbol_cache->metrics.symbol_index_count;
             m_state->symbol_cache->metrics.symbol_index_ns += Elapsed(start);
         }
@@ -550,8 +573,9 @@ namespace heimdall
     std::shared_ptr<const HeaderSummary> AnalysisSnapshot::Summary(DocumentId document) const
     {
         auto data = Document(document);
-        if (!data) return {};
-        auto semantic = Semantic(document);
+        if (!data)
+            return {};
+        auto            semantic = Semantic(document);
         std::lock_guard lock(data->mutex);
         if (!data->summary)
         {
@@ -598,12 +622,12 @@ namespace heimdall
         {
             std::lock_guard lock(m_state->project_cache->mutex);
             total.project_index_count = m_state->project_cache->metrics.project_index_count;
-            total.project_index_ns = m_state->project_cache->metrics.project_index_ns;
+            total.project_index_ns    = m_state->project_cache->metrics.project_index_ns;
         }
         {
             std::lock_guard lock(m_state->symbol_cache->mutex);
             total.symbol_index_count = m_state->symbol_cache->metrics.symbol_index_count;
-            total.symbol_index_ns = m_state->symbol_cache->metrics.symbol_index_ns;
+            total.symbol_index_ns    = m_state->symbol_cache->metrics.symbol_index_ns;
         }
         return total;
     }
@@ -625,14 +649,15 @@ namespace heimdall
             }
 
             std::scoped_lock lock(data->mutex, data->syntax->mutex);
-            total.source_bytes += data->source ? data->source->capacity() :
-            (data->syntax->tree ? data->syntax->tree->Source().size() : 0);
-            if (const auto & tree = data->syntax->tree)
+            total.source_bytes +=
+                data->source ? data->source->capacity()
+                             : (data->syntax->tree ? data->syntax->tree->Source().size() : 0);
+            if (const auto& tree = data->syntax->tree)
             {
                 total.syntax_bytes += tree->StorageBytes();
             }
 
-            if (const auto & base = data->syntax->base)
+            if (const auto& base = data->syntax->base)
             {
                 total.retained_base_bytes += base->StorageBytes();
                 auto source = base->SharedSource();
@@ -679,8 +704,8 @@ namespace heimdall
         return total;
     }
 
-    std::expected<AnalysisSnapshot, WorkspaceError> AnalysisSnapshot::WithSyntax(DocumentId document,
-        std::shared_ptr<const ParseTree> tree, ParserOptions options) const
+    std::expected<AnalysisSnapshot, WorkspaceError> AnalysisSnapshot::WithSyntax(
+        DocumentId document, std::shared_ptr<const ParseTree> tree, ParserOptions options) const
     {
         auto data = Document(document);
         if (!data)
@@ -688,8 +713,10 @@ namespace heimdall
             return std::unexpected(WorkspaceError::InvalidDocument);
         }
 
-        const auto source = data->source ? std::string_view(*data->source) : Syntax(document)->Source();
-        if (!tree || tree->Cancelled() || tree->Source() != source || tree->Standard() != options.standard)
+        const auto source =
+            data->source ? std::string_view(*data->source) : Syntax(document)->Source();
+        if (!tree || tree->Cancelled() || tree->Source() != source ||
+            tree->Standard() != options.standard)
         {
             return std::unexpected(WorkspaceError::InvalidSource);
         }
@@ -716,25 +743,26 @@ namespace heimdall
                 }
             }
         }
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
-        auto derived = NewDocument(*data);
-        derived->options = std::move(options);
-        derived->syntax->tree = std::move(tree);
+        auto state                 = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto derived               = NewDocument(*data);
+        derived->options           = std::move(options);
+        derived->syntax->tree      = std::move(tree);
         state->documents[document] = std::move(derived);
         state->project.reset();
         return AnalysisSnapshot(std::move(state));
     }
 
     AnalysisSnapshot AnalysisSnapshot::FromSyntax(std::shared_ptr<const ParseTree> tree,
-        ParserOptions options, std::filesystem::path path)
+                                                  ParserOptions options, std::filesystem::path path)
     {
-        if (!tree || tree->Cancelled()) return {};
-        auto state = std::make_shared<detail::WorkspaceState>();
-        auto document = std::make_shared<detail::DocumentAnalysis>();
-        document->path = std::move(path);
-        document->source = tree->SharedSource();
-        options.standard = tree->Standard();
-        document->options = std::move(options);
+        if (!tree || tree->Cancelled())
+            return {};
+        auto state             = std::make_shared<detail::WorkspaceState>();
+        auto document          = std::make_shared<detail::DocumentAnalysis>();
+        document->path         = std::move(path);
+        document->source       = tree->SharedSource();
+        options.standard       = tree->Standard();
+        document->options      = std::move(options);
         document->syntax->tree = std::move(tree);
         state->paths.emplace(PathKey(document->path), 0);
         state->documents.push_back(std::move(document));
@@ -744,7 +772,9 @@ namespace heimdall
         return AnalysisSnapshot(std::move(state));
     }
 
-    Workspace::Workspace() : m_state(std::make_shared<detail::WorkspaceState>()) {}
+    Workspace::Workspace() : m_state(std::make_shared<detail::WorkspaceState>())
+    {
+    }
 
     std::expected<ProjectLoadReport, ProjectLoadError> Workspace::LoadProjectSources(
         ProjectLoadLimits limits, std::stop_token stop)
@@ -761,29 +791,29 @@ namespace heimdall
         }
         struct Input
         {
-            std::filesystem::path path;
+            std::filesystem::path              path;
             std::shared_ptr<const std::string> source;
-            ParserOptions options;
-            bool existing = false;
+            ParserOptions                      options;
+            bool                               existing = false;
         };
 
-        std::vector<Input> inputs;
-        std::unordered_set<std::string> visited;
+        std::vector<Input>                 inputs;
+        std::unordered_set<std::string>    visited;
         std::vector<std::filesystem::path> roots;
-        std::size_t bytes = 0;
-        ProjectLoadReport report;
+        std::size_t                        bytes = 0;
+        ProjectLoadReport                  report;
         for (const auto& document : base->documents)
             if (document)
-        {
-            if (!document->source || document->source->size() > limits.source_bytes - bytes)
             {
-                return std::unexpected(ProjectLoadError::LimitReached);
-            }
+                if (!document->source || document->source->size() > limits.source_bytes - bytes)
+                {
+                    return std::unexpected(ProjectLoadError::LimitReached);
+                }
 
-            bytes += document->source->size();
-            inputs.push_back({document->path, document->source, document->options, true});
-            visited.insert(PathKey(document->path));
-        }
+                bytes += document->source->size();
+                inputs.push_back({ document->path, document->source, document->options, true });
+                visited.insert(PathKey(document->path));
+            }
 
         if (inputs.size() > limits.documents)
         {
@@ -798,20 +828,19 @@ namespace heimdall
             }
         }
 
-        std::ranges::sort(roots,[](const auto& a, const auto& b)
-            {
-                return PathKey(a) < PathKey(b);
-        });
-        const auto read =[&](const std::filesystem::path& path)->std::expected<void, ProjectLoadError>
-        {
+        std::ranges::sort(roots,
+                          [](const auto& a, const auto& b) { return PathKey(a) < PathKey(b); });
+        const auto read =
+            [&](const std::filesystem::path& path) -> std::expected<void, ProjectLoadError> {
             if (stop.stop_requested())
             {
                 return std::unexpected(ProjectLoadError::Cancelled);
             }
 
-            if (!visited.insert(PathKey(path)).second) return {};
+            if (!visited.insert(PathKey(path)).second)
+                return {};
             std::error_code error;
-            const auto size = std::filesystem::file_size(path, error);
+            const auto      size = std::filesystem::file_size(path, error);
             if (error)
             {
                 report.unavailable.push_back(path);
@@ -843,7 +872,7 @@ namespace heimdall
             }
 
             bytes += source->size();
-            inputs.push_back({path, std::move(source), std::move(options), false});
+            inputs.push_back({ path, std::move(source), std::move(options), false });
             return {};
         };
         for (const auto& path : roots)
@@ -864,10 +893,11 @@ namespace heimdall
 
             // Copy before appending: the queue can reallocate during read().
             const auto input = inputs[next];
-            const auto command = base->compilation ? base->compilation->FindOrNearest(input.path) : nullptr;
+            const auto command =
+                base->compilation ? base->compilation->FindOrNearest(input.path) : nullptr;
             for (const auto& target : Includes(*input.source, input.options))
             {
-                const auto name = target.substr(1, target.size() - 2);
+                const auto                         name = target.substr(1, target.size() - 2);
                 std::vector<std::filesystem::path> directories;
                 if (target.front() == '"')
                 {
@@ -875,22 +905,23 @@ namespace heimdall
                     if (command)
                     {
                         directories.insert(directories.end(), command->quote_directories.begin(),
-                            command->quote_directories.end());
+                                           command->quote_directories.end());
                     }
                 }
 
                 if (command)
                 {
                     directories.insert(directories.end(), command->include_directories.begin(),
-                        command->include_directories.end());
+                                       command->include_directories.end());
                 }
 
                 bool found = false;
                 for (const auto& directory : directories)
                 {
-                    const auto candidate = directory / name;
+                    const auto      candidate = directory / name;
                     std::error_code error;
-                    if (!visited.contains(PathKey(candidate)) && !std::filesystem::is_regular_file(candidate, error))
+                    if (!visited.contains(PathKey(candidate)) &&
+                        !std::filesystem::is_regular_file(candidate, error))
                     {
                         continue;
                     }
@@ -941,12 +972,12 @@ namespace heimdall
                 return std::unexpected(ProjectLoadError::LimitReached);
             }
 
-            auto document = std::make_shared<detail::DocumentAnalysis>();
-            document->path = std::move(input.path);
-            document->source = std::move(input.source);
-            document->options = std::move(input.options);
+            auto document             = std::make_shared<detail::DocumentAnalysis>();
+            document->path            = std::move(input.path);
+            document->source          = std::move(input.source);
+            document->options         = std::move(input.options);
             document->include_targets = Includes(*document->source, document->options);
-            const auto id = static_cast<DocumentId>(state->documents.size());
+            const auto id             = static_cast<DocumentId>(state->documents.size());
             state->paths.emplace(PathKey(document->path), id);
             state->documents.push_back(std::move(document));
             state->dependencies.emplace_back();
@@ -979,8 +1010,9 @@ namespace heimdall
 
     std::expected<DocumentId, WorkspaceError> Workspace::Open(
         std::filesystem::path path,
-        std::shared_ptr<const std::string> source,
-        std::int64_t version,
+        std::shared_ptr<const std::string>
+                      source,
+        std::int64_t  version,
         ParserOptions options)
     {
         if (!source)
@@ -989,7 +1021,7 @@ namespace heimdall
         }
 
         std::lock_guard lock(m_mutex);
-        auto key = PathKey(path);
+        auto            key = PathKey(path);
         if (const auto found = m_state->paths.find(key); found != m_state->paths.end())
         {
             return std::unexpected(WorkspaceError::StaleVersion);
@@ -1000,12 +1032,12 @@ namespace heimdall
             return std::unexpected(WorkspaceError::IdExhausted);
         }
 
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
-        auto document = std::make_shared<detail::DocumentAnalysis>();
-        document->path = std::move(path);
-        document->source = std::move(source);
+        auto state        = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto document     = std::make_shared<detail::DocumentAnalysis>();
+        document->path    = std::move(path);
+        document->source  = std::move(source);
         document->version = version;
-        if (SameOptions(options, ParserOptions{}) && state->compilation)
+        if (SameOptions(options, ParserOptions {}) && state->compilation)
         {
             if (const auto command = state->compilation->FindOrNearest(document->path))
             {
@@ -1013,9 +1045,9 @@ namespace heimdall
             }
         }
 
-        document->options = std::move(options);
+        document->options         = std::move(options);
         document->include_targets = Includes(*document->source, document->options);
-        const auto id = static_cast<DocumentId>(state->documents.size());
+        const auto id             = static_cast<DocumentId>(state->documents.size());
         state->documents.push_back(std::move(document));
         state->dependencies.emplace_back();
         state->dependents.emplace_back();
@@ -1028,8 +1060,8 @@ namespace heimdall
         return id;
     }
 
-    std::expected<void, WorkspaceError> Workspace::Update(DocumentId document,
-        std::shared_ptr<const std::string> source, std::int64_t version)
+    std::expected<void, WorkspaceError> Workspace::Update(
+        DocumentId document, std::shared_ptr<const std::string> source, std::int64_t version)
     {
         if (!source)
         {
@@ -1048,20 +1080,20 @@ namespace heimdall
             return std::unexpected(WorkspaceError::StaleVersion);
         }
 
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
-        auto replacement = NewDocument(*old);
+        auto state           = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto replacement     = NewDocument(*old);
         replacement->version = version;
-        bool graph_changed = false;
+        bool graph_changed   = false;
         if (*source == *old->source)
         {
             // Version-only change: all cached data remains valid.
             replacement->syntax = old->syntax;
             std::lock_guard cache_lock(old->mutex);
             replacement->semantic = old->semantic;
-            replacement->types = old->types;
-            replacement->summary = old->summary;
-            replacement->metrics = old->metrics;
-            state->project_cache = m_state->project_cache;
+            replacement->types    = old->types;
+            replacement->summary  = old->summary;
+            replacement->metrics  = old->metrics;
+            state->project_cache  = m_state->project_cache;
         }
         else
         {
@@ -1075,28 +1107,29 @@ namespace heimdall
                 // updates. The grammar already knows which top-level items it
                 // can reuse safely (including changes in known type names).
                 const auto& before = *old->source;
-                const auto& after = *source;
+                const auto& after  = *source;
                 std::size_t prefix = 0;
-                while (prefix < before.size() && prefix < after.size() && before[prefix] == after[prefix])
+                while (prefix < before.size() && prefix < after.size() &&
+                       before[prefix] == after[prefix])
                 {
                     ++prefix;
                 }
 
                 std::size_t suffix = 0;
                 while (suffix < before.size() - prefix && suffix < after.size() - prefix &&
-                    before[before.size() - suffix - 1] == after[after.size() - suffix - 1])
+                       before[before.size() - suffix - 1] == after[after.size() - suffix - 1])
                 {
                     ++suffix;
                 }
 
-                replacement->syntax->edit = {prefix, before.size() - prefix - suffix,
-                    after.size() - prefix - suffix};
+                replacement->syntax->edit = { prefix, before.size() - prefix - suffix,
+                                              after.size() - prefix - suffix };
             }
 
             replacement->source = std::move(source);
             state->project.reset();
             replacement->include_targets = Includes(*replacement->source, replacement->options);
-            graph_changed = replacement->include_targets != old->include_targets;
+            graph_changed                = replacement->include_targets != old->include_targets;
             InvalidateDependents(*state, document);
         }
 
@@ -1136,10 +1169,10 @@ namespace heimdall
         return {};
     }
 
-    std::expected<void, WorkspaceError> Workspace::SetDependencies(DocumentId document,
-        std::span<const DocumentId> dependencies)
+    std::expected<void, WorkspaceError> Workspace::SetDependencies(
+        DocumentId document, std::span<const DocumentId> dependencies)
     {
-        std::lock_guard lock(m_mutex);
+        std::lock_guard  lock(m_mutex);
         AnalysisSnapshot snapshot(m_state);
         if (!snapshot.Contains(document))
         {
@@ -1157,13 +1190,14 @@ namespace heimdall
         std::vector<DocumentId> edges(dependencies.begin(), dependencies.end());
         std::sort(edges.begin(), edges.end());
         edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
-        if (edges == m_state->dependencies[document] && m_state->explicit_dependencies[document]) return {};
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
-        state->dependencies[document] = std::move(edges);
+        if (edges == m_state->dependencies[document] && m_state->explicit_dependencies[document])
+            return {};
+        auto state                             = std::make_shared<detail::WorkspaceState>(*m_state);
+        state->dependencies[document]          = std::move(edges);
         state->explicit_dependencies[document] = true;
         ReverseEdges(*state);
-        auto replacement = NewDocument(*state->documents[document]);
-        replacement->syntax = state->documents[document]->syntax;
+        auto replacement           = NewDocument(*state->documents[document]);
+        replacement->syntax        = state->documents[document]->syntax;
         state->documents[document] = std::move(replacement);
         InvalidateDependents(*state, document);
         ++state->revision;
@@ -1171,8 +1205,8 @@ namespace heimdall
         return {};
     }
 
-    std::expected<void,
-        WorkspaceError> Workspace::SetOptions(DocumentId document, ParserOptions options)
+    std::expected<void, WorkspaceError> Workspace::SetOptions(DocumentId    document,
+                                                              ParserOptions options)
     {
         std::lock_guard lock(m_mutex);
         if (!AnalysisSnapshot(m_state).Contains(document))
@@ -1180,12 +1214,13 @@ namespace heimdall
             return std::unexpected(WorkspaceError::InvalidDocument);
         }
 
-        if (SameOptions(m_state->documents[document]->options, options)) return {};
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
-        auto replacement = NewDocument(*state->documents[document]);
-        replacement->options = std::move(options);
+        if (SameOptions(m_state->documents[document]->options, options))
+            return {};
+        auto state                   = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto replacement             = NewDocument(*state->documents[document]);
+        replacement->options         = std::move(options);
         replacement->include_targets = Includes(*replacement->source, replacement->options);
-        state->documents[document] = std::move(replacement);
+        state->documents[document]   = std::move(replacement);
         InvalidateDependents(*state, document);
         state->project.reset();
         ResolveIncludes(*state);
@@ -1202,7 +1237,7 @@ namespace heimdall
             return;
         }
 
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto state         = std::make_shared<detail::WorkspaceState>(*m_state);
         state->compilation = std::move(database);
         state->project.reset();
         for (auto& document : state->documents)
@@ -1212,7 +1247,7 @@ namespace heimdall
                 continue;
             }
 
-            auto replacement = NewDocument(*document);
+            auto replacement     = NewDocument(*document);
             replacement->options = {};
             if (state->compilation)
             {
@@ -1223,7 +1258,7 @@ namespace heimdall
             }
 
             replacement->include_targets = Includes(*replacement->source, replacement->options);
-            document = std::move(replacement);
+            document                     = std::move(replacement);
         }
 
         ResolveIncludes(*state);
@@ -1239,7 +1274,7 @@ namespace heimdall
             return;
         }
 
-        auto state = std::make_shared<detail::WorkspaceState>(*m_state);
+        auto state     = std::make_shared<detail::WorkspaceState>(*m_state);
         state->project = std::move(index);
         for (auto& document : state->documents)
         {
@@ -1248,12 +1283,12 @@ namespace heimdall
                 continue;
             }
 
-            auto replacement = NewDocument(*document);
+            auto replacement    = NewDocument(*document);
             replacement->syntax = document->syntax;
-            document = std::move(replacement);
+            document            = std::move(replacement);
         }
 
         ++state->revision;
         m_state = std::move(state);
     }
-}
+} // namespace heimdall

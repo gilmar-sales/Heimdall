@@ -20,8 +20,8 @@ namespace heimdall
     {
         std::size_t directive_offset = 0;
         std::size_t directive_length = 0;
-        std::size_t target_offset = 0;
-        std::size_t target_length = 0;
+        std::size_t target_offset    = 0;
+        std::size_t target_length    = 0;
         // Header name with its delimiters, as written: `<vector>` or `"a.h"`.
         std::string target;
         // Inside an `#if`/`#ifdef` other than the include guard.
@@ -70,8 +70,8 @@ namespace heimdall
         struct FileStamp
         {
             std::filesystem::path path;
-            std::uintmax_t size = 0;
-            std::int64_t mtime = 0;
+            std::uintmax_t        size  = 0;
+            std::int64_t          mtime = 0;
         };
 
         std::string fingerprint;
@@ -82,8 +82,8 @@ namespace heimdall
         // (platform headers) do not count against it.
         bool includes_known = true;
         // The analyzed file is a header (cpp/prefer-forward-declaration applies).
-        bool is_header_file = false;
-        std::vector<Entry> entries;
+        bool                   is_header_file = false;
+        std::vector<Entry>     entries;
         std::vector<FileStamp> stamps;
 
         bool IsSystemFile(const std::filesystem::path& file) const;
@@ -104,17 +104,18 @@ namespace heimdall
     // cases it never reports.
     class IncludeAnalyzer
     {
-    public:
+      public:
         // Literal includes of `tree`, in source order; entry i of an IncludeProfile
         // built from the same include block describes element i.
         static std::vector<DirectInclude> DirectIncludes(const ParseTree& tree);
 
         static std::shared_ptr<const IncludeProfile> BuildProfile(const std::filesystem::path& file,
-            const ParseTree& tree, const CompileCommand* command);
+                                                                  const ParseTree&             tree,
+                                                                  const CompileCommand* command);
 
         // Same fingerprint scheme as IncludeIndex::IncludeFingerprint.
         static std::string Fingerprint(const std::filesystem::path& file, const ParseTree& tree,
-            const CompileCommand* command);
+                                       const CompileCommand* command);
 
         // True while none of the headers behind the profile changed on disk.
         static bool IsFresh(const IncludeProfile& profile);
@@ -122,7 +123,8 @@ namespace heimdall
         // Diagnostics (not yet filtered by rule overrides or suppressions; run
         // them through RuleEngine::ApplyPolicy). Each carries an unsafe quick fix
         // that deletes the directive line.
-        static std::vector<Diagnostic> Analyze(const ParseTree& tree, const IncludeProfile& profile);
+        static std::vector<Diagnostic> Analyze(const ParseTree&      tree,
+                                               const IncludeProfile& profile);
     };
 
 } // namespace heimdall

@@ -21,8 +21,8 @@ namespace heimdall
         struct Designator
         {
             std::size_t begin = 0;
-            std::size_t end = 0;
-            NameId name = kNone;
+            std::size_t end   = 0;
+            NameId      name  = kNone;
         };
 
         // `20`, `0x10`, `1'000UL`: an integer literal (not floating-point).
@@ -43,9 +43,11 @@ namespace heimdall
 
         class DesignatedOrder
         {
-        public:
-            explicit DesignatedOrder(const SemanticModel& model) : m_model(model), m_view(model),
-                m_symbols(model.Symbols()), m_reporter(model.Tree()) {}
+          public:
+            explicit DesignatedOrder(const SemanticModel& model) :
+                m_model(model), m_view(model), m_symbols(model.Symbols()), m_reporter(model.Tree())
+            {
+            }
 
             enum class Mode
             {
@@ -78,7 +80,7 @@ namespace heimdall
                 return diagnostics;
             }
 
-        private:
+          private:
             // The class the list initializes: `T{`, `new T{`, `ns::T{` and `T x{` /
             // `T x = {`. Anything else (a function call, an unresolved name) is unknown.
             SymbolId OwnerOf(std::size_t open) const
@@ -114,7 +116,7 @@ namespace heimdall
 
                 std::size_t type = at - 1;
                 while (type > 0 && (m_view.At(type) == Tok::Star || m_view.At(type) == Tok::Amp ||
-                    m_view.At(type) == Tok::KwConst))
+                                    m_view.At(type) == Tok::KwConst))
                 {
                     --type;
                 }
@@ -155,7 +157,9 @@ namespace heimdall
                 if (symbol == kNone)
                 {
                     const auto name = m_model.Names().Find(m_view.Text(position));
-                    symbol = name == kNone ? kNone : m_model.Lookup(SemanticModel::TranslationUnitScope, name);
+                    symbol = name == kNone
+                                 ? kNone
+                                 : m_model.Lookup(SemanticModel::TranslationUnitScope, name);
                 }
 
                 if (symbol == kNone || m_symbols.kind[symbol] != SymbolKind::Class ||
@@ -176,7 +180,8 @@ namespace heimdall
                 for (SymbolId id = 0; id < m_symbols.Size(); ++id)
                 {
                     if (m_symbols.scope[id] == m_symbols.member_scope[klass] &&
-                        m_symbols.kind[id] == SymbolKind::Variable && (m_symbols.flags[id] & SymbolFlag::Static) == 0)
+                        m_symbols.kind[id] == SymbolKind::Variable &&
+                        (m_symbols.flags[id] & SymbolFlag::Static) == 0)
                     {
                         fields.push_back(m_symbols.name[id]);
                     }
@@ -190,20 +195,20 @@ namespace heimdall
             std::vector<Designator> Parse(std::size_t open, std::size_t close) const
             {
                 std::vector<Designator> list;
-                std::size_t i = open + 1;
+                std::size_t             i = open + 1;
                 while (i < close)
                 {
-                    if (m_view.At(i) != Tok::Dot ||!m_view.IsWord(i + 1) ||
+                    if (m_view.At(i) != Tok::Dot || !m_view.IsWord(i + 1) ||
                         (m_view.At(i + 2) != Tok::Eq && m_view.At(i + 2) != Tok::LBrace))
                     {
                         return {};
                     }
 
                     Designator entry;
-                    entry.begin = i;
-                    entry.name = m_model.Names().Find(m_view.Text(i + 1));
-                    int depth = 0;
-                    std::size_t j = i + 2;
+                    entry.begin       = i;
+                    entry.name        = m_model.Names().Find(m_view.Text(i + 1));
+                    int         depth = 0;
+                    std::size_t j     = i + 2;
                     for (; j < close; ++j)
                     {
                         const Tok tok = m_view.At(j);
@@ -257,7 +262,8 @@ namespace heimdall
                     }
 
                     const bool zero = m_view.IsZeroLiteral(entry.begin + 3);
-                    const bool integer =!zero && m_view.KindAt(entry.begin + 3) == TokenKind::Number &&
+                    const bool integer =
+                        !zero && m_view.KindAt(entry.begin + 3) == TokenKind::Number &&
                         IsIntegerLiteral(m_view.Text(entry.begin + 3));
                     if (integers ? !integer : !zero)
                     {
@@ -268,8 +274,9 @@ namespace heimdall
                     for (SymbolId id = 0; id < m_symbols.Size() && !pointer; ++id)
                     {
                         pointer = m_symbols.scope[id] == m_symbols.member_scope[klass] &&
-                            m_symbols.name[id] == entry.name && m_symbols.kind[id] == SymbolKind::Variable &&
-                            (m_symbols.flags[id] & SymbolFlag::Pointer) != 0;
+                                  m_symbols.name[id] == entry.name &&
+                                  m_symbols.kind[id] == SymbolKind::Variable &&
+                                  (m_symbols.flags[id] & SymbolFlag::Pointer) != 0;
                     }
 
                     if (!pointer)
@@ -282,18 +289,21 @@ namespace heimdall
                     const std::size_t offset = m_view.Offset(position);
                     if (integers)
                     {
-                        auto bad = m_reporter.Make(RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer",
+                        auto bad = m_reporter.Make(
+                            RuleId::NoIntegerToPointer, "cpp/no-integer-to-pointer",
                             "integer constant " + literal + " cannot initialize a pointer", offset,
-                            m_view.End(position) - offset, TextEdit{offset, 0, ""}, "");
+                            m_view.End(position) - offset, TextEdit { offset, 0, "" }, "");
                         bad.severity = Severity::Error;
-                        bad.has_fix = false;
+                        bad.has_fix  = false;
                         out.push_back(std::move(bad));
                         continue;
                     }
 
-                    auto diagnostic = m_reporter.Make(RuleId::NoZeroAsNull, "cpp/no-zero-as-null",
+                    auto diagnostic = m_reporter.Make(
+                        RuleId::NoZeroAsNull, "cpp/no-zero-as-null",
                         "use nullptr instead of " + literal + " to initialize a pointer", offset,
-                        m_view.End(position) - offset, TextEdit{offset, m_view.End(position) - offset, "nullptr"},
+                        m_view.End(position) - offset,
+                        TextEdit { offset, m_view.End(position) - offset, "nullptr" },
                         "Replace " + literal + " with nullptr");
                     diagnostic.fix_is_safe = true;
                     out.push_back(std::move(diagnostic));
@@ -320,7 +330,7 @@ namespace heimdall
                     return;
                 }
 
-                const auto fields = FieldsOf(klass);
+                const auto                              fields = FieldsOf(klass);
                 std::unordered_map<NameId, std::size_t> rank;
                 for (std::size_t i = 0; i < fields.size(); ++i)
                 {
@@ -353,9 +363,9 @@ namespace heimdall
 
                 // Rewrite the span from the first entry to the end of the last one: the
                 // entries are permuted, the separators between them stay where they are.
-                const std::string_view source = m_model.Tree().Source();
-                const std::size_t first = m_view.Offset(list.front().begin);
-                const std::size_t last = m_view.End(list.back().end - 1);
+                const std::string_view   source = m_model.Tree().Source();
+                const std::size_t        first  = m_view.Offset(list.front().begin);
+                const std::size_t        last   = m_view.End(list.back().end - 1);
                 std::vector<std::size_t> permutation(list.size());
                 for (std::size_t i = 0; i < permutation.size(); ++i)
                 {
@@ -363,13 +373,9 @@ namespace heimdall
                 }
 
                 std::stable_sort(permutation.begin(), permutation.end(),
-                    [&](std::size_t a, std::size_t b)
-                    {
-                        return order[a] < order[b];
-                });
+                                 [&](std::size_t a, std::size_t b) { return order[a] < order[b]; });
 
-                const auto text =[&](const Designator& entry)
-                {
+                const auto text = [&](const Designator& entry) {
                     const std::size_t begin = m_view.Offset(entry.begin);
                     return source.substr(begin, m_view.End(entry.end - 1) - begin);
                 };
@@ -386,16 +392,18 @@ namespace heimdall
                 }
 
                 const std::size_t anchor = m_view.Offset(list.front().begin);
-                out.push_back(m_reporter.Make(RuleId::DesignatedInitOrder, "cpp/designated-init-order",
-                    "designated initializers must follow the declaration order of the members", anchor,
-                    m_view.End(list.front().begin + 1) - anchor, TextEdit{first, last - first, std::move(replacement)},
+                out.push_back(m_reporter.Make(
+                    RuleId::DesignatedInitOrder, "cpp/designated-init-order",
+                    "designated initializers must follow the declaration order of the members",
+                    anchor, m_view.End(list.front().begin + 1) - anchor,
+                    TextEdit { first, last - first, std::move(replacement) },
                     "Reorder designated initializers"));
             }
 
             const SemanticModel& m_model;
-            detail::TokenView m_view;
-            const SymbolTable& m_symbols;
-            detail::Reporter m_reporter;
+            detail::TokenView    m_view;
+            const SymbolTable&   m_symbols;
+            detail::Reporter     m_reporter;
         };
 
     } // namespace
@@ -410,7 +418,8 @@ namespace heimdall
         return DesignatedOrder(model).Run(DesignatedOrder::Mode::Zero);
     }
 
-    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedIntegerToPointer(const SemanticModel& model)
+    std::vector<Diagnostic> SemanticRules::AnalyzeDesignatedIntegerToPointer(
+        const SemanticModel& model)
     {
         return DesignatedOrder(model).Run(DesignatedOrder::Mode::Integer);
     }

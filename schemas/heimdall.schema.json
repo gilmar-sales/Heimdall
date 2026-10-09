@@ -424,6 +424,79 @@
       "type": "object",
       "description": "Formatter settings. CLI alignment flags override the corresponding values.",
       "properties": {
+        "indent-width": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 4,
+          "description": "Number of spaces per indentation level; zero is allowed."
+        },
+        "use-tabs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indent with tabs instead of spaces."
+        },
+        "max-empty-lines": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "Maximum consecutive empty lines retained."
+        },
+        "column-limit": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 100,
+          "description": "Maximum line width for formatter wrapping; zero disables wrapping."
+        },
+        "sort-includes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort contiguous include directives."
+        },
+        "blank-line-after-control-block": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert a blank line after control-flow blocks."
+        },
+        "blank-line-after-type-definition": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert a blank line after type definitions."
+        },
+        "space-before-inheritance-colon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Put a space before inheritance and enum underlying-type colons."
+        },
+        "align-trailing-comments": {
+          "type": "boolean",
+          "default": true,
+          "description": "Align adjacent trailing line comments."
+        },
+        "align-consecutive-macros": {
+          "type": "boolean",
+          "default": false,
+          "description": "Align replacement lists of adjacent single-line #define directives."
+        },
+        "align-consecutive-assignments": {
+          "type": "boolean",
+          "default": false,
+          "description": "Align top-level = operators in consecutive single-line statements."
+        },
+        "space-after-c-style-cast": {
+          "type": "boolean",
+          "default": true,
+          "description": "Separate a C-style cast from its operand."
+        },
+        "space-after-logical-not": {
+          "type": "boolean",
+          "default": false,
+          "description": "Insert a space after the logical-not operator."
+        },
+        "space-before-cpp11-braced-list": {
+          "type": "boolean",
+          "default": true,
+          "description": "Separate a type or name from its braced initializer."
+        },
         "pointer-alignment": {
           "enum": [
             "left",

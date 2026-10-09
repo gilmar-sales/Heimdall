@@ -10,11 +10,11 @@ namespace heimdall::cli
     namespace
     {
 
-        constexpr char kSlash = '/';
-        constexpr char kBackslash = '\\';
-        constexpr char kStar = '*';
-        constexpr char kQuestion = '?';
-        constexpr char kBracketOpen = '[';
+        constexpr char kSlash        = '/';
+        constexpr char kBackslash    = '\\';
+        constexpr char kStar         = '*';
+        constexpr char kQuestion     = '?';
+        constexpr char kBracketOpen  = '[';
         constexpr char kBracketClose = ']';
 
         std::string NormalizeSeparators(std::string_view input)
@@ -27,8 +27,8 @@ namespace heimdall::cli
         bool HasGlobChars(std::string_view text)
         {
             return text.find(kStar) != std::string_view::npos ||
-                text.find(kQuestion) != std::string_view::npos ||
-                text.find(kBracketOpen) != std::string_view::npos;
+                   text.find(kQuestion) != std::string_view::npos ||
+                   text.find(kBracketOpen) != std::string_view::npos;
         }
 
         bool MatchBracket(std::string_view pattern, std::size_t& pi, char value)
@@ -37,7 +37,7 @@ namespace heimdall::cli
             // whether `value` is in the class. Supports [!...]/[^...] negation
             // and [a-z] ranges. Returns false on unterminated classes.
             constexpr std::size_t kClassHeaderLen = 2;
-            const std::size_t open = pi;
+            const std::size_t     open            = pi;
             ++pi;
             if (pi >= pattern.size())
             {
@@ -51,9 +51,9 @@ namespace heimdall::cli
                 ++pi;
             }
 
-            bool matched = false;
-            bool has_item = false;
-            char prev = '\0';
+            bool matched   = false;
+            bool has_item  = false;
+            char prev      = '\0';
             bool have_prev = false;
             while (pi < pattern.size() && pattern[pi] != kBracketClose)
             {
@@ -69,7 +69,7 @@ namespace heimdall::cli
 
                     pi += kClassHeaderLen;
                     have_prev = false;
-                    has_item = true;
+                    has_item  = true;
                     continue;
                 }
 
@@ -78,13 +78,13 @@ namespace heimdall::cli
                     matched = true;
                 }
 
-                prev = pattern[pi];
+                prev      = pattern[pi];
                 have_prev = true;
-                has_item = true;
+                has_item  = true;
                 ++pi;
             }
 
-            if (pi >= pattern.size() ||!has_item)
+            if (pi >= pattern.size() || !has_item)
             {
                 pi = open;
                 return false;
@@ -95,10 +95,7 @@ namespace heimdall::cli
         }
 
         bool MatchGlobRec(
-            std::string_view pattern,
-            std::size_t pi,
-            std::string_view text,
-            std::size_t si)
+            std::string_view pattern, std::size_t pi, std::string_view text, std::size_t si)
         {
             while (pi < pattern.size())
             {
@@ -219,16 +216,16 @@ namespace heimdall::cli
             }
 
             const std::size_t slash_before = normalized.rfind(kSlash, first_glob);
-            std::string base_str;
-            std::string remainder;
+            std::string       base_str;
+            std::string       remainder;
             if (slash_before == std::string::npos)
             {
-                base_str = ".";
+                base_str  = ".";
                 remainder = normalized;
             }
             else
             {
-                base_str = normalized.substr(0, slash_before);
+                base_str  = normalized.substr(0, slash_before);
                 remainder = normalized.substr(slash_before + 1);
                 if (base_str.empty())
                 {
@@ -237,7 +234,7 @@ namespace heimdall::cli
             }
 
             const std::filesystem::path base_path(base_str);
-            std::error_code ec;
+            std::error_code             ec;
             if (!std::filesystem::exists(base_path, ec) || ec ||
                 !std::filesystem::is_directory(base_path, ec) || ec)
             {
@@ -246,13 +243,13 @@ namespace heimdall::cli
             }
 
             const bool recursive = remainder.find("**") != std::string::npos ||
-                remainder.find(kSlash) != std::string::npos;
+                                   remainder.find(kSlash) != std::string::npos;
 
             std::vector<std::filesystem::path> matched;
             if (recursive)
             {
                 for (std::filesystem::recursive_directory_iterator it(base_path, ec), end;
-                    it != end && !ec; it.increment(ec))
+                     it != end && !ec; it.increment(ec))
                 {
                     if (ec)
                     {
@@ -285,8 +282,8 @@ namespace heimdall::cli
             }
             else
             {
-                for (std::filesystem::directory_iterator it(base_path, ec), end;
-                    it != end && !ec; it.increment(ec))
+                for (std::filesystem::directory_iterator it(base_path, ec), end; it != end && !ec;
+                     it.increment(ec))
                 {
                     if (ec)
                     {
@@ -320,7 +317,8 @@ namespace heimdall::cli
 
             if (ec)
             {
-                std::cerr << "error traversing pattern base " << base_str << ": " << ec.message() << '\n';
+                std::cerr << "error traversing pattern base " << base_str << ": " << ec.message()
+                          << '\n';
                 return true;
             }
 
@@ -339,8 +337,9 @@ namespace heimdall::cli
     bool IsSourceFile(const std::filesystem::path& path)
     {
         const auto extension = path.extension().string();
-        return extension == ".c" || extension == ".cc" || extension == ".cpp" || extension == ".cxx" || extension == ".h" ||
-            extension == ".hh" || extension == ".hpp" || extension == ".hxx";
+        return extension == ".c" || extension == ".cc" || extension == ".cpp" ||
+               extension == ".cxx" || extension == ".h" || extension == ".hh" ||
+               extension == ".hpp" || extension == ".hxx";
     }
 
     bool MatchGlobPattern(std::string_view pattern, std::string_view text)
@@ -349,7 +348,7 @@ namespace heimdall::cli
     }
 
     bool CollectFiles(const std::vector<std::filesystem::path>& inputs,
-        std::vector<std::filesystem::path>& files)
+                      std::vector<std::filesystem::path>&       files)
     {
         for (const auto& input : inputs)
         {
@@ -380,8 +379,8 @@ namespace heimdall::cli
             }
             else if (std::filesystem::is_directory(input, ec))
             {
-                for (std::filesystem::recursive_directory_iterator it(input, ec), end; it != end && !ec;
-                    it.increment(ec))
+                for (std::filesystem::recursive_directory_iterator it(input, ec), end;
+                     it != end && !ec; it.increment(ec))
                 {
                     if (it->is_regular_file(ec) && IsSourceFile(it->path()))
                     {
@@ -391,7 +390,8 @@ namespace heimdall::cli
 
                 if (ec)
                 {
-                    std::cerr << "error traversing directory " << input.string() << ": " << ec.message() << '\n';
+                    std::cerr << "error traversing directory " << input.string() << ": "
+                              << ec.message() << '\n';
                     return false;
                 }
             }

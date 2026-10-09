@@ -27,35 +27,29 @@ namespace heimdall::lsp
     //   or parsing while holding it. Workers pop interactives first.
     class ThreadPool
     {
-    public:
+      public:
         enum class Priority
         {
             Interactive,
             Background
         };
 
-        using Task = std::move_only_function<void() >;
+        using Task = std::move_only_function<void()>;
 
         explicit ThreadPool(std::size_t threads)
         {
             m_threads.reserve(threads);
             for (std::size_t i = 0; i < std::max<std::size_t>(1, threads); ++i)
             {
-                m_threads.emplace_back([this]
-                    {
-                        WorkerMain();
-                });
+                m_threads.emplace_back([this] { WorkerMain(); });
             }
         }
 
         ThreadPool(const ThreadPool&) = delete;
 
-        ThreadPool& operator= (const ThreadPool&) = delete;
+        ThreadPool& operator=(const ThreadPool&) = delete;
 
-        ~ThreadPool()
-        {
-            Shutdown();
-        }
+        ~ThreadPool() { Shutdown(); }
 
         void Submit(Task task, Priority priority = Priority::Interactive)
         {
@@ -66,7 +60,8 @@ namespace heimdall::lsp
                     return;
                 }
 
-                (priority == Priority::Interactive ? m_interactive : m_background).push_back(std::move(task));
+                (priority == Priority::Interactive ? m_interactive : m_background)
+                    .push_back(std::move(task));
             }
             m_cv.notify_one();
         }
@@ -75,9 +70,8 @@ namespace heimdall::lsp
         void WaitIdle()
         {
             std::unique_lock<std::mutex> lock(m_mu);
-            m_idle_cv.wait(lock,[&]
-                {
-                    return m_interactive.empty() && m_background.empty() && m_active == 0;
+            m_idle_cv.wait(lock, [&] {
+                return m_interactive.empty() && m_background.empty() && m_active == 0;
             });
         }
 
@@ -103,7 +97,7 @@ namespace heimdall::lsp
             m_threads.clear();
         }
 
-    private:
+      private:
         void WorkerMain()
         {
             while (true)
@@ -111,9 +105,8 @@ namespace heimdall::lsp
                 Task task;
                 {
                     std::unique_lock<std::mutex> lock(m_mu);
-                    m_cv.wait(lock,[&]
-                        {
-                            return m_stopping ||!m_interactive.empty() ||!m_background.empty();
+                    m_cv.wait(lock, [&] {
+                        return m_stopping || !m_interactive.empty() || !m_background.empty();
                     });
                     if (m_stopping)
                     {
@@ -121,7 +114,7 @@ namespace heimdall::lsp
                     }
 
                     auto& queue = m_interactive.empty() ? m_background : m_interactive;
-                    task = std::move(queue.front());
+                    task        = std::move(queue.front());
                     queue.pop_front();
                     ++m_active;
                 }
@@ -145,13 +138,13 @@ namespace heimdall::lsp
             }
         }
 
-        std::mutex m_mu;
-        std::condition_variable m_cv;
-        std::condition_variable m_idle_cv;
-        std::deque<Task> m_interactive;
-        std::deque<Task> m_background;
-        std::size_t m_active = 0;
-        bool m_stopping = false;
+        std::mutex               m_mu;
+        std::condition_variable  m_cv;
+        std::condition_variable  m_idle_cv;
+        std::deque<Task>         m_interactive;
+        std::deque<Task>         m_background;
+        std::size_t              m_active   = 0;
+        bool                     m_stopping = false;
         std::vector<std::thread> m_threads;
     };
 
