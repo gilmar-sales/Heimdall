@@ -338,9 +338,9 @@ namespace heimdall::cli
 
     bool IsSourceFile(const std::filesystem::path& path)
     {
-        const auto ext = path.extension().string();
-        return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx" || ext == ".h" ||
-            ext == ".hh" || ext == ".hpp" || ext == ".hxx";
+        const auto extension = path.extension().string();
+        return extension == ".c" || extension == ".cc" || extension == ".cpp" || extension == ".cxx" || extension == ".h" ||
+            extension == ".hh" || extension == ".hpp" || extension == ".hxx";
     }
 
     bool MatchGlobPattern(std::string_view pattern, std::string_view text)

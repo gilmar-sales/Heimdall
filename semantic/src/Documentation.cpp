@@ -1272,8 +1272,11 @@ namespace heimdall
 
         // Build one coordinated edit per declaration, so fix-all cannot apply
         // conflicting edits for several missing tags in the same comment.
-        TextEdit DocumentationFix(DocAnalysis& analysis, const Entity& entity,
-            const Doc& doc, bool& safe)
+        TextEdit DocumentationFix(
+            DocAnalysis& analysis,
+            const Entity& entity,
+            const Doc& doc,
+            bool& safe)
         {
             const auto source = analysis.Model().Tree().Source();
             const auto start = doc.present ? doc.begin : analysis.View().Offset(entity.start);
@@ -1285,12 +1288,14 @@ namespace heimdall
             {
                 ++indent_end;
             }
+
             const std::string indent(source.substr(line_start, indent_end - line_start));
             std::vector<std::string> lines;
             for (const auto& line : doc.lines)
             {
                 lines.push_back(line.text);
             }
+
             const auto commands = ParseCommands(doc);
             struct Change
             {
@@ -1299,6 +1304,7 @@ namespace heimdall
                 std::size_t length;
                 std::string text;
             };
+
             std::vector<Change> changes;
             std::vector<std::string> additions;
             std::vector<std::string> params;
@@ -1312,12 +1318,14 @@ namespace heimdall
                     search_line = command.line;
                     search_from = 0;
                 }
+
                 const std::string marker = std::string(command.at ? "@" : "\\") + command.name;
                 const auto begin = lines[command.line].find(marker, search_from);
                 if (begin == std::string::npos)
                 {
                     continue;
                 }
+
                 const auto length = marker.size() + command.parts.front().size();
                 search_from = begin + length;
                 std::string replacement = "@" + command.name + command.parts.front();
@@ -1328,12 +1336,13 @@ namespace heimdall
                     if (rest.starts_with('['))
                     {
                         const auto close = rest.find(']');
-                        rest = close == std::string_view::npos ? std::string_view{} : rest.substr(close + 1);
+                        rest = close == std::string_view::npos ? std::string_view{}: rest.substr(close + 1);
                     }
+
                     rest = Trim(rest);
                     const auto stop = rest.find_first_of(" \t");
                     const auto names = rest.substr(0, stop);
-                    const auto description = stop == std::string_view::npos ? std::string_view{} : Trim(rest.substr(stop));
+                    const auto description = stop == std::string_view::npos ? std::string_view{}: Trim(rest.substr(stop));
                     auto& seen = command.name == "param" ? params : tparams;
                     const auto& declared = command.name == "param" ? entity.params : entity.tparams;
                     const bool known = command.name == "param" ? entity.params_known : entity.tparams_known;
@@ -1343,15 +1352,24 @@ namespace heimdall
                     while (cursor < names.size())
                     {
                         const auto comma = names.find(',', cursor);
-                        const std::string name(names.substr(cursor, comma == std::string_view::npos ? names.size() - cursor : comma - cursor));
+                        const std::string name(names.substr(cursor,
+                            comma == std::string_view::npos ? names.size() - cursor : comma - cursor));
                         invalid |= std::find(seen.begin(), seen.end(), name) != seen.end() ||
                             std::find(listed.begin(), listed.end(), name) != listed.end() ||
                             (known && std::none_of(declared.begin(), declared.end(),
-                                [&](const Named& item) { return item.name == name; }));
+                            [&](const Named& item)
+                            {
+                                return item.name == name;
+                        }));
                         listed.push_back(name);
-                        if (comma == std::string_view::npos) break;
+                        if (comma == std::string_view::npos)
+                        {
+                            break;
+                        }
+
                         cursor = comma + 1;
                     }
+
                     if (invalid)
                     {
                         // Preserve obsolete/duplicate prose as a note rather than
@@ -1390,7 +1408,11 @@ namespace heimdall
                                     if (HasSecondSentence(std::string_view(text).substr(0, i + 1)))
                                     {
                                         auto split = i;
-                                        while (split > 0 && !IsSpace(text[split - 1])) --split;
+                                        while (split > 0 && !IsSpace(text[split - 1]))
+                                        {
+                                            --split;
+                                        }
+
                                         if (part == 0)
                                         {
                                             replacement = "@" + command.name + std::string(Trim(std::string_view(text).substr(0, split))) +
@@ -1402,14 +1424,17 @@ namespace heimdall
                                         {
                                             const auto line = command.line + part;
                                             changes.push_back({line, 0, lines[line].size(),
-                                                std::string(Trim(std::string_view(text).substr(0, split))) + "\n\n" +
-                                                std::string(Trim(std::string_view(text).substr(split)))});
+                                                    std::string(Trim(std::string_view(text).substr(0, split))) + "\n\n" +
+                                                    std::string(Trim(std::string_view(text).substr(split)))});
                                         }
+
                                         break;
                                     }
                                 }
+
                                 break;
                             }
+
                             const auto trimmed = Trim(text);
                             if (part + 1 < command.parts.size() && !trimmed.empty() &&
                                 (trimmed.back() == '.' || trimmed.back() == '!' || trimmed.back() == '?'))
@@ -1440,26 +1465,34 @@ namespace heimdall
                     if (joined.find(' ') == std::string::npos)
                     {
                         replacement += joined.empty() ? " TODO TODO: Describe the exception and condition." :
-                            " TODO: Describe when it is thrown.";
+                        " TODO: Describe when it is thrown.";
                         safe = false;
                     }
                 }
+
                 if (search_from < lines[command.line].size() && !replacement.empty() &&
                     !IsSpace(replacement.back()))
                 {
                     replacement += ' ';
                 }
+
                 changes.push_back({command.line, begin, length, std::move(replacement)});
             }
+
             if (Find(commands, {"brief", "short", "copybrief"}) == nullptr)
             {
                 additions.push_back("@brief TODO: Describe " + analysis.NameOf(entity) + ".");
                 safe = false;
             }
-            const auto add_named = [&](std::string_view tag, const std::vector<Named>& declared,
+
+            const auto add_named =[&](std::string_view tag, const std::vector<Named>& declared,
                 const std::vector<std::string>& seen, bool known)
             {
-                if (!known) return;
+                if (!known)
+                {
+                    return;
+                }
+
                 for (const auto& item : declared)
                 {
                     if (std::find(seen.begin(), seen.end(), item.name) == seen.end())
@@ -1473,31 +1506,36 @@ namespace heimdall
             if (entity.function)
             {
                 add_named("param", entity.params, params, entity.params_known);
-                if (entity.returns == Tri::Yes && Find(commands, {"return", "returns", "result", "retval"}) == nullptr)
+                if (entity.returns == Tri::Yes && Find(commands, {"return", "returns", "result",
+                        "retval"}) == nullptr)
                 {
                     additions.push_back("@return TODO: Describe the returned value.");
                     safe = false;
                 }
+
                 if (entity.throws && Find(commands, {"throw", "throws", "exception"}) == nullptr)
                 {
                     additions.push_back("@throws TODO TODO: Describe the exception and condition.");
                     safe = false;
                 }
             }
-            std::stable_sort(changes.begin(), changes.end(), [](const Change& a, const Change& b)
-            {
-                return a.line != b.line ? a.line > b.line : a.begin > b.begin;
+
+            std::stable_sort(changes.begin(), changes.end(),[](const Change& a, const Change& b)
+                {
+                    return a.line != b.line ? a.line > b.line : a.begin > b.begin;
             });
             for (const auto& change : changes)
             {
                 lines[change.line].replace(change.begin, change.length, change.text);
             }
+
             if (!additions.empty() && additions.front().starts_with("@brief"))
             {
                 lines.insert(lines.begin(), additions.front());
                 lines.insert(lines.begin() + 1, "");
                 additions.erase(additions.begin());
             }
+
             lines.insert(lines.end(), additions.begin(), additions.end());
             std::string replacement = doc.trailing ? "/**<" : "/**";
             replacement += newline;
@@ -1510,25 +1548,43 @@ namespace heimdall
                     const auto piece = std::string_view(line).substr(cursor,
                         end == std::string::npos ? line.size() - cursor : end - cursor);
                     replacement += indent + " *";
-                    if (!piece.empty()) replacement += " " + std::string(piece);
+                    if (!piece.empty())
+                    {
+                        replacement += " " + std::string(piece);
+                    }
+
                     replacement += newline;
-                    if (end == std::string::npos) break;
+                    if (end == std::string::npos)
+                    {
+                        break;
+                    }
+
                     cursor = end + 1;
                 } while (cursor <= line.size());
             }
+
             replacement += indent + " */";
             if (!doc.present)
             {
                 replacement += newline;
                 replacement += indent;
             }
+
             return {start, doc.present ? doc.end - doc.begin : 0, std::move(replacement)};
         }
 
-        void AttachDocumentationFix(DocAnalysis& analysis, const Entity& entity, const Doc& doc,
-            std::vector<Diagnostic>& diagnostics, std::size_t first)
+        void AttachDocumentationFix(
+            DocAnalysis& analysis,
+            const Entity& entity,
+            const Doc& doc,
+            std::vector<Diagnostic>& diagnostics,
+            std::size_t first)
         {
-            if (first == diagnostics.size()) return;
+            if (first == diagnostics.size())
+            {
+                return;
+            }
+
             bool safe = doc.present;
             const auto fix = DocumentationFix(analysis, entity, doc, safe);
             for (auto i = first; i < diagnostics.size(); ++i)
@@ -1867,6 +1923,7 @@ namespace heimdall
                     report("@" + throws->name + " needs the exception type and when it is thrown", throws->line);
                 }
             }
+
             AttachDocumentationFix(analysis, entity, doc, diagnostics, first);
         }
 

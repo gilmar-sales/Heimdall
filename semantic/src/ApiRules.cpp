@@ -263,7 +263,7 @@ namespace heimdall
                     {
                         m_destructor[klass] = symbol;
                     }
-                    else if ((flags & kVirtualish) != 0 &&
+                    else if ((flags& kVirtualish) != 0 &&
                         (flags& SymbolFlag::Constructor) == 0)
                     {
                         m_introduces_virtual[klass] = 1;
@@ -998,8 +998,11 @@ namespace heimdall
 
         // `std::move(name)` (or a bare `move(name)`) in [first, last): the
         // by-value parameter is intentionally sunk, not pointlessly copied.
-        bool IsMovedFrom(const detail::TokenView& view, std::string_view name,
-            std::size_t first, std::size_t last)
+        bool IsMovedFrom(
+            const detail::TokenView& view,
+            std::string_view name,
+            std::size_t first,
+            std::size_t last)
         {
             for (auto i = first; i + 3 < last; ++i)
             {
@@ -1032,7 +1035,7 @@ namespace heimdall
             for (const auto prefix : kPrefixes)
             {
                 if (lower.size() >= prefix.size() && lower.compare(0, prefix.size(), prefix) == 0 &&
-                    (lower.size() == prefix.size() || !(lower[prefix.size()] >= 'a' &&
+                    (lower.size() == prefix.size() ||!(lower[prefix.size()] >= 'a' &&
                     lower[prefix.size()] <= 'z')))
                 {
                     return true;
@@ -1207,7 +1210,7 @@ namespace heimdall
             return owner != kNone &&
                 (symbols.flags[owner] &
                 (SymbolFlag::Template | SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final |
-                    SymbolFlag::Operator)) != 0;
+                SymbolFlag::Operator)) != 0;
         }
 
         // ---------------------------------------------------------------------
@@ -1472,8 +1475,12 @@ namespace heimdall
         // no member write, no address of a member escaping, no call to a
         // non-const member, and no call the engine cannot resolve. Bare `this`
         // (other than `this->`) also ends the proof.
-        bool MemberFunctionIsPureReader(const SemanticModel& model, const detail::TokenView& view,
-            SymbolId klass, SymbolId function, std::pair<std::size_t, std::size_t> body)
+        bool MemberFunctionIsPureReader(
+            const SemanticModel& model,
+            const detail::TokenView& view,
+            SymbolId klass,
+            SymbolId function,
+            std::pair<std::size_t, std::size_t> body)
         {
             const auto& symbols = model.Symbols();
             for (auto i = body.first + 1; i < body.second; ++i)
@@ -1562,7 +1569,7 @@ namespace heimdall
                     const ScopeId target_scope = symbols.scope[target];
                     const auto& scopes = model.Scopes();
                     const SymbolId target_owner = scopes.kind[target_scope] == ScopeKind::Class
-                        ? scopes.owner[target_scope] : kNone;
+                    ? scopes.owner[target_scope] : kNone;
                     if (target_owner == klass || IsBaseOf(model, target_owner, klass) ||
                         IsBaseOf(model, klass, target_owner))
                     {
@@ -1654,7 +1661,7 @@ namespace heimdall
                     }
                 }
 
-                if (!seen || !read_only)
+                if (!seen ||!read_only)
                 {
                     continue;
                 }
@@ -1698,7 +1705,7 @@ namespace heimdall
 
                 const SymbolId klass = scopes.owner[scope];
                 const auto body = FunctionBodyOf(model, view, symbols.decl_node[symbol]);
-                if (!body || !MemberFunctionIsPureReader(model, view, klass, symbol, *body))
+                if (!body ||!MemberFunctionIsPureReader(model, view, klass, symbol, *body))
                 {
                     continue;
                 }
@@ -1774,7 +1781,7 @@ namespace heimdall
                     }
                 }
 
-                if (anchor >= angle || (is_pointer && is_reference))
+                if (anchor >= angle ||(is_pointer&& is_reference))
                 {
                     continue;
                 }
@@ -2126,7 +2133,7 @@ namespace heimdall
             }
 
             const char first = rest.front();
-            if ((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_' ||
+            if ((first >= 'a' && first <= 'z') ||(first >= 'A' && first <= 'Z') || first == '_' ||
                 first == ':')
             {
                 static constexpr std::string_view kExcluded[] = {"new", "delete", "and", "and_eq", "bitand",

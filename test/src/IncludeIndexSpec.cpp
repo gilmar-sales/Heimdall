@@ -65,6 +65,51 @@ TEST(IncludeIndexSpec, ResolvesTransitiveQuotedHeaders)
     EXPECT_EQ(headers.back().filename(), "core.hpp");
 }
 
+TEST(IncludeIndexSpec, OverlayResolvesNewHeadersAndIndexesUnsavedContents)
+{
+    const auto base = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test/fixtures/include";
+    heimdall::SourceOverlay overlay;
+    overlay.Add(base / "unsaved.hpp", std::make_shared<const std::string>(
+        "#include \"unsaved_nested.hpp\"\nnamespace edited { struct Fresh {}; }"));
+    overlay.Add(base / "unsaved_nested.hpp", std::make_shared<const std::string>(
+        "namespace edited { int nested; }"));
+    heimdall::ResolveReport report;
+    const auto headers = heimdall::IncludeIndex::ResolveHeaders(base,
+        "#include \"unsaved.hpp\"", nullptr, {}, &report, &overlay);
+    ASSERT_TRUE(report.complete);
+    ASSERT_EQ(headers.size(), 2u);
+    const auto index = heimdall::IncludeIndex::Build(headers, nullptr, {}, &overlay);
+    const auto* scope = FindScope(index.Scopes(), {"edited"});
+    ASSERT_NE(scope, nullptr);
+    EXPECT_TRUE(Contains(scope->members, "Fresh"));
+    EXPECT_TRUE(Contains(scope->members, "nested"));
+    const auto before = heimdall::IncludeIndex::CacheKey(headers, nullptr, &overlay);
+    overlay.Add(base / "not_included.hpp", std::make_shared<const std::string>("int unrelated;"));
+    EXPECT_EQ(heimdall::IncludeIndex::CacheKey(headers, nullptr, &overlay), before);
+    EXPECT_EQ(*index.Source(0),
+        "#include \"unsaved_nested.hpp\"\nnamespace edited { struct Fresh {}; }");
+    overlay.Add(base / "unsaved_nested.hpp", std::make_shared<const std::string>(
+        "namespace edited { int changed; }"));
+    EXPECT_NE(heimdall::IncludeIndex::CacheKey(headers, nullptr, &overlay), before);
+    EXPECT_EQ(*index.Source(1), "namespace edited { int nested; }");
+}
+
+TEST(IncludeIndexSpec, OversizedOverlayMarksResolutionIncompleteAndEmptyBuffersHideDisk)
+{
+    const auto base = IncludeDir();
+    heimdall::SourceOverlay overlay;
+    overlay.Add(base / "mylib/core.hpp", std::make_shared<const std::string>());
+    const auto empty = heimdall::IncludeIndex::Build({base / "mylib/core.hpp"}, nullptr, {}, &overlay);
+    EXPECT_TRUE(empty.Empty());
+    overlay.Add(base / "large_unsaved.hpp", std::make_shared<const std::string>(100, ' '));
+    heimdall::IncludeLimits limits;
+    limits.max_file_bytes = 10;
+    heimdall::ResolveReport report;
+    heimdall::IncludeIndex::ResolveHeaders(base, "#include \"large_unsaved.hpp\"", nullptr,
+        limits, &report, &overlay);
+    EXPECT_FALSE(report.complete);
+}
+
 TEST(IncludeIndexSpec, RealCliOptionsAndFilesystemPathHaveCompilerLayouts)
 {
     const std::filesystem::path root = HEIMDALL_SOURCE_DIR;

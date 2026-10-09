@@ -29,6 +29,31 @@ ctest --test-dir build --build-config Debug --output-on-failure
 
 ## CLI
 
+The development LSP also supports conservative local refactorings: rename and
+references for locals/parameters, extraction of complete integral/boolean constant return
+expressions to variables, literal-return extraction to internal functions, and
+inline of same-type scalar literal locals used directly in returns. These
+extract/inline operations require a document without preprocessor directives/macros.
+Local rename accepts includes when GCC/Clang preprocessing through
+`compile_commands.json` preserves the document's written tokens before and after
+the edit. Macro expansion, conditional token removal, dirty included headers,
+templates, captures, global rename and general statement extraction remain blocked.
+Versioned workspace edits are required. Actions use the specific LSP kinds
+`refactor.extract.variable`, `refactor.extract.function` and `refactor.inline.variable`;
+parent-kind filters such as `refactor.extract` also work. Floating-point and
+user-defined literals are not supported. See
+[the implementation status and remaining phases](docs/refactoring-implementation-plan.md#8-estado-da-implementação).
+
+Header completion/indexing reads open buffers through an immutable overlay,
+including headers not yet saved to disk. Compiler macro probing still uses disk
+headers, so this does not establish full preprocessor fidelity for refactoring.
+
+The engine also provides a snapshot-based semantic project symbol index, with
+header/source declaration identities, classified occurrences and explicit coverage
+gaps. `Workspace::LoadProjectSources` can import closed compilation units and
+transitive includes without overwriting open buffers. This does not enable global
+LSP rename yet; see [the index API and supported subset](docs/project-symbol-index.md).
+
 ```bash
 ./build/src/heimdall lint --jobs 8 src include
 ./build/src/heimdall lint --json src/main.cpp

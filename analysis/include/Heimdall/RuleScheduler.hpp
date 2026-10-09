@@ -10,6 +10,10 @@
 
 namespace heimdall
 {
+    /**
+     * @brief TODO: Describe RuleDescriptor.
+     *
+     */
     struct RuleDescriptor
     {
         RuleId id = RuleId::External;

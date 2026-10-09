@@ -8,6 +8,8 @@ FetchContent_MakeAvailable(gtest)
 include(GoogleTest)
 
 add_executable(Tests_run
+  src/RefactoringSpec.cpp
+  src/ProjectSymbolIndexSpec.cpp
   src/WorkspaceSpec.cpp
   src/SemanticDispatchSpec.cpp
   src/RuleSchedulerSpec.cpp
@@ -53,9 +55,10 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::analysis heimdall::config)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::refactor heimdall::config)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(Tests_run PRIVATE HEIMDALL_BUILD_DIR="${PROJECT_BINARY_DIR}")
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_TEST_CXX_COMPILER="${CMAKE_CXX_COMPILER}")
 
 target_precompile_headers(Tests_run PRIVATE
@@ -102,6 +105,24 @@ if (Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspNavigationSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
+  add_test(
+    NAME LspRefactoringSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspRefactoringSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>" "${CMAKE_CXX_COMPILER}"
+  )
+  add_test(
+    NAME LspUnversionedRefactoringSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspRefactoringSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>" "${CMAKE_CXX_COMPILER}" --unversioned
+  )
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    add_test(
+      NAME LspCliRenameSmoke
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspCliRenameSmoke.py"
+              "$<TARGET_FILE:heimdall-lsp>" "${PROJECT_BINARY_DIR}/compile_commands.json"
+              "${PROJECT_SOURCE_DIR}/src/cli.cpp"
+    )
+  endif ()
   add_test(
     NAME LspWorkspaceScanSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspWorkspaceScanSmoke.py"

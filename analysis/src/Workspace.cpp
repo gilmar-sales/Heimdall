@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -58,6 +59,13 @@ namespace heimdall
             AnalysisMetrics metrics;
         };
 
+        struct SymbolIndexStorage
+        {
+            std::mutex mutex;
+            std::shared_ptr<const ProjectSymbolIndex> index;
+            AnalysisMetrics metrics;
+        };
+
         struct WorkspaceState
         {
             WorkspaceState() = default;
@@ -77,6 +85,7 @@ namespace heimdall
             std::shared_ptr<const CompileDatabase> compilation;
             std::shared_ptr<const ProjectIndex> project;
             std::shared_ptr<ProjectStorage> project_cache = std::make_shared<ProjectStorage>();
+            std::shared_ptr<SymbolIndexStorage> symbol_cache = std::make_shared<SymbolIndexStorage>();
         };
     }
 
@@ -379,6 +388,12 @@ namespace heimdall
         ? m_state->compilation->FindOrNearest(Path(document)) : nullptr;
     }
 
+    std::span<const CompileCommand> AnalysisSnapshot::CompilationCommands() const
+    {
+        return m_state && m_state->compilation ? std::span<const CompileCommand>(m_state->compilation->Commands())
+        : std::span<const CompileCommand> {};
+    }
+
     std::span<const DocumentId> AnalysisSnapshot::Dependencies(DocumentId document) const
     {
         return Contains(document) ? std::span<const DocumentId>(m_state->dependencies[document])
@@ -489,6 +504,49 @@ namespace heimdall
         return m_state->project_cache->index;
     }
 
+    std::expected<std::shared_ptr<const ProjectSymbolIndex>,
+        SymbolIndexError> AnalysisSnapshot::SymbolIndex(
+        std::stop_token stop) const
+    {
+        if (stop.stop_requested())
+        {
+            return std::unexpected(SymbolIndexError::Cancelled);
+        }
+
+        if (!m_state)
+        {
+            auto empty = ProjectSymbolIndex::Build(*this, {}, stop);
+            if (!empty)
+            {
+                return std::unexpected(empty.error());
+            }
+
+            return std::make_shared<const ProjectSymbolIndex>(std::move(*empty));
+        }
+
+        std::lock_guard lock(m_state->symbol_cache->mutex);
+        if (stop.stop_requested())
+        {
+            return std::unexpected(SymbolIndexError::Cancelled);
+        }
+
+        if (!m_state->symbol_cache->index)
+        {
+            const auto start = Clock::now();
+            auto index = ProjectSymbolIndex::Build(*this, {}, stop);
+            if (!index)
+            {
+                return std::unexpected(index.error());
+            }
+
+            m_state->symbol_cache->index = std::make_shared<const ProjectSymbolIndex>(std::move(*index));
+            ++m_state->symbol_cache->metrics.symbol_index_count;
+            m_state->symbol_cache->metrics.symbol_index_ns += Elapsed(start);
+        }
+
+        return m_state->symbol_cache->index;
+    }
+
     std::shared_ptr<const HeaderSummary> AnalysisSnapshot::Summary(DocumentId document) const
     {
         auto data = Document(document);
@@ -541,6 +599,11 @@ namespace heimdall
             std::lock_guard lock(m_state->project_cache->mutex);
             total.project_index_count = m_state->project_cache->metrics.project_index_count;
             total.project_index_ns = m_state->project_cache->metrics.project_index_ns;
+        }
+        {
+            std::lock_guard lock(m_state->symbol_cache->mutex);
+            total.symbol_index_count = m_state->symbol_cache->metrics.symbol_index_count;
+            total.symbol_index_ns = m_state->symbol_cache->metrics.symbol_index_ns;
         }
         return total;
     }
@@ -602,6 +665,14 @@ namespace heimdall
                 {
                     total.project_string_bytes += summary->PoolBytes();
                 }
+            }
+        }
+
+        {
+            std::lock_guard symbol_lock(m_state->symbol_cache->mutex);
+            if (m_state->symbol_cache->index)
+            {
+                total.symbol_index_bytes = m_state->symbol_cache->index->StorageBytes();
             }
         }
 
@@ -674,6 +745,231 @@ namespace heimdall
     }
 
     Workspace::Workspace() : m_state(std::make_shared<detail::WorkspaceState>()) {}
+
+    std::expected<ProjectLoadReport, ProjectLoadError> Workspace::LoadProjectSources(
+        ProjectLoadLimits limits, std::stop_token stop)
+    {
+        if (stop.stop_requested())
+        {
+            return std::unexpected(ProjectLoadError::Cancelled);
+        }
+
+        std::shared_ptr<const detail::WorkspaceState> base;
+        {
+            std::lock_guard lock(m_mutex);
+            base = m_state;
+        }
+        struct Input
+        {
+            std::filesystem::path path;
+            std::shared_ptr<const std::string> source;
+            ParserOptions options;
+            bool existing = false;
+        };
+
+        std::vector<Input> inputs;
+        std::unordered_set<std::string> visited;
+        std::vector<std::filesystem::path> roots;
+        std::size_t bytes = 0;
+        ProjectLoadReport report;
+        for (const auto& document : base->documents)
+            if (document)
+        {
+            if (!document->source || document->source->size() > limits.source_bytes - bytes)
+            {
+                return std::unexpected(ProjectLoadError::LimitReached);
+            }
+
+            bytes += document->source->size();
+            inputs.push_back({document->path, document->source, document->options, true});
+            visited.insert(PathKey(document->path));
+        }
+
+        if (inputs.size() > limits.documents)
+        {
+            return std::unexpected(ProjectLoadError::LimitReached);
+        }
+
+        if (base->compilation)
+        {
+            for (const auto& command : base->compilation->Commands())
+            {
+                roots.push_back(command.file);
+            }
+        }
+
+        std::ranges::sort(roots,[](const auto& a, const auto& b)
+            {
+                return PathKey(a) < PathKey(b);
+        });
+        const auto read =[&](const std::filesystem::path& path)->std::expected<void, ProjectLoadError>
+        {
+            if (stop.stop_requested())
+            {
+                return std::unexpected(ProjectLoadError::Cancelled);
+            }
+
+            if (!visited.insert(PathKey(path)).second) return {};
+            std::error_code error;
+            const auto size = std::filesystem::file_size(path, error);
+            if (error)
+            {
+                report.unavailable.push_back(path);
+                return {};
+            }
+
+            if (size > limits.source_bytes - bytes || inputs.size() >= limits.documents)
+            {
+                return std::unexpected(ProjectLoadError::LimitReached);
+            }
+
+            std::ifstream file(path, std::ios::binary);
+            auto source = std::make_shared<std::string>(static_cast<std::size_t>(size), '\0');
+            file.read(source->data(), static_cast<std::streamsize>(source->size()));
+            // Refuse changing files rather than pinning a truncated read.
+            if (!file || file.peek() != std::char_traits<char>::eof())
+            {
+                report.unavailable.push_back(path);
+                return {};
+            }
+
+            ParserOptions options;
+            if (base->compilation)
+            {
+                if (const auto command = base->compilation->FindOrNearest(path))
+                {
+                    options = CommandOptions(*command);
+                }
+            }
+
+            bytes += source->size();
+            inputs.push_back({path, std::move(source), std::move(options), false});
+            return {};
+        };
+        for (const auto& path : roots)
+        {
+            const auto loaded = read(path);
+            if (!loaded)
+            {
+                return std::unexpected(loaded.error());
+            }
+        }
+
+        for (std::size_t next = 0; next < inputs.size(); ++next)
+        {
+            if (stop.stop_requested())
+            {
+                return std::unexpected(ProjectLoadError::Cancelled);
+            }
+
+            // Copy before appending: the queue can reallocate during read().
+            const auto input = inputs[next];
+            const auto command = base->compilation ? base->compilation->FindOrNearest(input.path) : nullptr;
+            for (const auto& target : Includes(*input.source, input.options))
+            {
+                const auto name = target.substr(1, target.size() - 2);
+                std::vector<std::filesystem::path> directories;
+                if (target.front() == '"')
+                {
+                    directories.push_back(input.path.parent_path());
+                    if (command)
+                    {
+                        directories.insert(directories.end(), command->quote_directories.begin(),
+                            command->quote_directories.end());
+                    }
+                }
+
+                if (command)
+                {
+                    directories.insert(directories.end(), command->include_directories.begin(),
+                        command->include_directories.end());
+                }
+
+                bool found = false;
+                for (const auto& directory : directories)
+                {
+                    const auto candidate = directory / name;
+                    std::error_code error;
+                    if (!visited.contains(PathKey(candidate)) && !std::filesystem::is_regular_file(candidate, error))
+                    {
+                        continue;
+                    }
+
+                    const auto loaded = read(candidate);
+                    if (!loaded)
+                    {
+                        return std::unexpected(loaded.error());
+                    }
+
+                    found = true;
+                    break;
+                }
+
+                if (!found)
+                {
+                    report.unavailable.emplace_back(name);
+                }
+            }
+        }
+
+        if (stop.stop_requested())
+        {
+            return std::unexpected(ProjectLoadError::Cancelled);
+        }
+
+        std::lock_guard lock(m_mutex);
+        if (m_state != base)
+        {
+            return std::unexpected(ProjectLoadError::StaleSnapshot);
+        }
+
+        auto state = std::make_shared<detail::WorkspaceState>(*base);
+        for (auto& input : inputs)
+        {
+            if (stop.stop_requested())
+            {
+                return std::unexpected(ProjectLoadError::Cancelled);
+            }
+
+            if (input.existing)
+            {
+                continue;
+            }
+
+            if (state->documents.size() >= InvalidDocument)
+            {
+                return std::unexpected(ProjectLoadError::LimitReached);
+            }
+
+            auto document = std::make_shared<detail::DocumentAnalysis>();
+            document->path = std::move(input.path);
+            document->source = std::move(input.source);
+            document->options = std::move(input.options);
+            document->include_targets = Includes(*document->source, document->options);
+            const auto id = static_cast<DocumentId>(state->documents.size());
+            state->paths.emplace(PathKey(document->path), id);
+            state->documents.push_back(std::move(document));
+            state->dependencies.emplace_back();
+            state->dependents.emplace_back();
+            state->explicit_dependencies.push_back(false);
+            report.added.push_back(id);
+        }
+
+        if (!report.added.empty())
+        {
+            if (stop.stop_requested())
+            {
+                return std::unexpected(ProjectLoadError::Cancelled);
+            }
+
+            state->project.reset();
+            ResolveIncludes(*state);
+            ++state->revision;
+            m_state = std::move(state);
+        }
+
+        return report;
+    }
 
     AnalysisSnapshot Workspace::Snapshot() const
     {

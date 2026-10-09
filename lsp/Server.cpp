@@ -13,6 +13,7 @@
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/Refactoring.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -179,11 +180,14 @@ namespace heimdall::lsp
                 if (method == "initialize")
                 {
                     LoadInitializationOptions(request);
+                    const std::string rename_capability = m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
                     Respond(id_json,
                         "{\"capabilities\":{\"textDocumentSync\":2,\"documentFormattingProvider\":true,"
                         "\"documentRangeFormattingProvider\":true,"
-                        "\"codeActionProvider\":true,\"hoverProvider\":true,"
+                        "\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source.fixAll\","
+                        "\"refactor.extract.variable\",\"refactor.extract.function\",\"refactor.inline.variable\"]},\"hoverProvider\":true,"
                         "\"definitionProvider\":true,\"implementationProvider\":true,"
+                        "\"referencesProvider\":true,\"renameProvider\":" + rename_capability + ","
                         "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\",\"/\",\"<\",\"\\\"\"],"
                         "\"resolveProvider\":false}},"
                         "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
@@ -249,6 +253,16 @@ namespace heimdall::lsp
                     Dispatch(body, request, id_json,[this](simdjson::dom::element request, std::string_view id)
                         {
                             CompleteDocument(request, id);
+                    });
+                }
+                else if (method == "textDocument/references" || method == "textDocument/prepareRename" ||
+                    method == "textDocument/rename")
+                {
+                    const int mode = method == "textDocument/references" ? 0 :
+                    method == "textDocument/prepareRename" ? 1 : 2;
+                    Dispatch(body, request, id_json,[this, mode](simdjson::dom::element request, std::string_view id)
+                        {
+                            RenameDocument(request, id, mode);
                     });
                 }
                 else if (method == "textDocument/definition")
@@ -550,6 +564,17 @@ namespace heimdall::lsp
         simdjson::dom::object params;
         simdjson::dom::object options;
         const bool has_params = GetObject(request, "params", params);
+        simdjson::dom::object capabilities, workspace_capabilities, edit_capabilities;
+        if (has_params && GetObject(params, "capabilities", capabilities) &&
+            GetObject(capabilities, "workspace", workspace_capabilities) &&
+            GetObject(workspace_capabilities, "workspaceEdit", edit_capabilities))
+        {
+            bool supported = false;
+            if (!edit_capabilities["documentChanges"].get_bool().get(supported))
+            {
+                m_versioned_edits = supported;
+            }
+        }
 
         std::filesystem::path workspace_root;
         if (has_params)
@@ -1550,6 +1575,170 @@ namespace heimdall::lsp
         return diagnostics;
     }
 
+    void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id, int mode)
+    {
+        if (mode != 0 && !m_versioned_edits)
+        {
+            Respond(id, "null");
+            return;
+        }
+
+        simdjson::dom::object params, text_document, position;
+        std::string_view uri;
+        if (!GetObject(request, "params", params) ||!GetObject(params, "textDocument", text_document) ||
+            !GetString(text_document, "uri", uri) ||!GetObject(params, "position", position))
+        {
+            Respond(id, mode == 0 ? "[]" : "null");
+            return;
+        }
+
+        const std::string uri_string(uri);
+        const auto document = GetDocument(uri_string);
+        if (!document)
+        {
+            Respond(id, mode == 0 ? "[]" : "null");
+            return;
+        }
+
+        const auto* command = CommandFor(uri_string);
+        const auto tree = CachedParse(uri_string, document->text, document->version, command);
+        if (!tree || RequestCancelled())
+        {
+            RespondCancelled(id);
+            return;
+        }
+
+        const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
+        const auto offset = document->lines->OffsetFromPosition({
+                static_cast<std::size_t>(PositionNumber(position, "line")),
+                static_cast<std::size_t>(PositionNumber(position, "character"))});
+        const auto fail =[&](const heimdall::RefactoringError& error)
+        {
+            if (error.code == heimdall::RefactoringErrorCode::Cancelled)
+            {
+                RespondCancelled(id);
+                return;
+            }
+
+            if (mode == 0)
+            {
+                Respond(id, "[]");
+                return;
+            }
+
+            std::string response = "{\"jsonrpc\":\"2.0\",\"id\":" + std::string(id) +
+                ",\"error\":{\"code\":-32803,\"message\":";
+            QuoteJson(error.message, response);
+            response += "}}";
+            Send(response);
+        };
+        bool include_declaration = true;
+        simdjson::dom::object reference_context;
+        if (mode == 0 && GetObject(params, "context", reference_context))
+        {
+            bool value = false;
+            if (!reference_context["includeDeclaration"].get_bool().get(value))
+            {
+                include_declaration = value;
+            }
+        }
+
+        const auto refs = mode == 2 ? std::expected<heimdall::SymbolOccurrences,
+            heimdall::RefactoringError>(
+            heimdall::SymbolOccurrences{}) : heimdall::RefactoringService::LocalReferences(context.Snapshot(),
+            context.Document(),
+            offset, include_declaration, CurrentStop());
+        if (!refs)
+        {
+            fail(refs.error());
+            return;
+        }
+
+        const auto range =[&](std::size_t start, std::size_t length, std::string& output)
+        {
+            output += "{\"start\":";
+            AppendPosition(document->lines->ToPosition(start), output);
+            output += ",\"end\":";
+            AppendPosition(document->lines->ToPosition(start + length), output);
+            output += '}';
+        };
+        if (mode == 1)
+        {
+            std::string response = "{\"range\":";
+            range(refs->offset, refs->length, response);
+            response += ",\"placeholder\":";
+            QuoteJson(refs->name, response);
+            response += '}';
+            Respond(id, response);
+            return;
+        }
+
+        if (mode == 0)
+        {
+            std::string response = "[";
+            for (auto token : refs->tokens)
+            {
+                if (response.size() > 1)
+                {
+                    response += ',';
+                }
+
+                response += "{\"uri\":";
+                QuoteJson(uri, response);
+                response += ",\"range\":";
+                range(tree->Tokens()[token].offset, tree->Tokens()[token].length, response);
+                response += '}';
+            }
+
+            response += ']';
+            Respond(id, response);
+            return;
+        }
+
+        std::string_view new_name;
+        if (!GetString(params, "newName", new_name))
+        {
+            fail({heimdall::RefactoringErrorCode::InvalidName, "Missing newName"});
+            return;
+        }
+
+        const auto plan = heimdall::RefactoringService::RenameLocal(context.Snapshot(), context.Document(),
+            offset, new_name, CurrentStop());
+        if (!plan)
+        {
+            fail(plan.error());
+            return;
+        }
+
+        const auto preview = heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
+        if (!preview ||!IsCurrentVersion(uri_string, document->version))
+        {
+            fail(preview ? heimdall::RefactoringError{heimdall::RefactoringErrorCode::StaleSnapshot,
+                    "Document changed; request rename again"}: preview.error());
+            return;
+        }
+
+        std::string response = "{\"documentChanges\":[{\"textDocument\":{\"uri\":";
+        QuoteJson(uri, response);
+        response += ",\"version\":" + std::to_string(document->version) + "},\"edits\":[";
+        for (const auto& edit : plan->documents.front().edits)
+        {
+            if (response.back() != '[')
+            {
+                response += ',';
+            }
+
+            response += "{\"range\":";
+            range(edit.offset, edit.length, response);
+            response += ",\"newText\":";
+            QuoteJson(edit.replacement, response);
+            response += '}';
+        }
+
+        response += "]}]}";
+        Respond(id, response);
+    }
+
     void LanguageServer::CodeActions(simdjson::dom::element request, std::string_view id)
     {
         std::string_view uri;
@@ -1564,8 +1753,8 @@ namespace heimdall::lsp
         simdjson::dom::object range;
         simdjson::dom::object start_object;
         simdjson::dom::object end_object;
-        if (!GetObject(request, "params", params) || !GetObject(params, "range", range) ||
-            !GetObject(range, "start", start_object) || !GetObject(range, "end", end_object))
+        if (!GetObject(request, "params", params) ||!GetObject(params, "range", range) ||
+            !GetObject(range, "start", start_object) ||!GetObject(range, "end", end_object))
         {
             Respond(id, "[]");
             return;
@@ -1601,9 +1790,135 @@ namespace heimdall::lsp
         std::string response = "[";
         bool first = true;
 
-        // "Fix all" comes first so it is the default pick in the lightbulb.
+        const auto accepts =[&](std::string_view kind)
+        {
+            simdjson::dom::object action_context;
+            simdjson::dom::array only;
+            if (!GetObject(params, "context", action_context) || action_context["only"].get_array().get(only))
+            {
+                return true;
+            }
+
+            for (const auto item : only)
+            {
+                std::string_view wanted;
+                if (!item.get_string().get(wanted) && (kind == wanted ||
+                    (kind.starts_with(wanted) && kind.size() > wanted.size() && kind[wanted.size()] == '.')))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
+        const auto selection_start = lines->OffsetFromPosition({
+                static_cast<std::size_t>(PositionNumber(start_object, "line")),
+                static_cast<std::size_t>(PositionNumber(start_object, "character"))});
+        const auto selection_end = lines->OffsetFromPosition({
+                static_cast<std::size_t>(PositionNumber(end_object, "line")),
+                static_cast<std::size_t>(PositionNumber(end_object, "character"))});
+        const auto append_refactor =[&](const auto& plan, std::string_view kind)
+        {
+            if (!plan || RequestCancelled() ||!IsCurrentVersion(uri_string, version) ||
+                !heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop()))
+            {
+                return;
+            }
+
+            if (!first)
+            {
+                response += ',';
+            }
+
+            first = false;
+            response += "{\"title\":";
+            QuoteJson(plan->title, response);
+            response += ",\"kind\":";
+            QuoteJson(kind, response);
+            response += ",\"edit\":{\"documentChanges\":[{\"textDocument\":{\"uri\":";
+            QuoteJson(uri, response);
+            response += ",\"version\":" + std::to_string(version) + "},\"edits\":[";
+            bool first_edit = true;
+            for (const auto& edit : plan->documents.front().edits)
+            {
+                if (!first_edit)
+                {
+                    response += ',';
+                }
+
+                first_edit = false;
+                response += "{\"range\":{\"start\":";
+                AppendPosition(lines->ToPosition(edit.offset), response);
+                response += ",\"end\":";
+                AppendPosition(lines->ToPosition(edit.offset + edit.length), response);
+                response += "},\"newText\":";
+                QuoteJson(edit.replacement, response);
+                response += '}';
+            }
+
+            response += "]}]}}";
+        };
+        if (m_versioned_edits && selection_end > selection_start)
+        {
+            // Deterministic collision-free default; the plan still checks lookup.
+            std::string name = "extractedValue";
+            for (unsigned suffix = 1; suffix < 1000; ++suffix)
+            {
+                const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
+                    {
+                        return token.kind == heimdall::TokenKind::Identifier && tree->Text(token) == name;
+                });
+                if (!used)
+                {
+                    break;
+                }
+
+                name = "extractedValue" + std::to_string(suffix);
+            }
+
+            if (accepts("refactor.extract.variable"))
+            {
+                append_refactor(heimdall::RefactoringService::ExtractVariable(context.Snapshot(),
+                    context.Document(),
+                    selection_start, selection_end - selection_start, name, CurrentStop()),
+                    "refactor.extract.variable");
+            }
+
+            std::string function_name = "extractedFunction";
+            for (unsigned suffix = 1; suffix < 1000; ++suffix)
+            {
+                const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
+                    {
+                        return token.kind == heimdall::TokenKind::Identifier && tree->Text(token) == function_name;
+                });
+                if (!used)
+                {
+                    break;
+                }
+
+                function_name = "extractedFunction" + std::to_string(suffix);
+            }
+
+            if (accepts("refactor.extract.function"))
+            {
+                append_refactor(heimdall::RefactoringService::ExtractFunction(context.Snapshot(),
+                    context.Document(),
+                    selection_start, selection_end - selection_start, function_name, CurrentStop()),
+                    "refactor.extract.function");
+            }
+        }
+
+        if (m_versioned_edits && accepts("refactor.inline.variable"))
+        {
+            append_refactor(heimdall::RefactoringService::InlineVariable(context.Snapshot(), context.Document(),
+                selection_start, CurrentStop()), "refactor.inline.variable");
+        }
+
+        // Batch fixes follow any explicitly requested refactoring actions.
         // Batch semantics mirror `RuleEngine::ApplyFixes` without unsafe
         // edits: safe, in-bounds and non-overlapping fixes only.
+        if (accepts("source.fixAll"))
         {
             std::vector<const heimdall::Diagnostic*> safe;
             safe.reserve(diagnostics.size());
@@ -1615,7 +1930,7 @@ namespace heimdall::lsp
                 }
             }
 
-            std::sort(safe.begin(), safe.end(), [](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
+            std::sort(safe.begin(), safe.end(),[](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
                 {
                     return a->fix.offset > b->fix.offset;
             });
@@ -1630,7 +1945,7 @@ namespace heimdall::lsp
                 // ApplyFixes), be bounds-checked and not overlap a later fix.
                 const bool in_range = fix.offset >= diagnostic->offset &&
                     fix.offset - diagnostic->offset <= diagnostic->length &&
-                    fix.length <= diagnostic->length - (fix.offset - diagnostic->offset);
+                    fix.length <= diagnostic->length -(fix.offset - diagnostic->offset);
                 if (!in_range || fix.offset > text->size() || fix.length > text->size() - fix.offset ||
                     fix.offset + fix.length > previous_start)
                 {
@@ -1680,7 +1995,7 @@ namespace heimdall::lsp
 
         for (const auto& diagnostic : diagnostics)
         {
-            if (!diagnostic.has_fix)
+            if (!diagnostic.has_fix ||!accepts("quickfix"))
             {
                 continue;
             }
@@ -2034,8 +2349,19 @@ namespace heimdall::lsp
         const std::filesystem::path file_path = PathFromUri(uri);
         const std::filesystem::path base_dir =
             file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
+        auto overlay = std::make_shared<heimdall::SourceOverlay>();
+        const auto snapshot = t_context ? t_context->analysis : m_workspace.Snapshot();
+        for (auto document : snapshot.Documents())
+        {
+            const auto& path = snapshot.Path(document);
+            if (path != file_path)
+            {
+                overlay->Add(path, snapshot.Source(document));
+            }
+        }
+
         const std::string fingerprint = heimdall::IncludeIndex::IncludeFingerprint(base_dir, *text,
-            command);
+            command) + overlay->Fingerprint();
 
         std::vector<std::filesystem::path> headers;
         std::string requested_key;
@@ -2089,7 +2415,7 @@ namespace heimdall::lsp
                     m_index_pending.insert(requested_key);
                     {
                         const std::lock_guard<std::mutex> queue_lock(m_index_mu);
-                        m_index_queue.push_back({requested_key, headers, command});
+                        m_index_queue.push_back({requested_key, headers, command, overlay});
                     }
                     m_index_cv.notify_one();
                 }
@@ -2108,7 +2434,8 @@ namespace heimdall::lsp
             }
         }
         // Slow path: fingerprint changed. Resolve + stat outside the lock.
-        headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, *text, command);
+        headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, *text, command, {}, nullptr,
+            overlay.get());
         if (headers.empty())
         {
             // No headers: nothing to build, trivially complete (and shared, since
@@ -2122,7 +2449,7 @@ namespace heimdall::lsp
             return {nullptr, true};
         }
 
-        requested_key = heimdall::IncludeIndex::CacheKey(headers, command);
+        requested_key = heimdall::IncludeIndex::CacheKey(headers, command, overlay.get());
         {
             const std::lock_guard<std::mutex> lock(m_index_cache_mu);
             auto& entry = m_include_cache[uri];
@@ -2144,7 +2471,7 @@ namespace heimdall::lsp
                     m_index_pending.insert(requested_key);
                     {
                         const std::lock_guard<std::mutex> queue_lock(m_index_mu);
-                        m_index_queue.push_back({requested_key, headers, command});
+                        m_index_queue.push_back({requested_key, headers, command, overlay});
                     }
                     m_index_cv.notify_one();
                 }
@@ -2570,7 +2897,7 @@ namespace heimdall::lsp
             try
             {
                 built = std::make_shared<const heimdall::IncludeIndex>(
-                    heimdall::IncludeIndex::Build(job.headers, job.command));
+                    heimdall::IncludeIndex::Build(job.headers, job.command, {}, job.overlay.get()));
             }
             catch (...)
             {
@@ -2921,33 +3248,28 @@ namespace heimdall::lsp
         // File table: this document, header-index files (read on demand) and the
         // source files searched below, each loaded once per request.
         std::unordered_map<std::string, LoadedFile> loaded; // keyed by uri
-        // `disk` reads the file from disk even when it is open: header-index
-        // offsets were computed on the disk content, so positions must be too.
+        // Header locations use the exact source pinned by their index.
         auto load =[&](const std::filesystem::path& path, std::string uri_for,
-            bool disk = false) -> LoadedFile *
+            std::shared_ptr<const std::string> indexed_source = nullptr) -> LoadedFile *
         {
             if (uri_for.empty())
             {
                 uri_for = UriFromPath(path);
             }
 
-            const std::string cache_key = disk ? uri_for + "#disk" : uri_for;
+            const std::string cache_key = indexed_source ? uri_for + "#index" : uri_for;
             if (const auto found = loaded.find(cache_key); found != loaded.end())
             {
                 return &found->second;
             }
 
-            std::shared_ptr<const std::string> content;
-            if (!disk)
+            std::shared_ptr<const std::string> content = std::move(indexed_source);
+            if (!content)
             {
-                const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
-                for (const auto& [open_uri, document] : m_documents)
+                const auto id = analysis.Snapshot().Find(path);
+                if (id != heimdall::InvalidDocument)
                 {
-                    if (open_uri == uri_for || PathFromUri(open_uri) == path)
-                    {
-                        content = document.text;
-                        break;
-                    }
+                    content = analysis.Snapshot().Source(id);
                 }
             }
 
@@ -3116,7 +3438,7 @@ namespace heimdall::lsp
                 }
 
                 owner = files[static_cast<std::size_t>(target.file)];
-                file = load(owner, {}, true);
+                file = load(owner, {}, headers.index->Source(static_cast<std::size_t>(target.file)));
                 if (file == nullptr)
                 {
                     continue;

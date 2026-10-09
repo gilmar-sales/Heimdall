@@ -4,19 +4,23 @@ Known completion-engine gaps, why they exist, and what fixing each takes.
 Symptom-level notes also live in `README.md` / `vscode-extension/README.md`;
 this file is the engineering record so the details are not lost.
 
-## 1. Headers are read from disk, open buffers are ignored
+## 1. Open header buffers: overlay implemented, compiler macro probing still uses disk
 
 - **Files:** `lsp/Server.cpp` (`CompleteDocument`), `semantic/src/IncludeIndex.cpp`
   (`ReadFile`), `semantic/include/Heimdall/IncludeIndex.hpp`.
-- **Cause:** `IncludeIndex::Build` opens every header with `ifstream` from
-  disk. Only the main file's dirty text (from `m_documents`) feeds local
-  symbols; header buffers are never consulted.
-- **Impact:** editing a header without saving hides its new symbols from
-  completion in includers; not-yet-saved headers do not resolve at all.
-- **Fix:** overlay filesystem — pass a `read(path) -> optional<string>`
-  callback into `Build`/`ReadFile` that checks `m_documents` (path to URI)
-  first and falls back to disk. Include the open buffer's version in
-  `CacheKey`, otherwise the cache hides the change. Small (~30 lines).
+- **Implemented:** `SourceOverlay` pins open buffer contents from the request's
+  analysis snapshot. ResolveHeaders/Build consult it before disk, including
+  transitive includes and files that have not been created. Cache keys and the
+  LSP include fingerprint include the exact overlay contents.
+- **Verified:** unit coverage for transitive unsaved files, limits and empty
+  buffers, plus an LSP test changing a header without saving it.
+- **Remaining:** CompilerMacros still invokes the compiler against disk headers;
+  changed macro definitions/conditional branches are not a complete compiler
+  view of the overlay. Closed-file changes also need cache invalidation. The
+  exact-content cache fingerprints trade memory/copying cost for collision-free
+  equality and need budgeting before broad workspace indexing. Indexes also
+  retain the parsed source buffers so navigation never converts offsets using a
+  different version of a header.
 
 ## 2. No MSVC (`cl.exe`) default include paths
 

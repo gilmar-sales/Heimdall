@@ -126,7 +126,8 @@ namespace heimdall
             bool angled,
             const std::filesystem::path& including_dir,
             const CompileCommand* command,
-            const std::vector<std::filesystem::path>& system_dirs)
+            const std::vector<std::filesystem::path>& system_dirs,
+            const SourceOverlay* overlay = nullptr)
         {
             std::vector<std::filesystem::path> dirs;
             if (!angled)
@@ -159,6 +160,11 @@ namespace heimdall
                 }
 
                 const auto candidate = NormalizedAbsolute(dir / name);
+                if (overlay && overlay->Find(candidate))
+                {
+                    return candidate;
+                }
+
                 if (std::filesystem::exists(candidate, ec) && !ec &&
                     std::filesystem::is_regular_file(candidate, ec))
                 {
@@ -186,7 +192,8 @@ namespace heimdall
             const std::string& name,
             const std::filesystem::path& current,
             const CompileCommand* command,
-            const std::vector<std::filesystem::path>& system_dirs)
+            const std::vector<std::filesystem::path>& system_dirs,
+            const SourceOverlay* overlay = nullptr)
         {
             std::vector<std::filesystem::path> dirs;
             if (command != nullptr)
@@ -215,6 +222,11 @@ namespace heimdall
                 }
 
                 const auto candidate = NormalizedAbsolute(dirs[i] / name);
+                if (overlay && overlay->Find(candidate))
+                {
+                    return candidate;
+                }
+
                 if (std::filesystem::exists(candidate, ec) && !ec &&
                     std::filesystem::is_regular_file(candidate, ec))
                 {
@@ -235,8 +247,12 @@ namespace heimdall
             return "c++";
         }
 
-        std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes)
+        std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes,
+            const SourceOverlay* overlay = nullptr)
         {
+            if (overlay)
+                if (const auto source = overlay->Find(path))
+                    return source->size() <= max_bytes ? *source : std::string {};
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
             if (ec || size > max_bytes) return {};
@@ -345,7 +361,7 @@ namespace heimdall
         // library selects nothing and the class bodies never reach the index.
         // Object-like macros only; empty when the compiler cannot be run.
         Preprocessor::MacroMap CompilerMacros(const CompileCommand* command,
-            const std::vector<std::filesystem::path>& headers)
+            const std::vector<std::filesystem::path>& headers, const SourceOverlay* overlay)
         {
             Preprocessor::MacroMap macros;
             static std::atomic<unsigned> counter{0};
@@ -467,7 +483,7 @@ namespace heimdall
             // body. Drop the guards (`#ifndef X` / `#define X` at the top).
             for (const auto& header : headers)
             {
-                const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20));
+                const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20, overlay));
                 if (!guard.empty())
                 {
                     macros.erase(guard);
@@ -578,7 +594,8 @@ namespace heimdall
         std::string_view text,
         const CompileCommand* command,
         const Limits& limits,
-        ResolveReport* report)
+        ResolveReport* report,
+        const SourceOverlay* overlay)
     {
         const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
         std::vector<std::filesystem::path> normalized_system;
@@ -658,8 +675,8 @@ namespace heimdall
             }
 
             const auto resolved = work.next
-            ? TryResolveNext(work.name, work.from, command, system_dirs)
-            : TryResolve(work.name, work.angled, work.dir, command, system_dirs);
+            ? TryResolveNext(work.name, work.from, command, system_dirs, overlay)
+            : TryResolve(work.name, work.angled, work.dir, command, system_dirs, overlay);
             if (resolved.empty())
             {
                 if (!from_system)
@@ -677,9 +694,20 @@ namespace heimdall
             }
 
             ordered.push_back(resolved);
-            const std::string nested = ReadFile(resolved, limits.max_file_bytes);
+            const std::string nested = ReadFile(resolved, limits.max_file_bytes, overlay);
             if (nested.empty())
             {
+                if (overlay)
+                    if (const auto source = overlay->Find(resolved))
+                {
+                    if (!source->empty())
+                    {
+                        incomplete();
+                    }
+
+                    continue;
+                }
+
                 std::error_code size_ec;
                 if (std::filesystem::file_size(resolved, size_ec) != 0 || size_ec)
                 {
@@ -1020,7 +1048,7 @@ namespace heimdall
     }
 
     std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
-        const CompileCommand* command)
+        const CompileCommand* command, const SourceOverlay* overlay)
     {
         std::string key;
         for (const auto& header : headers)
@@ -1055,11 +1083,19 @@ namespace heimdall
             }
         }
 
+        if (overlay)
+        {
+            key += overlay->Fingerprint(headers);
+        }
+
         return key;
     }
 
-    IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& headers,
-        const CompileCommand* command, const Limits& limits)
+    IncludeIndex IncludeIndex::Build(
+        const std::vector<std::filesystem::path>& headers,
+        const CompileCommand* command,
+        const Limits& limits,
+        const SourceOverlay* overlay)
     {
         IncludeIndex index;
         // Path -> position in index.m_scopes: merging is O(1) per scope instead of
@@ -1085,7 +1121,7 @@ namespace heimdall
 
         if (!headers.empty())
         {
-            Preprocessor::MacroMap probed = CompilerMacros(command, headers);
+            Preprocessor::MacroMap probed = CompilerMacros(command, headers, overlay);
             if (!probed.contains("__cplusplus"))
             {
                 // No compiler to ask: at least select the right language branch.
@@ -1114,19 +1150,22 @@ namespace heimdall
         // merge serially. IndexScopes is a pure function of (content, options),
         // so concurrent calls only share read-only state.
         std::vector<ScopeIndex> per_header(headers.size());
+        index.m_sources.resize(headers.size());
         if (!headers.empty())
         {
             if (headers.size() <= 2)
             {
                 for (std::size_t h = 0; h < headers.size(); ++h)
                 {
-                    const std::string content = ReadFile(headers[h], limits.max_file_bytes);
-                    if (content.empty())
+                    const auto content = std::make_shared<const std::string>(ReadFile(headers[h], limits.max_file_bytes,
+                        overlay));
+                    index.m_sources[h] = content;
+                    if (content->empty())
                     {
                         continue;
                     }
 
-                    per_header[h] = CompletionEngine::IndexScopes(content, options);
+                    per_header[h] = CompletionEngine::IndexScopes(*content, options);
                 }
             }
             else
@@ -1159,8 +1198,10 @@ namespace heimdall
                                     return;
                             }
 
-                                const std::string content = ReadFile(headers[h], limits.max_file_bytes);
-                                if (content.empty())
+                                const auto content = std::make_shared<const std::string>(ReadFile(headers[h], limits.max_file_bytes,
+                                overlay));
+                                index.m_sources[h] = content;
+                                if (content->empty())
                                 {
                                     continue;
                             }
@@ -1168,7 +1209,7 @@ namespace heimdall
                             // An exception escaping a worker thread is std::terminate.
                                 try
                                 {
-                                    per_header[h] = CompletionEngine::IndexScopes(content, options);
+                                    per_header[h] = CompletionEngine::IndexScopes(*content, options);
                             }
                                 catch (...)
                                 {
@@ -1266,9 +1307,11 @@ namespace heimdall
         const std::filesystem::path& base_dir,
         std::string_view text,
         const CompileCommand* command,
-        const Limits& limits)
+        const Limits& limits,
+        const SourceOverlay* overlay)
     {
-        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr), command, limits);
+        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr, overlay), command, limits,
+            overlay);
     }
 
 } // namespace heimdall

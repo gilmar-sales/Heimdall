@@ -3,6 +3,7 @@
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Ids.hpp>
 #include <Heimdall/ProjectIndex.hpp>
+#include <Heimdall/ProjectSymbolIndex.hpp>
 #include <Heimdall/TypeModel.hpp>
 
 #include <expected>
@@ -28,6 +29,23 @@ namespace heimdall
         IdExhausted
     };
 
+    enum class ProjectLoadError
+    {
+        Cancelled, LimitReached, StaleSnapshot
+    };
+
+    struct ProjectLoadLimits
+    {
+        std::size_t documents = 4096;
+        std::size_t source_bytes = 64u << 20;
+    };
+
+    struct ProjectLoadReport
+    {
+        std::vector<DocumentId> added;
+        std::vector<std::filesystem::path> unavailable;
+    };
+
     struct AnalysisMetrics
     {
         std::uint64_t parse_count = 0;
@@ -41,6 +59,8 @@ namespace heimdall
         std::size_t type_allocations = 0;
         std::uint64_t project_index_count = 0;
         std::uint64_t project_index_ns = 0;
+        std::uint64_t symbol_index_count = 0;
+        std::uint64_t symbol_index_ns = 0;
     };
 
     struct MemoryBudget
@@ -50,12 +70,13 @@ namespace heimdall
         std::size_t semantic_arena_bytes = 0;
         std::size_t type_arena_bytes = 0;
         std::size_t project_string_bytes = 0;
+        std::size_t symbol_index_bytes = 0;
         std::size_t retained_base_bytes = 0;
 
         std::size_t Total() const noexcept
         {
             return source_bytes + syntax_bytes + semantic_arena_bytes + type_arena_bytes
-            + project_string_bytes + retained_base_bytes;
+            + project_string_bytes + symbol_index_bytes + retained_base_bytes;
         }
     };
 
@@ -85,6 +106,8 @@ namespace heimdall
 
         const CompileCommand* Command(DocumentId document) const;
 
+        std::span<const CompileCommand> CompilationCommands() const;
+
         std::span<const DocumentId> Dependencies(DocumentId document) const;
 
         std::shared_ptr<const ParseTree> Syntax(DocumentId document) const;
@@ -96,6 +119,9 @@ namespace heimdall
         std::shared_ptr<const HeaderSummary> Summary(DocumentId document) const;
 
         std::shared_ptr<const ProjectIndex> Project() const;
+
+        std::expected<std::shared_ptr<const ProjectSymbolIndex>, SymbolIndexError> SymbolIndex(
+            std::stop_token stop = {}) const;
 
         AnalysisMetrics Metrics() const;
 
@@ -147,6 +173,12 @@ namespace heimdall
         std::expected<void, WorkspaceError> SetOptions(DocumentId document, ParserOptions options);
 
         void SetCompilationDatabase(std::shared_ptr<const CompileDatabase> database);
+
+        // Explicit, transactional import of closed TUs and reachable includes.
+        // Existing registered buffers win over disk. Imported contents stay
+        // pinned until Update/Close; this is not a filesystem watcher.
+        std::expected<ProjectLoadReport, ProjectLoadError> LoadProjectSources(
+            ProjectLoadLimits limits = {}, std::stop_token stop = {});
 
         void SetProjectIndex(std::shared_ptr<const ProjectIndex> index);
 

@@ -2,6 +2,7 @@
 
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/SourceOverlay.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -64,8 +65,8 @@ namespace heimdall
     // Transitive header index for completion: resolves `#include`s (quoted and
     // angled, honoring -I/-iquote/-isystem plus compiler default paths) and
     // parses each header into qualified scopes, so e.g. `std::` from
-    // `#include <iostream>` resolves. Headers are read from disk; the including
-    // buffer itself is only scanned for `#include` lines.
+    // `#include <iostream>` resolves. An optional immutable overlay overrides
+    // disk contents. The including buffer is scanned for `#include` lines.
     class IncludeIndex
     {
     public:
@@ -77,7 +78,8 @@ namespace heimdall
             std::string_view text,
             const CompileCommand* command,
             const Limits& limits = Limits{},
-            ResolveReport* report = nullptr);
+            ResolveReport* report = nullptr,
+            const SourceOverlay* overlay = nullptr);
 
         // Completion of the path typed after `#include "` (angled = false) or
         // `#include <` (angled = true). `typed` is the text between the opening
@@ -97,7 +99,7 @@ namespace heimdall
         static std::optional<IncludeContext> IncludeContextAt(std::string_view text, std::size_t offset);
 
         static std::string CacheKey(const std::vector<std::filesystem::path>& headers,
-            const CompileCommand* command);
+            const CompileCommand* command, const SourceOverlay* overlay = nullptr);
 
         // Cheap fingerprint of the file's own `#include` lines plus the search
         // configuration. Lets the LSP skip ResolveHeaders (which stats + reads +
@@ -114,14 +116,18 @@ namespace heimdall
             std::size_t offset,
             const CompileCommand* command);
 
-        static IncludeIndex Build(const std::vector<std::filesystem::path>& headers,
-            const CompileCommand* command, const Limits& limits = Limits{});
+        static IncludeIndex Build(
+            const std::vector<std::filesystem::path>& headers,
+            const CompileCommand* command,
+            const Limits& limits = Limits{},
+            const SourceOverlay* overlay = nullptr);
 
         static IncludeIndex Build(
             const std::filesystem::path& base_dir,
             std::string_view text,
             const CompileCommand* command,
-            const Limits& limits = Limits{});
+            const Limits& limits = Limits{},
+            const SourceOverlay* overlay = nullptr);
 
         // Default compiler system include directories, cached per compiler
         // executable. Empty when undiscoverable (unknown driver, spawn failure).
@@ -149,10 +155,18 @@ namespace heimdall
             return m_files;
         }
 
+        // Exact content used to compute locations, including older overlays
+        // temporarily served while an asynchronous rebuild is pending.
+        std::shared_ptr<const std::string> Source(std::size_t file) const noexcept
+        {
+            return file < m_sources.size() ? m_sources[file] : nullptr;
+        }
+
     private:
         ScopeIndex m_scopes;
         std::shared_ptr<const TypeNameOracle> m_type_names;
         std::vector<std::filesystem::path> m_files;
+        std::vector<std::shared_ptr<const std::string>> m_sources;
     };
 
 } // namespace heimdall

@@ -100,6 +100,7 @@ namespace heimdall::lsp
             std::string key;
             std::vector<std::filesystem::path> headers;
             const heimdall::CompileCommand* command = nullptr;
+            std::shared_ptr<const heimdall::SourceOverlay> overlay;
         };
 
         struct DiagJob
@@ -131,6 +132,9 @@ namespace heimdall::lsp
         void RangeFormatDocument(simdjson::dom::element request, std::string_view id);
 
         void CodeActions(simdjson::dom::element request, std::string_view id);
+
+        // mode: 0 = references, 1 = prepareRename, 2 = rename.
+        void RenameDocument(simdjson::dom::element request, std::string_view id, int mode);
 
         void CompleteDocument(simdjson::dom::element request, std::string_view id);
 
@@ -253,6 +257,8 @@ namespace heimdall::lsp
         bool IsCurrentVersion(const std::string& uri, std::int64_t version);
 
         static thread_local const RequestContext* t_context;
+
+        bool m_versioned_edits = false;
 
         // m_docs_mu guards only m_documents (hot: every request and keystroke),
         // so readers never queue behind cache bookkeeping under the sharded

@@ -11,6 +11,17 @@ after `.`/`->` is not yet modeled).
 
 ## Language server: automatic install
 
+With the local development server, **Rename Symbol** supports modeled local
+variables and parameters. The **Refactor** menu offers restricted integral/boolean
+extract/inline actions when their preconditions hold. Extract/inline require
+a document without preprocessor directives/macros. Local rename can accept includes
+with GCC/Clang and `compile_commands.json` when compiler preprocessing preserves
+the written tokens before and after the edit; dirty included headers are blocked.
+All operations decline templates, captures, ambiguous/unmodeled uses and global symbols.
+They use versioned edits
+and reanalysis before returning a plan. This support is not available in older
+downloaded server binaries; use a local build to try it.
+
 On activation the extension resolves `heimdall-lsp` in this order:
 
 1. `heimdall.serverPath`, when set to something other than the default.

@@ -1737,7 +1737,7 @@ namespace heimdall
         static constexpr std::string_view kSizeNames[] = {
             "size", "length", "len", "count", "num", "n", "extent",
         };
-        auto is_size_name = [](std::string_view name)
+        auto is_size_name =[](std::string_view name)
         {
             std::string lower(name);
             std::transform(lower.begin(), lower.end(), lower.begin(),
@@ -1772,10 +1772,10 @@ namespace heimdall
                 if (symbols.scope[left] != symbols.scope[right])
                 {
                     return symbols.scope[left] < symbols.scope[right];
-                }
+            }
 
                 return symbols.decl_token[left] < symbols.decl_token[right];
-            });
+        });
         for (std::size_t i = 0; i + 1 < ordered.size(); ++i)
         {
             const SymbolId first = ordered[i];
@@ -1860,7 +1860,7 @@ namespace heimdall
                 (owner != kNone && symbols.kind[owner] == SymbolKind::Function &&
                 (symbols.flags[owner] &
                 (SymbolFlag::Template | SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final |
-                    SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0))
+                SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0))
             {
                 continue;
             }
@@ -1892,7 +1892,7 @@ namespace heimdall
                 continue;
             }
 
-            auto is_spelling_word = [](std::string_view text)
+            auto is_spelling_word =[](std::string_view text)
             {
                 return text == "const" || text == "volatile" || text == "unsigned" || text == "signed" ||
                     text == "int" || text == "char" || text == "short" || text == "long" ||
@@ -1966,7 +1966,7 @@ namespace heimdall
             {
                 reporter.Report(RuleId::ModernizeSpan, "cpp/modernize-span",
                     "pointer and size parameters '" + first_name + "' and '" + std::string(second_name) +
-                        "' can be a single std::span",
+                    "' can be a single std::span",
                     fix_begin, span_end - fix_begin, fix_begin, span_end - fix_begin,
                     "std::span<" + pointee_spelling + "> " + first_name, false,
                     "Replace '" + first_name + "' and '" + std::string(second_name) + "' with std::span");
@@ -1975,7 +1975,7 @@ namespace heimdall
             {
                 reporter.ReportNoFix(RuleId::ModernizeSpan, "cpp/modernize-span",
                     "pointer and size parameters '" + first_name + "' and '" + std::string(second_name) +
-                        "' can be a single std::span",
+                    "' can be a single std::span",
                     fix_begin, span_end - fix_begin);
             }
         }
@@ -2057,7 +2057,7 @@ namespace heimdall
                 break;
             }
 
-            if (!shape_ok || !has_const || !has_std || !has_scope || !has_string)
+            if (!shape_ok ||!has_const ||!has_std ||!has_scope ||!has_string)
             {
                 continue;
             }
@@ -2092,7 +2092,7 @@ namespace heimdall
             "length", "find", "contains", "front", "back", "top", "data", "at", "value", "make", "create",
             "clone", "copy", "exists", "equal", "compare", "starts", "ends", "first", "last", "peek",
         };
-        auto is_query_name = [](std::string_view name)
+        auto is_query_name =[](std::string_view name)
         {
             std::string lower(name);
             std::transform(lower.begin(), lower.end(), lower.begin(),
@@ -2103,7 +2103,7 @@ namespace heimdall
             for (const auto prefix : kQueryPrefixes)
             {
                 if (lower.size() >= prefix.size() && lower.compare(0, prefix.size(), prefix) == 0 &&
-                    (lower.size() == prefix.size() || !(lower[prefix.size()] >= 'a' &&
+                    (lower.size() == prefix.size() ||!(lower[prefix.size()] >= 'a' &&
                     lower[prefix.size()] <= 'z')))
                 {
                     return true;
@@ -2128,7 +2128,7 @@ namespace heimdall
             }
 
             const std::string name(model.Names().Text(symbols.name[symbol]));
-            if (name == "main" || !is_query_name(name))
+            if (name == "main" ||!is_query_name(name))
             {
                 continue;
             }
@@ -2197,7 +2197,7 @@ namespace heimdall
         const auto& scopes = model.Scopes();
         const detail::TokenView view(model);
         Reporter reporter(model);
-        auto is_arithmetic_word = [](std::string_view word)
+        auto is_arithmetic_word =[](std::string_view word)
         {
             return word == "int" || word == "char" || word == "short" || word == "long" ||
                 word == "signed" || word == "unsigned" || word == "float" || word == "double" ||
@@ -2332,7 +2332,8 @@ namespace heimdall
                 AnalyzeNullptr(model), AnalyzeZeroAsNull(model), AnalyzeAuto(model),
                 AnalyzeImplicitBool(types), AnalyzeRangeLoop(types), AnalyzeLoopConvert(types), AnalyzeConst(flow),
                 AnalyzeConstexpr(flow), AnalyzeSpan(types), AnalyzeStringView(model), AnalyzeAttributes(types),
-                AnalyzeConstevalConstexpr(model), AnalyzeVirtualDestructor(model), AnalyzeExplicitConstructor(model),
+                AnalyzeConstevalConstexpr(model), AnalyzeVirtualDestructor(model),
+                AnalyzeExplicitConstructor(model),
                 AnalyzeOverloadHiding(model), AnalyzeVirtualCallInConstructor(model),
                 AnalyzeMissingNodiscard(types), AnalyzePassByValue(types), AnalyzePassByConstReference(flow),
                 AnalyzeConstCorrectness(flow), AnalyzeUnsafeDowncast(types), AnalyzeSlicing(types),

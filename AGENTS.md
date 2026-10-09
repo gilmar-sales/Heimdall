@@ -6,7 +6,7 @@ C++26 linter/formatter/LSP engine for C++. CMake + Ninja + GCC 16+ (or MSVC/Clan
 
 ```bash
 cmake -G Ninja -S . -B build
-cmake --build build 
+cmake --build build  --parallel
 ctest --test-dir build --output-on-failure
 ```
 

@@ -65,6 +65,10 @@ namespace
         NoIncludes(root / "core", analysis);
         NoIncludes(root / "semantic", analysis);
         NoIncludes(root / "core", Headers(root / "semantic/include/Heimdall"));
+        const auto refactor = Headers(root / "refactor/include/Heimdall");
+        NoIncludes(root / "core", refactor);
+        NoIncludes(root / "semantic", refactor);
+        NoIncludes(root / "analysis", refactor);
     }
 
     TEST(ArchitecturePolicy, PublicPluginApiDoesNotExposeInternalRepresentations)

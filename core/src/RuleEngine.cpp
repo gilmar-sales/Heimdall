@@ -181,8 +181,12 @@ namespace heimdall
         // Index of the bracket closing the one at `open`, or tokens.size().
         // `open_text`/`close_text` are single-character punctuators; anything
         // unbalanced gives up so fixes never come from half-parsed code.
-        std::size_t MatchBracket(const std::vector<Token>& tokens, std::string_view source,
-            std::size_t open, std::string_view open_text, std::string_view close_text)
+        std::size_t MatchBracket(
+            const std::vector<Token>& tokens,
+            std::string_view source,
+            std::size_t open,
+            std::string_view open_text,
+            std::string_view close_text)
         {
             std::size_t depth = 0;
             for (std::size_t i = open; i < tokens.size(); ++i)
@@ -235,8 +239,11 @@ namespace heimdall
             std::size_t end_index = 0; // last token of the expression
         };
 
-        bool ParseNewExpression(const std::vector<Token>& tokens, std::string_view source,
-            std::size_t new_index, NewExpression& out)
+        bool ParseNewExpression(
+            const std::vector<Token>& tokens,
+            std::string_view source,
+            std::size_t new_index,
+            NewExpression& out)
         {
             std::size_t i = NextSignificant(tokens, new_index + 1);
             const std::size_t type_begin = i;
@@ -1311,8 +1318,10 @@ namespace heimdall
             };
 
             const SmartFactory factories[] = {
-                {"cpp/modernize-make-unique", RuleId::ModernizeMakeUnique, make_unique_on,
-                    "unique_ptr", "make_unique"},
+                {
+                    "cpp/modernize-make-unique", RuleId::ModernizeMakeUnique, make_unique_on,
+                        "unique_ptr", "make_unique"
+                },
                 {"cpp/modernize-make-shared", RuleId::ModernizeMakeShared, make_shared_on,
                     "shared_ptr", "make_shared"},
             };
@@ -1347,7 +1356,7 @@ namespace heimdall
                     }
 
                     const std::size_t open_angle = NextSignificant(tokens, i + 1);
-                    if (open_angle >= tokens.size() || !IsPunct(source, tokens[open_angle], "<"))
+                    if (open_angle >= tokens.size() ||!IsPunct(source, tokens[open_angle], "<"))
                     {
                         continue;
                     }
@@ -1392,7 +1401,7 @@ namespace heimdall
                     const auto template_args = Trimmed(source.substr(
                         tokens[open_angle].offset + tokens[open_angle].length,
                         tokens[close_angle].offset -
-                            (tokens[open_angle].offset + tokens[open_angle].length)));
+                        (tokens[open_angle].offset + tokens[open_angle].length)));
                     const std::size_t after = NextSignificant(tokens, close_angle + 1);
                     if (after >= tokens.size())
                     {
@@ -1424,7 +1433,7 @@ namespace heimdall
                     }
 
                     const std::size_t maybe_new = NextSignificant(tokens, open_paren + 1);
-                    if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new") ||
+                    if (maybe_new >= tokens.size() ||!IsWord(source, tokens[maybe_new], "new") ||
                         IsInDirective(tokens[maybe_new].offset, directives, directive_cursor))
                     {
                         continue;
@@ -1437,7 +1446,7 @@ namespace heimdall
                     }
 
                     const std::size_t outer_close = NextSignificant(tokens, created.end_index + 1);
-                    if (outer_close >= tokens.size() || !IsPunct(source, tokens[outer_close], ")"))
+                    if (outer_close >= tokens.size() ||!IsPunct(source, tokens[outer_close], ")"))
                     {
                         continue;
                     }
@@ -1467,7 +1476,7 @@ namespace heimdall
                         replacement += ')';
                         Diagnostic diagnostic = MakeDiagnostic(factory.id, factory.code,
                             std::string("use ") + qualified_maker + " instead of " +
-                                factory.smart + "(new ...)",
+                            factory.smart + "(new ...)",
                             fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
                             {fix_begin, fix_end - fix_begin, std::move(replacement)});
                         // make_unique changes overload/exception behavior for
@@ -1483,7 +1492,7 @@ namespace heimdall
                         // would build the wrong object, so only the direction.
                         diagnostics.push_back(MakeDiagnostic(factory.id, factory.code,
                             std::string("use ") + qualified_maker + " instead of " +
-                                factory.smart + "(new ...)",
+                            factory.smart + "(new ...)",
                             fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
                             {0, 0, std::string()}, false));
                     }
@@ -1505,7 +1514,7 @@ namespace heimdall
                 // `holder.reset(new T(args))`: unique vs shared is unknowable
                 // here, so the direction only, without a fix.
                 const std::size_t dot = PrevSignificant(tokens, i);
-                if (dot >= tokens.size() || !IsPunct(source, tokens[dot], "."))
+                if (dot >= tokens.size() ||!IsPunct(source, tokens[dot], "."))
                 {
                     continue;
                 }
@@ -1517,13 +1526,13 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
 
                 const std::size_t maybe_new = NextSignificant(tokens, open + 1);
-                if (maybe_new >= tokens.size() || !IsWord(source, tokens[maybe_new], "new"))
+                if (maybe_new >= tokens.size() ||!IsWord(source, tokens[maybe_new], "new"))
                 {
                     continue;
                 }
@@ -1535,7 +1544,7 @@ namespace heimdall
                 }
 
                 const std::size_t close = NextSignificant(tokens, created.end_index + 1);
-                if (close >= tokens.size() || !IsPunct(source, tokens[close], ")"))
+                if (close >= tokens.size() ||!IsPunct(source, tokens[close], ")"))
                 {
                     continue;
                 }
@@ -1559,7 +1568,7 @@ namespace heimdall
                 }
 
                 const std::size_t equal = PrevSignificant(tokens, m);
-                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
+                if (equal >= tokens.size() ||!IsPunct(source, tokens[equal], "="))
                 {
                     continue;
                 }
@@ -1571,7 +1580,7 @@ namespace heimdall
                 }
 
                 const std::size_t star = PrevSignificant(tokens, name);
-                if (star >= tokens.size() || !IsPunct(source, tokens[star], "*"))
+                if (star >= tokens.size() ||!IsPunct(source, tokens[star], "*"))
                 {
                     continue;
                 }
@@ -1685,7 +1694,7 @@ namespace heimdall
                 // the fix there. `Base* p = new Derived` would build the wrong
                 // object; constexpr cannot call make_unique here either.
                 const bool fixable =
-                    same_type && !has_constexpr && (created.has_parens || !is_builtin_new);
+                    same_type && !has_constexpr && (created.has_parens ||!is_builtin_new);
                 if (fixable)
                 {
                     const bool is_const = declared_type.find("const") != std::string_view::npos;
@@ -1699,7 +1708,7 @@ namespace heimdall
                     Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeSmartPtr,
                         "cpp/modernize-smart-ptr",
                         "ownership held in raw pointer '" + std::string(variable) +
-                            "'; use std::unique_ptr",
+                        "'; use std::unique_ptr",
                         fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
                         {fix_begin, fix_end - fix_begin, std::move(replacement)});
                     diagnostic.fix_is_safe = false;
@@ -1712,7 +1721,7 @@ namespace heimdall
                     diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeSmartPtr,
                         "cpp/modernize-smart-ptr",
                         "ownership held in raw pointer '" + std::string(variable) +
-                            "'; use a smart pointer",
+                        "'; use a smart pointer",
                         fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
                         {0, 0, std::string()}, false));
                 }
@@ -1728,7 +1737,7 @@ namespace heimdall
                 const bool is_new = token.tok == Tok::KwNew ||
                     (token.kind == TokenKind::Identifier &&
                     source.substr(token.offset, token.length) == "new");
-                const bool is_delete = !is_new &&
+                const bool is_delete =!is_new &&
                     (token.tok == Tok::KwDelete ||
                     (token.kind == TokenKind::Identifier &&
                     source.substr(token.offset, token.length) == "delete"));
@@ -1828,7 +1837,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, method + 1);
-                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
@@ -1851,7 +1860,7 @@ namespace heimdall
                     }
 
                     const std::size_t close_paren = NextSignificant(tokens, close_brace + 1);
-                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
+                    if (close_paren >= tokens.size() ||!IsPunct(source, tokens[close_paren], ")"))
                     {
                         continue;
                     }
@@ -1914,7 +1923,7 @@ namespace heimdall
                         break;
                     }
 
-                    if (!shape_ok || !saw_ident || angle_depth != 0 || cursor >= tokens.size() ||
+                    if (!shape_ok ||!saw_ident || angle_depth != 0 || cursor >= tokens.size() ||
                         !IsPunct(source, tokens[cursor], "("))
                     {
                         continue;
@@ -1939,7 +1948,7 @@ namespace heimdall
                     }
 
                     const std::size_t close_paren = NextSignificant(tokens, close_ctor + 1);
-                    if (close_paren >= tokens.size() || !IsPunct(source, tokens[close_paren], ")"))
+                    if (close_paren >= tokens.size() ||!IsPunct(source, tokens[close_paren], ")"))
                     {
                         continue;
                     }
@@ -1958,7 +1967,7 @@ namespace heimdall
                 Diagnostic diagnostic = MakeDiagnostic(RuleId::ModernizeEmplace,
                     "cpp/modernize-emplace",
                     std::string("use ") + std::string(emplacer) + " instead of " +
-                        std::string(method_name) + " with a temporary",
+                    std::string(method_name) + " with a temporary",
                     fix_begin, fix_end - fix_begin, lines.Lookup(fix_begin),
                     {fix_begin, fix_end - fix_begin, std::move(replacement)});
                 // Explicit constructors, narrowing and initializer_list
@@ -1993,7 +2002,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }
@@ -2037,7 +2046,7 @@ namespace heimdall
                 }
 
                 const std::size_t equal = NextSignificant(tokens, close + 1);
-                if (equal >= tokens.size() || !IsPunct(source, tokens[equal], "="))
+                if (equal >= tokens.size() ||!IsPunct(source, tokens[equal], "="))
                 {
                     continue;
                 }
@@ -2165,7 +2174,7 @@ namespace heimdall
                     diagnostics.push_back(MakeDiagnostic(RuleId::ModernizeStructuredBindings,
                         "cpp/modernize-structured-bindings",
                         "member access to '" + std::string(name) +
-                            ".first/.second; consider a structured binding",
+                        ".first/.second; consider a structured binding",
                         begin, end - begin, lines.Lookup(begin), {0, 0, std::string()}, false));
                 }
             }
@@ -2183,7 +2192,7 @@ namespace heimdall
                 }
 
                 const std::size_t open = NextSignificant(tokens, i + 1);
-                if (open >= tokens.size() || !IsPunct(source, tokens[open], "("))
+                if (open >= tokens.size() ||!IsPunct(source, tokens[open], "("))
                 {
                     continue;
                 }

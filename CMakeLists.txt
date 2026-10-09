@@ -48,6 +48,7 @@ add_subdirectory(core)
 add_subdirectory(config)
 add_subdirectory(semantic)
 add_subdirectory(analysis)
+add_subdirectory(refactor)
 add_subdirectory(src)
 add_subdirectory(lsp)
 

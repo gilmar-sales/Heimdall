@@ -5,6 +5,7 @@
 # SemanticAnalyzer.hpp are STL + Heimdall only).
 
 add_library(heimdall_semantic STATIC
+  src/SourceOverlay.cpp
   src/CompileDatabase.cpp
   src/SemanticAnalyzer.cpp
   src/IncludeIndex.cpp

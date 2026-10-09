@@ -2,6 +2,7 @@
 # core nor semantic depends on this application-independent coordination layer.
 add_library(heimdall_analysis STATIC
   src/Workspace.cpp
+  src/ProjectSymbolIndex.cpp
   src/AnalysisContext.cpp
   src/AnalysisFeatures.cpp
   src/SemanticRuleDispatch.cpp

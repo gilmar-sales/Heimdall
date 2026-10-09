@@ -52,7 +52,7 @@ namespace
     };
 
     std::vector<heimdall::Diagnostic> Bound(
-        std::vector<heimdall::Diagnostic> (*analysis)(const heimdall::SemanticModel&),
+        std::vector<heimdall::Diagnostic>(*analysis)(const heimdall::SemanticModel&),
         const std::string& source)
     {
         const auto tree = heimdall::ParseTree::Parse(source);
@@ -182,7 +182,7 @@ TEST(ModernizeCxxSpec, NoNewDeleteSkipsPlacementAndOperators)
     EXPECT_TRUE(
         ByCode("void* operator new(std::size_t n); void operator delete(void* p); \n",
         "cpp/no-new-delete")
-            .empty());
+        .empty());
 }
 
 // ---- cpp/modernize-structured-bindings ----------------------------------------
@@ -202,7 +202,8 @@ TEST(ModernizeCxxSpec, StructuredBindingsSuggestOnFirstAndSecond)
         ByCode("int f() { return point.first + point.second; }\n", "cpp/modernize-structured-bindings");
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_FALSE(diagnostics[0].has_fix);
-    EXPECT_TRUE(ByCode("int f() { return point.first; }\n", "cpp/modernize-structured-bindings").empty());
+    EXPECT_TRUE(ByCode("int f() { return point.first; }\n",
+        "cpp/modernize-structured-bindings").empty());
 }
 
 // ---- cpp/modernize-algorithms --------------------------------------------------
@@ -235,7 +236,7 @@ TEST(ModernizeCxxSpec, AlgorithmsIgnoresMutationsAndEscapes)
         ByCode("void f() { for (auto& x : values) x += 1; }\n", "cpp/modernize-algorithms").empty());
     EXPECT_TRUE(
         ByCode("int f() { for (auto x : values) { if (x) break; } }\n", "cpp/modernize-algorithms")
-            .empty());
+        .empty());
     EXPECT_TRUE(ByCode("void f() { int i = 0; }\n", "cpp/modernize-algorithms").empty());
 }
 
@@ -279,10 +280,11 @@ TEST(ModernizeCxxSpec, StringViewRewritesConstValueParameter)
 
 TEST(ModernizeCxxSpec, StringViewKeepsSinksAndReferences)
 {
-    EXPECT_TRUE(Bound(heimdall::SemanticRules::AnalyzeStringView, "void set(std::string value) {}\n").empty());
+    EXPECT_TRUE(Bound(heimdall::SemanticRules::AnalyzeStringView,
+        "void set(std::string value) {}\n").empty());
     EXPECT_TRUE(
         Bound(heimdall::SemanticRules::AnalyzeStringView, "void log(const std::string& message) {}\n")
-            .empty());
+        .empty());
 }
 
 // ---- cpp/modernize-attributes ----------------------------------------------------
@@ -326,25 +328,28 @@ TEST(ModernizeCxxSpec, ConstevalConstexprStaysSilentOtherwise)
         Bound(heimdall::SemanticRules::AnalyzeConstevalConstexpr, "int value = 5;\n").empty());
     EXPECT_TRUE(
         Bound(heimdall::SemanticRules::AnalyzeConstevalConstexpr, "extern const int kMax = 5;\n")
-            .empty());
+        .empty());
     EXPECT_TRUE(
         Bound(heimdall::SemanticRules::AnalyzeConstevalConstexpr, "const int kMax = Compute();\n")
-            .empty());
+        .empty());
     EXPECT_TRUE(
         Bound(heimdall::SemanticRules::AnalyzeConstevalConstexpr,
-            "void f() { const int local = 5; }\n")
-            .empty());
+        "void f() { const int local = 5; }\n")
+        .empty());
 }
 
 // ---- wiring ----------------------------------------------------------------------
 
 TEST(ModernizeCxxSpec, NewCodesAreKnownAndConfigurable)
 {
-    for (const char* code : {"cpp/modernize-emplace", "cpp/modernize-make-unique",
-             "cpp/modernize-make-shared", "cpp/modernize-smart-ptr", "cpp/no-new-delete",
-             "cpp/modernize-span", "cpp/modernize-string-view", "cpp/modernize-algorithms",
-             "cpp/modernize-structured-bindings", "cpp/modernize-attributes",
-             "cpp/modernize-consteval-constexpr"})
+    for (const char* code :
+        {
+            "cpp/modernize-emplace", "cpp/modernize-make-unique",
+            "cpp/modernize-make-shared", "cpp/modernize-smart-ptr", "cpp/no-new-delete",
+            "cpp/modernize-span", "cpp/modernize-string-view", "cpp/modernize-algorithms",
+            "cpp/modernize-structured-bindings", "cpp/modernize-attributes",
+            "cpp/modernize-consteval-constexpr"
+    })
     {
         EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
     }
@@ -353,5 +358,5 @@ TEST(ModernizeCxxSpec, NewCodesAreKnownAndConfigurable)
     options.overrides.push_back({"cpp/modernize-emplace", false, heimdall::Severity::Warning});
     EXPECT_TRUE(ByCode(heimdall::RuleEngine(options).Analyze("void f() { v.push_back(Foo(1)); }\n"),
         "cpp/modernize-emplace")
-            .empty());
+        .empty());
 }

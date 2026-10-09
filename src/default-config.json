@@ -1,0 +1,21 @@
+{
+    "root": true,
+    "rules": {
+        "cpp/no-null": "warning",
+        "format/no-trailing-whitespace": "warning",
+        "format/require-final-newline": "warning",
+        "cpp/no-empty-catch": "warning",
+        "cpp/no-duplicate-include": "warning",
+        "cpp/modernize-using": "warning",
+        "cpp/no-todo": "warning",
+        "cpp/no-magic-numbers": "warning"
+    },
+    "suppressions": true,
+    "include-order": {
+        "groups": [
+            "angle",
+            "quote"
+        ],
+        "case-insensitive": true
+    }
+}
