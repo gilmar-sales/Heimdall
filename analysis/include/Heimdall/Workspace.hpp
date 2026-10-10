@@ -4,6 +4,7 @@
 #include <Heimdall/Ids.hpp>
 #include <Heimdall/ProjectIndex.hpp>
 #include <Heimdall/ProjectSymbolIndex.hpp>
+#include <Heimdall/TokenSnapshot.hpp>
 #include <Heimdall/TypeModel.hpp>
 
 #include <expected>
@@ -102,6 +103,9 @@ namespace heimdall
 
         std::shared_ptr<const std::string> Source(DocumentId document) const;
 
+        /** Returns persistent pieces when present without materializing compatibility text. */
+        [[nodiscard]] std::shared_ptr<const SourceSnapshot> SourceBuffer(DocumentId document) const;
+
         const std::filesystem::path& Path(DocumentId document) const;
 
         const ParserOptions& Options(DocumentId document) const;
@@ -170,6 +174,26 @@ namespace heimdall
         std::expected<void, WorkspaceError> Update(
             DocumentId document, std::shared_ptr<const std::string> source, std::int64_t version);
 
+        /** Updates a buffer using the caller's validated edit in the previous version. */
+        [[nodiscard]] std::expected<void, WorkspaceError> Update(
+            DocumentId document, std::shared_ptr<const std::string> source, std::int64_t version,
+            Lexer::TextEdit edit);
+
+        /** Opens immutable text and token blocks while preserving compatibility accessors. */
+        [[nodiscard]] std::expected<DocumentId, WorkspaceError> OpenBuffer(
+            std::filesystem::path path, std::shared_ptr<const SourceSnapshot> source,
+            std::shared_ptr<const TokenSnapshot> tokens, std::int64_t version = 0,
+            ParserOptions options = {});
+
+        /** Publishes blocks without materializing text when directives are unchanged. */
+        [[nodiscard]] std::expected<void, WorkspaceError> UpdateBuffer(
+            DocumentId document, std::shared_ptr<const SourceSnapshot> source,
+            std::shared_ptr<const TokenSnapshot> tokens, std::int64_t version,
+            Lexer::TextEdit edit);
+
+        /** Releases cold cache references to approach a syntax/semantic retention budget. */
+        void TrimCaches(std::size_t retainedBytes);
+
         std::expected<void, WorkspaceError> Close(DocumentId document);
 
         std::expected<void, WorkspaceError> SetDependencies(
@@ -188,6 +212,15 @@ namespace heimdall
         void SetProjectIndex(std::shared_ptr<const ProjectIndex> index);
 
       private:
+        std::expected<DocumentId, WorkspaceError> OpenImpl(
+            std::filesystem::path path, std::shared_ptr<const std::string> source,
+            std::int64_t version, ParserOptions options,
+            std::shared_ptr<const SourceSnapshot> buffer,
+            std::shared_ptr<const TokenSnapshot>  tokens);
+        std::expected<void, WorkspaceError> UpdateImpl(DocumentId                         document,
+                                                       std::shared_ptr<const std::string> source,
+                                                       std::int64_t                       version,
+                                                       const Lexer::TextEdit*             edit);
         mutable std::mutex                            m_mutex;
         std::shared_ptr<const detail::WorkspaceState> m_state;
     };

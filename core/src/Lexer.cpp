@@ -102,11 +102,15 @@ namespace heimdall
             return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kHex) != 0;
         }
 
-        std::size_t ScanQuoted(std::string_view s, std::size_t i, char quote)
+        std::size_t ScanQuoted(std::string_view s, std::size_t i, char quote, std::stop_token stop)
         {
             ++i;
             while (i < s.size())
             {
+                if (stop.stop_requested())
+                {
+                    return i;
+                }
                 if (s[i] == '\n' || s[i] == '\r')
                 {
                     break;
@@ -125,19 +129,23 @@ namespace heimdall
             return i;
         }
 
-        std::size_t ScanRawString(std::string_view s, std::size_t quote)
+        std::size_t ScanRawString(std::string_view s, std::size_t quote, std::stop_token stop)
         {
             const std::size_t delim_start = quote + 1;
             const std::size_t open        = s.find('(', delim_start);
             if (open == std::string_view::npos || open - delim_start > kMaxDelimLen)
             {
-                return ScanQuoted(s, quote, '"');
+                return ScanQuoted(s, quote, '"', stop);
             }
 
             const std::string_view delimiter = s.substr(delim_start, open - delim_start);
             std::size_t            pos       = open + 1;
             while ((pos = s.find(')', pos)) != std::string_view::npos)
             {
+                if (stop.stop_requested())
+                {
+                    return pos;
+                }
                 if (pos + delimiter.size() + 1 < s.size() && s[pos + 1 + delimiter.size()] == '"' &&
                     s.substr(pos + 1, delimiter.size()) == delimiter)
                 {
@@ -291,15 +299,24 @@ namespace heimdall
 
     std::vector<Token> Lexer::Lex() const
     {
+        return Lex({});
+    }
+
+    std::vector<Token> Lexer::Lex(std::stop_token stop) const
+    {
         std::vector<Token> tokens;
+        if (stop.stop_requested() || m_source.size() > kMaxSourceBytes)
+        {
+            return tokens;
+        }
         // ~1 token per 4 source bytes on typical C++ (was size/3: over-reserved
         // ~8 B of Token storage per source byte up front).
         tokens.reserve(m_source.size() / kApproxBytesPerToken + 1);
 
         std::size_t i = 0;
-        while (i < m_source.size())
+        while (i < m_source.size() && !stop.stop_requested())
         {
-            const Token token = ScanToken(i);
+            const Token token = ScanToken(i, stop);
             tokens.push_back(token);
             i += token.length;
         }
@@ -307,7 +324,7 @@ namespace heimdall
         return tokens;
     }
 
-    Token Lexer::ScanToken(std::size_t start) const
+    Token Lexer::ScanToken(std::size_t start, std::stop_token stop) const
     {
         std::size_t i = start;
         {
@@ -320,13 +337,14 @@ namespace heimdall
                 do
                 {
                     ++i;
-                } while (i < m_source.size() && IsSpace(m_source[i]));
+                } while (i < m_source.size() && IsSpace(m_source[i]) && !stop.stop_requested());
             }
             else if (c == '/' && i + 1 < m_source.size() && m_source[i + 1] == '/')
             {
                 kind = TokenKind::LineComment;
                 i += kCommentDelimLen;
-                while (i < m_source.size() && m_source[i] != '\n' && m_source[i] != '\r')
+                while (i < m_source.size() && m_source[i] != '\n' && m_source[i] != '\r' &&
+                       !stop.stop_requested())
                 {
                     ++i;
                 }
@@ -335,7 +353,8 @@ namespace heimdall
             {
                 kind = TokenKind::BlockComment;
                 i += kCommentDelimLen;
-                while (i + 1 < m_source.size() && !(m_source[i] == '*' && m_source[i + 1] == '/'))
+                while (i + 1 < m_source.size() && !(m_source[i] == '*' && m_source[i + 1] == '/') &&
+                       !stop.stop_requested())
                 {
                     ++i;
                 }
@@ -366,7 +385,7 @@ namespace heimdall
                 if (raw_quote != std::string_view::npos)
                 {
                     kind = TokenKind::RawStringLiteral;
-                    i    = ScanRawString(m_source, raw_quote);
+                    i    = ScanRawString(m_source, raw_quote, stop);
                 }
                 else if ((c == 'u' || c == 'U' || c == 'L') && i + 1 < m_source.size() &&
                          (m_source[i + 1] == '"' || m_source[i + 1] == '\''))
@@ -374,7 +393,7 @@ namespace heimdall
                     quote = i + 1;
                     kind  = m_source[quote] == '"' ? TokenKind::StringLiteral
                                                    : TokenKind::CharacterLiteral;
-                    i     = ScanQuoted(m_source, quote, m_source[quote]);
+                    i     = ScanQuoted(m_source, quote, m_source[quote], stop);
                 }
                 else if (c == 'u' && i + kPrefixOffset2 < m_source.size() &&
                          m_source[i + 1] == '8' &&
@@ -384,12 +403,12 @@ namespace heimdall
                     quote = i + kPrefixOffset2;
                     kind  = m_source[quote] == '"' ? TokenKind::StringLiteral
                                                    : TokenKind::CharacterLiteral;
-                    i     = ScanQuoted(m_source, quote, m_source[quote]);
+                    i     = ScanQuoted(m_source, quote, m_source[quote], stop);
                 }
                 else if (c == '"' || c == '\'')
                 {
                     kind = c == '"' ? TokenKind::StringLiteral : TokenKind::CharacterLiteral;
-                    i    = ScanQuoted(m_source, i, c);
+                    i    = ScanQuoted(m_source, i, c, stop);
                 }
                 else if (IsIdentStart(c))
                 {
@@ -397,14 +416,15 @@ namespace heimdall
                     do
                     {
                         ++i;
-                    } while (i < m_source.size() && IsIdentContinue(m_source[i]));
+                    } while (i < m_source.size() && IsIdentContinue(m_source[i]) &&
+                             !stop.stop_requested());
                 }
                 else if (IsDigit(c) ||
                          (c == '.' && i + 1 < m_source.size() && IsDigit(m_source[i + 1])))
                 {
                     kind = TokenKind::Number;
                     ++i;
-                    while (i < m_source.size())
+                    while (i < m_source.size() && !stop.stop_requested())
                     {
                         const char n = m_source[i];
                         if (IsIdentContinue(n) || n == '\'' || n == '.')

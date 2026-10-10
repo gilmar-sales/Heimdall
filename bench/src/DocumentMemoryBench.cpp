@@ -65,20 +65,7 @@ namespace
 
     std::size_t TreeBytes(const heimdall::ParseTree& tree)
     {
-        std::size_t bytes = tree.Tokens().capacity() * sizeof(heimdall::Token);
-        const auto& soa   = tree.NodesSoA();
-        bytes += soa.kind.capacity() * sizeof(std::uint8_t);
-        bytes += (soa.first_token.capacity() + soa.token_count.capacity() + soa.parent.capacity() +
-                  soa.subtree_end.capacity()) *
-                 sizeof(std::uint32_t);
-        bytes += tree.Directives().capacity() * sizeof(heimdall::PreprocessorDirective);
-        bytes += tree.Diagnostics().capacity() * sizeof(heimdall::GrammarDiagnostic);
-        for (const auto& diagnostic : tree.Diagnostics())
-        {
-            bytes += diagnostic.message.capacity();
-        }
-
-        return bytes;
+        return tree.StorageBytes();
     }
 
 } // namespace
@@ -117,6 +104,7 @@ int main(int argc, char** argv)
 
     std::printf("%8s %9s %9s %9s %10s %10s %10s %11s\n", "lines", "KiB", "tokens", "nodes",
                 "tree MiB", "B/line", "B/token", "RSS +MiB");
+    std::printf("Phase times below each size: lex, preprocess, grammar, auxiliary (ms).\n");
     for (const std::size_t target : sizes)
     {
         auto document = heimdall::bench::BuildDocument(stb_dir, target);
@@ -136,6 +124,13 @@ int main(int argc, char** argv)
                     tree.NodesSoA().size(), static_cast<double>(bytes) / (1024.0 * 1024.0),
                     static_cast<double>(bytes) / static_cast<double>(lines),
                     static_cast<double>(bytes) / static_cast<double>(tree.Tokens().size()), growth);
+        const auto&      metrics  = tree.Metrics();
+        constexpr double kNsPerMs = 1000000.0;
+        std::printf("         phases: %.3f %.3f %.3f %.3f\n",
+                    static_cast<double>(metrics.lexNs) / kNsPerMs,
+                    static_cast<double>(metrics.preprocessingNs) / kNsPerMs,
+                    static_cast<double>(metrics.grammarNs) / kNsPerMs,
+                    static_cast<double>(metrics.auxiliaryNs) / kNsPerMs);
     }
 
     return 0;

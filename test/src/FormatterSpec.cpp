@@ -2,10 +2,41 @@
 
 #include <Heimdall/Formatter.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+
+TEST(FormatterSpec, PreCancelledTreeFormattingReturnsNoOutputOrEdits)
+{
+    const auto       tree = heimdall::ParseTree::Parse("int Value() {return 1;}");
+    std::stop_source stop;
+    stop.request_stop();
+
+    const auto output = heimdall::Formatter().Format(tree, stop.get_token());
+    const auto edits  = heimdall::Formatter().FormatEdits(tree, stop.get_token());
+
+    EXPECT_TRUE(output.empty());
+    EXPECT_TRUE(edits.empty());
+}
+
+TEST(FormatterSpec, TreeEditsMatchSourceEditsForTheSameDialect)
+{
+    constexpr std::string_view source = "int Value() {return 1;}\nint Other;";
+    const auto                 tree   = heimdall::ParseTree::Parse(source);
+
+    const auto expected = heimdall::Formatter().FormatEdits(source);
+    const auto actual   = heimdall::Formatter().FormatEdits(tree);
+
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < actual.size(); ++i)
+    {
+        EXPECT_EQ(actual[i].start_offset, expected[i].start_offset);
+        EXPECT_EQ(actual[i].end_offset, expected[i].end_offset);
+        EXPECT_EQ(actual[i].replacement, expected[i].replacement);
+    }
+}
 
 TEST(FormatterSpec, IndentsByBraceDepthAndIsIdempotent)
 {
@@ -1635,4 +1666,114 @@ TEST(FormatterSpec, UnnamedPointerTypesFollowThePointerAlignment)
             .Format(source);
     EXPECT_NE(right.find("sizeof(void *)"), std::string::npos) << right;
     EXPECT_NE(right.find("static_cast<void *>(p)"), std::string::npos) << right;
+}
+
+TEST(FormatterSpec, CachedFormattedTextProducesTheSameEditsWithoutReformatting)
+{
+    const std::string         source = "int first(){return 1;}\nint second(){return 2;}\n";
+    const auto                tree   = heimdall::ParseTree::Parse(source);
+    const heimdall::Formatter formatter;
+    const auto                formatted = formatter.Format(tree);
+
+    const auto edits    = heimdall::Formatter::ComputeEdits(source, formatted);
+    const auto expected = formatter.FormatEdits(tree);
+
+    ASSERT_EQ(edits.size(), expected.size());
+    for (std::size_t i = 0; i < edits.size(); ++i)
+    {
+        EXPECT_EQ(edits[i].start_offset, expected[i].start_offset);
+        EXPECT_EQ(edits[i].end_offset, expected[i].end_offset);
+        EXPECT_EQ(edits[i].replacement, expected[i].replacement);
+    }
+    std::stop_source cancelled;
+    cancelled.request_stop();
+    EXPECT_TRUE(
+        heimdall::Formatter::ComputeEdits(source, formatted, cancelled.get_token()).empty());
+}
+
+TEST(FormatterSpec, ShapingConvergenceSharesOutputAcrossDifferentSourceVersions)
+{
+    const heimdall::Formatter formatter;
+    const auto before = heimdall::ParseTree::Parse("void Empty()\n{\n}\n");
+    const auto after = heimdall::ParseTree::Parse("void Empty()\n{\n    \n}\n");
+    const auto original = formatter.FormatIncremental(before);
+
+    const auto changed = formatter.FormatIncremental(after, &original);
+
+    ASSERT_TRUE(changed.Complete());
+    EXPECT_TRUE(changed.ReusedShapedOutput());
+    EXPECT_EQ(&changed.Formatted(), &original.Formatted());
+    EXPECT_EQ(changed.Formatted(), formatter.Format(after));
+    EXPECT_FALSE(heimdall::Formatter::ComputeEdits(after.Source(), changed.Formatted()).empty());
+}
+
+TEST(FormatterSpec, IncrementalFormattingMatchesEveryPassAcrossOptionsAndMalformedInput)
+{
+    constexpr std::array<std::string_view, 5> kSources {
+        "#include <z.h>\n#include <a.h>\n#define ONE 1\n#define LONG 2\n"
+        "class A{int field; void One(int a,int b,int c,int d); void Two(){} };\n",
+        "void A()\r\n{\r\nif(x) return;\r\nelse f();\r\nconst char* s=R\"(raw\ntext)\";\r\n}",
+        "namespace broken { int f(int a, int b) { if (a) { return (b +\n",
+        "#if ENABLED\nint x=1; //x\nint longer=2; //longer\n#else\nvoid A() {}\n#endif\n",
+        "void A(){auto p=(int*)x; if(!p) f(1,2,3,4); for(auto& v : xs) ++v;}\n"
+    };
+    heimdall::ParserOptions parserOptions;
+    parserOptions.predefined_macros["ENABLED"] = "1";
+
+    for (std::size_t selection = 0; selection < 32; ++selection)
+    {
+        heimdall::FormatOptions options;
+        options.indent_width = selection % 3 + 1;
+        options.column_limit = selection & 1 ? 30 : 0;
+        options.use_tabs = (selection & 2) != 0;
+        options.brace_style = selection & 4 ? heimdall::BraceStyle::Attach
+                                          : heimdall::BraceStyle::Allman;
+        options.single_line_style = static_cast<heimdall::SingleLineStyle>(selection % 4);
+        options.sort_includes = (selection & 8) != 0;
+        options.align_consecutive_macros = true;
+        options.align_consecutive_assignments = true;
+        options.blank_line_between_methods = (selection & 16) != 0;
+        options.max_parameters_per_line = 1;
+        const heimdall::Formatter formatter(options);
+        for (auto source : kSources)
+        {
+            SCOPED_TRACE(selection);
+            SCOPED_TRACE(source);
+            const auto tree = heimdall::ParseTree::Parse(source, parserOptions);
+            const auto expected = formatter.Format(tree);
+
+            const auto initial = formatter.FormatIncremental(tree);
+            const auto repeated = formatter.FormatIncremental(tree, &initial);
+
+            ASSERT_TRUE(initial.Complete());
+            EXPECT_EQ(initial.Formatted(), expected);
+            EXPECT_EQ(repeated.Formatted(), expected);
+            EXPECT_TRUE(repeated.ReusedShapedOutput());
+        }
+    }
+}
+
+TEST(FormatterSpec, IncrementalCheckpointInvalidatesOptionsDialectAndCancelledWork)
+{
+    const auto tree = heimdall::ParseTree::Parse("void Empty(){}\n");
+    const heimdall::Formatter formatter;
+    const auto original = formatter.FormatIncremental(tree);
+    heimdall::FormatOptions options;
+    options.indent_width = 8;
+    const auto dialect = heimdall::ParseTree::Parse(tree.Source(), heimdall::CppStandard::Cpp26);
+    std::stop_source cancelled;
+    cancelled.request_stop();
+
+    const auto changed = heimdall::Formatter(options).FormatIncremental(tree, &original);
+    const auto reparsed = formatter.FormatIncremental(dialect, &original);
+    const auto stopped = formatter.FormatIncremental(tree, &original, cancelled.get_token());
+
+    EXPECT_FALSE(changed.ReusedShapedOutput());
+    EXPECT_FALSE(reparsed.ReusedShapedOutput());
+    EXPECT_FALSE(stopped.Complete());
+    EXPECT_FALSE(stopped.ReusedShapedOutput());
+    EXPECT_EQ(changed.Formatted(), heimdall::Formatter(options).Format(tree));
+    EXPECT_EQ(reparsed.Formatted(), formatter.Format(dialect));
+    EXPECT_TRUE(stopped.Formatted().empty());
+    EXPECT_GT(original.StorageBytes(), original.Formatted().size());
 }

@@ -3,6 +3,8 @@
 #include <Heimdall/ParseTree.hpp>
 
 #include <cstddef>
+#include <memory>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,10 +55,11 @@ namespace heimdall
 
 	struct FormatOptions
 	{
-		static constexpr std::size_t kDefaultIndentWidth = 4;
-		static constexpr std::size_t kDefaultColumnLimit = 100;
+        bool                         operator==(const FormatOptions&) const noexcept = default;
+        static constexpr std::size_t kDefaultIndentWidth                             = 4;
+        static constexpr std::size_t kDefaultColumnLimit                             = 100;
 
-		std::size_t indent_width    = kDefaultIndentWidth;
+        std::size_t indent_width    = kDefaultIndentWidth;
 		bool use_tabs               = false;
 		std::size_t max_empty_lines = 1;
 		// Maximum line width before comma-driven breaks; 0 disables breaking.
@@ -109,6 +112,31 @@ namespace heimdall
 		std::string replacement;
 	};
 
+    /** Immutable checkpoint after declaration and control-flow shaping passes. */
+    class FormattingSnapshot
+    {
+      public:
+        /** Formatted output owned by this snapshot, independent of its parse tree. */
+        [[nodiscard]] const std::string& Formatted() const noexcept;
+
+        /** Whether the remaining passes converged to a previous snapshot's input. */
+        [[nodiscard]] bool ReusedShapedOutput() const noexcept { return mReusedShapedOutput; }
+
+        /** Whether all passes finished without cancellation. */
+        [[nodiscard]] bool Complete() const noexcept { return static_cast<bool>(mFormatted); }
+
+        /** Retained string capacities; shared payload may be counted by another snapshot. */
+        [[nodiscard]] std::size_t StorageBytes() const noexcept;
+
+      private:
+        friend class Formatter;
+        FormatOptions mOptions;
+        CppStandard mStandard = CppStandard::Cpp20;
+        std::shared_ptr<const std::string> mPrepared;
+        std::shared_ptr<const std::string> mFormatted;
+        bool mReusedShapedOutput = false;
+    };
+
 	class Formatter
 	{
 	public:
@@ -118,25 +146,49 @@ namespace heimdall
 
 		std::string Format(const ParseTree& tree) const;
 
-		// Minimal line-diff between `source` and `Format(source)`: empty when the
-		// file is already formatted. Edits are disjoint and ascending.
-		std::vector<FormatEdit> FormatEdits(std::string_view source) const;
+        /** Formats a pinned tree, returning no output when cancellation is requested. */
+        [[nodiscard]] std::string Format(const ParseTree& tree, std::stop_token stop) const;
 
-		// Format the whole buffer but only apply edits overlapping
-		// [start_line, end_line); lines outside are byte-identical.
-		std::string FormatRange(std::string_view source, std::size_t start_line,
-			std::size_t end_line) const;
+        /** Reuses remaining passes after exact convergence, invalidating on options or dialect. */
+        [[nodiscard]] FormattingSnapshot FormatIncremental(
+            const ParseTree& tree, const FormattingSnapshot* previous = nullptr,
+            std::stop_token stop = {}) const;
 
-	private:
-		std::string DeclarationLayout(const ParseTree& tree) const;
+        // Minimal line-diff between `source` and `Format(source)`: empty when the
+        // file is already formatted. Edits are disjoint and ascending.
+        std::vector<FormatEdit> FormatEdits(std::string_view source) const;
 
-		std::string FormatImpl(std::string_view source, const std::vector<Token>& tokens,
-			const std::vector<PreprocessorDirective>& directives) const;
+        /** Computes edits using the pinned tree's tokens and parser dialect. */
+        [[nodiscard]] std::vector<FormatEdit> FormatEdits(const ParseTree& tree,
+                                                          std::stop_token  stop = {}) const;
 
-		std::string FormatShaped(std::string_view source, const std::vector<Token>& tokens,
-			const std::vector<PreprocessorDirective>& directives) const;
+        /** Diffs a previously formatted buffer without running formatting passes again. */
+        [[nodiscard]] static std::vector<FormatEdit> ComputeEdits(std::string_view source,
+                                                                  std::string_view formatted,
+                                                                  std::stop_token  stop = {});
 
-		FormatOptions m_options;
-	};
+        // Format the whole buffer but only apply edits overlapping
+        // [start_line, end_line); lines outside are byte-identical.
+        std::string FormatRange(std::string_view source, std::size_t start_line,
+                                std::size_t end_line) const;
+
+      private:
+        Formatter(FormatOptions options, std::stop_token stop) :
+            m_options(options), mStop(std::move(stop))
+        {
+        }
+
+        std::vector<FormatEdit> Diff(std::string_view source, std::string_view formatted) const;
+        std::string             DeclarationLayout(const ParseTree& tree) const;
+
+        std::string FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+                               const std::vector<PreprocessorDirective>& directives) const;
+
+        std::string FormatShaped(std::string_view source, const std::vector<Token>& tokens,
+                                 const std::vector<PreprocessorDirective>& directives) const;
+
+        FormatOptions   m_options;
+        std::stop_token mStop;
+    };
 
 } // namespace heimdall

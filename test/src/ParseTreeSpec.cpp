@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1059,4 +1061,57 @@ TEST(ParseTreeSpec, InlineNamespaceIsANamespaceDefinition)
 
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::NamespaceDefinition), 3);
     EXPECT_TRUE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, PreCancelledParseDoesNotAllocateTokens)
+{
+    std::stop_source stop;
+    stop.request_stop();
+    const auto source = std::make_shared<const std::string>(100000, 'a');
+
+    const auto tree = heimdall::ParseTree::ParseSnapshot(source, {}, stop.get_token());
+
+    EXPECT_TRUE(tree.Cancelled());
+    EXPECT_EQ(tree.Tokens().capacity(), 0u);
+}
+
+TEST(ParseTreeSpec, ConcurrentCompatibilityReadersSeeTheSameCompleteNodes)
+{
+    const auto tree = heimdall::ParseTree::Parse("int One() { return 1; } int Two;");
+    std::vector<std::future<std::size_t>> readers;
+
+    for (int i = 0; i < 16; ++i)
+    {
+        readers.push_back(std::async(std::launch::async, [&] { return tree.Nodes().size(); }));
+    }
+
+    for (auto& reader : readers)
+    {
+        EXPECT_EQ(reader.get(), tree.NodesSoA().size());
+    }
+}
+
+TEST(ParseTreeSpec, DeepExpressionProducesAnErrorInsteadOfExhaustingTheStack)
+{
+    constexpr std::size_t kDepth = 2000;
+    const auto            source = "int Deep() { return " + std::string(kDepth, '(') + "1" +
+                                   std::string(kDepth, ')') + "; } int Tail;";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_FALSE(tree.Cancelled());
+    EXPECT_TRUE(std::any_of(tree.Diagnostics().begin(), tree.Diagnostics().end(),
+                            [](const auto& diagnostic)
+                            { return diagnostic.message == "maximum grammar nesting exceeded"; }));
+    EXPECT_FALSE(tree.NodesSoA().empty());
+}
+
+TEST(ParseTreeSpec, StorageAccountingIncludesTheMaterializedCompatibilityAdapter)
+{
+    const auto tree   = heimdall::ParseTree::Parse("int One() { return 1; } int Two;");
+    const auto before = tree.StorageBytes();
+
+    const auto& nodes = tree.Nodes();
+
+    EXPECT_EQ(tree.StorageBytes(), before + nodes.capacity() * sizeof(heimdall::GrammarNode));
 }

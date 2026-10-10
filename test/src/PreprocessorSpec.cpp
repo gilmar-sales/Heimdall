@@ -4,6 +4,19 @@
 
 #include <string>
 
+TEST(PreprocessorSpec, PreCancelledProcessDoesNotBuildDirectiveOrMacroStorage)
+{
+    std::stop_source stop;
+    stop.request_stop();
+
+    const auto result = heimdall::Preprocessor().Process("#define X 1\n#include <vector>\n", true,
+                                                         stop.get_token());
+
+    EXPECT_TRUE(result.directives.empty());
+    EXPECT_TRUE(result.active_source.empty());
+    EXPECT_TRUE(result.local_macros.empty());
+}
+
 TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
 {
     constexpr std::string_view source =
@@ -175,4 +188,18 @@ TEST(PreprocessorSpec, ReportsLocalDefines)
     ASSERT_TRUE(result.local_macros.contains("API"));
     EXPECT_EQ(result.local_macros.at("API"), "extern");
     EXPECT_FALSE(result.local_macros.contains("GONE"));
+}
+
+TEST(PreprocessorSpec, DeepConditionalExpressionsRecoverWithoutExhaustingTheStack)
+{
+    const std::string expression = std::string(10000, '(') + "1" + std::string(10000, ')');
+    const std::string source     = "#if " + expression + "\nint skipped;\n#endif\nint kept;\n";
+
+    const auto result = heimdall::Preprocessor().Process(source, true);
+
+    ASSERT_EQ(result.diagnostics.size(), 1u);
+    EXPECT_EQ(result.diagnostics.front().message,
+              "maximum preprocessor expression nesting exceeded");
+    EXPECT_EQ(result.active_source.find("skipped"), std::string::npos);
+    EXPECT_NE(result.active_source.find("kept"), std::string::npos);
 }

@@ -11,6 +11,8 @@ add_executable(Tests_run
   src/RefactoringSpec.cpp
   src/ProjectSymbolIndexSpec.cpp
   src/WorkspaceSpec.cpp
+  src/SourceSnapshotSpec.cpp
+  src/TokenSnapshotSpec.cpp
   src/SemanticDispatchSpec.cpp
   src/RuleSchedulerSpec.cpp
   src/PluginHostSpec.cpp

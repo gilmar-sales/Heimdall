@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -255,19 +256,31 @@ namespace heimdall
 
 	class ParseTree;
 
-	// Describes how a new parse relates to an earlier one: `previous` was parsed
-	// from the text in which `old_length` bytes at `offset` were replaced by
-	// `new_length` bytes to give the text being parsed. Items of `previous` that
-	// lie outside that edit are copied instead of re-parsed.
-	struct ParseReuse
+    struct ParseMetrics
+    {
+        std::uint64_t lexNs               = 0;
+        std::uint64_t preprocessingNs     = 0;
+        std::uint64_t grammarNs           = 0;
+        std::uint64_t auxiliaryNs         = 0;
+        std::size_t   reusedNodes         = 0;
+        bool          reusedPreprocessing = false;
+    };
+
+    // Describes how a new parse relates to an earlier one: `previous` was parsed
+    // from the text in which `old_length` bytes at `offset` were replaced by
+    // `new_length` bytes to give the text being parsed. Items of `previous` that
+    // lie outside that edit are copied instead of re-parsed.
+    struct ParseReuse
 	{
 		const ParseTree* previous = nullptr;
 		std::size_t offset        = 0;
 		std::size_t old_length    = 0;
 		std::size_t new_length    = 0;
-	};
+        /** True only when directives, physical lines and macro options are unchanged. */
+        bool directivesUnchanged = false;
+    };
 
-	namespace detail
+    namespace detail
 	{
 		void ParseWithGrammar(
 			ParseTree& tree,
@@ -347,10 +360,10 @@ namespace heimdall
 
 		const std::vector<PreprocessorDirective>& Directives() const noexcept
 		{
-			return m_directives;
-		}
+            return mPreprocessing.directives;
+        }
 
-		const std::vector<TopLevelItem>& Items() const noexcept
+        const std::vector<TopLevelItem>& Items() const noexcept
 		{
 			return m_items;
 		}
@@ -361,12 +374,12 @@ namespace heimdall
 			return m_reused_items;
 		}
 
-		bool Cancelled() const noexcept
-		{
-			return m_cancelled;
-		}
+        /** Stage timings and reuse counts for this immutable parse result. */
+        [[nodiscard]] const ParseMetrics& Metrics() const noexcept { return mMetrics; }
 
-		// Identifier tokens the grammar treated as invisible because a predefined
+        bool Cancelled() const noexcept { return m_cancelled; }
+
+        // Identifier tokens the grammar treated as invisible because a predefined
 		// macro expands to mere decoration (`class EXPORT Name`, `_GLIBCXX_NOEXCEPT`).
 		// Name extraction that reads raw tokens must skip them too.
 		bool IsDecorationToken(std::size_t token) const noexcept
@@ -472,11 +485,10 @@ namespace heimdall
 			return m_owned_source;
 		}
 
-		// Backing container estimate, excluding source and the lazy AoS adapter.
-		// Does not construct or read mutable compatibility storage.
-		std::size_t StorageBytes() const noexcept;
+        /** Backing container estimate, including an existing AoS adapter but excluding source. */
+        [[nodiscard]] std::size_t StorageBytes() const noexcept;
 
-		// Drops the tree's claim on the source text and the view of it. Afterwards
+        // Drops the tree's claim on the source text and the view of it. Afterwards
 		// only the tokens, nodes, items and diagnostics may be used (that is all a
 		// parse reusing this tree reads); call it only on a tree nobody else holds.
 		void ReleaseSource() noexcept
@@ -521,24 +533,26 @@ namespace heimdall
 		// Lazy construction of AoS view for backward compatibility
 		mutable std::vector<GrammarNode> m_nodes_aos;
 		mutable bool m_nodes_aos_dirty = true;
+        mutable std::shared_ptr<std::mutex> mNodesAoSMutex    = std::make_shared<std::mutex>();
 
-		void EnsureNodesAoS() const;
+        void EnsureNodesAoS() const;
 
-		std::shared_ptr<const std::string> m_owned_source;
+        std::shared_ptr<const std::string> m_owned_source;
 		std::string_view m_source;
 		CppStandard m_standard = CppStandard::Cpp20;
 		std::vector<Token> m_tokens;
 		std::shared_ptr<const std::vector<Token>> m_shared_tokens;
 		GrammarNodeSoA m_nodes_soa; // SoA layout (primary)
 		std::vector<GrammarDiagnostic> m_diagnostics;
-		std::vector<PreprocessorDirective> m_directives;
-		bool m_cancelled = false;
-		std::vector<bool> m_decoration;
+        PreprocessorResult                        mPreprocessing;
+        bool                                      m_cancelled = false;
+        std::vector<bool> m_decoration;
 		std::vector<TopLevelItem> m_items;
 		std::size_t m_reused_items = 0;
+        ParseMetrics                              mMetrics;
 
-		// Pre-computed auxiliary data for fast queries
-		std::vector<std::uint8_t>
+        // Pre-computed auxiliary data for fast queries
+        std::vector<std::uint8_t>
 		m_token_kind_mask;                              // 1 = trivia (whitespace/comment), 0 = significant
 		std::vector<std::uint32_t> m_identifier_tokens; // indices of all identifier tokens
 		std::vector<std::uint32_t> m_directive_tokens;  // indices of all directive tokens

@@ -94,6 +94,45 @@ try:
         assert reply(request_id).get("error", {}).get("code") == -32800, reply(request_id)
     for request_id in (20, 21):
         assert "shared" in json.dumps(reply(request_id).get("result")), reply(request_id)
+    send("textDocument/didClose", {"textDocument": {"uri": big_uri}})
+
+    header_uri = "file:///source_overlay_header.hpp"
+    overlay_uri = "file:///source_overlay_main.cpp"
+    header = "namespace overlay_left { int clash; } namespace overlay_right { int clash; }\n"
+    probe_line = "int Probe() { return overlay_left::cl; }\n"
+    overlay_text = ('#include "source_overlay_header.hpp"\n'
+                    'using namespace overlay_left;\nusing namespace overlay_right;\n'
+                    'int Read() { return clash; }\n' + probe_line)
+    open_document(header_uri, header)
+    hover(header_uri, 40, 16)
+    reply(40)
+    open_document(overlay_uri, overlay_text)
+    deadline = time.monotonic() + 30
+    request_id = 100
+    while True:
+        send("textDocument/completion", {"textDocument": {"uri": overlay_uri},
+             "position": {"line": 4, "character": probe_line.index("::") + 4}}, request_id)
+        result = reply(request_id).get("result", {})
+        if not result.get("isIncomplete", True) and any(
+                item["label"] == "clash" for item in result.get("items", [])):
+            break
+        assert time.monotonic() < deadline, result
+        request_id += 1
+        time.sleep(0.02)
+    send("textDocument/didChange", {"textDocument": {"uri": overlay_uri, "version": 2},
+         "contentChanges": [{"text": overlay_text + " "}]})
+    with condition:
+        assert condition.wait_for(lambda: any(
+            message.get("method") == "textDocument/publishDiagnostics"
+            and message["params"]["uri"] == overlay_uri
+            and message["params"].get("version") == 2
+            and any(diagnostic["code"] == "semantic/ambiguous-reference"
+                    for diagnostic in message["params"]["diagnostics"])
+            for message in messages), 30), [
+                [diagnostic["code"] for diagnostic in message["params"]["diagnostics"]]
+                for message in messages
+                if message.get("method") == "textDocument/publishDiagnostics"
+                and message["params"]["uri"] == overlay_uri]
     send("shutdown", request_id=30)
     reply(30)
     # Shutdown drains suspended continuations: no duplicate late replies.

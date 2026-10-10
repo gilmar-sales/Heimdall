@@ -9,6 +9,8 @@
 
 add_library(heimdall_core STATIC
   src/Arena.cpp
+  src/SourceSnapshot.cpp
+  src/TokenSnapshot.cpp
   src/MappedBuffer.cpp
   src/SyntaxTree.cpp
   src/Formatter.cpp

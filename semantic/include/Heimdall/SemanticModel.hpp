@@ -178,6 +178,12 @@ namespace heimdall
 
         std::size_t ArenaBytes() const noexcept { return m_arena->Used(); }
 
+        /** Includes allocator block slack in the semantic model's reservation. */
+        [[nodiscard]] std::size_t ArenaReservedBytes() const noexcept
+        {
+            return m_arena->ReservedBytes();
+        }
+
         std::size_t ArenaAllocations() const noexcept { return m_arena->AllocationCount(); }
 
         // First symbol named `name` declared directly in `scope`; further

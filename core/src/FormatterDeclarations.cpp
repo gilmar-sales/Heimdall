@@ -42,9 +42,13 @@ namespace heimdall
 
 		for (std::size_t node = 0; node < nodes.size(); ++node)
 		{
-			if (m_options.max_parameters_per_line &&
-				nodes.Kind(node) == GrammarKind::FunctionSuffix)
-			{
+            if (mStop.stop_requested())
+            {
+                return {};
+            }
+            if (m_options.max_parameters_per_line &&
+                nodes.Kind(node) == GrammarKind::FunctionSuffix)
+            {
 				std::vector<std::size_t> parameters;
 				for (const auto child : tree.DirectChildren(node))
 				{

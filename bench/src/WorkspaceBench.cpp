@@ -36,6 +36,39 @@ namespace
 
     BENCHMARK(SnapshotPin)->Arg(1)->Arg(100)->Arg(1000);
 
+    void PagedWorkspaceUpdate(benchmark::State& state)
+    {
+        Workspace  workspace;
+        const auto first  = Source(1, 1);
+        const auto second = Source(1, 2);
+        const auto firstBuffer =
+            std::make_shared<const SourceSnapshot>(*SourceSnapshot::Create(*first));
+        const auto secondBuffer =
+            std::make_shared<const SourceSnapshot>(*SourceSnapshot::Create(*second));
+        const auto firstTokens =
+            std::make_shared<const TokenSnapshot>(TokenSnapshot::Create(Lexer(*first).Lex()));
+        const auto secondTokens =
+            std::make_shared<const TokenSnapshot>(TokenSnapshot::Create(Lexer(*second).Lex()));
+        const auto id = workspace.OpenBuffer("edit.cpp", firstBuffer, firstTokens, 1);
+        for (std::int64_t i = 1; i < state.range(0); ++i)
+        {
+            (void)workspace.Open("other" + std::to_string(i) + ".cpp", first);
+        }
+        const Lexer::TextEdit edit { first->find("return 1") + 7, 1, 1 };
+        std::int64_t          version = 1;
+        for (auto _ : state)
+        {
+            ++version;
+            const bool alternate = version % 2 == 0;
+            const auto updated =
+                workspace.UpdateBuffer(*id, alternate ? secondBuffer : firstBuffer,
+                                       alternate ? secondTokens : firstTokens, version, edit);
+            benchmark::DoNotOptimize(updated.has_value());
+        }
+    }
+
+    BENCHMARK(PagedWorkspaceUpdate)->Arg(1)->Arg(100)->Arg(1000);
+
     void WarmSemanticCache(benchmark::State& state)
     {
         Workspace workspace;

@@ -94,3 +94,33 @@ TEST(DocumentSpec, LineIndexRebindSurvivesBufferMove)
     EXPECT_EQ(index.ToPosition(2).line, 1u);
     EXPECT_EQ(index.OffsetFromPosition({ 1, 1 }), 3u);
 }
+
+TEST(DocumentSpec, PersistentLineIndexMatchesUnicodePositionsAcrossChunkBoundaries)
+{
+    std::string text(4095, 'a');
+    text += "\nUTF8: ";
+    text += "\xf0\x9f\x98\x80";
+    text += "\r\nlast\n";
+    auto source =
+        std::make_shared<const heimdall::SourceSnapshot>(*heimdall::SourceSnapshot::Create(text));
+    heimdall::lsp::LineIndex index;
+    index.Build(source);
+    const auto oldIndex = index;
+    const auto edited   = source->Edit(4095, 1, "\nnew\n");
+    ASSERT_TRUE(edited);
+    source = std::make_shared<const heimdall::SourceSnapshot>(std::move(*edited));
+    text.replace(4095, 1, "\nnew\n");
+    index.Update(source, 4095, 1, 5);
+
+    heimdall::lsp::LineIndex expected;
+    expected.Build(text);
+    ASSERT_EQ(index.LineCount(), expected.LineCount());
+    EXPECT_EQ(oldIndex.LineCount(), 4u);
+    for (std::size_t offset = 4088; offset <= text.size(); ++offset)
+    {
+        const auto position = expected.ToPosition(offset);
+        EXPECT_EQ(index.ToPosition(offset).line, position.line);
+        EXPECT_EQ(index.ToPosition(offset).character, position.character);
+        EXPECT_EQ(index.OffsetFromPosition(position), expected.OffsetFromPosition(position));
+    }
+}

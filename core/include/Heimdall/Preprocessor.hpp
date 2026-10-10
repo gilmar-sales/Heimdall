@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -100,6 +101,10 @@ namespace heimdall
         // linter and formatter only need ranges/directives/diagnostics. Tests and
         // benchmarks that assert on expansion pass build_active_source=true.
         PreprocessorResult Process(std::string_view source, bool build_active_source = false) const;
+
+        /** Returns partial preprocessing data when cancellation is requested. */
+        [[nodiscard]] PreprocessorResult Process(std::string_view source, bool buildActiveSource,
+                                                 std::stop_token stop) const;
 
       private:
         std::shared_ptr<const MacroMap> m_owned;

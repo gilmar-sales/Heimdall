@@ -3,6 +3,7 @@
 #include "CliOptions.hpp"
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/SourceSnapshot.hpp>
 #include <Heimdall/TypeLayout.hpp>
 
 #include <algorithm>
@@ -110,6 +111,44 @@ TEST(IncludeIndexSpec, OversizedOverlayMarksResolutionIncompleteAndEmptyBuffersH
     heimdall::IncludeIndex::ResolveHeaders(
         base, "#include \"large_unsaved.hpp\"", nullptr, limits, &report, &overlay);
     EXPECT_FALSE(report.complete);
+}
+
+TEST(IncludeIndexSpec, OverlayDependencyKeysIgnoreUnrelatedEditsAndTrackPathMembership)
+{
+    const auto              base = IncludeDir();
+    heimdall::SourceOverlay overlay;
+    overlay.Add(base / "used.hpp", std::make_shared<const std::string>("int used;"));
+    overlay.Add(base / "other.cpp", std::make_shared<const std::string>("int other;"));
+    const std::vector<std::filesystem::path> dependencies { base / "used.hpp" };
+    const auto                               paths   = overlay.PathFingerprint();
+    const auto                               content = overlay.Fingerprint(dependencies);
+
+    overlay.Add(base / "other.cpp", std::make_shared<const std::string>("int changed;"));
+
+    EXPECT_EQ(overlay.PathFingerprint(), paths);
+    EXPECT_EQ(overlay.Fingerprint(dependencies), content);
+    overlay.Add(base / "used.hpp", std::make_shared<const std::string>("int updated;"));
+    EXPECT_NE(overlay.Fingerprint(dependencies), content);
+    overlay.Add(base / "new.hpp", std::make_shared<const std::string>(""));
+    EXPECT_NE(overlay.PathFingerprint(), paths);
+}
+
+TEST(IncludeIndexSpec, OverlayPathKeysDoNotMaterializePersistentBuffers)
+{
+    const auto source = std::make_shared<const heimdall::SourceSnapshot>(
+        *heimdall::SourceSnapshot::Create(std::string(10000, 'a')));
+    const auto              bytes = source->StorageBytes();
+    const auto              path  = IncludeDir() / "lazy.hpp";
+    heimdall::SourceOverlay overlay;
+
+    overlay.AddSnapshot(path, source);
+    EXPECT_FALSE(overlay.PathFingerprint().empty());
+
+    EXPECT_EQ(source->StorageBytes(), bytes);
+    ASSERT_NE(overlay.Find(path), nullptr);
+    EXPECT_EQ(overlay.Find(path), source->Materialize());
+    EXPECT_EQ(overlay.Find(path)->size(), source->Size());
+    EXPECT_GT(source->StorageBytes(), bytes);
 }
 
 TEST(IncludeIndexSpec, RealCliOptionsAndFilesystemPathHaveCompilerLayouts)

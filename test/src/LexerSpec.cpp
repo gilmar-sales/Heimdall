@@ -326,3 +326,14 @@ TEST(LexerSpec, TokenStaysTwelveBytes)
 {
     EXPECT_EQ(sizeof(heimdall::Token), 12u);
 }
+
+TEST(LexerSpec, PreCancelledLexDoesNotReserveSourceSizedStorage)
+{
+    const std::string source(100000, 'a');
+    std::stop_source  stop;
+    stop.request_stop();
+
+    const auto tokens = heimdall::Lexer(source).Lex(stop.get_token());
+
+    EXPECT_EQ(tokens.capacity(), 0u);
+}

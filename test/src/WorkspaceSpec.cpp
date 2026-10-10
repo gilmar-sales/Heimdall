@@ -331,4 +331,158 @@ namespace
         EXPECT_EQ(current->ExportsNamed("NewType").size(), 1);
         EXPECT_EQ(index->ExportsNamed("OldType").size(), 1);
     }
+
+    TEST(WorkspaceSpec, EditHullUpdateReusesSyntaxAndPreservesOlderSnapshotsAcrossPages)
+    {
+        Workspace               workspace;
+        std::vector<DocumentId> ids;
+        for (int i = 0; i < 130; ++i)
+        {
+            auto id = workspace.Open("page" + std::to_string(i) + ".cpp",
+                                     Text("int First;\nint Second;\nint Third;\n"), 1);
+            ASSERT_TRUE(id);
+            ids.push_back(*id);
+        }
+        const auto                before  = workspace.Snapshot();
+        const auto                oldTree = before.Syntax(ids[64]);
+        const auto                source  = Text("int First;\nint Changed;\nint Third;\n");
+        constexpr Lexer::TextEdit kEdit { 15, 6, 7 };
+
+        ASSERT_TRUE(workspace.Update(ids[64], source, 2, kEdit));
+        const auto after = workspace.Snapshot();
+        const auto tree  = after.Syntax(ids[64]);
+
+        EXPECT_EQ(before.Source(ids[64]), oldTree->SharedSource());
+        EXPECT_EQ(before.Version(ids[64]), 1);
+        EXPECT_EQ(after.Version(ids[64]), 2);
+        EXPECT_GT(tree->ReusedItems(), 0u);
+        for (std::size_t i = 0; i < ids.size(); ++i)
+        {
+            if (i != 64)
+            {
+                EXPECT_EQ(after.Source(ids[i]), before.Source(ids[i]));
+            }
+        }
+    }
+
+    TEST(WorkspaceSpec, InvalidEditHullDoesNotPublishANewRevision)
+    {
+        Workspace workspace;
+        auto      id = workspace.Open("invalid_edit.cpp", Text("int Value;"), 1);
+        ASSERT_TRUE(id);
+        const auto before = workspace.Snapshot();
+
+        const auto updated =
+            workspace.Update(*id, Text("int Other;"), 2, Lexer::TextEdit { 100, 1, 1 });
+
+        EXPECT_FALSE(updated);
+        EXPECT_EQ(workspace.Snapshot().Revision(), before.Revision());
+        EXPECT_EQ(workspace.Snapshot().Version(*id), 1);
+    }
+
+    TEST(WorkspaceSpec, ConcurrentColdQueriesPublishOnlyOneModel)
+    {
+        Workspace workspace;
+        auto      id = workspace.Open("concurrent.cpp", Text("struct Value { int Field; };"), 1);
+        ASSERT_TRUE(id);
+        const auto                                                 snapshot = workspace.Snapshot();
+        std::vector<std::future<std::shared_ptr<const TypeModel>>> queries;
+
+        for (int i = 0; i < 12; ++i)
+        {
+            queries.push_back(std::async(std::launch::async, [&] { return snapshot.Types(*id); }));
+        }
+        const auto expected = queries.front().get();
+
+        for (std::size_t i = 1; i < queries.size(); ++i)
+        {
+            EXPECT_EQ(queries[i].get(), expected);
+        }
+        const auto metrics = snapshot.Metrics();
+        EXPECT_EQ(metrics.parse_count, 1u);
+        EXPECT_EQ(metrics.bind_count, 1u);
+        EXPECT_EQ(metrics.type_count, 1u);
+    }
 } // namespace
+
+TEST(WorkspaceSpec, PersistentEditsReusePreprocessingAndPreservePinnedVersions)
+{
+    heimdall::Workspace workspace;
+    const std::string   text = "#define VALUE 1\nint first = VALUE;\nint second = 2;\n";
+    auto                source =
+        std::make_shared<const heimdall::SourceSnapshot>(*heimdall::SourceSnapshot::Create(text));
+    auto tokens = std::make_shared<const heimdall::TokenSnapshot>(
+        heimdall::TokenSnapshot::Create(heimdall::Lexer(text).Lex()));
+    const auto id = workspace.OpenBuffer("persistent.cpp", source, tokens, 1);
+    ASSERT_TRUE(id);
+    const auto                      before  = workspace.Snapshot();
+    const auto                      oldTree = before.Syntax(*id);
+    const auto                      offset  = text.find("2");
+    const heimdall::Lexer::TextEdit edit { offset, 1, 2 };
+    source = std::make_shared<const heimdall::SourceSnapshot>(*source->Edit(offset, 1, "23"));
+    tokens = std::make_shared<const heimdall::TokenSnapshot>(tokens->Relex(*source, edit));
+
+    ASSERT_TRUE(workspace.UpdateBuffer(*id, source, tokens, 2, edit));
+    const auto tree = workspace.Snapshot().Syntax(*id);
+    const auto full = heimdall::ParseTree::Parse(*source->Materialize());
+
+    EXPECT_TRUE(tree->Metrics().reusedPreprocessing);
+    EXPECT_EQ(oldTree->Source(), text);
+    EXPECT_EQ(tree->Directives().size(), full.Directives().size());
+    ASSERT_EQ(tree->NodesSoA().size(), full.NodesSoA().size());
+    for (std::size_t i = 0; i < full.NodesSoA().size(); ++i)
+    {
+        EXPECT_EQ(tree->NodesSoA().Kind(i), full.NodesSoA().Kind(i));
+        EXPECT_EQ(tree->NodesSoA().FirstToken(i), full.NodesSoA().FirstToken(i));
+        EXPECT_EQ(tree->NodesSoA().TokenCount(i), full.NodesSoA().TokenCount(i));
+        EXPECT_EQ(tree->NodesSoA().Parent(i), full.NodesSoA().Parent(i));
+    }
+    EXPECT_GT(workspace.Snapshot().Memory().Total(), source->Size());
+    EXPECT_EQ(before.Version(*id), 1);
+}
+
+TEST(WorkspaceSpec, PersistentMacroEditsReprocessAndUpdateTheIncludeGraph)
+{
+    heimdall::Workspace workspace;
+    const auto header = workspace.Open("old.hpp", std::make_shared<const std::string>("int Old;"));
+    ASSERT_TRUE(header);
+    const std::string text = "#include \"old.hpp\"\nint Value;\n";
+    auto              source =
+        std::make_shared<const heimdall::SourceSnapshot>(*heimdall::SourceSnapshot::Create(text));
+    auto tokens = std::make_shared<const heimdall::TokenSnapshot>(
+        heimdall::TokenSnapshot::Create(heimdall::Lexer(text).Lex()));
+    const auto id = workspace.OpenBuffer("main.cpp", source, tokens, 1);
+    ASSERT_TRUE(id);
+    EXPECT_EQ(workspace.Snapshot().Dependencies(*id).size(), 1u);
+    (void)workspace.Snapshot().Syntax(*id);
+    const auto                      offset = text.find("old");
+    const heimdall::Lexer::TextEdit edit { offset, 3, 3 };
+    source = std::make_shared<const heimdall::SourceSnapshot>(*source->Edit(offset, 3, "new"));
+    tokens = std::make_shared<const heimdall::TokenSnapshot>(tokens->Relex(*source, edit));
+
+    ASSERT_TRUE(workspace.UpdateBuffer(*id, source, tokens, 2, edit));
+
+    EXPECT_FALSE(workspace.Snapshot().Syntax(*id)->Metrics().reusedPreprocessing);
+    EXPECT_TRUE(workspace.Snapshot().Dependencies(*id).empty());
+}
+
+TEST(WorkspaceSpec, CacheBudgetEvictionKeepsBorrowedModelsAndRebuildsQueries)
+{
+    heimdall::Workspace workspace;
+    const auto          id = workspace.Open(
+        "budget.cpp", std::make_shared<const std::string>("struct Value { int field; };"), 1);
+    ASSERT_TRUE(id);
+    const auto snapshot = workspace.Snapshot();
+    const auto tree     = snapshot.Syntax(*id);
+    const auto model    = snapshot.Semantic(*id);
+    const auto types    = snapshot.Types(*id);
+
+    workspace.TrimCaches(0);
+
+    EXPECT_EQ(tree->Source(), "struct Value { int field; };");
+    EXPECT_GT(model->ArenaReservedBytes(), 0u);
+    EXPECT_GT(types->ArenaReservedBytes(), 0u);
+    EXPECT_NE(snapshot.Syntax(*id), tree);
+    EXPECT_NE(snapshot.Semantic(*id), model);
+    EXPECT_EQ(snapshot.Version(*id), 1);
+}

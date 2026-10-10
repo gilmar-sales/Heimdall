@@ -37,6 +37,12 @@ send({"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 2}})
 # Sent while the big request is still in flight: must not queue behind it.
 send({"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover", "params": {
     "textDocument": {"uri": small_uri}, "position": {"line": 0, "character": 5}}})
+burst_ids = list(range(1000, 1064))
+for request_id in burst_ids:
+    send({"jsonrpc": "2.0", "id": request_id, "method": "textDocument/hover", "params": {
+        "textDocument": {"uri": small_uri}, "position": {"line": 0, "character": 5}}})
+for request_id in burst_ids:
+    send({"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": request_id}})
 send({"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": {}})
 send({"jsonrpc": "2.0", "method": "exit"})
 
@@ -56,3 +62,8 @@ cancelled = next(item for item in responses if item.get("id") == 2)
 assert cancelled.get("error", {}).get("code") == -32800, cancelled
 assert any(item.get("id") == 3 for item in responses), responses
 assert any(item.get("id") == 4 for item in responses), responses
+
+for request_id in burst_ids:
+    replies = [item for item in responses if item.get("id") == request_id]
+    assert len(replies) == 1, (request_id, replies)
+    assert "result" in replies[0] or replies[0].get("error", {}).get("code") == -32800, replies[0]

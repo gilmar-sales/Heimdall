@@ -33,6 +33,17 @@ namespace heimdall
         constexpr int kThirteen     = 13;
         constexpr int kFourteen     = 14;
         constexpr int kScratchBytes = 32768;
+        constexpr std::size_t kMaxGrammarDepth = 256;
+
+        class DepthGuard
+        {
+          public:
+            explicit DepthGuard(std::size_t& depth) noexcept : mDepth(depth) { ++mDepth; }
+            ~DepthGuard() { --mDepth; }
+
+          private:
+            std::size_t& mDepth;
+        };
 
         // Predefined macros that only decorate a declaration (`_GLIBCXX_NOEXCEPT`,
         // `EXPORT`, `[[nodiscard]]` wrappers) or open/close a namespace
@@ -134,8 +145,23 @@ namespace heimdall
 
             std::size_t active_cursor    = 0;
             std::size_t directive_cursor = 0;
+            const auto& tokens           = tree.Tokens();
+            const auto  significantCount =
+                std::count_if(tokens.begin(), tokens.end(),
+                              [](const Token& token)
+                              {
+                                  return token.kind != TokenKind::Whitespace &&
+                                         token.kind != TokenKind::LineComment &&
+                                         token.kind != TokenKind::BlockComment;
+                              });
+            m_sig.reserve(static_cast<std::size_t>(significantCount));
             for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
             {
+                if (m_stop.stop_requested())
+                {
+                    tree.m_cancelled = true;
+                    return;
+                }
                 const auto& token = tree.Tokens()[i];
                 while (active_cursor < preprocessing.active_ranges.size() &&
                        preprocessing.active_ranges[active_cursor].offset +
@@ -207,6 +233,11 @@ namespace heimdall
             std::pmr::vector<std::uint32_t> stack(&m_scratch);
             for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(m_sig.size()); ++i)
             {
+                if (m_stop.stop_requested())
+                {
+                    tree.m_cancelled = true;
+                    return;
+                }
                 const Tok t = m_sig_tok[i];
                 if (t == Tok::LParen || t == Tok::LBracket || t == Tok::LBrace)
                 {
@@ -253,6 +284,11 @@ namespace heimdall
 
         void Run()
         {
+            if (m_tree.m_cancelled || m_stop.stop_requested())
+            {
+                m_tree.m_cancelled = true;
+                return;
+            }
             m_tree.m_nodes_soa.push_back(
                 static_cast<std::uint8_t>(GrammarKind::TranslationUnit),
                 0,
@@ -276,6 +312,7 @@ namespace heimdall
         std::pmr::vector<Tok>           m_sig_tok { &m_scratch };
         std::pmr::vector<std::uint32_t> m_match { &m_scratch };
         std::uint32_t                   m_last_expression_node = Invalid;
+        std::size_t                     mGrammarDepth          = 0;
         const ParseReuse*               m_reuse                = nullptr;
         const TypeNameOracle*           m_oracle               = nullptr;
         // File-level names (flags above) and their order-independent hash, seeded
@@ -2541,6 +2578,20 @@ namespace heimdall
         std::size_t ParseExpression(
             std::size_t pos, std::size_t end, std::size_t parent, int minimum = 1)
         {
+            if (mGrammarDepth >= kMaxGrammarDepth && pos < end)
+            {
+                m_last_expression_node = Add(GrammarKind::ErrorExpression, pos, end, parent);
+                m_tree.m_diagnostics.push_back(
+                    { m_tree.Tokens()[m_sig[pos]].offset, "maximum grammar nesting exceeded" });
+                return end;
+            }
+            const DepthGuard depth(mGrammarDepth);
+            if (m_stop.stop_requested())
+            {
+                m_tree.m_cancelled     = true;
+                m_last_expression_node = Invalid;
+                return end;
+            }
             if (pos >= end)
             {
                 m_last_expression_node = Invalid;
@@ -2739,6 +2790,11 @@ namespace heimdall
             bool operand_pending = first == "new" || first == "delete";
             while (pos < end)
             {
+                if (m_stop.stop_requested())
+                {
+                    m_tree.m_cancelled = true;
+                    return end;
+                }
                 const auto op = Text(pos);
                 if ((op == "(" || op == "[") && m_match[pos] != Invalid && m_match[pos] < end)
                 {
@@ -3363,6 +3419,15 @@ namespace heimdall
 
         std::size_t ParseCompound(std::size_t& pos, std::size_t end, std::size_t parent)
         {
+            if (mGrammarDepth >= kMaxGrammarDepth)
+            {
+                const auto node = Add(GrammarKind::Error, pos, end, parent);
+                m_tree.m_diagnostics.push_back(
+                    { m_tree.Tokens()[m_sig[pos]].offset, "maximum grammar nesting exceeded" });
+                pos = end;
+                return node;
+            }
+            const DepthGuard depth(mGrammarDepth);
             const auto start = pos++;
             const auto node  = Add(GrammarKind::CompoundStatement, start, start + 1, parent);
             m_block_starts.push_back(m_block_names.size());
@@ -3375,6 +3440,12 @@ namespace heimdall
 
             while (pos < end && !Is(pos, "}"))
             {
+                if (m_stop.stop_requested())
+                {
+                    m_tree.m_cancelled = true;
+                    pos                = end;
+                    break;
+                }
                 const auto before       = pos;
                 const auto nodes_before = m_tree.m_nodes_soa.size();
                 if (IsDirective(pos))
@@ -4149,6 +4220,8 @@ namespace heimdall
             auto&               nodes      = m_tree.m_nodes_soa;
             const auto&         old_nodes  = prev.m_nodes_soa;
             const std::size_t   node_count = item.node_end - item.node_begin;
+
+            m_tree.mMetrics.reusedNodes += node_count;
             // Copy unchanged columns in contiguous batches, then remap only the
             // version-dependent indices. One resize replaces five push_backs per node.
             nodes.resize(node_base + node_count);
@@ -4204,6 +4277,14 @@ namespace heimdall
 
         void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
         {
+            if (mGrammarDepth >= kMaxGrammarDepth && begin < end)
+            {
+                Add(GrammarKind::Error, begin, end, parent);
+                m_tree.m_diagnostics.push_back(
+                    { m_tree.Tokens()[m_sig[begin]].offset, "maximum grammar nesting exceeded" });
+                return;
+            }
+            const DepthGuard depth(mGrammarDepth);
             const bool top_level = parent == ParseTree::RootNode;
             auto       pos       = begin;
             while (pos < end)

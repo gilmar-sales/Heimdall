@@ -7,8 +7,9 @@ namespace heimdall::lsp
 
 	void LineIndex::Build(std::string_view text)
 	{
-		m_text = text;
-		m_line_starts.clear();
+        mSource.reset();
+        m_text = text;
+        m_line_starts.clear();
 		m_line_starts.push_back(0);
 		for (std::size_t i = 0; i < text.size(); ++i)
 		{
@@ -19,21 +20,59 @@ namespace heimdall::lsp
 		}
 	}
 
-	void LineIndex::Update(
-		std::string_view text,
-		std::size_t offset,
-		std::size_t old_length,
-		std::size_t new_length)
-	{
+    void LineIndex::Build(std::shared_ptr<const heimdall::SourceSnapshot> source)
+    {
+        mSource = std::move(source);
+        m_text  = {};
+        m_line_starts.clear();
+        m_line_starts.push_back(0);
+        for (std::size_t chunk = 0; chunk < mSource->ChunkCount(); ++chunk)
+        {
+            const auto text   = mSource->Chunk(chunk);
+            const auto offset = mSource->ChunkOffset(chunk);
+            for (std::size_t i = 0; i < text.size(); ++i)
+            {
+                if (text[i] == '\n')
+                {
+                    m_line_starts.push_back(static_cast<std::uint32_t>(offset + i + 1));
+                }
+            }
+        }
+    }
+
+    void LineIndex::Update(std::string_view text, std::size_t offset, std::size_t old_length,
+                           std::size_t new_length)
+    {
 		if (m_line_starts.empty())
 		{
 			Build(text);
 			return;
 		}
 
-		m_text                    = text;
-		const std::size_t old_end = offset + old_length;
-		// Line starts s with offset < s <= old_end sat right after a removed newline.
+        mSource.reset();
+        m_text = text;
+        UpdateLines(offset, old_length, text.substr(offset, new_length));
+    }
+
+    void LineIndex::Update(std::shared_ptr<const heimdall::SourceSnapshot> source,
+                           std::size_t offset, std::size_t oldLength, std::size_t newLength)
+    {
+        if (m_line_starts.empty())
+        {
+            Build(std::move(source));
+            return;
+        }
+        mSource = std::move(source);
+        m_text  = {};
+        UpdateLines(offset, oldLength, mSource->Read(offset, newLength));
+    }
+
+    void LineIndex::UpdateLines(std::size_t offset, std::size_t old_length,
+                                std::string_view inserted)
+    {
+        const auto        new_length = inserted.size();
+        const std::size_t old_end    = offset + old_length;
+        // Line starts s with offset < s <= old_end sat right after a removed newline.
 		const auto first = std::upper_bound(
 			m_line_starts.begin(), m_line_starts.end(), static_cast<std::uint32_t>(offset));
 		const auto last =
@@ -41,15 +80,15 @@ namespace heimdall::lsp
 		const auto position = m_line_starts.erase(first, last) - m_line_starts.begin();
 
 		std::vector<std::uint32_t> fresh;
-		for (std::size_t i = offset; i < offset + new_length && i < text.size(); ++i)
-		{
-			if (text[i] == '\n')
-			{
-				fresh.push_back(static_cast<std::uint32_t>(i + 1));
-			}
-		}
+        for (std::size_t i = 0; i < inserted.size(); ++i)
+        {
+            if (inserted[i] == '\n')
+            {
+                fresh.push_back(static_cast<std::uint32_t>(offset + i + 1));
+            }
+        }
 
-		const std::ptrdiff_t delta =
+        const std::ptrdiff_t delta =
 			static_cast<std::ptrdiff_t>(new_length) - static_cast<std::ptrdiff_t>(old_length);
 		auto tail = m_line_starts.begin() + position;
 		for (; tail != m_line_starts.end(); ++tail)
@@ -58,11 +97,11 @@ namespace heimdall::lsp
 		}
 
 		m_line_starts.insert(m_line_starts.begin() + position, fresh.begin(), fresh.end());
-	}
+    }
 
-	std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i,
-		std::size_t stop) noexcept
-	{
+    std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i,
+                                      std::size_t stop) noexcept
+    {
 		const unsigned char c = static_cast<unsigned char>(text[i]);
 		if ((c & 0x80) == 0)
 		{
@@ -91,8 +130,16 @@ namespace heimdall::lsp
 
 	Position LineIndex::ToPosition(std::size_t offset) const
 	{
-		Position position;
-		if (m_line_starts.empty())
+        if (mSource)
+        {
+            offset          = std::min(offset, mSource->Size());
+            const auto next = std::upper_bound(m_line_starts.begin(), m_line_starts.end(), offset);
+            const auto line = static_cast<std::size_t>(next - m_line_starts.begin() - 1);
+            const auto text = mSource->Read(m_line_starts[line], offset - m_line_starts[line]);
+            return { line, heimdall::lsp::ToPosition(text, text.size()).character };
+        }
+        Position position;
+        if (m_line_starts.empty())
 		{
 			return position;
 		}
@@ -147,8 +194,21 @@ namespace heimdall::lsp
 
 	std::size_t LineIndex::OffsetFromPosition(Position position) const
 	{
-		if (m_line_starts.empty())
-		{
+        if (mSource)
+        {
+            if (position.line >= m_line_starts.size())
+            {
+                return mSource->Size();
+            }
+            const auto start = m_line_starts[position.line];
+            const auto end   = position.line + 1 < m_line_starts.size()
+                                   ? m_line_starts[position.line + 1] - 1
+                                   : mSource->Size();
+            const auto text  = mSource->Read(start, end - start);
+            return start + heimdall::lsp::OffsetFromPosition(text, { 0, position.character });
+        }
+        if (m_line_starts.empty())
+        {
 			return 0;
 		}
 

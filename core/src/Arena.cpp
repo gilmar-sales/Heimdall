@@ -3,10 +3,12 @@
 namespace heimdall
 {
 
-	Arena::Arena(std::size_t initial_capacity) : m_resource(initial_capacity) {}
+    Arena::Arena(std::size_t initial_capacity) : m_resource(initial_capacity, &mUpstream)
+    {
+    }
 
-	void* Arena::Allocate(std::size_t size, std::size_t alignment)
-	{
+    void* Arena::Allocate(std::size_t size, std::size_t alignment)
+    {
 		void* mem = m_resource.allocate(size, alignment);
 		m_used +=(size + alignment - 1) & ~(alignment - 1);
 		++m_allocations;
@@ -17,8 +19,9 @@ namespace heimdall
 	void Arena::Reset()
 	{
 		m_resource.release();
-		m_used        = 0;
-		m_allocations = 0;
+        mUpstream.peak = 0;
+        m_used         = 0;
+        m_allocations = 0;
 	}
 
 } // namespace heimdall

@@ -1,8 +1,26 @@
 #include <gtest/gtest.h>
 
+#include <Heimdall/Arena.hpp>
 #include <Heimdall/SyntaxTree.hpp>
 
 #include <string>
+
+TEST(ArenaSpec, ReportsUpstreamReservationAndReleasesItOnReset)
+{
+    heimdall::Arena arena(128);
+
+    (void)arena.Allocate(1);
+    const auto first = arena.ReservedBytes();
+    (void)arena.Allocate(4096);
+    const auto peak = arena.PeakReservedBytes();
+    arena.Reset();
+
+    EXPECT_GT(first, 1u);
+    EXPECT_GE(peak, 4096u);
+    EXPECT_EQ(arena.ReservedBytes(), 0u);
+    EXPECT_EQ(arena.PeakReservedBytes(), 0u);
+    EXPECT_EQ(arena.Used(), 0u);
+}
 
 TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 {

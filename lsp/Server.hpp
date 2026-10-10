@@ -6,6 +6,7 @@
 
 #include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -45,26 +46,70 @@ namespace heimdall::lsp
 		bool Run();
 
 	private:
-		// Immutable per-version snapshot: published by the document worker, consumed by
-		// workers without locking or copying. The ParseTree borrows this buffer
-		// through shared ownership (see CachedParse), so replacing the text never
-		// invalidates a tree being analyzed concurrently.
-		struct DocumentSnapshot
-		{
-			heimdall::DocumentId document           = heimdall::InvalidDocument;
-			std::shared_ptr<const std::string> text = std::make_shared<const std::string>();
-			std::int64_t version                    = 0;
-			std::shared_ptr<const LineIndex> lines  = std::make_shared<const LineIndex>();
-			// Lossless tokens of `text`, kept in step with it by incremental re-lexing.
-			std::shared_ptr<const std::vector<heimdall::Token>> tokens;
-		};
+      struct DocumentVersion
+      {
+          std::mutex       mutex;
+          std::stop_source stop;
+          std::size_t      consumers = 0;
+          bool             current   = true;
 
-		// A document as it was when a request arrived.
-		struct PinnedDocument
-		{
-			std::string uri;
-			DocumentSnapshot snapshot;
-		};
+          void Retain()
+          {
+              const std::lock_guard lock(mutex);
+              ++consumers;
+          }
+
+          void Release()
+          {
+              bool cancel;
+              {
+                  const std::lock_guard lock(mutex);
+                  --consumers;
+                  cancel = !current && consumers == 0;
+              }
+              if (cancel)
+              {
+                  stop.request_stop();
+              }
+          }
+
+          void Retire()
+          {
+              bool cancel;
+              {
+                  const std::lock_guard lock(mutex);
+                  current = false;
+                  cancel  = consumers == 0;
+              }
+              if (cancel)
+              {
+                  stop.request_stop();
+              }
+          }
+      };
+      // Immutable per-version snapshot: published by the document worker, consumed by
+      // workers without locking or copying. The ParseTree borrows this buffer
+      // through shared ownership (see CachedParse), so replacing the text never
+      // invalidates a tree being analyzed concurrently.
+      struct DocumentSnapshot
+      {
+          heimdall::DocumentId                            document = heimdall::InvalidDocument;
+          std::shared_ptr<const std::string>              text;
+          std::shared_ptr<const heimdall::SourceSnapshot> buffer;
+          std::shared_ptr<const heimdall::TokenSnapshot>  tokenBuffer;
+          std::int64_t                                    version = 0;
+          std::shared_ptr<const LineIndex> lines = std::make_shared<const LineIndex>();
+          // Lossless tokens of `text`, kept in step with it by incremental re-lexing.
+          std::shared_ptr<const std::vector<heimdall::Token>> tokens;
+          std::shared_ptr<DocumentVersion> lifetime = std::make_shared<DocumentVersion>();
+      };
+
+      // A document as it was when a request arrived.
+      struct PinnedDocument
+      {
+          std::string      uri;
+          DocumentSnapshot snapshot;
+      };
 
 		struct RequestJob;
 		// Per-request state, visible to the handler running on a pool thread
@@ -79,11 +124,12 @@ namespace heimdall::lsp
 			bool interactive = false;
 			std::shared_ptr<const heimdall::ParseTree> parsed;
 			std::exception_ptr parse_failure;
-		};
+            std::shared_ptr<DocumentVersion>           interest;
+        };
 
-		using RequestHandler =
-			std::move_only_function<void(simdjson::dom::element, std::string_view) >;
-		struct RequestJob
+        using RequestHandler =
+            std::move_only_function<void(simdjson::dom::element, std::string_view)>;
+        struct RequestJob
 		{
 			std::string body;
 			std::string id;
@@ -231,10 +277,11 @@ namespace heimdall::lsp
 		struct EditHull
 		{
 			bool valid = false;
-			heimdall::Lexer::TextEdit edit;
+            bool                      directivesUnchanged = true;
+            heimdall::Lexer::TextEdit edit;
 
-			void Add(const heimdall::Lexer::TextEdit& next) noexcept
-			{
+            void Add(const heimdall::Lexer::TextEdit& next) noexcept
+            {
 				edit  = valid ? heimdall::Lexer::Compose(edit, next) : next;
 				valid = true;
 			}
@@ -242,17 +289,15 @@ namespace heimdall::lsp
 
 		;
 
-		static bool ApplyContentChange(
-			std::string& current,
-			LineIndex& index,
-			std::vector<heimdall::Token>& tokens,
-			EditHull& hull,
-			simdjson::dom::object change);
+        static bool ApplyContentChange(std::shared_ptr<const heimdall::SourceSnapshot>& current,
+                                       LineIndex&                                       index,
+                                       std::shared_ptr<const heimdall::TokenSnapshot>&  tokens,
+                                       EditHull& hull, simdjson::dom::object change);
 
-		// Requires m_index_cache_mu to be held by the caller.
-		void TouchGlobalIndex(const std::string& key);
+        // Requires m_index_cache_mu to be held by the caller.
+        void TouchGlobalIndex(const std::string& key);
 
-		// Runs `handler` on the pool against a private copy of the message, so
+        // Runs `handler` on the pool against a private copy of the message, so
 		// the I/O thread goes straight back to reading (and to $/cancelRequest).
 		void Dispatch(
 			std::string_view body,
@@ -262,13 +307,13 @@ namespace heimdall::lsp
 
 		void ExecuteRequest(const std::shared_ptr<RequestJob>& job);
 
-		void QueueDocument(std::string_view body);
+        void QueueDocument(std::string_view body, simdjson::dom::element request);
 
-		void DrainRequests();
+        void DrainRequests();
 
-		// Snapshot of `uri`: the one pinned at arrival for the current request,
-		// otherwise the latest.
-		std::optional<DocumentSnapshot> GetDocument(const std::string& uri);
+        // Snapshot of `uri`: the one pinned at arrival for the current request,
+        // otherwise the latest.
+        std::optional<DocumentSnapshot> GetDocument(const std::string& uri);
 
 		const heimdall::CompileCommand* CommandFor(const std::string& uri);
 
@@ -343,8 +388,31 @@ namespace heimdall::lsp
 		std::unordered_set<std::string> m_index_pending;
 		std::deque<IndexJob> m_index_queue;
 
-		struct ParseSlot
-		{
+        struct FormattingResult
+        {
+            heimdall::FormattingSnapshot       checkpoint;
+            std::vector<heimdall::FormatEdit> edits;
+            std::size_t                       bytes = 0;
+        };
+
+        struct FormattingEntry
+        {
+            std::weak_ptr<const heimdall::ParseTree> tree;
+            heimdall::FormatOptions                  options;
+            std::shared_ptr<const FormattingResult>  result;
+            std::string                              documentUri;
+        };
+
+        std::shared_ptr<const FormattingResult> CachedFormatting(
+            const std::shared_ptr<const heimdall::ParseTree>& tree, heimdall::FormatOptions options,
+            std::stop_token stop);
+
+        std::mutex                 mFormattingMutex;
+        std::list<FormattingEntry> mFormattingCache;
+        std::size_t                mFormattingBytes = 0;
+
+        struct ParseSlot
+        {
 			struct Waiter
 			{
 				std::atomic<bool> resumed {false};
@@ -369,9 +437,10 @@ namespace heimdall::lsp
 			std::exception_ptr failure;
 			std::vector<std::shared_ptr<Waiter>> waiters;
 			bool started = false;
-			// Set (release) only after a successful parse is published.
-			std::atomic<bool> ready {false};
-		};
+            bool                                       cancelled = false;
+            // Set (release) only after a successful parse is published.
+            std::atomic<bool> ready { false };
+        };
 
 		// Internal suspension, caught before a request has produced a response.
 		struct ParsePending
@@ -383,19 +452,21 @@ namespace heimdall::lsp
 		{
 			std::int64_t version = -1;
 			std::shared_ptr<const std::string> text;
-			heimdall::ParserOptions options;
-			std::shared_ptr<ParseSlot> slot;
-			// Tree of an earlier version of this document and the edit that turns
+            std::shared_ptr<const heimdall::SourceSnapshot> buffer;
+            heimdall::ParserOptions                         options;
+            std::shared_ptr<ParseSlot>                      slot;
+            // Tree of an earlier version of this document and the edit that turns
 			// its text into the one at `base_version`: the next parse copies the
 			// top-level items outside that edit instead of re-parsing them.
 			std::shared_ptr<const heimdall::ParseTree> base;
 			heimdall::ParserOptions base_options;
 			heimdall::Lexer::TextEdit base_edit;
 			std::int64_t base_version = -1;
-		};
+            bool                                       baseDirectivesUnchanged = false;
+        };
 
-		std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;
-		// Type names of the headers each open document includes, as last indexed (guarded
+        std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;
+        // Type names of the headers each open document includes, as last indexed (guarded
 		// by m_parse_mu). The parser reads them without ever waiting for an index build; a
 		// new set invalidates the cached parse, so the next request re-reads the file with it.
 		std::unordered_map<std::string, std::shared_ptr<const heimdall::TypeNameOracle>>

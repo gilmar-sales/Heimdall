@@ -10,6 +10,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(google-benchmark)
 
 add_executable(CoreBench
+  src/SnapshotBench.cpp
   src/ArenaBench.cpp
   src/MappedBufferBench.cpp
   src/SyntaxTreeBench.cpp
@@ -46,6 +47,7 @@ set(HEIMDALL_STB_DEFINITION HEIMDALL_STB_DIR="${CMAKE_CURRENT_SOURCE_DIR}/third_
 # End-to-end LSP latency (didChange + completion) and server memory per document.
 # Drives the real heimdall-lsp binary over stdio.
 add_executable(LspLatencyBench src/LspLatencyBench.cpp)
+target_link_libraries(LspLatencyBench PRIVATE simdjson::simdjson)
 add_dependencies(LspLatencyBench heimdall-lsp)
 target_compile_definitions(LspLatencyBench PRIVATE ${HEIMDALL_STB_DEFINITION}
   HEIMDALL_LSP_EXE="$<TARGET_FILE:heimdall-lsp>")

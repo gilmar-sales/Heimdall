@@ -28,6 +28,7 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <simdjson.h>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -56,6 +57,7 @@ namespace
     {
         double working_set_mb      = 0;
         double peak_working_set_mb = 0;
+        double privateUsageMb      = -1;
     };
 
     // Child process with piped stdin/stdout (stderr discarded).
@@ -164,15 +166,17 @@ namespace
 
     MemorySample Child::Memory() const
     {
-        PROCESS_MEMORY_COUNTERS counters {};
+        PROCESS_MEMORY_COUNTERS_EX counters {};
         counters.cb = sizeof(counters);
         MemorySample sample;
-        if (GetProcessMemoryInfo(m_process, &counters, sizeof(counters)))
+        if (GetProcessMemoryInfo(m_process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                                 sizeof(counters)))
         {
             sample.working_set_mb =
                 static_cast<double>(counters.WorkingSetSize) / (1024.0 * 1024.0);
             sample.peak_working_set_mb =
                 static_cast<double>(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+            sample.privateUsageMb = static_cast<double>(counters.PrivateUsage) / (1024.0 * 1024.0);
         }
 
         return sample;
@@ -381,7 +385,8 @@ namespace
         }
 
         // Blocks until response `id` arrives; returns its arrival time.
-        bool Await(std::int64_t id, std::chrono::milliseconds timeout, Clock::time_point& arrived)
+        bool Await(std::int64_t id, std::chrono::milliseconds timeout, Clock::time_point& arrived,
+                   bool requireCompletion = false)
         {
             std::unique_lock lock(m_mu);
             const bool       ok =
@@ -391,9 +396,10 @@ namespace
                 return false;
             }
 
-            arrived = m_arrivals[id];
+            const auto response = m_arrivals[id];
+            arrived             = response.time;
             m_arrivals.erase(id);
-            return true;
+            return response.success && (!requireCompletion || response.completion);
         }
 
       private:
@@ -454,18 +460,43 @@ namespace
                 return;
             }
 
+            simdjson::dom::element        message;
+            const simdjson::padded_string padded(body);
+            if (mParser.parse(padded).get(message))
+            {
+                return;
+            }
             std::int64_t id = 0;
-            std::from_chars(body.data() + prefix.size(), body.data() + body.size(), id);
+            if (message["id"].get_int64().get(id))
+            {
+                return;
+            }
+            simdjson::dom::element result;
+            simdjson::dom::element error;
+            const bool success    = message["error"].get(error) && !message["result"].get(result);
+            bool       completion = success && result.is_array();
+            if (success && result.is_object())
+            {
+                simdjson::dom::array items;
+                completion = !result["items"].get_array().get(items);
+            }
             {
                 const std::lock_guard lock(m_mu);
-                m_arrivals[id] = now;
+                m_arrivals[id] = { now, success, completion };
             }
             m_cv.notify_all();
         }
 
         std::mutex                                          m_mu;
         std::condition_variable                             m_cv;
-        std::unordered_map<std::int64_t, Clock::time_point> m_arrivals;
+        struct Arrival
+        {
+            Clock::time_point time;
+            bool              success;
+            bool              completion;
+        };
+        std::unordered_map<std::int64_t, Arrival>           m_arrivals;
+        simdjson::dom::parser                               mParser;
         bool                                                m_closed = false;
         std::thread                                         m_thread;
     };
@@ -537,6 +568,9 @@ namespace
         int                      warmup     = 10;
         double                   budget_ms  = 50.0;
         bool                     enforce    = false;
+        int                      burst         = 1;
+        int                      documents     = 1;
+        int                      typingDelayMs = 15;
     };
 
     bool ParseArguments(int argc, char** argv, Options& options)
@@ -548,6 +582,27 @@ namespace
             if (flag == "--enforce")
             {
                 options.enforce = true;
+            }
+            else if (flag == "--burst" || flag == "--documents" || flag == "--typing-delay-ms")
+            {
+                const auto argument = value();
+                if (!argument)
+                {
+                    return false;
+                }
+                const auto number = std::atoi(argument);
+                if (flag == "--burst")
+                {
+                    options.burst = number;
+                }
+                else if (flag == "--documents")
+                {
+                    options.documents = number;
+                }
+                else
+                {
+                    options.typingDelayMs = number;
+                }
             }
             else if (flag == "--server")
             {
@@ -631,7 +686,8 @@ namespace
             }
         }
 
-        return !options.server.empty() && options.iterations > 0;
+        return !options.server.empty() && options.iterations > 0 && options.warmup >= 0 &&
+               options.burst > 0 && options.documents > 0 && options.typingDelayMs >= 0;
     }
 
     struct Result
@@ -642,6 +698,7 @@ namespace
         std::vector<double> samples_ms;
         double              document_mb = 0; // working set after the run minus the idle server
         double              peak_mb     = 0;
+        double              privateMb   = -1;
         bool                ok          = false;
     };
 
@@ -709,7 +766,6 @@ namespace
         ResponseReader    reader(child);
         const std::string uri     = "file:///heimdall-bench/stb.cpp";
         std::int64_t      next_id = 1;
-        std::int64_t      version = 1;
         const auto        timeout = std::chrono::seconds(60);
         Clock::time_point arrived;
 
@@ -723,15 +779,16 @@ namespace
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"));
         const MemorySample idle = child.Memory();
 
-        auto complete = [&](std::size_t at_line, std::size_t at_column, Clock::time_point start,
-                            double& elapsed_ms) {
+        auto complete = [&](const std::string& targetUri, std::size_t at_line,
+                            std::size_t at_column, Clock::time_point start, double& elapsed_ms)
+        {
             const std::int64_t id = next_id++;
             child.Write(Frame(
                 "{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(id) +
                 ",\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"" +
-                uri + "\"},\"position\":{\"line\":" + std::to_string(at_line) +
+                targetUri + "\"},\"position\":{\"line\":" + std::to_string(at_line) +
                 ",\"character\":" + std::to_string(at_column) + "}}}"));
-            if (!reader.Await(id, timeout, arrived))
+            if (!reader.Await(id, timeout, arrived, true))
             {
                 return false;
             }
@@ -748,43 +805,64 @@ namespace
                           "didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" +
                           uri + "\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"" +
                           JsonEscape(*document) + "\"}}}"));
-        if (!complete(lsp_line, column, open_start, result.open_ms))
+        if (!complete(uri, lsp_line, column, open_start, result.open_ms))
         {
             return result;
         }
 
-        std::size_t typed = 0;
-        for (int i = 0; i < options.warmup + options.iterations; ++i)
+        std::vector<std::string>  uris { uri };
+        std::vector<std::size_t>  typed(static_cast<std::size_t>(options.documents), 0);
+        std::vector<std::int64_t> versions(static_cast<std::size_t>(options.documents), 1);
+        for (int index = 1; index < options.documents; ++index)
         {
-            const std::size_t at    = column + typed;
-            const auto        start = Clock::now();
-            child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
-                              "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
-                              uri + "\",\"version\":" + std::to_string(++version) +
-                              "},\"contentChanges\":[{\"range\":{\"start\":{\"line\":" +
-                              std::to_string(lsp_line) + ",\"character\":" + std::to_string(at) +
-                              "},\"end\":{\"line\":" + std::to_string(lsp_line) +
-                              ",\"character\":" + std::to_string(at) + "}},\"text\":\"a\"}]}}"));
-            ++typed;
+            uris.push_back(uri + "." + std::to_string(index) + ".cpp");
+            child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\","
+                              "\"params\":{\"textDocument\":{\"uri\":\"" +
+                              uris.back() + "\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"" +
+                              JsonEscape(*document) + "\"}}}"));
             double elapsed = 0;
-            if (!complete(lsp_line, column + typed, start, elapsed))
+            if (!complete(uris.back(), lsp_line, column, Clock::now(), elapsed))
             {
                 return result;
             }
-
+        }
+        for (int i = 0; i < options.warmup + options.iterations; ++i)
+        {
+            const auto  documentIndex = static_cast<std::size_t>(i % options.documents);
+            const auto& activeUri     = uris[documentIndex];
+            const auto  start         = Clock::now();
+            for (int editIndex = 0; editIndex < options.burst; ++editIndex)
+            {
+                const auto at = column + typed[documentIndex];
+                child.Write(Frame(
+                    "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+                    "didChange\",\"params\":{\"textDocument\":{\"uri\":\"" +
+                    activeUri + "\",\"version\":" + std::to_string(++versions[documentIndex]) +
+                    "},\"contentChanges\":[{\"range\":{\"start\":{\"line\":" +
+                    std::to_string(lsp_line) + ",\"character\":" + std::to_string(at) +
+                    "},\"end\":{\"line\":" + std::to_string(lsp_line) +
+                    ",\"character\":" + std::to_string(at) + "}},\"text\":\"a\"}]}}"));
+                ++typed[documentIndex];
+            }
+            double elapsed = 0;
+            if (!complete(activeUri, lsp_line, column + typed[documentIndex], start, elapsed))
+            {
+                return result;
+            }
             if (i >= options.warmup)
             {
                 result.samples_ms.push_back(elapsed);
             }
-
-            // A typist does not send keys back to back; give the debounced
-            // diagnostics worker the same chance to compete that real typing does.
-            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            std::this_thread::sleep_for(std::chrono::milliseconds(options.typingDelayMs));
         }
 
         const MemorySample loaded = child.Memory();
         result.document_mb        = std::max(0.0, loaded.working_set_mb - idle.working_set_mb);
         result.peak_mb            = std::max(0.0, loaded.peak_working_set_mb - idle.working_set_mb);
+        if (loaded.privateUsageMb >= 0 && idle.privateUsageMb >= 0)
+        {
+            result.privateMb = std::max(0.0, loaded.privateUsageMb - idle.privateUsageMb);
+        }
 
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"id\":" + std::to_string(next_id) +
                           ",\"method\":\"shutdown\"}"));
@@ -806,14 +884,17 @@ int main(int argc, char** argv)
             stderr,
             "usage: LspLatencyBench [--server <heimdall-lsp>] [--stb-dir DIR] [--lines "
             "1000,5000,20000]\n"
-            "                       [--iterations N] [--warmup N] [--budget-ms 50] [--enforce]\n");
+            "                       [--iterations N] [--warmup N] [--budget-ms 50] [--enforce]\n"
+            "                       [--burst N] [--documents N] [--typing-delay-ms N]\n");
         return 2;
     }
 
-    std::printf("didChange(1 char) + completion, %d samples after %d warmup, budget %.0f ms\n\n",
-                options.iterations, options.warmup, options.budget_ms);
-    std::printf("%8s %9s %10s %8s %8s %8s %8s %8s %11s %9s\n", "lines", "KiB", "open(ms)", "p50",
-                "p95", "p99", "max", "budget", "doc MiB", "peak MiB");
+    std::printf("didChange(%d chars/burst, %d documents) + completion, %d samples after %d warmup, "
+                "budget %.0f ms\n\n",
+                options.burst, options.documents, options.iterations, options.warmup,
+                options.budget_ms);
+    std::printf("%8s %9s %10s %8s %8s %8s %8s %8s %11s %9s %11s\n", "lines", "KiB", "open(ms)", "p50",
+                "p95", "p99", "max", "budget", "doc MiB", "peak MiB", "private MiB");
 
     bool over_budget = false;
     bool failed      = false;
@@ -832,11 +913,20 @@ int main(int argc, char** argv)
         const double p95  = Percentile(sorted, 0.95);
         const bool   over = p95 > options.budget_ms;
         over_budget       = over_budget || over;
-        std::printf("%8zu %9.1f %10.1f %8.2f %8.2f %8.2f %8.2f %8s %11.1f %9.1f\n", result.lines,
+        char privateUsage[32];
+        if (result.privateMb >= 0)
+        {
+            std::snprintf(privateUsage, sizeof(privateUsage), "%.1f", result.privateMb);
+        }
+        else
+        {
+            std::snprintf(privateUsage, sizeof(privateUsage), "n/a");
+        }
+        std::printf("%8zu %9.1f %10.1f %8.2f %8.2f %8.2f %8.2f %8s %11.1f %9.1f %11s\n", result.lines,
                     static_cast<double>(result.bytes) / 1024.0, result.open_ms,
                     Percentile(sorted, 0.50), p95, Percentile(sorted, 0.99),
                     sorted.empty() ? 0.0 : sorted.back(), over ? "OVER" : "ok", result.document_mb,
-                    result.peak_mb);
+                    result.peak_mb, privateUsage);
         std::fflush(stdout);
     }
 

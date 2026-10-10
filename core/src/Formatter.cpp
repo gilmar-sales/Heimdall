@@ -2463,23 +2463,107 @@ namespace heimdall
 
 	std::string Formatter::Format(const ParseTree& tree) const
 	{
-		const auto layout = DeclarationLayout(tree);
-		if (layout != tree.Source())
-		{
-			const auto tokens     = Lexer(layout).Lex();
-			const auto directives = Preprocessor().Process(layout).directives;
-			return FormatImpl(layout, tokens, directives);
-		}
+        if (mStop.stop_requested())
+        {
+            return {};
+        }
+        const auto layout = DeclarationLayout(tree);
+        if (mStop.stop_requested())
+        {
+            return {};
+        }
+        if (layout != tree.Source())
+        {
+            const auto tokens     = Lexer(layout).Lex(mStop);
+            const auto directives = Preprocessor().Process(layout, false, mStop).directives;
+            return FormatImpl(layout, tokens, directives);
+        }
 
-		return FormatImpl(tree.Source(), tree.Tokens(), tree.Directives());
+        return FormatImpl(tree.Source(), tree.Tokens(), tree.Directives());
 	}
 
-	std::string Formatter::FormatImpl(std::string_view source, const std::vector<Token>& tokens,
-		const std::vector<PreprocessorDirective>& directives) const
-	{
-		std::string altered(source);
-		JoinEmptyBracesPass(altered);
-		if (m_options.single_line_style != SingleLineStyle::Keep)
+    std::string Formatter::Format(const ParseTree& tree, std::stop_token stop) const
+    {
+        return Formatter(m_options, stop).Format(tree);
+    }
+
+    const std::string& FormattingSnapshot::Formatted() const noexcept
+    {
+        static const std::string kEmpty;
+        return mFormatted ? *mFormatted : kEmpty;
+    }
+
+    std::size_t FormattingSnapshot::StorageBytes() const noexcept
+    {
+        return (mPrepared ? mPrepared->capacity() : 0) +
+               (mFormatted && mFormatted != mPrepared ? mFormatted->capacity() : 0);
+    }
+
+    FormattingSnapshot Formatter::FormatIncremental(
+        const ParseTree& tree, const FormattingSnapshot* previous, std::stop_token stop) const
+    {
+        FormattingSnapshot snapshot;
+        if (stop.stop_requested() || tree.Cancelled())
+        {
+            return snapshot;
+        }
+        const Formatter worker(m_options, stop);
+        auto prepared = worker.DeclarationLayout(tree);
+        const bool declarationsChanged = prepared != tree.Source();
+        if (stop.stop_requested())
+        {
+            return snapshot;
+        }
+        JoinEmptyBracesPass(prepared);
+        if (m_options.single_line_style != SingleLineStyle::Keep)
+        {
+            prepared = ApplySingleLineStyle(prepared, m_options.single_line_style);
+        }
+        if (stop.stop_requested())
+        {
+            return snapshot;
+        }
+        snapshot.mOptions = m_options;
+        snapshot.mStandard = tree.Standard();
+        if (previous && previous->Complete() && previous->mOptions == m_options &&
+            previous->mStandard == tree.Standard() && previous->mPrepared &&
+            *previous->mPrepared == prepared)
+        {
+            snapshot.mPrepared = previous->mPrepared;
+            snapshot.mFormatted = previous->mFormatted;
+            snapshot.mReusedShapedOutput = true;
+            return snapshot;
+        }
+        std::string formatted;
+        if (!declarationsChanged && prepared == tree.Source())
+        {
+            formatted = worker.FormatShaped(tree.Source(), tree.Tokens(), tree.Directives());
+        }
+        else
+        {
+            const auto tokens = Lexer(prepared).Lex(stop);
+            const auto directives = Preprocessor().Process(prepared, false, stop).directives;
+            formatted = worker.FormatShaped(prepared, tokens, directives);
+        }
+        if (stop.stop_requested())
+        {
+            return {};
+        }
+        snapshot.mPrepared = std::make_shared<const std::string>(std::move(prepared));
+        snapshot.mFormatted = std::make_shared<const std::string>(std::move(formatted));
+        return snapshot;
+    }
+
+    std::string Formatter::FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+                                      const std::vector<PreprocessorDirective>& directives) const
+    {
+        if (mStop.stop_requested())
+        {
+            return {};
+        }
+        std::string altered(source);
+        JoinEmptyBracesPass(altered);
+        if (m_options.single_line_style != SingleLineStyle::Keep)
 		{
 			altered = ApplySingleLineStyle(altered, m_options.single_line_style);
 		}
@@ -2489,19 +2573,19 @@ namespace heimdall
 			return FormatShaped(source, tokens, directives);
 		}
 
-		const auto fresh_tokens     = Lexer(altered).Lex();
-		const auto fresh_directives = Preprocessor().Process(altered).directives;
-		return FormatShaped(altered, fresh_tokens, fresh_directives);
-	}
+        const auto fresh_tokens     = Lexer(altered).Lex(mStop);
+        const auto fresh_directives = Preprocessor().Process(altered, false, mStop).directives;
+        return FormatShaped(altered, fresh_tokens, fresh_directives);
+    }
 
-	std::string Formatter::FormatShaped(std::string_view source, const std::vector<Token>& tokens,
+    std::string Formatter::FormatShaped(std::string_view source, const std::vector<Token>& tokens,
 		const std::vector<PreprocessorDirective>& directives) const
 	{
-		if (source.empty())
-			return {};
+        if (source.empty() || mStop.stop_requested())
+            return {};
 
-		// ---- Line table -------------------------------------------------------
-		std::vector<std::size_t> line_starts = {0};
+        // ---- Line table -------------------------------------------------------
+        std::vector<std::size_t> line_starts = {0};
 		for (std::size_t i = 0; i < source.size(); ++i)
 		{
 			if (source[i] == '\n')
@@ -2555,12 +2639,16 @@ namespace heimdall
 		std::vector<char> line_spanned(line_count, 0);
 		for (std::size_t t = 0; t < tokens.size(); ++t)
 		{
-			if (tokens[t].kind == TokenKind::Whitespace || tokens[t].length == 0)
-			{
-				continue;
-			}
+            if (mStop.stop_requested())
+            {
+                return {};
+            }
+            if (tokens[t].kind == TokenKind::Whitespace || tokens[t].length == 0)
+            {
+                continue;
+            }
 
-			const std::size_t tok_end = tokens[t].offset + tokens[t].length;
+            const std::size_t tok_end = tokens[t].offset + tokens[t].length;
 			std::size_t first = 0, last = 0;
 			{
 				std::size_t lo = 0, hi = line_starts.size();
@@ -2615,22 +2703,30 @@ namespace heimdall
 			std::size_t cursor = 0;
 			for (std::size_t line = 0; line < line_count; ++line)
 			{
-				is_directive_line[line] =
-					static_cast<char>(IsDirectiveLine(line_starts[line], directives, cursor));
-			}
-		}
+                if (mStop.stop_requested())
+                {
+                    return {};
+                }
+                is_directive_line[line] =
+                    static_cast<char>(IsDirectiveLine(line_starts[line], directives, cursor));
+            }
+        }
 
 		// ---- Significant tokens with global depth context ---------------------
 		std::vector<Sig> sigs;
 		sigs.reserve(tokens.size());
 		for (std::size_t t = 0; t < tokens.size(); ++t)
 		{
-			if (IsTrivia(tokens[t].kind))
-			{
-				continue;
-			}
+            if (mStop.stop_requested())
+            {
+                return {};
+            }
+            if (IsTrivia(tokens[t].kind))
+            {
+                continue;
+            }
 
-			std::size_t line = 0;
+            std::size_t line = 0;
 			{
 				std::size_t lo = 0, hi = line_starts.size();
 				while (lo + 1 < hi)
@@ -2781,9 +2877,13 @@ namespace heimdall
 			std::size_t sig_cursor = 0;
 			for (std::size_t line = 0; line < line_count; ++line)
 			{
-				const auto[content_start, content_end] = line_range(line);
-				std::size_t probe                      = content_start;
-				while (probe < content_end && IsIndent(source[probe]))
+                if (mStop.stop_requested())
+                {
+                    return {};
+                }
+                const auto [content_start, content_end] = line_range(line);
+                std::size_t probe                       = content_start;
+                while (probe < content_end && IsIndent(source[probe]))
 				{
 					++probe;
 				}
@@ -3165,12 +3265,16 @@ namespace heimdall
 		std::vector<std::vector<std::size_t>> line_comments(line_count);
 		for (std::size_t t = 0; t < tokens.size(); ++t)
 		{
-			if (!IsComment(tokens[t].kind))
-			{
-				continue;
-			}
+            if (mStop.stop_requested())
+            {
+                return {};
+            }
+            if (!IsComment(tokens[t].kind))
+            {
+                continue;
+            }
 
-			std::size_t line = 0;
+            std::size_t line = 0;
 			{
 				std::size_t lo = 0, hi = line_starts.size();
 				while (lo + 1 < hi)
@@ -4168,9 +4272,38 @@ namespace heimdall
 	std::vector<FormatEdit> Formatter::FormatEdits(std::string_view source) const
 	{
 		const std::string formatted = Format(source);
-		if (formatted == source)
-			return {};
-		const auto src = SplitLines(source);
+        return Diff(source, formatted);
+    }
+
+    std::vector<FormatEdit> Formatter::FormatEdits(const ParseTree& tree,
+                                                   std::stop_token  stop) const
+    {
+        const Formatter worker(m_options, stop);
+        const auto      formatted = worker.Format(tree);
+        if (stop.stop_requested())
+        {
+            return {};
+        }
+        return worker.Diff(tree.Source(), formatted);
+    }
+
+    std::vector<FormatEdit> Formatter::ComputeEdits(std::string_view source,
+                                                    std::string_view formatted,
+                                                    std::stop_token  stop)
+    {
+        if (stop.stop_requested())
+        {
+            return {};
+        }
+        return Formatter({}, stop).Diff(source, formatted);
+    }
+
+    std::vector<FormatEdit> Formatter::Diff(std::string_view source,
+                                            std::string_view formatted) const
+    {
+        if (formatted == source)
+            return {};
+        const auto src = SplitLines(source);
 		const auto dst = SplitLines(formatted);
 		std::vector<std::size_t> src_hash(src.size());
 		for (std::size_t i = 0; i < src.size(); ++i)
@@ -4194,14 +4327,18 @@ namespace heimdall
 		};
 		while (i < src.size() || j < dst.size())
 		{
-			if (i < src.size() && j < dst.size() && values_equal(i, j))
-			{
-				++i;
+            if (mStop.stop_requested())
+            {
+                return {};
+            }
+            if (i < src.size() && j < dst.size() && values_equal(i, j))
+            {
+                ++i;
 				++j;
 				continue;
-			}
+            }
 
-			// Resync: a source line matching ahead in formatted (insertion), or a
+            // Resync: a source line matching ahead in formatted (insertion), or a
 			// formatted line matching ahead in source (deletion).
 			std::size_t ni = i, nj = j;
 			bool found = false;
@@ -4266,12 +4403,12 @@ namespace heimdall
 		}
 
 		return edits;
-	}
+    }
 
-	std::string Formatter::FormatRange(std::string_view source, std::size_t start_line,
-		std::size_t end_line) const
-	{
-		const auto edits = FormatEdits(source);
+    std::string Formatter::FormatRange(std::string_view source, std::size_t start_line,
+                                       std::size_t end_line) const
+    {
+        const auto edits = FormatEdits(source);
 		if (edits.empty())
 		{
 			return std::string(source);
@@ -4294,6 +4431,6 @@ namespace heimdall
 
 		output.append(source.substr(cursor));
 		return output;
-	}
+    }
 
 } // namespace heimdall

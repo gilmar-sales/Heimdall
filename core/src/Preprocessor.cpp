@@ -110,8 +110,8 @@ namespace heimdall
         class IfExpression
         {
           public:
-            IfExpression(std::string_view input, const MacroScope& macros) :
-                m_input(input), m_macros(macros)
+            IfExpression(std::string_view input, const MacroScope& macros, std::stop_token stop) :
+                m_input(input), m_macros(macros), mStop(stop)
             {
             }
 
@@ -119,13 +119,16 @@ namespace heimdall
             {
                 const long long value = ParseOr();
                 SkipSpace();
-                return value != 0 && m_pos == m_input.size();
+                return !mTooComplex && !mStop.stop_requested() && value != 0 &&
+                       m_pos == m_input.size();
             }
+
+            [[nodiscard]] bool TooComplex() const noexcept { return mTooComplex; }
 
           private:
             void SkipSpace()
             {
-                while (m_pos < m_input.size())
+                while (m_pos < m_input.size() && !mStop.stop_requested())
                 {
                     if (std::isspace(static_cast<unsigned char>(m_input[m_pos])))
                     {
@@ -149,6 +152,11 @@ namespace heimdall
 
             bool Consume(std::string_view token)
             {
+                if (mStop.stop_requested())
+                {
+                    m_pos = m_input.size();
+                    return false;
+                }
                 SkipSpace();
                 if (m_input.substr(m_pos, token.size()) != token)
                 {
@@ -221,6 +229,19 @@ namespace heimdall
 
             long long ParseUnary()
             {
+                constexpr std::size_t kMaxExpressionDepth = 256;
+                if (mDepth >= kMaxExpressionDepth || mStop.stop_requested())
+                {
+                    mTooComplex = mDepth >= kMaxExpressionDepth;
+                    m_pos       = m_input.size();
+                    return 0;
+                }
+                struct DepthScope
+                {
+                    std::size_t& depth;
+                    explicit DepthScope(std::size_t& value) noexcept : depth(value) { ++depth; }
+                    ~DepthScope() { --depth; }
+                } scope(mDepth);
                 if (Consume("!"))
                 {
                     return ParseUnary() == 0;
@@ -240,7 +261,8 @@ namespace heimdall
                     const bool paren = Consume("(");
                     SkipSpace();
                     const std::size_t start = m_pos;
-                    while (m_pos < m_input.size() && IsIdentContinue(m_input[m_pos]))
+                    while (m_pos < m_input.size() && !mStop.stop_requested() &&
+                           IsIdentContinue(m_input[m_pos]))
                     {
                         ++m_pos;
                     }
@@ -259,7 +281,7 @@ namespace heimdall
                     (IsIdentStart(m_input[m_pos]) ||
                      std::isdigit(static_cast<unsigned char>(m_input[m_pos]))))
                 {
-                    while (m_pos < m_input.size() &&
+                    while (m_pos < m_input.size() && !mStop.stop_requested() &&
                            (IsIdentContinue(m_input[m_pos]) || m_input[m_pos] == 'x' ||
                             m_input[m_pos] == 'X'))
                     {
@@ -325,6 +347,9 @@ namespace heimdall
             std::string_view  m_input;
             const MacroScope& m_macros;
             std::size_t       m_pos = 0;
+            std::size_t       mDepth      = 0;
+            bool              mTooComplex = false;
+            std::stop_token   mStop;
         };
 
         DirectiveKind KindOf(std::string_view name)
@@ -518,7 +543,17 @@ namespace heimdall
     PreprocessorResult Preprocessor::Process(std::string_view source,
                                              bool             build_active_source) const
     {
+        return Process(source, build_active_source, {});
+    }
+
+    PreprocessorResult Preprocessor::Process(std::string_view source, bool build_active_source,
+                                             std::stop_token stop) const
+    {
         PreprocessorResult result;
+        if (stop.stop_requested())
+        {
+            return result;
+        }
         // Local overlay: file #defines stay small; predefined macros are read
         // through the scope pointer without copying the whole map per file.
         MacroMap local;
@@ -537,6 +572,10 @@ namespace heimdall
 
         while (offset < source.size())
         {
+            if (stop.stop_requested())
+            {
+                return result;
+            }
             const std::size_t line_start = offset;
             std::size_t       end        = source.find('\n', offset);
             if (end == std::string_view::npos)
@@ -569,7 +608,7 @@ namespace heimdall
                 EndsWithBackslash(body))
             {
                 joined.assign(body.substr(0, body.size() - 1));
-                while (end < source.size())
+                while (end < source.size() && !stop.stop_requested())
                 {
                     const std::size_t next_end = source.find('\n', end);
                     const std::size_t stop =
@@ -608,6 +647,17 @@ namespace heimdall
                 const auto directive_name = ReadWord(trimmed);
                 const auto kind           = KindOf(directive_name);
                 result.directives.push_back({ kind, line_start, line.size() });
+                const auto evaluate = [&]
+                {
+                    IfExpression expression(trimmed, scope, stop);
+                    const auto   condition = expression.Evaluate();
+                    if (expression.TooComplex())
+                    {
+                        result.diagnostics.push_back(
+                            { line_start, "maximum preprocessor expression nesting exceeded" });
+                    }
+                    return condition;
+                };
 
                 if (kind == DirectiveKind::If || kind == DirectiveKind::Ifdef ||
                     kind == DirectiveKind::Ifndef)
@@ -615,7 +665,7 @@ namespace heimdall
                     bool condition = false;
                     if (kind == DirectiveKind::If)
                     {
-                        condition = IfExpression(trimmed, scope).Evaluate();
+                        condition = evaluate();
                     }
                     else
                     {
@@ -644,8 +694,8 @@ namespace heimdall
                             result.diagnostics.push_back({ line_start, "#elif after #else" });
                         }
 
-                        const bool condition = frame.parent_active && !frame.branch_taken &&
-                                               IfExpression(trimmed, scope).Evaluate();
+                        const bool condition =
+                            frame.parent_active && !frame.branch_taken && evaluate();
                         frame.active         = condition;
                         frame.branch_taken |= condition;
                         active = frame.active;
