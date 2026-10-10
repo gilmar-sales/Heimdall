@@ -1421,7 +1421,7 @@ TEST(TyperRules, PolicyCanDisableAndSuppressEachRule)
     ASSERT_EQ(raw.size(), 3u);
 
     heimdall::RuleOptions options;
-    options.overrides.push_back({ "cpp/modernize-range-loop", false, heimdall::Severity::Warning });
+    options.overrides.emplace_back("cpp/modernize-range-loop", false, heimdall::Severity::Warning);
     const auto filtered = heimdall::RuleEngine(options).ApplyPolicy(raw, typed.tree);
     ASSERT_EQ(filtered.size(), 1u);
     EXPECT_EQ(filtered[0].code, "cpp/modernize-loop-convert");

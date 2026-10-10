@@ -230,7 +230,7 @@ TEST(IncludeIndexSpec, MetaHeaderOffersReflectionFunctionsByQualifiedName)
     }
     for (const std::string_view name : {
              "identifier_of", "u8identifier_of", "source_location_of", "type_of",
-             "template_arguments_of", "parameters_of", "current_function", "current_class",
+             "template_arguments_of", "parameters_of",
              "members_of", "bases_of", "nonstatic_data_members_of", "enumerators_of",
              "size_of", "offset_of", "extract", "substitute", "reflect_constant",
              "data_member_spec", "define_aggregate", "is_class_type", "is_same_type",
@@ -266,6 +266,26 @@ TEST(IncludeIndexSpec, MetaHeaderOffersReflectionFunctionsByQualifiedName)
     EXPECT_EQ(hovered->detail.find("consteval"), std::string::npos);
     EXPECT_NE(hovered->detail.find("vector<info>"), std::string::npos)
         << hovered->detail;
+}
+
+TEST(IncludeIndexSpec, OffersReflectionScopeFunctionsDeclaredInHeader)
+{
+    const auto headerPath = IncludeDir() / "reflection_scope.hpp";
+    heimdall::SourceOverlay overlay;
+    overlay.Add(headerPath, std::make_shared<const std::string>(
+        "namespace std::meta { using info = int; "
+        "consteval info current_function(); consteval info current_class(); }"));
+    auto command = CommandWithIncludes();
+    command.standard = heimdall::CppStandard::Cpp26;
+
+    const auto index = heimdall::IncludeIndex::Build(
+        std::vector<std::filesystem::path> { headerPath }, &command, {}, &overlay);
+    constexpr std::string_view source = "std::meta::current_";
+    const auto items = heimdall::CompletionEngine::Complete(
+        source, {}, source.size(), &index.Scopes());
+
+    EXPECT_TRUE(Contains(items, "current_function"));
+    EXPECT_TRUE(Contains(items, "current_class"));
 }
 
 TEST(IncludeIndexSpec, SkipsMissingHeaders)
