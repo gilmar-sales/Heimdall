@@ -78,6 +78,11 @@ if (WIN32)
   target_link_libraries(DocumentMemoryBench PRIVATE psapi)
 endif ()
 
+# Refactoring subsystem (rename end-to-end, lookup, preview apply).
+add_executable(RefactorBench src/RefactorBench.cpp)
+target_link_libraries(RefactorBench PRIVATE heimdall::refactor benchmark::benchmark benchmark::benchmark_main)
+target_compile_features(RefactorBench PRIVATE cxx_std_26)
+
 # Parser robustness under truncation (incomplete typing): hang / time / error bounds.
 add_executable(ParserTruncationFuzz src/ParserTruncationFuzz.cpp)
 target_link_libraries(ParserTruncationFuzz PRIVATE heimdall::core)

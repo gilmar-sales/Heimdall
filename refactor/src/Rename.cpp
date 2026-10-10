@@ -2,6 +2,7 @@
 #include <Heimdall/Refactoring.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace heimdall
 {
@@ -118,6 +119,36 @@ namespace heimdall
             return model.ScopeOfNode(innermost);
         }
 
+        // Token range of the function body that owns `scope`. A function-local
+        // rename can only be captured by uses inside that same function, so the
+        // collision scan stays proportional to the function instead of the file.
+        bool FunctionTokenRange(const SemanticModel& model, ScopeId scope, std::uint32_t& begin,
+                                std::uint32_t& end)
+        {
+            const auto& scopes   = model.Scopes();
+            ScopeId     function = scope;
+            while (function < scopes.Size() && scopes.kind[function] == ScopeKind::Block)
+            {
+                function = scopes.parent[function];
+            }
+
+            if (function >= scopes.Size() || scopes.kind[function] != ScopeKind::Function)
+            {
+                return false;
+            }
+
+            const auto& soa  = model.Tree().NodesSoA();
+            const auto  node = scopes.node[function];
+            if (node >= soa.size())
+            {
+                return false;
+            }
+
+            begin = soa.FirstToken(node);
+            end   = begin + soa.TokenCount(node);
+            return true;
+        }
+
         std::expected<void, RefactoringError> CheckNameScopes(const SemanticModel& model,
                                                               SymbolId             target,
                                                               std::string_view     name,
@@ -143,9 +174,33 @@ namespace heimdall
             }
 
             const auto& tree        = model.Tree();
+            const auto& tokens      = tree.Tokens();
             const auto& significant = model.Significant();
-            for (std::uint32_t token = symbols.decl_token[target] + 1; token < tree.Tokens().size();
-                 ++token)
+
+            // Uses outside the renamed function's token range resolve in scopes
+            // that can never sit inside the target's scope, so they cannot be
+            // captured by the new name. Scanning only the function turns this
+            // check from O(file) into O(function).
+            std::uint32_t range_begin = symbols.decl_token[target] + 1;
+            std::uint32_t range_end   = static_cast<std::uint32_t>(tokens.size());
+            {
+                std::uint32_t function_begin = 0;
+                std::uint32_t function_end   = range_end;
+                if (FunctionTokenRange(model, scope, function_begin, function_end))
+                {
+                    range_begin = std::max(range_begin, function_begin);
+                    range_end   = std::min(range_end, function_end);
+                }
+            }
+
+            // Declaration membership was a linear find per token, i.e.
+            // O(tokens x symbols). A set built once makes it O(1) per token.
+            const std::unordered_set<std::uint32_t> declarations(
+                symbols.decl_token.begin(), symbols.decl_token.end());
+            // Intern the new name once instead of hashing it per candidate.
+            const auto wanted = model.Names().Find(name);
+
+            for (std::uint32_t token = range_begin; token < range_end; ++token)
             {
                 if (stop.stop_requested())
                 {
@@ -153,9 +208,9 @@ namespace heimdall
                         Error(RefactoringErrorCode::Cancelled, "Request cancelled"));
                 }
 
-                if (!model.IsCode(token) || tree.Tokens()[token].kind != TokenKind::Identifier ||
-                    tree.Text(tree.Tokens()[token]) != name ||
-                    std::ranges::find(symbols.decl_token, token) != symbols.decl_token.end() ||
+                if (!model.IsCode(token) || tokens[token].kind != TokenKind::Identifier ||
+                    tree.Text(tokens[token]) != name ||
+                    declarations.find(token) != declarations.end() ||
                     std::binary_search(model.Refs().token.begin(), model.Refs().token.end(), token))
                 {
                     continue;
@@ -164,7 +219,7 @@ namespace heimdall
                 const auto at = std::lower_bound(significant.begin(), significant.end(), token);
                 if (at != significant.begin())
                 {
-                    const auto previous = tree.Tokens()[*(at - 1)].tok;
+                    const auto previous = tokens[*(at - 1)].tok;
                     if (previous == Tok::Dot || previous == Tok::Arrow ||
                         previous == Tok::ColonColon)
                     {
@@ -178,7 +233,7 @@ namespace heimdall
                     continue;
                 }
 
-                const auto existing = model.Lookup(use_scope, model.Names().Find(name), token);
+                const auto existing = model.Lookup(use_scope, wanted, token);
                 if (existing != kNone && Within(model, symbols.scope[existing], scope))
                 {
                     continue;
@@ -224,13 +279,39 @@ namespace heimdall
             const auto&   symbols  = model->Symbols();
             const auto&   tokens   = tree->Tokens();
             std::uint32_t selected = kNone;
-            for (std::uint32_t i = 0; i < tokens.size(); ++i)
+            // Tokens are emitted in offset order: binary search the container
+            // instead of scanning from the start of the file.
             {
-                if (offset >= tokens[i].offset && offset - tokens[i].offset < tokens[i].length &&
-                    tokens[i].kind == TokenKind::Identifier && tokens[i].tok == Tok::None)
+                const auto matches = [&](const Token& token) {
+                    return token.kind == TokenKind::Identifier && token.tok == Tok::None;
+                };
+                const auto begin = tokens.begin(), end = tokens.end();
+                const auto after = std::upper_bound(
+                    begin, end, offset, [](std::size_t value, const Token& token) {
+                        return value < token.offset;
+                    });
+                if (after != begin)
                 {
-                    selected = i;
-                    break;
+                    const auto candidate = std::prev(after);
+                    if (candidate->offset <= offset &&
+                        offset - candidate->offset < candidate->length && matches(*candidate))
+                    {
+                        selected = static_cast<std::uint32_t>(candidate - begin);
+                    }
+                }
+
+                if (selected == kNone)
+                {
+                    // Defensive fallback: identical to the old linear scan.
+                    for (std::uint32_t i = 0; i < tokens.size(); ++i)
+                    {
+                        if (offset >= tokens[i].offset &&
+                            offset - tokens[i].offset < tokens[i].length && matches(tokens[i]))
+                        {
+                            selected = i;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -427,14 +508,24 @@ namespace heimdall
                                 {},
                                 snapshot.Options(document) };
         if (new_name != refs->name)
+        {
+            edits.edits.reserve(refs->tokens.size());
             for (auto index : refs->tokens)
             {
                 const auto& token = tree->Tokens()[index];
                 edits.edits.push_back(
                     { token.offset, token.length, refs->name, std::string(new_name) });
             }
+        }
 
         plan.documents.push_back(std::move(edits));
+        if (plan.documents.back().edits.empty())
+        {
+            // Renaming to the same name: the preview would be byte-identical and
+            // the reparse/rebind below trivially passes, so skip both.
+            return plan;
+        }
+
         const auto preview = PreviewRefactoring(snapshot, plan, stop);
         if (!preview)
         {
@@ -451,8 +542,33 @@ namespace heimdall
             }
         }
 
-        const auto after_tree =
-            ParseTree::Parse(preview->front().source, snapshot.Options(document), stop);
+        // Revalidate incrementally: the preview only touches the edited spans, so
+        // untouched top-level items are copied from the current tree instead of
+        // being re-parsed. Reuse is best-effort; items that cannot be proven
+        // reusable are parsed normally, so this cannot change the result.
+        ParseReuse        reuse {};
+        const ParseReuse* reuse_ptr = nullptr;
+        {
+            const auto& applied  = plan.documents.back().edits;
+            const auto  original = snapshot.Source(document);
+            std::size_t old_start = applied.front().offset;
+            std::size_t old_end   = old_start;
+            for (const auto& edit : applied)
+            {
+                old_start = std::min(old_start, edit.offset);
+                old_end   = std::max(old_end, edit.offset + edit.length);
+            }
+
+            reuse.previous   = tree.get();
+            reuse.offset     = old_start;
+            reuse.old_length = old_end - old_start;
+            reuse.new_length =
+                preview->front().source.size() - original->size() + reuse.old_length;
+            reuse_ptr = &reuse;
+        }
+
+        const auto after_tree = ParseTree::Parse(
+            preview->front().source, snapshot.Options(document), stop, nullptr, reuse_ptr);
         if (after_tree.Cancelled() || stop.stop_requested())
         {
             return std::unexpected(Error(RefactoringErrorCode::Cancelled, "Request cancelled"));

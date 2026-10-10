@@ -90,8 +90,21 @@ namespace heimdall
                 }
             }
 
-            auto& output = result.emplace_back(document.document, document.path, *source).source;
-            for (auto edit = edits.rbegin(); edit != edits.rend(); ++edit)
+            // Single forward pass: the final size is known up front, so the file is
+            // allocated once and every byte moves exactly once. The previous loop
+            // applied one std::string::replace per edit (O(file) memmove each).
+            std::size_t grown   = 0;
+            std::size_t removed = 0;
+            for (const auto* edit : edits)
+            {
+                grown += edit->replacement.size();
+                removed += edit->length;
+            }
+
+            std::string applied;
+            applied.reserve(source->size() - removed + grown);
+            std::size_t cursor = 0;
+            for (const auto* edit : edits)
             {
                 if (stop.stop_requested())
                 {
@@ -99,8 +112,13 @@ namespace heimdall
                         RefactoringError { RefactoringErrorCode::Cancelled, "Request cancelled" });
                 }
 
-                output.replace((*edit)->offset, (*edit)->length, (*edit)->replacement);
+                applied.append(*source, cursor, edit->offset - cursor);
+                applied.append(edit->replacement);
+                cursor = edit->offset + edit->length;
             }
+
+            applied.append(*source, cursor, source->size() - cursor);
+            result.push_back({ document.document, document.path, std::move(applied) });
         }
 
         return result;
