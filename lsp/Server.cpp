@@ -223,7 +223,7 @@ namespace heimdall::lsp
 						"\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source."
 						"fixAll\","
 						"\"refactor.extract.variable\",\"refactor.extract.function\","
-						"\"refactor.inline.variable\"]},\"hoverProvider\":true,"
+						"\"refactor.inline.variable\",\"refactor.inline.function\",\"refactor.extract.constant\",\"refactor.extract.method\"]},\"hoverProvider\":true,"
 						"\"definitionProvider\":true,\"implementationProvider\":true,"
 						"\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":" +
 						workspace_symbol_capability +
@@ -1775,24 +1775,26 @@ namespace heimdall::lsp
 		: heimdall::RefactoringService::LocalReferences(
 			context.Snapshot(), context.Document(), offset, include_declaration,
 			CurrentStop());
-		if (!refs)
+		if (!refs && (mode != 0 ||
+			refs.error().code != heimdall::RefactoringErrorCode::UnsupportedSymbol))
 		{
 			fail(refs.error());
 			return;
 		}
 
-		const auto range =[&](std::size_t start, std::size_t length, std::string& output)
+		const auto range =[&](const std::shared_ptr<const LineIndex>& lines, std::size_t start,
+			std::size_t length, std::string& output)
 		{
 			output += "{\"start\":";
-			AppendPosition(document->lines->ToPosition(start), output);
+			AppendPosition(lines->ToPosition(start), output);
 			output += ",\"end\":";
-			AppendPosition(document->lines->ToPosition(start + length), output);
+			AppendPosition(lines->ToPosition(start + length), output);
 			output += '}';
 		};
 		if (mode == 1)
 		{
 			std::string response = "{\"range\":";
-			range(refs->offset, refs->length, response);
+			range(document->lines, refs->offset, refs->length, response);
 			response += ",\"placeholder\":";
 			QuoteJson(refs->name, response);
 			response += '}';
@@ -1802,6 +1804,72 @@ namespace heimdall::lsp
 
 		if (mode == 0)
 		{
+			// Locals and fields resolve in a single tree; free functions and
+			// globals resolve across the workspace instead.
+			if (!refs && refs.error().code == heimdall::RefactoringErrorCode::UnsupportedSymbol)
+			{
+				auto workspace_refs = heimdall::RefactoringService::WorkspaceReferences(
+					context.Snapshot(), context.Document(), offset, include_declaration,
+					CurrentStop());
+				if (!workspace_refs)
+				{
+					fail(workspace_refs.error());
+					return;
+				}
+
+				std::string response = "[";
+				for (const auto& document_refs : *workspace_refs)
+				{
+					const std::string item_uri =
+						UriFromPath(context.Snapshot().Path(document_refs.document));
+					const auto item_tree = context.Snapshot().Syntax(document_refs.document);
+					if (!item_tree)
+					{
+						continue;
+					}
+
+					std::shared_ptr<const LineIndex> item_lines;
+					if (auto open = GetDocument(item_uri))
+					{
+						item_lines = open->lines;
+					}
+					else
+					{
+						auto built = std::make_shared<LineIndex>();
+						if (auto source = context.Snapshot().Source(document_refs.document))
+						{
+							built->Build(*source);
+						}
+
+						item_lines = std::move(built);
+					}
+
+					for (auto token : document_refs.tokens)
+					{
+						if (token >= item_tree->Tokens().size())
+						{
+							continue;
+						}
+
+						if (response.size() > 1)
+						{
+							response += ',';
+						}
+
+						response += "{\"uri\":";
+						QuoteJson(item_uri, response);
+						response += ",\"range\":";
+						range(item_lines, item_tree->Tokens()[token].offset,
+							item_tree->Tokens()[token].length, response);
+						response += '}';
+					}
+				}
+
+				response += ']';
+				Respond(id, response);
+				return;
+			}
+
 			std::string response = "[";
 			for (auto token : refs->tokens)
 			{
@@ -1813,7 +1881,7 @@ namespace heimdall::lsp
 				response += "{\"uri\":";
 				QuoteJson(uri, response);
 				response += ",\"range\":";
-				range(tree->Tokens()[token].offset, tree->Tokens()[token].length, response);
+				range(document->lines, tree->Tokens()[token].offset, tree->Tokens()[token].length, response);
 				response += '}';
 			}
 
@@ -1848,24 +1916,71 @@ namespace heimdall::lsp
 			return;
 		}
 
-		std::string response = "{\"documentChanges\":[{\"textDocument\":{\"uri\":";
-		QuoteJson(uri, response);
-		response += ",\"version\":" + std::to_string(document->version) + "},\"edits\":[";
-		for (const auto& edit : plan->documents.front().edits)
+		std::string response = "{\"documentChanges\":[";
+		bool      first_document = true;
+		for (const auto& plan_document : plan->documents)
 		{
-			if (response.back() != '[')
+			const std::string doc_uri = UriFromPath(plan_document.path);
+			// Positions refer to the pre-edit text: the origin document uses
+			// its pinned lines, open documents use theirs, and closed files
+			// get an index built over the pinned original on the fly.
+			std::shared_ptr<const LineIndex> lines;
+			std::optional<std::int64_t>      version;
+			if (doc_uri == uri_string)
+			{
+				lines   = document->lines;
+				version = document->version;
+			}
+			else if (auto other = GetDocument(doc_uri))
+			{
+				if (!IsCurrentVersion(doc_uri, other->version))
+				{
+					fail(heimdall::RefactoringError {
+						heimdall::RefactoringErrorCode::StaleSnapshot,
+						"Document changed; request rename again" });
+					return;
+				}
+
+				lines   = other->lines;
+				version = other->version;
+			}
+			else
+			{
+				auto built = std::make_shared<LineIndex>();
+				built->Build(*plan_document.original);
+				lines   = std::move(built);
+				version = std::nullopt;
+			}
+
+			if (!first_document)
 			{
 				response += ',';
 			}
 
-			response += "{\"range\":";
-			range(edit.offset, edit.length, response);
-			response += ",\"newText\":";
-			QuoteJson(edit.replacement, response);
-			response += '}';
+			first_document = false;
+			response += "{\"textDocument\":{\"uri\":";
+			QuoteJson(doc_uri, response);
+			response += ",\"version\":";
+			response += version ? std::to_string(*version) : "null";
+			response += "},\"edits\":[";
+			for (const auto& edit : plan_document.edits)
+			{
+				if (response.back() != '[')
+				{
+					response += ',';
+				}
+
+				response += "{\"range\":";
+				range(lines, edit.offset, edit.length, response);
+				response += ",\"newText\":";
+				QuoteJson(edit.replacement, response);
+				response += '}';
+			}
+
+			response += "]}";
 		}
 
-		response += "]}]}";
+		response += "]}";
 		Respond(id, response);
 	}
 
@@ -2049,6 +2164,64 @@ namespace heimdall::lsp
 				heimdall::RefactoringService::InlineVariable(
 				context.Snapshot(), context.Document(), selection_start, CurrentStop()),
 				"refactor.inline.variable");
+		}
+
+		if (m_versioned_edits && accepts("refactor.inline.function"))
+		{
+			append_refactor(
+				heimdall::RefactoringService::InlineFunction(
+				context.Snapshot(), context.Document(), selection_start, CurrentStop()),
+				"refactor.inline.function");
+		}
+
+		if (m_versioned_edits && selection_end > selection_start
+			&& accepts("refactor.extract.constant"))
+		{
+			std::string name = "extractedConstant";
+			for (unsigned suffix = 1; suffix < 1000; ++suffix)
+			{
+				const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
+				{
+					return token.kind == heimdall::TokenKind::Identifier &&
+					tree->Text(token) == name;
+				});
+				if (!used)
+				{
+					break;
+				}
+
+				name = "extractedConstant" + std::to_string(suffix);
+			}
+
+			append_refactor(heimdall::RefactoringService::ExtractConstant(
+				context.Snapshot(), context.Document(), selection_start,
+				selection_end - selection_start, name, CurrentStop()),
+				"refactor.extract.constant");
+		}
+
+		if (m_versioned_edits && selection_end > selection_start
+			&& accepts("refactor.extract.method"))
+		{
+			std::string name = "extractedMethod";
+			for (unsigned suffix = 1; suffix < 1000; ++suffix)
+			{
+				const bool used = std::ranges::any_of(tree->Tokens(),[&](const auto& token)
+				{
+					return token.kind == heimdall::TokenKind::Identifier &&
+					tree->Text(token) == name;
+				});
+				if (!used)
+				{
+					break;
+				}
+
+				name = "extractedMethod" + std::to_string(suffix);
+			}
+
+			append_refactor(heimdall::RefactoringService::ExtractMethod(
+				context.Snapshot(), context.Document(), selection_start,
+				selection_end - selection_start, name, CurrentStop()),
+				"refactor.extract.method");
 		}
 
 		// Batch fixes follow any explicitly requested refactoring actions.

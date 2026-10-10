@@ -568,6 +568,66 @@ TEST(Typer, TypesThisAndImplicitMembers)
     EXPECT_EQ(typed.Of("q"), "S*");
 }
 
+TEST(Typer, MemberSymbolResolvesFieldsThroughObjectsPointersAndInheritance)
+{
+    using namespace heimdall;
+    const Typed typed("struct Base { int base_field; };\n"
+                      "struct Derived : Base { int own; };\n"
+                      "struct Holder { Derived value; Derived* ptr; };\n"
+                      "int f(Holder h) {\n"
+                      "    h.value.own = 1;\n"
+                      "    h.ptr->own = 2;\n"
+                      "    h.value.base_field = 3;\n"
+                      "    return h.value.own;\n"
+                      "}\n");
+    const auto&       tree    = typed.tree;
+    const auto&       model   = typed.model;
+    const auto&       types   = typed.types;
+    const auto&       soa     = tree.NodesSoA();
+    std::size_t       members = 0;
+    for (std::uint32_t node = 0; node < soa.size(); ++node)
+    {
+        if (soa.Kind(node) != GrammarKind::MemberExpression)
+        {
+            continue;
+        }
+
+        const auto kids = model.ChildrenOf(node);
+        ASSERT_EQ(kids.size(), 2u);
+        const auto name_token = soa.FirstToken(kids[1]);
+        const auto member     = types.MemberSymbol(node);
+        ASSERT_NE(member, kNone) << tree.Text(tree.Tokens()[name_token]);
+        // The resolved field is spelled exactly like the member token.
+        EXPECT_EQ(model.Names().Text(model.Symbols().name[member]),
+            tree.Text(tree.Tokens()[name_token]));
+        ++members;
+    }
+
+    // h.value, (h.value).own, h.ptr, (h.ptr)->own, h.value,
+    // (h.value).base_field, h.value, (h.value).own.
+    EXPECT_EQ(members, 8u);
+}
+
+TEST(Typer, MemberSymbolIsUnknownForUnknowableReceivers)
+{
+    using namespace heimdall;
+    const Typed typed("struct Opaque;\n"
+                      "void f(Opaque* p) { p->x = 1; }\n"
+                      "void g() { missing.m = 2; }\n");
+    const auto& soa     = typed.tree.NodesSoA();
+    bool        checked = false;
+    for (std::uint32_t node = 0; node < soa.size(); ++node)
+    {
+        if (soa.Kind(node) == GrammarKind::MemberExpression)
+        {
+            EXPECT_EQ(typed.types.MemberSymbol(node), kNone);
+            checked = true;
+        }
+    }
+
+    EXPECT_TRUE(checked);
+}
+
 TEST(Typer, OverloadsShareAReturnTypeOrAreUnknown)
 {
     const Typed typed("int same(int); int same(double);\n"
@@ -856,9 +916,13 @@ TEST(ImplicitBool, SilentForDeclarationConditionsAndInitStatements)
              "while (int* p = next()) {}\n"
              "if (int* q = next()) {}");
     EXPECT_TRUE(ImplicitBool(source).empty());
-    // The grammar gives `if (init; cond)` no node for the condition: silent.
+    // The init-statement declarator is not a condition, but the condition after
+    // the `;` is analyzed like any other boolean context now that the grammar
+    // models it.
     const std::string with_init = Body("int a = 0;\nif (int b = 1; a) {}");
-    EXPECT_TRUE(ImplicitBool(with_init).empty());
+    const auto        diagnostics = ImplicitBool(with_init);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(with_init.substr(diagnostics[0].offset, diagnostics[0].length), "a");
 }
 
 TEST(ImplicitBool, SilentForCStyleCasts)

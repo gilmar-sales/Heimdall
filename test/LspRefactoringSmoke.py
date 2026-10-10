@@ -76,6 +76,10 @@ try:
     assert caps["renameProvider"]["prepareProvider"]
     assert caps["referencesProvider"]
     assert "refactor.extract.function" in caps["codeActionProvider"]["codeActionKinds"]
+    assert "refactor.inline.function" in caps["codeActionProvider"]["codeActionKinds"]
+    assert "refactor.extract.constant" in caps["codeActionProvider"]["codeActionKinds"]
+    assert "refactor.extract.method" in caps["codeActionProvider"]["codeActionKinds"]
+    assert "refactor.inline.function" in caps["codeActionProvider"]["codeActionKinds"]
     send("initialized", {})
     uri = "file:///C:/heimdall-refactor-fixture.cpp"
     # The emoji shifts UTF-16 positions relative to bytes and codepoints.
@@ -116,13 +120,16 @@ try:
     end = {"line": 0, "character": start["character"] + 5}
     actions = send("textDocument/codeAction", {"textDocument": {"uri": uri},
         "range": {"start": start, "end": end}, "context": {"diagnostics": [], "only": ["refactor.extract"]}}, True)["result"]
-    assert len(actions) == 1 and actions[0]["kind"] == "refactor.extract.variable", actions
-    assert actions[0]["edit"]["documentChanges"][0]["textDocument"]["version"] == 3
-    assert len(actions[0]["edit"]["documentChanges"][0]["edits"]) == 2
-    # Specific kinds must not offer a different extraction or unrelated fixes.
+    assert len(actions) == 2, actions
+    assert {action["kind"] for action in actions} == {"refactor.extract.variable",
+        "refactor.extract.function"}, actions
+    action = next(action for action in actions if action["kind"] == "refactor.extract.variable")
+    assert action["edit"]["documentChanges"][0]["textDocument"]["version"] == 3
+    assert len(action["edit"]["documentChanges"][0]["edits"]) == 2
+    # Specific kinds must not offer unrelated fixes.
     assert send("textDocument/codeAction", {"textDocument": {"uri": uri},
         "range": {"start": start, "end": end}, "context": {"diagnostics": [],
-        "only": ["refactor.extract.function"]}}, True)["result"] == []
+        "only": ["refactor.inline.function"]}}, True)["result"] == []
 
     text = "int f() { int value = 42; return value; }"
     send("textDocument/didChange", {"textDocument": {"uri": uri, "version": 4},
@@ -167,6 +174,27 @@ try:
             compiled = subprocess.run(args, capture_output=True, text=True, timeout=30)
             assert compiled.returncode == 0, (transformed, compiled.stdout, compiled.stderr)
 
+    impl_uri = "file:///C:/heimdall-refactor-impl.cpp"
+    caller_uri = "file:///C:/heimdall-refactor-caller.cpp"
+    send("textDocument/didOpen", {"textDocument": {"uri": impl_uri, "languageId": "cpp",
+        "version": 1, "text": "int add(int a, int b) { return a + b; }"}})
+    send("textDocument/didOpen", {"textDocument": {"uri": caller_uri, "languageId": "cpp",
+        "version": 1, "text": "int add(int a, int b);\nint run() { return add(1, 2); }"}})
+    renamed = send("textDocument/rename", {"textDocument": {"uri": impl_uri},
+        "position": {"line": 0, "character": len("int ")}, "newName": "sum"}, True)["result"]
+    assert len(renamed["documentChanges"]) == 2, renamed
+    by_uri = {change["textDocument"]["uri"]: change for change in renamed["documentChanges"]}
+    assert by_uri[impl_uri]["textDocument"]["version"] == 1, renamed
+    assert len(by_uri[impl_uri]["edits"]) == 1, renamed
+    assert by_uri[caller_uri]["textDocument"]["version"] == 1, renamed
+    assert len(by_uri[caller_uri]["edits"]) == 2, renamed
+    assert all(edit["newText"] == "sum" for edit in by_uri[caller_uri]["edits"]), renamed
+    refs = send("textDocument/references", {"textDocument": {"uri": impl_uri},
+        "position": {"line": 0, "character": len("int ")},
+        "context": {"includeDeclaration": True}}, True)["result"]
+    assert len(refs) == 3, refs
+    assert {item["uri"] for item in refs} == {impl_uri, caller_uri}, refs
+
     header_uri = "file:///C:/heimdall-refactor-lib.hpp"
     send("textDocument/didOpen", {"textDocument": {"uri": header_uri, "languageId": "cpp", "version": 1,
         "text": "namespace dirty { int first; }"}})
@@ -195,6 +223,36 @@ try:
     assert location == [{"uri": header_uri, "range": {
         "start": {"line": 0, "character": len("namespace dirty { int ")},
         "end": {"line": 0, "character": len("namespace dirty { int fresh")}}}], location
+    text = "static int twice(int v) { return v * 2; } int f(int x) { return twice(x); }"
+    send("textDocument/didChange", {"textDocument": {"uri": uri, "version": 10},
+        "contentChanges": [{"text": text}]})
+    start = at("twice(x)")
+    actions = send("textDocument/codeAction", {"textDocument": {"uri": uri},
+        "range": {"start": start, "end": start}, "context": {"diagnostics": [],
+        "only": ["refactor.inline"]}}, True)["result"]
+    assert len(actions) == 1 and actions[0]["kind"] == "refactor.inline.function", actions
+    transformed = apply_ascii(text, actions[0]["edit"]["documentChanges"][0]["edits"])
+    assert transformed == text.replace("twice(x)", "((x) * 2)"), (transformed, text)
+    text = "int f() { return 42 + 42; }"
+    send("textDocument/didChange", {"textDocument": {"uri": uri, "version": 11},
+        "contentChanges": [{"text": text}]})
+    start = at("42")
+    end = {"line": 0, "character": start["character"] + 2}
+    actions = send("textDocument/codeAction", {"textDocument": {"uri": uri},
+        "range": {"start": start, "end": end}, "context": {"diagnostics": [],
+        "only": ["refactor.extract.constant"]}}, True)["result"]
+    assert len(actions) == 1 and actions[0]["kind"] == "refactor.extract.constant", actions
+    assert len(actions[0]["edit"]["documentChanges"][0]["edits"]) == 3, actions
+    text = "struct S { int m; int get() { return m + 1; } };"
+    send("textDocument/didChange", {"textDocument": {"uri": uri, "version": 12},
+        "contentChanges": [{"text": text}]})
+    start = at("m + 1")
+    end = {"line": 0, "character": start["character"] + 5}
+    actions = send("textDocument/codeAction", {"textDocument": {"uri": uri},
+        "range": {"start": start, "end": end}, "context": {"diagnostics": [],
+        "only": ["refactor.extract.method"]}}, True)["result"]
+    assert len(actions) == 1 and actions[0]["kind"] == "refactor.extract.method", actions
+    assert len(actions[0]["edit"]["documentChanges"][0]["edits"]) == 2, actions
     send("shutdown", None, True)
     send("exit", None)
     process.wait(timeout=10)

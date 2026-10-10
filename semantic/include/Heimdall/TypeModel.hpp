@@ -207,6 +207,15 @@ namespace heimdall
             return node < m_node_type.size() ? m_node_type[node] : TypeTable::Unknown;
         }
 
+        // MemberExpression nodes: the resolved field (`Variable`), or kNone when
+        // the receiver type is unknown, the member is unresolved or a method, or
+        // the node is not a member access. Methods are deliberately excluded:
+        // overload sets have no single target.
+        SymbolId MemberSymbol(std::uint32_t node) const noexcept
+        {
+            return node < m_member_symbol.size() ? m_member_symbol[node] : kNone;
+        }
+
         // Human-readable spelling for diagnostics: `int`, `const char*`, `Foo`.
         std::string Spell(TypeId type) const;
 
@@ -227,6 +236,7 @@ namespace heimdall
         TypeTable                m_types;
         std::pmr::vector<TypeId> m_symbol_type;
         std::pmr::vector<TypeId> m_node_type;
+        std::pmr::vector<SymbolId> m_member_symbol;
     };
 
     // `std::vector`, `std::map`, `std::string`...: library containers whose

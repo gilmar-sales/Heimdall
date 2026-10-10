@@ -102,7 +102,30 @@ namespace
     TEST(StbCorpus, RepeatedCopiesGetUniqueIncludeGuards)
     {
         const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
-        const auto large = heimdall::bench::BuildDocument(dir, 20000);
+        // Guard renaming is size-independent: copy 0 keeps the plain guard,
+        // copy 1 renames every occurrence exactly once (matched by prefix and
+        // checked not to leave a bare occurrence behind, regardless of the
+        // file's line endings).
+        constexpr std::string_view plain_view = "#ifndef INCLUDE_STB_C_LEXER_H";
+        constexpr std::string_view renamed_view = "#ifndef INCLUDE_STB_C_LEXER_H_COPY1";
+        const std::string          plain(plain_view);
+        const std::string          renamed(renamed_view);
+        const auto first = heimdall::bench::LoadUnit(dir, heimdall::bench::kStbUnits[0], 0);
+        ASSERT_TRUE(first);
+        EXPECT_NE(first->find(plain), std::string::npos);
+        EXPECT_EQ(first->find("_COPY1"), std::string::npos);
+        const auto second = heimdall::bench::LoadUnit(dir, heimdall::bench::kStbUnits[0], 1);
+        ASSERT_TRUE(second);
+        EXPECT_NE(second->find(renamed), std::string::npos);
+        EXPECT_EQ(second->find(renamed), second->rfind(renamed));
+        for (std::size_t at = second->find(plain); at != std::string::npos;
+             at             = second->find(plain, at + 1))
+        {
+            EXPECT_EQ((*second)[at + plain.size()], '_');
+        }
+        // End to end: 40000 lines force whole-file repeats (three units no
+        // longer reach 90% of 20000 since the vendored headers grew).
+        const auto large = heimdall::bench::BuildDocument(dir, 40000);
         ASSERT_TRUE(large);
         // The lexer is emitted twice; the second copy must not collide with the first.
         EXPECT_NE(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"), std::string::npos);

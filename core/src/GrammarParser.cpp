@@ -1796,6 +1796,26 @@ namespace heimdall
             else
             {
                 core_end = ParseQualifiedName(i, end, declarator, name_pos);
+                if (name_pos == Invalid && core_end == i && i < end && Is(i, "[") &&
+                    m_match[i] != Invalid && m_match[i] < end)
+                {
+                    // Structured binding: `auto [a, b] = ...` / `auto& [a, b] = ...`.
+                    // No name precedes the `[`, so this cannot be an array suffix.
+                    // Emit one DeclaredName per bound identifier; the Binder
+                    // declares a Variable for each. Bindings take no suffixes.
+                    const auto close = m_match[i];
+                    for (auto j = i + 1; j < close; ++j)
+                    {
+                        if (IsIdentifierToken(j) && m_match[j] == Invalid)
+                        {
+                            Add(GrammarKind::DeclaredName, j, j + 1, declarator);
+                        }
+                    }
+
+                    SetNodeRange(declarator, begin, close + 1);
+                    return close + 1;
+                }
+
                 if (name_pos == Invalid && core_end < end &&
                     (Is(core_end, "*") || Is(core_end, "&") || Is(core_end, "&&")))
                 {
@@ -2300,6 +2320,42 @@ namespace heimdall
             }
         }
 
+        // Lambda `(params)`: same shape as function parameters, parented to
+        // the lambda so DeclareParameter finds them. Captures, `mutable` /
+        // specifiers and the trailing return type stay unparsed.
+        void AddLambdaParameters(std::size_t open, std::size_t close, std::size_t parent)
+        {
+            auto part = open + 1;
+            if (part == close)
+            {
+                return;
+            }
+
+            if (part + 1 == close && Is(part, "void"))
+            {
+                return;
+            }
+
+            while (part < close)
+            {
+                const auto comma    = FindComma(part, close);
+                const bool ellipsis = comma == part + 1 && Is(part, "...");
+                if (!ellipsis && comma > part)
+                {
+                    const auto parameter =
+                        Add(GrammarKind::ParameterDeclaration, part, comma, parent);
+                    AddTypeAndDeclarator(part, comma, parameter);
+                }
+
+                if (comma == close)
+                {
+                    break;
+                }
+
+                part = comma + 1;
+            }
+        }
+
         GrammarKind StatementKind(std::size_t begin, std::size_t end) const
         {
             if (begin >= end)
@@ -2557,9 +2613,17 @@ namespace heimdall
             else if (first == "[" && m_match[pos] != Invalid && m_match[pos] < end)
             {
                 const std::size_t capture_close = m_match[pos];
+                std::size_t       param_open    = Invalid;
+                std::size_t       param_close   = Invalid;
                 std::size_t       body          = capture_close + 1;
                 if (Is(body, "("))
                 {
+                    if (m_match[body] != Invalid && m_match[body] < end)
+                    {
+                        param_open  = body;
+                        param_close = m_match[body];
+                    }
+
                     body = SkipGroup(body, end);
                 }
 
@@ -2572,6 +2636,14 @@ namespace heimdall
                 {
                     const auto lambda =
                         Add(GrammarKind::LambdaExpression, pos, m_match[body] + 1, parent);
+                    if (param_open != Invalid)
+                    {
+                        // Parameter list: declared like function parameters so
+                        // uses in the body resolve (and shadow correctly).
+                        // Captures stay unmodeled (see rename).
+                        AddLambdaParameters(param_open, param_close, lambda);
+                    }
+
                     std::size_t body_pos = body;
                     ParseCompound(body_pos, m_match[body] + 1, lambda);
                     pos         = m_match[body] + 1;
@@ -3027,6 +3099,18 @@ namespace heimdall
                     const auto catch_start = pos++;
                     if (Is(pos, "(") && m_match[pos] != Invalid)
                     {
+                        const auto close = m_match[pos];
+                        // `catch (...)` declares nothing; any other parameter list
+                        // declares one variable (`catch (const E& e)`) visible in
+                        // the handler body.
+                        if (close > pos + 1 && !(close == pos + 2 && Is(pos + 1, "...")))
+                        {
+                            const auto decl =
+                                Add(GrammarKind::DeclarationStatement, pos + 1, close, node);
+                            AddDeclarationDetails(pos + 1, close, decl);
+                            RegisterNodes(decl, m_tree.m_nodes_soa.size());
+                        }
+
                         pos = SkipGroup(pos, end);
                     }
 
@@ -3140,7 +3224,30 @@ namespace heimdall
                     }
                     else
                     {
-                        ParseExpression(pos + 1, close, node);
+                        // `if`/`switch` init-statement (`if (int x = 0; x)`) and
+                        // condition-declarations (`if (int x = f())`,
+                        // `while (int x = f())`): model the declaration like the
+                        // `for` header above so the name binds. Anything else
+                        // keeps the old expression-only behavior.
+                        const auto sep      = FindSemicolon(pos + 1, close);
+                        const auto init_end = sep < close ? sep : close;
+                        const bool is_decl =
+                            StatementKind(pos + 1, init_end) == GrammarKind::DeclarationStatement;
+                        if (is_decl)
+                        {
+                            const auto init =
+                                Add(GrammarKind::DeclarationStatement, pos + 1, init_end, node);
+                            AddDeclarationDetails(pos + 1, init_end, init);
+                            RegisterNodes(init, m_tree.m_nodes_soa.size());
+                            if (sep < close && sep + 1 < close)
+                            {
+                                ParseExpression(sep + 1, close, node);
+                            }
+                        }
+                        else
+                        {
+                            ParseExpression(pos + 1, close, node);
+                        }
                     }
 
                     pos = close + 1;

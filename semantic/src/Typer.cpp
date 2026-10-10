@@ -174,7 +174,8 @@ namespace heimdall
     TypeModel::TypeModel(const SemanticModel& model, std::size_t arena_hint) :
         m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model),
         m_externals(m_arena->Resource()), m_types(m_arena->Resource()),
-        m_symbol_type(m_arena->Resource()), m_node_type(m_arena->Resource())
+        m_symbol_type(m_arena->Resource()), m_node_type(m_arena->Resource()),
+        m_member_symbol(m_arena->Resource())
     {
     }
 
@@ -2456,6 +2457,11 @@ namespace heimdall
         }
 
         const auto kind = m_symbols.kind[member];
+        if (kind == SymbolKind::Variable || kind == SymbolKind::Parameter)
+        {
+            m_out.m_member_symbol[node] = member;
+        }
+
         if (as_call)
         {
             return kind == SymbolKind::Function ? OverloadReturn(member) : TypeTable::Unknown;
@@ -2558,6 +2564,7 @@ namespace heimdall
     {
         m_out.m_symbol_type.assign(m_symbols.Size(), kPending);
         m_out.m_node_type.assign(m_nodes.size(), kPending);
+        m_out.m_member_symbol.assign(m_nodes.size(), kNone);
         for (SymbolId symbol = 0; symbol < m_symbols.Size(); ++symbol)
         {
             SymbolType(symbol);

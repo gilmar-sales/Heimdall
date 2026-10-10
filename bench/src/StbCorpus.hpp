@@ -81,8 +81,10 @@ namespace heimdall::bench
 
     // Builds a document of roughly `target_lines` lines (whole stb files only, so at
     // least 90% of the target), or std::nullopt if a header is missing. Targets
-    // cycle lexer (~0.95k lines) -> tilemap (~4.2k) -> image (~8k): 1000 -> 0.95k,
-    // 5000 -> 5.1k, 20000 -> 18.3k. Report CountLines() of the result, not the target.
+    // cycle lexer (~1.3k lines) -> tilemap (~5.5k) -> image (~11.2k): 1000 -> 1.3k,
+    // 5000 -> 6.8k, 20000 -> 18.0k, 40000 -> 36.0k. Report CountLines() of the
+    // result, not the target. Measured 2026-10; bump the repetition-sensitive
+    // tests below if the vendored headers grow again.
     inline std::optional<std::string> BuildDocument(std::string_view directory,
                                                     std::size_t      target_lines)
     {

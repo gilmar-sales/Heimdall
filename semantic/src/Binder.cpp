@@ -51,6 +51,7 @@ namespace heimdall
                 case GrammarKind::LoopStatement:
                 case GrammarKind::IfStatement:
                 case GrammarKind::SwitchStatement:
+                case GrammarKind::TryStatement:
                 case GrammarKind::LambdaExpression:
                     return true;
                 default:
@@ -1221,7 +1222,7 @@ namespace heimdall
             return;
         }
 
-        const auto    scope     = ParentScopeFor(node);
+        auto          scope     = ParentScopeFor(node);
         std::uint64_t signature = 0;
         std::uint32_t flags     = FlagsFromHead(node, head, signature);
         const auto    parent    = m_tree.NodesSoA().Parent(node);
@@ -1234,6 +1235,24 @@ namespace heimdall
         if (qualified)
         {
             flags |= SymbolFlag::Qualified;
+        }
+
+        // Out-of-line definitions join their namespace scope (`int N::f() {}`)
+        // so qualified and unqualified uses resolve identically to an in-block
+        // definition. Classes keep lexical placement (method bodies, `this`
+        // and inheritance need a wider review).
+        bool rerouted = false;
+        if (qualified && head.name_first != kNone)
+        {
+            bool       global = false;
+            const auto owner =
+                ResolveQualifier(head.qualifier_first, head.name_first, scope, global);
+            if (owner != kNone && m_model.m_symbols.kind[owner] == SymbolKind::Namespace &&
+                m_model.m_symbols.member_scope[owner] != kNone)
+            {
+                scope    = m_model.m_symbols.member_scope[owner];
+                rerouted = true;
+            }
         }
 
         // Constructors repeat the class name (the symbol of the owning scope).
@@ -1255,7 +1274,7 @@ namespace heimdall
 
         flags |= ReturnsPointerFlag(node);
         const auto id = Declare(HeadName(head), SymbolKind::Function, scope, flags, head.name_token,
-                                node, kNone, !qualified);
+                                node, kNone, !qualified || rerouted);
         m_model.m_symbols.signature[id] = signature;
     }
 
@@ -1337,6 +1356,46 @@ namespace heimdall
 
             if (declarator == kNone || FindChild(declarator, GrammarKind::FunctionSuffix) != kNone)
             {
+                continue;
+            }
+
+            // Structured bindings (`auto [a, b] = ...`) carry one DeclaredName
+            // per bound identifier; declare a Variable for each. Ordinary
+            // declarators carry at most one and keep the path below.
+            std::uint32_t bindings = 0;
+            {
+                const auto [dbegin, dend] = Children(declarator);
+                for (auto i = dbegin; i < dend; ++i)
+                {
+                    if (KindOf(m_child_list[i]) == GrammarKind::DeclaredName)
+                    {
+                        ++bindings;
+                    }
+                }
+            }
+
+            if (bindings > 1)
+            {
+                const auto [dbegin, dend] = Children(declarator);
+                for (auto i = dbegin; i < dend; ++i)
+                {
+                    const auto child = m_child_list[i];
+                    if (KindOf(child) != GrammarKind::DeclaredName)
+                    {
+                        continue;
+                    }
+
+                    const auto token = m_tree.NodesSoA().FirstToken(child);
+                    if (!IsIdent(token))
+                    {
+                        continue;
+                    }
+
+                    Declare(m_model.m_names.Intern(Text(token)),
+                            typedef_declaration ? SymbolKind::TypeAlias : SymbolKind::Variable,
+                            scope, flags | PointerFlags(declarator), token, node, kNone, true);
+                }
+
                 continue;
             }
 
