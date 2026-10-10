@@ -31,15 +31,18 @@ def same_file(uri, path):
 
 
 class Client:
-    def __init__(self, workspace, options=None, hierarchical=True):
+    def __init__(self, workspace, options=None, hierarchical=True, progress=False):
         self.process = subprocess.Popen([server], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, cwd=workspace)
         self.inbox = []
         self.lock = threading.Lock()
         self.next_id = 100
+        self.last_log = ""
         threading.Thread(target=self._read, daemon=True).start()
         capabilities = {"textDocument": {"documentSymbol": {
             "hierarchicalDocumentSymbolSupport": hierarchical}}}
+        if progress:
+            capabilities["window"] = {"workDoneProgress": True}
         params = {"workspaceFolders": [{"uri": workspace.as_uri(), "name": "workspace"}],
                   "capabilities": capabilities}
         if options is not None:
@@ -81,8 +84,10 @@ class Client:
         deadline = time.time() + timeout
         while time.time() < deadline:
             with self.lock:
-                if any(m.get("method") == "window/logMessage" and needle in m["params"]["message"]
-                       for m in self.inbox):
+                found = [m["params"]["message"] for m in self.inbox
+                         if m.get("method") == "window/logMessage" and needle in m["params"]["message"]]
+                if found:
+                    self.last_log = found[0]
                     return True
             time.sleep(0.02)
         return False
@@ -151,7 +156,7 @@ def check_ranges(symbols):
         check_ranges(symbol["children"])
 
 
-with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_") as temporary:
+with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_", ignore_cleanup_errors=True) as temporary:
     workspace = Path(temporary).resolve()
     header = workspace / "include" / "shapes.hpp"
     source = workspace / "src" / "shapes.cpp"
@@ -171,11 +176,42 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_") as temporary:
     generated.write_text("int GeneratedSymbol;\n", encoding="utf-8")
 
     # ---- capabilities, Outline and the workspace index (hierarchical client) ----------------
-    client = Client(workspace)
+    client = Client(workspace, options={"indexStatus": True}, progress=True)
     capabilities = client.initialize["result"]["capabilities"]
     assert capabilities.get("documentSymbolProvider") is True, capabilities
     assert capabilities.get("workspaceSymbolProvider") is True, capabilities
     assert client.wait_log("symbol index ready"), "the workspace symbol index never became ready"
+
+    # The scan is reported as work-done progress: create, begin, then end, all for one token.
+    def progress_messages(c):
+        with c.lock:
+            return list(c.inbox)
+    inbox = progress_messages(client)
+    created = [m for m in inbox if m.get("method") == "window/workDoneProgress/create"]
+    assert len(created) == 1, created
+    token = created[0]["params"]["token"]
+    events = [(m["params"]["value"]["kind"], m["params"]["value"]) for m in inbox
+              if m.get("method") == "$/progress" and m["params"]["token"] == token]
+    kinds = [kind for kind, _ in events]
+    assert kinds[0] == "begin" and kinds[-1] == "end", kinds
+    assert set(kinds[1:-1]) <= {"report"}, kinds
+    assert events[0][1]["title"] == "Heimdall: indexing symbols", events[0]
+    percentages = [value["percentage"] for kind, value in events if kind != "end"]
+    assert percentages == sorted(percentages) and all(0 <= p <= 100 for p in percentages), percentages
+    assert inbox.index(created[0]) < next(i for i, m in enumerate(inbox) if m.get("method") == "$/progress")
+
+    # The status-bar notification (opt-in) walks indexing -> ready with the file totals.
+    statuses = [m["params"] for m in inbox if m.get("method") == "heimdall/indexStatus"]
+    assert statuses and statuses[0]["state"] == "indexing" and statuses[0]["done"] == 0, statuses
+    last = statuses[-1]
+    assert (last["state"], last["done"]) == ("ready", last["total"]), statuses
+    assert all(isinstance(s["elapsedMs"], int) and s["elapsedMs"] >= 0 for s in statuses), statuses
+    assert [s["elapsedMs"] for s in statuses] == sorted(s["elapsedMs"] for s in statuses), statuses
+    progress_end = [m["params"]["value"] for m in inbox if m.get("method") == "$/progress"
+                    and m["params"]["value"]["kind"] == "end"]
+    assert progress_end and " files indexed in " in progress_end[0]["message"], progress_end
+    assert statuses[-1]["total"] >= 4, statuses
+    assert [s["done"] for s in statuses] == sorted(s["done"] for s in statuses), statuses
 
     # Outline: hierarchy, kinds and ranges.
     client.open(header, header_text)
@@ -221,10 +257,11 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_") as temporary:
                and item["containerName"] == "geo" and item["kind"] == SYMBOL_KIND["Struct"]
                for item in circles), circles
     assert any(same_file(item["location"]["uri"], source) and item["name"] == "Circle::Area"
-               for item in client.symbols("Area")), client.symbols("Area")
+               for item in client.symbols("Area")), (client.symbols("Area"), client.last_log)
     assert client.symbols("GeneratedSymbol") == []
     assert client.symbols("") == []
-    assert [item["name"] for item in client.symbols("main")] == ["main"]
+    main_hits = client.symbols("main")
+    assert [item["name"] for item in main_hits] == ["main"], (main_hits, client.last_log)
     exact_first = client.symbols("geo::Circle")
     assert exact_first and exact_first[0]["name"] == "Circle", exact_first
 
@@ -252,7 +289,8 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_") as temporary:
     assert client.symbols("BufferOnly", until=lambda result: not result) == []
     client.close(main)
     assert client.symbols("Renamed", until=lambda result: not result) == []
-    assert [item["name"] for item in client.symbols("main")] == ["main"]
+    main_again = client.symbols("main", until=bool)
+    assert [item["name"] for item in main_again] == ["main"], main_again
 
     # File-system events: created, changed and deleted files, and a deleted folder.
     late = workspace / "src" / "late.cpp"
@@ -294,6 +332,10 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_") as temporary:
 
     # ---- a client without hierarchical support gets SymbolInformation[] ---------------------
     flat_client = Client(workspace, hierarchical=False)
+    assert flat_client.wait_log("symbol index ready")
+    assert not [m for m in progress_messages(flat_client)
+                if m.get("method") in ("window/workDoneProgress/create", "$/progress",
+                                       "heimdall/indexStatus")],         "progress and status must only be sent to clients that ask for them"
     flat_client.open(header, header_text)
     flat = flat_client.outline(header)
     assert [item["name"] for item in flat] == ["geo", "Circle", "Circle", "Area", "radius", "Kind",

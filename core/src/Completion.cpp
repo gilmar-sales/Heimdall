@@ -6519,11 +6519,12 @@ namespace heimdall
 					{
 						const auto description = declaration->detail.find(declaration->label) ==
 							std::string::npos
-							? declaration->label + ": " + declaration->detail
-							: declaration->detail;
+						? declaration->label + ": " + declaration->detail
+						: declaration->detail;
 						hovered.documentation += "\n\nDeclaration: `" + description + "`.";
 					}
 				}
+
 				return hovered;
 			}
 		}

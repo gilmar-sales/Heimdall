@@ -93,6 +93,9 @@ As quatro fases foram implementadas. Onde a realidade divergiu do plano está an
   - `didClose` devolve o arquivo ao disco; `workspace/didChangeWatchedFiles` (a extensão registra
     o watcher) cobre criação, alteração, remoção e pastas removidas.
   - Opção `workspaceSymbols` (padrão `true`) liga/desliga o índice; o Outline não depende dela.
+- **Feedback de carregamento:** o servidor envia `window/workDoneProgress` (criar, `begin`, um `report` por
+  percentual, `end`) enquanto indexa o disco, só para clientes que declaram `window.workDoneProgress`;
+  a extensão mostra "starting language server" na barra de status até o `initialize` responder.
 - **Extensão:** watcher de fontes, opção `heimdall.workspaceSymbols`, README. Nenhum comando ou
   atalho próprio foi registrado.
 

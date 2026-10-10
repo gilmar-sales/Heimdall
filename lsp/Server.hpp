@@ -409,6 +409,11 @@ namespace heimdall::lsp
 		std::atomic<bool> m_workspace_scan  = true;
 		std::atomic<bool> m_workspace_symbols    = true;
 		std::atomic<bool> m_hierarchical_symbols = false;
+		// The client can show `$/progress` for tokens the server creates.
+		std::atomic<bool> m_work_done_progress = false;
+		// Opt-in (initializationOptions.indexStatus): `heimdall/indexStatus` notifications
+		// for the extension's status-bar item.
+		std::atomic<bool> m_index_status = false;
 		WorkspaceSymbolIndex m_symbol_index;
 		// Orders "buffer indexed" against "buffer closed" so a late index pass cannot
 		// resurrect the entry of a document that was closed meanwhile.

@@ -24,6 +24,33 @@ const SOURCE_FILE_GLOB = '**/*.{c,cc,cpp,cxx,c++,h,hh,hpp,hxx,inl,ipp,tpp,cppm,i
 let client: LanguageClient | undefined;
 let output: vscode.OutputChannel;
 let sourceWatcher: vscode.FileSystemWatcher | undefined;
+let indexStatus: vscode.StatusBarItem | undefined;
+
+interface IndexStatus {
+    state: 'indexing' | 'ready';
+    done: number;
+    total: number;
+    elapsedMs: number;
+}
+
+function formatElapsed(milliseconds: number): string {
+    return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
+function showIndexStatus(status: IndexStatus): void {
+    if (!indexStatus) {
+        return;
+    }
+    const elapsed = formatElapsed(status.elapsedMs);
+    if (status.state === 'indexing') {
+        indexStatus.text = `$(sync~spin) Heimdall: indexing ${status.done}/${status.total} (${elapsed})`;
+        indexStatus.tooltip = 'Heimdall is indexing the workspace for Go to Symbol in Workspace.';
+    } else {
+        indexStatus.text = `$(check) Heimdall: ${status.total} files indexed in ${elapsed}`;
+        indexStatus.tooltip = `Go to Symbol in Workspace is ready: ${status.total} files indexed in ${elapsed}.`;
+    }
+    indexStatus.show();
+}
 
 function findOnPath(executable: string): string | undefined {
     try {
@@ -214,6 +241,10 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         run: { command: stagedServerPath, args: [] },
         debug: { command: stagedServerPath, args: [] },
     };
+    indexStatus?.dispose();
+    indexStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+    indexStatus.name = 'Heimdall symbol index';
+    context.subscriptions.push(indexStatus);
     sourceWatcher?.dispose();
     sourceWatcher = vscode.workspace.createFileSystemWatcher(SOURCE_FILE_GLOB);
     context.subscriptions.push(sourceWatcher);
@@ -230,6 +261,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
             enableSemantic: configuration.get<boolean>('enableSemantic', false),
             workspaceDiagnostics: configuration.get<boolean>('workspaceDiagnostics', true),
             workspaceSymbols: configuration.get<boolean>('workspaceSymbols', true),
+            indexStatus: true,
             compileCommands,
             workspaceRoot,
         },
@@ -237,11 +269,19 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     };
 
     client = new LanguageClient('heimdall', 'Heimdall', serverOptions, clientOptions);
+    client.onNotification('heimdall/indexStatus', (status: IndexStatus) => showIndexStatus(status));
     client.setTrace(trace === 'verbose' ? Trace.Verbose : trace === 'messages' ? Trace.Messages : Trace.Off);
     context.subscriptions.push(client);
 
     try {
-        await client.start();
+        // The status-bar message covers the time until the server answers `initialize`; the
+        // server then reports its own background indexing as LSP work-done progress.
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: 'Heimdall: starting language server' },
+            async () => {
+                await client!.start();
+            },
+        );
         output.appendLine(`Started ${stagedServerPath}`);
     } catch (error) {
         const message = `Could not start heimdall-lsp at '${serverPath}': ${String(error)}`;

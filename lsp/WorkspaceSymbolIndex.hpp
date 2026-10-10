@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <shared_mutex>
+#include <mutex>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -120,7 +120,7 @@ namespace heimdall::lsp
         [[nodiscard]] std::size_t FileCount() const;
 
     private:
-        mutable std::shared_mutex mMutex;
+        mutable std::mutex mMutex;
         std::unordered_map<std::string, IndexedFilePtr> mDisk;
         std::unordered_map<std::string, IndexedFilePtr> mOpen;
     };

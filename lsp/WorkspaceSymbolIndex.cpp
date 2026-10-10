@@ -331,20 +331,20 @@ namespace heimdall::lsp
 
     void WorkspaceSymbolIndex::SetDisk(const std::string& key, IndexedFilePtr file)
     {
-        const std::unique_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         mDisk[key] = std::move(file);
     }
 
     void WorkspaceSymbolIndex::RemoveDisk(const std::string& key)
     {
-        const std::unique_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         mDisk.erase(key);
     }
 
     void WorkspaceSymbolIndex::RemoveDiskUnder(const std::string& key)
     {
         const std::string folder = key + '/';
-        const std::unique_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         std::erase_if(mDisk, [&](const auto& entry)
         {
             return entry.first == key || entry.first.starts_with(folder);
@@ -353,19 +353,19 @@ namespace heimdall::lsp
 
     void WorkspaceSymbolIndex::SetOpen(const std::string& key, IndexedFilePtr file)
     {
-        const std::unique_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         mOpen[key] = std::move(file);
     }
 
     void WorkspaceSymbolIndex::ClearOpen(const std::string& key)
     {
-        const std::unique_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         mOpen.erase(key);
     }
 
     std::size_t WorkspaceSymbolIndex::FileCount() const
     {
-        const std::shared_lock<std::shared_mutex> lock(mMutex);
+        const std::lock_guard<std::mutex> lock(mMutex);
         std::size_t count = mOpen.size();
         for (const auto& entry : mDisk)
         {
@@ -400,7 +400,7 @@ namespace heimdall::lsp
 
         std::vector<IndexedFilePtr> files;
         {
-            const std::shared_lock<std::shared_mutex> lock(mMutex);
+            const std::lock_guard<std::mutex> lock(mMutex);
             files.reserve(mOpen.size() + mDisk.size());
             for (const IndexedFilePtr& file : mOpen | std::views::values)
             {

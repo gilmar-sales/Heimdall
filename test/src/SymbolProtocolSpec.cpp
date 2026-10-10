@@ -271,3 +271,53 @@ TEST(SymbolProtocolSpec, WorkspaceSymbolsReportTheNameRangeAndContainer)
     EXPECT_EQ(Number(range["start"], "character"), 11u);
     EXPECT_EQ(Number(range["end"], "character"), 17u);
 }
+
+TEST(SymbolProtocolSpec, ProgressMessagesAreWellFormedJsonRpc)
+{
+    using namespace heimdall::lsp;
+
+    Parsed create;
+    ParseJson(create, WorkDoneProgressCreate("req-1", "tok\"en"));
+    EXPECT_EQ(Text(create.root, "method"), "window/workDoneProgress/create");
+    EXPECT_EQ(Text(create.root, "id"), "req-1");
+    EXPECT_EQ(Text(create.root["params"], "token"), "tok\"en");
+
+    Parsed begin;
+    ParseJson(begin, WorkDoneProgressBegin("t", "Indexing", "0/10 files"));
+    EXPECT_EQ(Text(begin.root, "method"), "$/progress");
+    EXPECT_EQ(Text(begin.root["params"]["value"], "kind"), "begin");
+    EXPECT_EQ(Text(begin.root["params"]["value"], "title"), "Indexing");
+    EXPECT_EQ(Text(begin.root["params"]["value"], "message"), "0/10 files");
+    EXPECT_EQ(Number(begin.root["params"]["value"], "percentage"), 0u);
+
+    Parsed report;
+    ParseJson(report, WorkDoneProgressReport("t", "5/10 files", 50));
+    EXPECT_EQ(Text(report.root["params"]["value"], "kind"), "report");
+    EXPECT_EQ(Number(report.root["params"]["value"], "percentage"), 50u);
+
+    Parsed end;
+    ParseJson(end, WorkDoneProgressEnd("t", "10 files indexed"));
+    EXPECT_EQ(Text(end.root["params"]["value"], "kind"), "end");
+    EXPECT_EQ(Text(end.root["params"]["value"], "message"), "10 files indexed");
+    EXPECT_EQ(Text(end.root["params"], "token"), "t");
+}
+
+TEST(SymbolProtocolSpec, ProgressPercentageNeverExceedsOneHundred)
+{
+    Parsed report;
+    ParseJson(report, heimdall::lsp::WorkDoneProgressReport("t", "over", 250));
+
+    EXPECT_EQ(Number(report.root["params"]["value"], "percentage"), 100u);
+}
+
+TEST(SymbolProtocolSpec, IndexStatusCarriesStateAndCounts)
+{
+    Parsed status;
+    ParseJson(status, heimdall::lsp::IndexStatusNotification("indexing", 12, 340, 1250));
+
+    EXPECT_EQ(Text(status.root, "method"), "heimdall/indexStatus");
+    EXPECT_EQ(Text(status.root["params"], "state"), "indexing");
+    EXPECT_EQ(Number(status.root["params"], "done"), 12u);
+    EXPECT_EQ(Number(status.root["params"], "total"), 340u);
+    EXPECT_EQ(Number(status.root["params"], "elapsedMs"), 1250u);
+}

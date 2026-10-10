@@ -231,4 +231,78 @@ namespace heimdall::lsp
         out += ']';
     }
 
+    namespace
+    {
+
+        std::string ProgressHead(std::string_view token, std::string_view kind)
+        {
+            std::string out = "{\"jsonrpc\":\"2.0\",\"method\":\"$/progress\",\"params\":{\"token\":";
+            QuoteJson(token, out);
+            out += ",\"value\":{\"kind\":\"";
+            out += kind;
+            out += '"';
+            return out;
+        }
+
+        void AppendProgressMessage(std::string_view message, std::string& out)
+        {
+            out += ",\"message\":";
+            QuoteJson(message, out);
+        }
+
+    } // namespace
+
+    std::string WorkDoneProgressCreate(std::string_view requestId, std::string_view token)
+    {
+        std::string out = "{\"jsonrpc\":\"2.0\",\"id\":";
+        QuoteJson(requestId, out);
+        out += ",\"method\":\"window/workDoneProgress/create\",\"params\":{\"token\":";
+        QuoteJson(token, out);
+        out += "}}";
+        return out;
+    }
+
+    std::string WorkDoneProgressBegin(std::string_view token,
+                                      std::string_view title,
+                                      std::string_view message)
+    {
+        std::string out = ProgressHead(token, "begin");
+        out += ",\"title\":";
+        QuoteJson(title, out);
+        AppendProgressMessage(message, out);
+        out += ",\"percentage\":0,\"cancellable\":false}}}";
+        return out;
+    }
+
+    std::string WorkDoneProgressReport(std::string_view token,
+                                       std::string_view message,
+                                       unsigned percentage)
+    {
+        constexpr unsigned kMaxPercentage = 100;
+        std::string out = ProgressHead(token, "report");
+        AppendProgressMessage(message, out);
+        out += ",\"percentage\":" + std::to_string(std::min(percentage, kMaxPercentage)) + "}}}";
+        return out;
+    }
+
+    std::string IndexStatusNotification(std::string_view state,
+                                        std::size_t done,
+                                        std::size_t total,
+                                        std::uint64_t elapsedMs)
+    {
+        std::string out = "{\"jsonrpc\":\"2.0\",\"method\":\"heimdall/indexStatus\",\"params\":{\"state\":";
+        QuoteJson(state, out);
+        out += ",\"done\":" + std::to_string(done) + ",\"total\":" + std::to_string(total) +
+               ",\"elapsedMs\":" + std::to_string(elapsedMs) + "}}";
+        return out;
+    }
+
+    std::string WorkDoneProgressEnd(std::string_view token, std::string_view message)
+    {
+        std::string out = ProgressHead(token, "end");
+        AppendProgressMessage(message, out);
+        out += "}}}";
+        return out;
+    }
+
 } // namespace heimdall::lsp

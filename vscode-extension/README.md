@@ -80,8 +80,10 @@ out-of-line definitions as `Type::Member`), constructors, destructors, operators
 variables, `using` aliases, `typedef`s and concepts. Block-local variables and function
 parameters are not listed, nor are forward declarations and `friend` declarations.
 
-Workspace symbols come from an index built in the background after start-up (logged as
-`symbol index ready`); a search typed before that finishes sees the files indexed so far.
+Workspace symbols come from an index built in the background after start-up. VS Code shows
+it as a progress notification (*Heimdall: indexing symbols*, with the file count), and the
+status bar reads *Heimdall: starting language server* until the server is up. A search typed
+before the indexing ends sees the files indexed so far.
 
 - Files under `build*`, `cmake-build*`, `out`, `node_modules`, `_deps`, `vcpkg_installed` and
   hidden folders are skipped, as are files over 2 MiB and anything past 20 000 files.

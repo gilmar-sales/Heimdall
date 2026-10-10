@@ -34,6 +34,22 @@ namespace heimdall::lsp
 
 		std::uint64_t PositionNumber(simdjson::dom::object position, const char* key);
 
+		// "850 ms" below a second, "12.3 s" above.
+		std::string FormatDuration(std::uint64_t milliseconds)
+		{
+			constexpr std::uint64_t kMillisecondsPerSecond = 1000;
+			constexpr std::uint64_t kTenthsPerSecond       = 10;
+			if (milliseconds < kMillisecondsPerSecond)
+			{
+				return std::to_string(milliseconds) + " ms";
+			}
+
+			const std::uint64_t tenths =
+				milliseconds * kTenthsPerSecond / kMillisecondsPerSecond;
+			return std::to_string(tenths / kTenthsPerSecond) + "." +
+				std::to_string(tenths % kTenthsPerSecond) + " s";
+		}
+
 		// Interactive handlers + two for background work (compiler probing).
 		// HEIMDALL_LSP_THREADS overrides the default when set (clamped to 2..16),
 		// so constrained CI boxes and large workstations can both meet <50ms.
@@ -645,6 +661,17 @@ namespace heimdall::lsp
 			}
 		}
 
+		simdjson::dom::object window_capabilities;
+		if (has_params && GetObject(params, "capabilities", capabilities) &&
+			GetObject(capabilities, "window", window_capabilities))
+		{
+			bool progress = false;
+			if (!window_capabilities["workDoneProgress"].get_bool().get(progress))
+			{
+				m_work_done_progress.store(progress, std::memory_order_relaxed);
+			}
+		}
+
 		simdjson::dom::object text_document_capabilities, symbol_capabilities;
 		if (has_params && GetObject(params, "capabilities", capabilities) &&
 			GetObject(capabilities, "textDocument", text_document_capabilities) &&
@@ -758,6 +785,12 @@ namespace heimdall::lsp
 		if (has_options && !options["workspaceSymbols"].get_bool().get(symbols))
 		{
 			m_workspace_symbols.store(symbols, std::memory_order_relaxed);
+		}
+
+		bool index_status = false;
+		if (has_options && !options["indexStatus"].get_bool().get(index_status))
+		{
+			m_index_status.store(index_status, std::memory_order_relaxed);
 		}
 
 		bool enabled = false;
@@ -3756,7 +3789,19 @@ namespace heimdall::lsp
 		const std::string key = FileKey(file);
 		try
 		{
+			// A file that was just written can stay locked for a moment (editor save, virus
+			// scan); give an existing one a few tries before dropping it from the index.
+			constexpr int kReadAttempts = 4;
+			constexpr std::chrono::milliseconds kReadRetryDelay {25};
 			auto contents = ReadWorkspaceFile(file);
+			std::error_code exists_error;
+			for (int attempt = 1; !contents && attempt < kReadAttempts &&
+				std::filesystem::exists(file, exists_error) &&!stop.stop_requested(); ++attempt)
+			{
+				std::this_thread::sleep_for(kReadRetryDelay);
+				contents = ReadWorkspaceFile(file);
+			}
+
 			if (!contents)
 			{
 				m_symbol_index.RemoveDisk(key);
@@ -3796,6 +3841,13 @@ namespace heimdall::lsp
 			return;
 		}
 
+		const auto started = std::chrono::steady_clock::now();
+		const auto elapsed_ms = [&started]
+		{
+			return static_cast<std::uint64_t>(
+				std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - started).count());
+		};
 		const std::vector<std::filesystem::path> files = DiscoverWorkspaceSources(root, stop);
 		// Reading files dominates, so a few helpers overlap the I/O; the pool that serves
 		// requests is left alone, and shutdown never waits for this scan.
@@ -3804,6 +3856,28 @@ namespace heimdall::lsp
 		const std::size_t threads = std::clamp<std::size_t>(
 			std::thread::hardware_concurrency() / kCoresPerIndexThread, 1, kMaxIndexThreads);
 		std::atomic<std::size_t> next {0};
+		std::atomic<std::size_t> done {0};
+		std::mutex report_mutex;
+		std::size_t reported = 0;
+		const bool show_progress = m_work_done_progress.load(std::memory_order_relaxed) &&
+			!files.empty();
+		const bool show_status = m_index_status.load(std::memory_order_relaxed);
+		if (show_status)
+		{
+			Send(IndexStatusNotification("indexing", 0, files.size(), elapsed_ms()));
+		}
+
+		const std::string token = "heimdall/symbol-index";
+		if (show_progress)
+		{
+			Send(WorkDoneProgressCreate(token, token));
+			Send(WorkDoneProgressBegin(token, "Heimdall: indexing symbols",
+				"0/" + std::to_string(files.size()) + " files"));
+		}
+
+		// One report per percent at most: a 20 000-file scan sends about a hundred messages.
+		constexpr std::size_t kPercent = 100;
+		const std::size_t report_every = std::max<std::size_t>(1, files.size() / kPercent);
 		const auto drain = [&]
 		{
 			// Relaxed is enough: the counter only hands out distinct file indexes, and each
@@ -3813,6 +3887,30 @@ namespace heimdall::lsp
 				i = next.fetch_add(1, std::memory_order_relaxed))
 			{
 				IndexDiskSymbols(files[i], stop);
+				const std::size_t finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
+				if ((show_status || show_progress) && finished % report_every == 0 &&
+					finished < files.size())
+				{
+					// Helpers finish out of order: only ever report a larger count than the last.
+					const std::lock_guard<std::mutex> lock(report_mutex);
+					if (finished > reported)
+					{
+						reported = finished;
+						if (show_status)
+						{
+							Send(IndexStatusNotification("indexing", finished, files.size(),
+								elapsed_ms()));
+						}
+
+						if (show_progress)
+						{
+							Send(WorkDoneProgressReport(token,
+								std::to_string(finished) + "/" + std::to_string(files.size()) +
+								" files (" + FormatDuration(elapsed_ms()) + ")",
+								static_cast<unsigned>(finished * kPercent / files.size())));
+						}
+					}
+				}
 			}
 		};
 		{
@@ -3824,6 +3922,17 @@ namespace heimdall::lsp
 
 			drain();
 		}
+		if (show_status)
+		{
+			Send(IndexStatusNotification("ready", files.size(), files.size(), elapsed_ms()));
+		}
+
+		if (show_progress)
+		{
+			Send(WorkDoneProgressEnd(token, std::to_string(files.size()) + " files indexed in " +
+				FormatDuration(elapsed_ms())));
+		}
+
 		if (stop.stop_requested())
 		{
 			return;
@@ -3831,7 +3940,8 @@ namespace heimdall::lsp
 
 		std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
 		"logMessage\",\"params\":{\"type\":3,\"message\":";
-		QuoteJson("Heimdall: symbol index ready: " + std::to_string(files.size()) + " files",
+		QuoteJson("Heimdall: symbol index ready: " + std::to_string(files.size()) + " files in " +
+			FormatDuration(elapsed_ms()),
 			notification);
 		notification += "}}";
 		Send(notification);
