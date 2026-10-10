@@ -2403,7 +2403,9 @@ namespace heimdall
                AnalyzeSlicing(types),
                AnalyzeImplicitConversion(model),
                AnalyzeDesignatedInitOrder(model),
-               AnalyzeIntegerToPointer(model) })
+               AnalyzeIntegerToPointer(model),
+               AnalyzeCallArguments(model),
+               AnalyzeCallArgumentTypes(types) })
         {
             all.insert(all.end(), part.begin(), part.end());
         }

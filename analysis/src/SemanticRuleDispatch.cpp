@@ -57,6 +57,8 @@ namespace heimdall::detail
                     &SemanticRules::AnalyzeVirtualCallInConstructor },
             Entry { RuleId::DesignatedInitOrder, &SemanticRules::AnalyzeDesignatedInitOrder },
             Entry { RuleId::NoIntegerToPointer, &SemanticRules::AnalyzeIntegerToPointer },
+            Entry { RuleId::CallArgumentCount, &SemanticRules::AnalyzeCallArguments },
+            Entry { RuleId::CallArgumentType, &SemanticRules::AnalyzeCallArgumentTypes },
             Entry { RuleId::ModernizeFinal, &SemanticRules::AnalyzeFinal },
             Entry { RuleId::IncludeWhatYouUse, &SemanticRules::AnalyzeIncludeWhatYouUse },
             Entry { RuleId::DocRequireComment, &SemanticRules::AnalyzeRequireDocComment },

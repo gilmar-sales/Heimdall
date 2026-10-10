@@ -258,7 +258,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         ],
         synchronize: { configurationSection: 'heimdall', fileEvents: sourceWatcher },
         initializationOptions: {
-            enableSemantic: configuration.get<boolean>('enableSemantic', false),
+            enableSemantic: configuration.get<boolean>('enableSemantic', true),
             workspaceDiagnostics: configuration.get<boolean>('workspaceDiagnostics', true),
             workspaceSymbols: configuration.get<boolean>('workspaceSymbols', true),
             indexStatus: true,

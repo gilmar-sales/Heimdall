@@ -81,6 +81,24 @@ namespace
 
 } // namespace
 
+TEST(Typer, TypesUnnamedPrototypeParametersAndPreservesReferences)
+{
+    const Typed typed("void f(int*, const int&, std::string desc);");
+    const auto& nodes = typed.tree.NodesSoA();
+
+    std::vector<std::string> spellings;
+    for (std::uint32_t node = 0; node < nodes.size(); ++node)
+    {
+        if (nodes.Kind(node) == heimdall::GrammarKind::ParameterDeclaration)
+        {
+            spellings.push_back(typed.types.Spell(typed.types.ParameterType(node)));
+        }
+    }
+
+    EXPECT_EQ(spellings, (std::vector<std::string> { "int*", "const int&", "std::string" }));
+    EXPECT_EQ(typed.types.ParameterType(heimdall::kNone), heimdall::TypeTable::Unknown);
+}
+
 // ---- TypeTable -----------------------------------------------------------------
 
 TEST(TypeTable, HashConsesEqualTypes)

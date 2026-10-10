@@ -12,13 +12,13 @@ def frame(message):
     return f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
 
 
-def run(cwd, initialize_params):
+def run(cwd, initialize_params, source="auto p = NULL;\n"):
     source_uri = (cwd / "input.cpp").as_uri()
     messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": initialize_params},
         {"jsonrpc": "2.0", "method": "initialized", "params": {}},
         {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
-            "uri": source_uri, "languageId": "cpp", "version": 1, "text": "auto p = NULL;\n"}}},
+            "uri": source_uri, "languageId": "cpp", "version": 1, "text": source}}},
         {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": {}},
         {"jsonrpc": "2.0", "method": "exit"},
     ]
@@ -52,3 +52,33 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_config_") as temporary:
         '{"root":true,"rules":{"cpp/no-null":"off"}}', encoding="utf-8")
     diagnostics = run(cwd, {})
     assert not any(item["code"] == "cpp/no-null" for item in diagnostics), diagnostics
+
+    diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
+                      "void test_method(int a, int b, std::string desc) {}\n"
+                      "void g() { test_method(1, 2); }\n")
+    calls = [item for item in diagnostics if item["code"] == "cpp/call-argument-count"]
+    assert len(calls) == 1, diagnostics
+    assert calls[0]["severity"] == 1, calls
+    assert calls[0]["range"] == {"start": {"line": 1, "character": 11},
+                                 "end": {"line": 1, "character": 22}}, calls
+
+    diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
+                      "void test_method(int a, int b, std::string desc) {}\n"
+                      "void g() { test_method(1, 2, 1); }\n")
+    calls = [item for item in diagnostics if item["code"] == "cpp/call-argument-type"]
+    assert len(calls) == 1 and calls[0]["severity"] == 1, diagnostics
+    assert calls[0]["range"] == {"start": {"line": 1, "character": 29},
+                                 "end": {"line": 1, "character": 30}}, calls
+
+    (cwd / ".heimdall.json").write_text(
+        '{"root":true,"rules":{"cpp/call-argument-count":"warning"}}', encoding="utf-8")
+    diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
+                      "void f(int); void g() { f(); }\n")
+    calls = [item for item in diagnostics if item["code"] == "cpp/call-argument-count"]
+    assert len(calls) == 1 and calls[0]["severity"] == 2, diagnostics
+
+    (cwd / ".heimdall.json").write_text(
+        '{"root":true,"rules":{"cpp/call-argument-count":"off"}}', encoding="utf-8")
+    diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
+                      "void f(int); void g() { f(); }\n")
+    assert not any(item["code"] == "cpp/call-argument-count" for item in diagnostics), diagnostics

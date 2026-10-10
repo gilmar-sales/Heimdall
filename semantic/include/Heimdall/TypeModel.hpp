@@ -207,6 +207,14 @@ namespace heimdall
             return node < m_node_type.size() ? m_node_type[node] : TypeTable::Unknown;
         }
 
+        /** Declared type of a parameter node, including unnamed/prototype parameters. */
+        [[nodiscard]] TypeId ParameterType(std::uint32_t node) const noexcept
+        {
+            return node < m_node_type.size() &&
+                           m_model->Tree().NodesSoA().Kind(node) == GrammarKind::ParameterDeclaration
+                       ? m_node_type[node] : TypeTable::Unknown;
+        }
+
         // MemberExpression nodes: the resolved field (`Variable`), or kNone when
         // the receiver type is unknown, the member is unresolved or a method, or
         // the node is not a member access. Methods are deliberately excluded:

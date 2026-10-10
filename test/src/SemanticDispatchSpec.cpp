@@ -131,7 +131,7 @@ namespace
                 rule.id == RuleId::ApiMissingNodiscard || rule.id == RuleId::ApiPassByValue ||
                 rule.id == RuleId::ApiPassByConstReference ||
                 rule.id == RuleId::ApiConstCorrectness || rule.id == RuleId::ApiUnsafeDowncast ||
-                rule.id == RuleId::ApiSlicing;
+                rule.id == RuleId::ApiSlicing || rule.id == RuleId::CallArgumentType;
             EXPECT_EQ(context.Snapshot().Metrics().bind_count, 1);
             EXPECT_EQ(context.Snapshot().Metrics().type_count, typed ? 1 : 0);
             EXPECT_EQ(context.Snapshot().Metrics().project_index_count, 0);

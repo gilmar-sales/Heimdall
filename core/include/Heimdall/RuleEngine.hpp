@@ -67,6 +67,8 @@ namespace heimdall
         ApiVirtualCallInConstructor,
         DesignatedInitOrder,
         NoIntegerToPointer,
+        CallArgumentCount,
+        CallArgumentType,
         DocRequireComment,
         DocDoxygenStyle,
         // Experimental external rules use their string code as identity.

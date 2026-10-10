@@ -30,6 +30,12 @@ namespace heimdall
     class SemanticRules
     {
       public:
+        /** Reports argument-count mismatches for locally resolved non-template functions. */
+        [[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArguments(const SemanticModel& model);
+
+        /** Reports proven argument-type mismatches, accepting known implicit conversions. */
+        [[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(const TypeModel& types);
+
         // cpp/modernize-override: a member function that overrides a virtual
         // function of a base class declared in this translation unit but does not
         // say `override` (or `final`). Destructors are not reported yet.

@@ -879,7 +879,7 @@ TEST(ProjectRulesSpec, RulesAreInTheCatalogAndCanBeSwitchedOff)
         const auto* info = heimdall::FindRuleByCode(code);
         ASSERT_NE(info, nullptr);
         EXPECT_EQ(info->category, "cpp");
-        EXPECT_EQ(info->layer, "semântica");
+        EXPECT_EQ(info->layer, "semantic");
     }
 
     Project                        project;

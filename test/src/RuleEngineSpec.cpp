@@ -445,7 +445,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto& catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 49);
+    ASSERT_EQ(catalog.size(), 51);
     for (const auto& info : catalog)
     {
         EXPECT_FALSE(info.code.empty());
@@ -464,9 +464,9 @@ TEST(RuleEngineSpec, CatalogDescribesEveryRule)
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-empty-catch")->autofix, false);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-duplicate-include")->autofix, false);
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->autofix, true);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "sintática");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-using")->layer, "syntactic");
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->autofix, true);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->layer, "diretivas");
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/sort-includes")->layer, "directives");
     EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-override")->autofix, true);
 }
 

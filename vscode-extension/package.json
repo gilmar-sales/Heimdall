@@ -67,8 +67,8 @@
         },
         "heimdall.enableSemantic": {
           "type": "boolean",
-          "default": false,
-          "description": "Enable simple local semantic diagnostics using compile_commands.json."
+          "default": true,
+          "description": "Enable semantic diagnostics (on by default). Local checks work without compile_commands.json; the database provides compiler options and project context."
         },
         "heimdall.workspaceDiagnostics": {
           "type": "boolean",

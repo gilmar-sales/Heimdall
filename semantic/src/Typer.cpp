@@ -553,6 +553,8 @@ namespace heimdall
 
         TypeId VariableType(SymbolId symbol);
 
+        TypeId ParameterType(std::uint32_t node);
+
         TypeId ReturnType(SymbolId symbol);
 
         TypeId AliasTarget(SymbolId symbol);
@@ -1404,6 +1406,44 @@ namespace heimdall
         }
 
         return type;
+    }
+
+    TypeId TyperImpl::ParameterType(std::uint32_t node)
+    {
+        const auto spec = FindChild(node, GrammarKind::TypeSpecifier);
+        if (spec == kNone)
+        {
+            return TypeTable::Unknown;
+        }
+        const auto [begin, end] = NodeSig(spec);
+        auto base = ParseBase(begin, end, m_model.ScopeOfNode(node), m_nodes.FirstToken(node));
+        if (!base.ok || base.is_auto)
+        {
+            return TypeTable::Unknown;
+        }
+        if (base.next < end)
+        {
+            base.type = ApplyOperators(base.type, base.next, end);
+        }
+        const auto declarator = FindChild(node, GrammarKind::Declarator);
+        if (declarator != kNone && FindChild(declarator, GrammarKind::DeclaredName) == kNone)
+        {
+            const auto [parameterBegin, parameterEnd] = NodeSig(node);
+            auto typeEnd = parameterEnd;
+            for (auto position = parameterBegin; position < parameterEnd; ++position)
+            {
+                if (At(position) == Tok::Eq)
+                {
+                    typeEnd = position;
+                    break;
+                }
+            }
+            return ParseTypeTokens(parameterBegin, typeEnd, m_model.ScopeOfNode(node),
+                                   m_nodes.FirstToken(node));
+        }
+        return declarator == kNone ? base.type
+            : DeclaratorType(base, declarator, SymbolKind::Parameter,
+                             TypeTable::Unknown, Category::Unknown);
     }
 
     TypeId TyperImpl::VariableType(SymbolId symbol)
@@ -2574,6 +2614,9 @@ namespace heimdall
         {
             switch (m_nodes.Kind(node))
             {
+                case GrammarKind::ParameterDeclaration:
+                    m_out.m_node_type[node] = ParameterType(node);
+                    break;
                 case GrammarKind::LiteralExpression:
                 case GrammarKind::IdentifierExpression:
                 case GrammarKind::ParenthesizedExpression:

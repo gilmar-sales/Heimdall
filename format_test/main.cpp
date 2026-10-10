@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <string>
 
 struct Node
 {
@@ -8,6 +9,25 @@ struct Node
 
 auto sizeOfNode  = sizeof(Node);
 auto alignOfNode = alignof(Node);
+
+/**
+ * @brief Describe test_method.
+ *
+ * @param a Describe this parameter.
+ * @param b Describe this parameter.
+ * @param desc Describe this parameter.
+ */
+void test_method(int a, int b, std::string desc)
+{
+	auto value = a + b;
+}
+
+void unreacheable_code() {
+	return;
+
+	auto unreacheable_variable = 10;
+	unreacheable_variable++;
+}
 
 int main()
 {
@@ -19,6 +39,7 @@ int main()
 	{
 		.next = next,.value = 20
 	};
+
 
 	return 0;
 }

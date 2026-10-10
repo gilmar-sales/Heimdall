@@ -991,7 +991,8 @@ namespace heimdall::lsp
 			AppendPosition(start, message);
 			message += ",\"end\":";
 			AppendPosition(end, message);
-			message += "},\"severity\":2,\"code\":";
+			message += diagnostic.severity == heimdall::Severity::Error
+				? "},\"severity\":1,\"code\":" : "},\"severity\":2,\"code\":";
 			QuoteJson(diagnostic.code, message);
 			message += ",\"source\":\"heimdall\",\"message\":";
 			QuoteJson(diagnostic.message, message);
@@ -1576,7 +1577,9 @@ namespace heimdall::lsp
 		};
 		for (const auto& diagnostic : diagnostics)
 		{
-			append(diagnostic.offset, diagnostic.length, 2, diagnostic.code, diagnostic.message);
+			append(diagnostic.offset, diagnostic.length,
+				diagnostic.severity == heimdall::Severity::Error ? 1 : 2,
+				diagnostic.code, diagnostic.message);
 		}
 
 		for (const auto& diagnostic : semantic)

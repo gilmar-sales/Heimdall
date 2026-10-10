@@ -117,10 +117,17 @@ falls back to `heimdall-lsp` on `PATH`. Override the path with the VS Code setti
 global storage and runs the copy, so rebuilding while VS Code is open never hits
 a Windows file lock — just rebuild and Reload Window to pick the new binary up.
 
-Optional local semantic diagnostics can be enabled with `heimdall.enableSemantic`.
+Semantic diagnostics are enabled by default. Set `heimdall.enableSemantic` to `false`
+to disable them. Local checks, including argument-count errors for functions declared
+in the same file, work without a compile database.
 Set `heimdall.compileCommands` to the database path (default:
 `build/compile_commands.json`); the extension passes it to the server during
 initialization.
+
+To test an unreleased server fix, set `heimdall.serverPath` to the absolute path of
+your rebuilt `build/lsp/heimdall-lsp` and Reload Window. Otherwise, a release install
+can take precedence over the local build. An explicitly saved
+`heimdall.enableSemantic: false` still disables semantic diagnostics.
 
 ## Build the extension
 

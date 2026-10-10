@@ -33,6 +33,7 @@ add_executable(Tests_run
   src/SemanticRulesSpec.cpp
   src/ApiRulesSpec.cpp
   src/DesignatedInitSpec.cpp
+  src/CallArgumentsSpec.cpp
   src/DocumentationSpec.cpp
   src/SemanticModernizeSpec.cpp
   src/ModernizeCxxSpec.cpp

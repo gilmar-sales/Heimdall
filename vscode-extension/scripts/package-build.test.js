@@ -3,6 +3,16 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const test = require('node:test');
 const esbuild = require('esbuild');
+const fs = require('node:fs');
+
+test('semantic diagnostics are enabled by default in settings and client initialization', () => {
+    const extensionDir = path.resolve(__dirname, '..');
+    const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'package.json'), 'utf8'));
+    const source = fs.readFileSync(path.join(extensionDir, 'src/extension.ts'), 'utf8');
+
+    assert.equal(manifest.contributes.configuration.properties['heimdall.enableSemantic'].default, true);
+    assert.match(source, /enableSemantic:\s*configuration\.get<boolean>\('enableSemantic', true\)/);
+});
 
 test('extension compiles with the language client node export', () => {
     const extensionDir = path.resolve(__dirname, '..');

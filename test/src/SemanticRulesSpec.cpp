@@ -274,6 +274,6 @@ TEST(ModernizeOverride, IsRegisteredInTheRuleCatalog)
     const auto* info = heimdall::FindRuleByCode("cpp/modernize-override");
     ASSERT_NE(info, nullptr);
     EXPECT_EQ(info->id, heimdall::RuleId::ModernizeOverride);
-    EXPECT_EQ(info->layer, "semântica");
+    EXPECT_EQ(info->layer, "semantic");
     EXPECT_TRUE(heimdall::IsKnownRuleCode("cpp/modernize-override"));
 }
