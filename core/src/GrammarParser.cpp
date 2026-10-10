@@ -2496,11 +2496,29 @@ namespace heimdall
             std::size_t root        = Invalid;
             const auto  first       = Text(pos);
             if (first == "+" || first == "-" || first == "!" || first == "~" || first == "*" ||
-                first == "&" || first == "++" || first == "--" || first == "co_await")
+                first == "&" || first == "++" || first == "--" || first == "co_await" ||
+                first == "^^")
             {
                 root = Add(GrammarKind::UnaryExpression, begin, begin + 1, parent);
                 ++pos;
-                pos = ParseExpression(pos, end, root, kFourteen);
+                if (first == "^^" && pos < end &&
+                    (IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile") ||
+                     Is(pos, "signed") || Is(pos, "unsigned")))
+                {
+                    const auto type_begin = pos;
+                    while (pos < end &&
+                           (IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile") ||
+                            Is(pos, "signed") || Is(pos, "unsigned") || Is(pos, "*") ||
+                            Is(pos, "&") || Is(pos, "&&")))
+                    {
+                        ++pos;
+                    }
+                    Add(GrammarKind::TypeSpecifier, type_begin, pos, root);
+                }
+                else
+                {
+                    pos = ParseExpression(pos, end, root, kFourteen);
+                }
                 SetNodeRange(root, begin, pos);
                 prefix_kind = GrammarKind::UnaryExpression;
             }
@@ -2526,6 +2544,15 @@ namespace heimdall
                 root        = node;
                 prefix_kind = GrammarKind::ParenthesizedExpression;
                 (void) node;
+            }
+            else if (first == "[" && Is(pos + 1, ":") && m_match[pos] != Invalid &&
+                     m_match[pos] < end && Is(m_match[pos] - 1, ":"))
+            {
+                const auto close = m_match[pos];
+                root             = Add(GrammarKind::SpliceExpression, pos, close + 1, parent);
+                ParseExpression(pos + 2, close - 1, root);
+                pos         = close + 1;
+                prefix_kind = GrammarKind::SpliceExpression;
             }
             else if (first == "[" && m_match[pos] != Invalid && m_match[pos] < end)
             {
@@ -2873,6 +2900,21 @@ namespace heimdall
             return pos;
         }
 
+        std::size_t ParseStaticAssert(std::size_t pos, std::size_t end, std::size_t parent)
+        {
+            if (!Is(pos + 1, "(") || m_match[pos + 1] == Invalid ||
+                m_match[pos + 1] >= end || !Is(m_match[pos + 1] + 1, ";"))
+            {
+                return pos;
+            }
+
+            const auto close = m_match[pos + 1];
+            const auto node  = Add(GrammarKind::StaticAssertDeclaration, pos, close + kTwo, parent);
+            const auto comma = FindComma(pos + kTwo, close);
+            ParseExpression(pos + kTwo, comma, node);
+            return close + kTwo;
+        }
+
         void ParseStatement(std::size_t& pos, std::size_t end, std::size_t parent)
         {
             const auto start = pos;
@@ -2892,6 +2934,16 @@ namespace heimdall
             {
                 ParseCompound(pos, end, parent);
                 return;
+            }
+
+            if (Is(pos, "static_assert"))
+            {
+                const auto next = ParseStaticAssert(pos, end, parent);
+                if (next != pos)
+                {
+                    pos = next;
+                    return;
+                }
             }
 
             const auto keyword = Text(pos);
@@ -4105,32 +4157,50 @@ namespace heimdall
                     }
                 }
 
-                auto       declaration_start = pos;
-                const bool is_template       = Is(pos, "template");
-                if (is_template)
+                const auto instantiation_head =
+                    Is(pos, "extern") && Is(pos + 1, "template") ? pos + 1 : pos;
+                if (Is(instantiation_head, "template") &&
+                    !Is(instantiation_head + 1, "<"))
                 {
-                    auto angle = pos + 1;
-                    while (angle < end && !Is(angle, "<"))
+                    const auto semi = FindSemicolon(instantiation_head, end);
+                    if (semi < end)
                     {
-                        ++angle;
+                        Add(GrammarKind::Declaration, pos, semi + 1, parent);
+                        pos = semi + 1;
+                        continue;
                     }
+                }
 
-                    if (angle == end)
-                    {
-                        m_tree.m_diagnostics.push_back({ m_tree.Tokens()[m_sig[pos]].offset,
-                                                         "expected template parameter list" });
-                        Add(GrammarKind::Error, pos, end, parent);
-                        break;
-                    }
+                auto declaration_start = pos;
+                if (Is(declaration_start, "export") &&
+                    Is(declaration_start + 1, "template"))
+                {
+                    ++declaration_start;
+                }
 
-                    std::size_t depth = 0;
+                const bool is_template = Is(declaration_start, "template") &&
+                                         Is(declaration_start + 1, "<");
+                bool malformed_template_head = false;
+                while (Is(declaration_start, "template") &&
+                       Is(declaration_start + 1, "<"))
+                {
+                    const auto open = declaration_start + 1;
+                    std::size_t depth = 1;
+                    auto angle = open + 1;
                     for (; angle < end; ++angle)
                     {
+                        if ((Is(angle, "(") || Is(angle, "[") || Is(angle, "{")) &&
+                            m_match[angle] != Invalid && m_match[angle] > angle)
+                        {
+                            angle = m_match[angle];
+                            continue;
+                        }
+
                         if (Is(angle, "<"))
                         {
                             ++depth;
                         }
-                        else if (Is(angle, ">") && depth != 0)
+                        else if (Is(angle, ">"))
                         {
                             if (--depth == 0)
                             {
@@ -4138,7 +4208,7 @@ namespace heimdall
                                 break;
                             }
                         }
-                        else if (Is(angle, ">>") && depth != 0)
+                        else if (Is(angle, ">>"))
                         {
                             depth = depth > 1 ? depth - kTwo : 0;
                             if (depth == 0)
@@ -4149,15 +4219,48 @@ namespace heimdall
                         }
                     }
 
-                    declaration_start = angle;
-                    if (declaration_start >= end)
+                    if (depth != 0)
                     {
                         m_tree.m_diagnostics.push_back(
-                            { m_tree.Tokens()[m_sig[start]].offset,
-                              "expected declaration after template parameter list" });
-                        Add(GrammarKind::Error, start, end, parent);
+                            { m_tree.Tokens()[m_sig[open]].offset,
+                              "expected '>' to close template parameter list" });
+                        const auto semi = FindSemicolon(pos, end);
+                        const auto recovery = semi < end ? semi + 1 : end;
+                        Add(GrammarKind::Error, pos, recovery, parent);
+                        pos = recovery;
+                        malformed_template_head = true;
                         break;
                     }
+
+                    declaration_start = angle;
+                }
+
+                if (malformed_template_head)
+                {
+                    if (pos >= end)
+                    {
+                        break;
+                    }
+                    continue;
+                }
+
+                if (Is(pos, "static_assert"))
+                {
+                    const auto next = ParseStaticAssert(pos, end, parent);
+                    if (next != pos)
+                    {
+                        pos = next;
+                        continue;
+                    }
+                }
+
+                if (is_template && declaration_start >= end)
+                {
+                    m_tree.m_diagnostics.push_back(
+                        { m_tree.Tokens()[m_sig[start]].offset,
+                          "expected declaration after template parameter list" });
+                    Add(GrammarKind::Error, start, end, parent);
+                    break;
                 }
 
                 std::size_t leading_req     = Invalid;
@@ -4412,6 +4515,17 @@ namespace heimdall
                         else if (declaration_kind != GrammarKind::UsingDeclaration)
                         {
                             AddDeclarationDetails(declaration_start, semi, declaration);
+                        }
+                        else
+                        {
+                            for (auto i = declaration_start + 1; i < semi; ++i)
+                            {
+                                if (Is(i, "=") && Is(i + 1, "[") && Is(i + 2, ":"))
+                                {
+                                    ParseExpression(i + 1, semi, declaration);
+                                    break;
+                                }
+                            }
                         }
                     }
 

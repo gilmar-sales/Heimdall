@@ -79,6 +79,21 @@ TEST(PreprocessorSpec, EvaluatesIntegerComparisonsInIfExpressions)
     EXPECT_TRUE(result.diagnostics.empty());
 }
 
+TEST(PreprocessorSpec, IgnoresCommentsInConditionalExpressions)
+{
+    heimdall::Preprocessor::MacroMap macros { { "FEATURE", "202603L" } };
+    const auto result = heimdall::Preprocessor(macros).Process(
+        "#if FEATURE >= 202506L // enabled with -freflection\n"
+        "first\n"
+        "#endif\n"
+        "#if FEATURE /* version */ >= 202506L\n"
+        "second\n"
+        "#endif\n", true);
+
+    EXPECT_EQ(result.active_source, "first\nsecond\n");
+    EXPECT_TRUE(result.diagnostics.empty());
+}
+
 TEST(PreprocessorSpec, SkipsActiveSourceExpansionByDefault)
 {
     constexpr std::string_view source = "#define ENABLED 1\nint selected = ENABLED;\n";

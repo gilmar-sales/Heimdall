@@ -17,7 +17,7 @@ namespace heimdall
     X(RBrace, "}") X(LBracket, "[") X(RBracket, "]") X(LParen, "(") X(RParen, ")") X(Hash, "#") X(                                       \
         HashHash, "##") X(Lt, "<") X(Gt, ">") X(Percent, "%") X(Colon, ":") X(ColonColon, "::")                                          \
         X(Semi, ";") X(Dot, ".") X(Ellipsis, "...") X(DotStar, ".*") X(Question, "?") X(                                                 \
-            Star, "*") X(Plus, "+") X(Minus, "-") X(Slash, "/") X(Caret, "^") X(Amp, "&")                                                \
+            Star, "*") X(Plus, "+") X(Minus, "-") X(Slash, "/") X(Caret, "^") X(CaretCaret, "^^") X(Amp, "&")                           \
             X(Pipe, "|") X(Tilde, "~") X(Bang, "!") X(Eq, "=") X(Comma, ",") X(Backslash, "\\") X(                                       \
                 DigraphHash, "%:") X(DigraphHashHash, "%:%:") X(PercentEq, "%=")                                                         \
                 X(DigraphRBrace, "%>") X(DigraphRBracket, ":>") X(DigraphLBracket, "<:") X(                                              \

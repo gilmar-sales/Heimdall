@@ -137,6 +137,10 @@ namespace heimdall::cli
                 return "LanguageLinkageSpec";
             case GrammarKind::CastExpression:
                 return "CastExpression";
+            case GrammarKind::StaticAssertDeclaration:
+                return "StaticAssertDeclaration";
+            case GrammarKind::SpliceExpression:
+                return "SpliceExpression";
         }
 
         return "Unknown";

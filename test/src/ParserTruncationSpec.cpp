@@ -19,36 +19,37 @@ namespace
 
     constexpr std::string_view kSample =
         "#include <vector>\n"
-        "namespace demo {\n"
-        "template <typename T> struct Box { T value; int get() const { return value; } };\n"
-        "enum class Color { Red, Green = 2 };\n"
-        "int add(int left, int right) {\n"
-        "    if (left > right) { return left - right; }\n"
-        "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
-        "    auto lambda = [&](int x) { return x + left; };\n"
-        "    return lambda(right) + (left ? right : 0);\n"
-        "}\n"
-        "}\n";
+    "namespace demo {\n"
+    "template <typename T> struct Box { T value; int get() const { return value; } };\n"
+    "enum class Color { Red, Green = 2 };\n"
+    "int add(int left, int right) {\n"
+    "    if (left > right) { return left - right; }\n"
+    "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
+    "    auto lambda = [&](int x) { return x + left; };\n"
+    "    return lambda(right) + (left ? right : 0);\n"
+    "}\n"
+    "}\n";
 
     std::size_t CountErrors(const heimdall::ParseTree& tree)
     {
         return static_cast<std::size_t>(
-            std::count_if(tree.Nodes().begin(), tree.Nodes().end(), [](const auto& node) {
+            std::count_if(tree.Nodes().begin(), tree.Nodes().end(),[](const auto& node)
+            {
                 return node.kind == GrammarKind::Error || node.kind == GrammarKind::ErrorExpression;
-            }));
+        }));
     }
 
     TEST(ParserTruncation, EveryPrefixParsesWithBoundedErrorsAndTime)
     {
         EXPECT_EQ(CountErrors(heimdall::ParseTree::Parse(kSample)), 0u)
-            << "the sample must be valid";
+        << "the sample must be valid";
 
         std::size_t worst_errors = 0;
-        std::size_t worst_at     = 0;
+        std::size_t worst_at = 0;
         for (std::size_t length = 0; length <= kSample.size(); ++length)
         {
-            const auto start   = std::chrono::steady_clock::now();
-            const auto tree    = heimdall::ParseTree::Parse(kSample.substr(0, length));
+            const auto start = std::chrono::steady_clock::now();
+            const auto tree = heimdall::ParseTree::Parse(kSample.substr(0, length));
             const auto elapsed = std::chrono::steady_clock::now() - start;
 
             // Hang guard, deliberately loose so a loaded CI machine cannot flake it.
@@ -56,19 +57,19 @@ namespace
             ASSERT_FALSE(tree.Cancelled());
             ASSERT_FALSE(tree.Nodes().empty()) << "prefix of " << length << " bytes";
             ASSERT_EQ(tree.Nodes()[heimdall::ParseTree::RootNode].kind,
-                      GrammarKind::TranslationUnit);
+                GrammarKind::TranslationUnit);
             for (const auto& node : tree.Nodes())
             {
                 ASSERT_LE(node.subtree_end, tree.Nodes().size());
                 ASSERT_LE(static_cast<std::size_t>(node.first_token) + node.token_count,
-                          tree.Tokens().size());
+                    tree.Tokens().size());
             }
 
             const std::size_t errors = CountErrors(tree);
             if (errors > worst_errors)
             {
                 worst_errors = errors;
-                worst_at     = length;
+                worst_at = length;
             }
         }
 
@@ -85,10 +86,10 @@ namespace
 
     TEST(StbCorpus, TargetsMapToWholeFileTiers)
     {
-        const std::string dir    = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
-        const auto        small  = heimdall::bench::BuildDocument(dir, 1000);
-        const auto        medium = heimdall::bench::BuildDocument(dir, 5000);
-        const auto        large  = heimdall::bench::BuildDocument(dir, 20000);
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
+        const auto small = heimdall::bench::BuildDocument(dir, 1000);
+        const auto medium = heimdall::bench::BuildDocument(dir, 5000);
+        const auto large = heimdall::bench::BuildDocument(dir, 20000);
         ASSERT_TRUE(small && medium && large);
         EXPECT_GE(heimdall::bench::CountLines(*small), 900u);
         EXPECT_LT(heimdall::bench::CountLines(*small), 2000u);
@@ -100,13 +101,13 @@ namespace
 
     TEST(StbCorpus, RepeatedCopiesGetUniqueIncludeGuards)
     {
-        const std::string dir   = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
-        const auto        large = heimdall::bench::BuildDocument(dir, 20000);
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
+        const auto large = heimdall::bench::BuildDocument(dir, 20000);
         ASSERT_TRUE(large);
         // The lexer is emitted twice; the second copy must not collide with the first.
         EXPECT_NE(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"), std::string::npos);
         EXPECT_EQ(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"),
-                  large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
+            large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
     }
 
     TEST(StbCorpus, MissingDirectoryYieldsNullopt)
@@ -116,8 +117,8 @@ namespace
 
     TEST(StbCorpus, EmbeddedImplementationParsesWithoutErrorNodes)
     {
-        const std::string dir   = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
-        const auto        small = heimdall::bench::BuildDocument(dir, 1000);
+        const std::string dir = std::string(HEIMDALL_SOURCE_DIR) + "/bench/third_party/stb";
+        const auto small = heimdall::bench::BuildDocument(dir, 1000);
         ASSERT_TRUE(small);
         EXPECT_LE(CountErrors(heimdall::ParseTree::Parse(*small)), 8u);
     }

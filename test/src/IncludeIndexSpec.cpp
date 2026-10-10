@@ -149,6 +149,86 @@ TEST(IncludeIndexSpec, RealCliOptionsAndFilesystemPathHaveCompilerLayouts)
     EXPECT_EQ(path->align_bytes, alignof(std::filesystem::path));
 }
 
+TEST(IncludeIndexSpec, MetaHeaderOffersReflectionFunctionsByQualifiedName)
+{
+    if (!HEIMDALL_REFLECTION_PROBE_AVAILABLE)
+    {
+        GTEST_SKIP() << "Compiler does not support C++26 reflection with -freflection";
+    }
+
+    heimdall::CompileCommand command;
+    command.arguments = { HEIMDALL_TEST_CXX_COMPILER, "-std=c++26", "-freflection" };
+    command.standard = heimdall::CppStandard::Cpp26;
+    auto without_reflection = command;
+    without_reflection.arguments.pop_back();
+    EXPECT_NE(heimdall::IncludeIndex::IncludeFingerprint(IncludeDir(), "#include <meta>\n",
+                                                        &command),
+              heimdall::IncludeIndex::IncludeFingerprint(IncludeDir(), "#include <meta>\n",
+                                                        &without_reflection));
+    if (heimdall::IncludeIndex::SystemIncludes(HEIMDALL_TEST_CXX_COMPILER).empty())
+    {
+        GTEST_SKIP() << "Compiler does not expose standard library include directories";
+    }
+
+    constexpr std::string_view source = "#include <meta>\nint f() { std::meta::iden; }\n";
+    const auto index = heimdall::IncludeIndex::Build(IncludeDir(), source, &command);
+    EXPECT_NE(heimdall::IncludeIndex::CacheKey(index.Files(), &command),
+              heimdall::IncludeIndex::CacheKey(index.Files(), &without_reflection));
+    const auto* meta = FindScope(index.Scopes(), { "std", "meta" });
+    ASSERT_NE(meta, nullptr) << "Indexed files: " << index.Files().size();
+    EXPECT_TRUE(Contains(meta->members, "identifier_of"));
+    const auto items = heimdall::CompletionEngine::Complete(
+        source, {}, source.find("iden") + 4, &index.Scopes());
+
+    EXPECT_TRUE(Contains(items, "identifier_of"));
+    EXPECT_FALSE(Contains(items, "nonstatic_data_members_of"));
+
+    const auto all = heimdall::CompletionEngine::Complete(
+        "std::meta::", {}, std::string_view { "std::meta::" }.size(), &index.Scopes());
+    for (const auto& member : meta->members)
+    {
+        EXPECT_TRUE(Contains(all, member.label)) << member.label;
+    }
+    for (const std::string_view name : {
+             "identifier_of", "u8identifier_of", "source_location_of", "type_of",
+             "template_arguments_of", "parameters_of", "current_function", "current_class",
+             "members_of", "bases_of", "nonstatic_data_members_of", "enumerators_of",
+             "size_of", "offset_of", "extract", "substitute", "reflect_constant",
+             "data_member_spec", "define_aggregate", "is_class_type", "is_same_type",
+             "access_context", "info" })
+    {
+        EXPECT_TRUE(Contains(all, name)) << name;
+    }
+
+    const auto identifier = std::ranges::find_if(all, [](const auto& item) {
+        return item.label == "identifier_of";
+    });
+    ASSERT_NE(identifier, all.end());
+    EXPECT_EQ(identifier->kind, heimdall::CompletionKind::Function);
+
+    constexpr std::string_view context = "std::meta::access_context::cur";
+    const auto nested = heimdall::CompletionEngine::Complete(
+        context, {}, context.size(), &index.Scopes());
+    EXPECT_TRUE(Contains(nested, "current"));
+
+    constexpr std::string_view unqualified = "identifier_o";
+    const auto plain = heimdall::CompletionEngine::Complete(
+        unqualified, {}, unqualified.size(), &index.Scopes());
+    EXPECT_FALSE(Contains(plain, "identifier_of"));
+
+    constexpr std::string_view reflected =
+        "#include <meta>\nvoid Function(int value);\n"
+        "void inspect() { const auto parameters = std::meta::parameters_of(^^Function); }\n";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        reflected, options, reflected.find("parameters =") + 1, &index.Scopes());
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->detail.find("consteval"), std::string::npos);
+    EXPECT_NE(hovered->detail.find("vector<info>"), std::string::npos)
+        << hovered->detail;
+}
+
 TEST(IncludeIndexSpec, SkipsMissingHeaders)
 {
     const auto                 command = CommandWithIncludes();

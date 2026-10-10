@@ -17,6 +17,7 @@ add_executable(Tests_run
   src/CompileDatabaseSpec.cpp
   src/RuleConfigSpec.cpp
   src/CliInitSpec.cpp
+  src/Cpp26FeaturesSpec.cpp
   src/CorePolicySpec.cpp
   src/ArchitecturePolicySpec.cpp
   src/SyntaxTreeSpec.cpp
@@ -66,6 +67,38 @@ target_precompile_headers(Tests_run PRIVATE
 )
 
 gtest_discover_tests(Tests_run)
+
+option(HEIMDALL_TEST_REFLECTION "Probe optional C++26 reflection support" ON)
+set(HEIMDALL_REFLECTION_PROBE_AVAILABLE 0)
+if (HEIMDALL_TEST_REFLECTION)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-std=c++26 -freflection")
+  check_cxx_source_compiles([=[
+#include <meta>
+#if !defined(__cpp_impl_reflection) || __cpp_impl_reflection < 202506L
+#error Reflection is unavailable
+#endif
+struct Sample { int value; };
+static_assert(std::meta::identifier_of(^^Sample::value) == "value");
+int main() { return 0; }
+]=] HEIMDALL_CXX26_REFLECTION_AVAILABLE)
+  unset(CMAKE_REQUIRED_FLAGS)
+
+  if (HEIMDALL_CXX26_REFLECTION_AVAILABLE)
+    set(HEIMDALL_REFLECTION_PROBE_AVAILABLE 1)
+    add_executable(Cpp26ReflectionProbe src/ReflectionProbe.cpp)
+    target_include_directories(Cpp26ReflectionProbe PRIVATE ${PROJECT_SOURCE_DIR}/core/include)
+    target_link_libraries(Cpp26ReflectionProbe PRIVATE gtest_main)
+    target_compile_features(Cpp26ReflectionProbe PRIVATE cxx_std_26)
+    target_compile_options(Cpp26ReflectionProbe PRIVATE -freflection)
+    gtest_discover_tests(Cpp26ReflectionProbe)
+    message(STATUS "C++26 reflection probe enabled (-freflection)")
+  else ()
+    message(STATUS "C++26 reflection probe unavailable with this compiler")
+  endif ()
+endif ()
+target_compile_definitions(Tests_run PRIVATE
+  HEIMDALL_REFLECTION_PROBE_AVAILABLE=${HEIMDALL_REFLECTION_PROBE_AVAILABLE})
 
 add_library(CliSemanticFixture OBJECT EXCLUDE_FROM_ALL fixtures/semantic_unused.cpp)
 target_compile_features(CliSemanticFixture PRIVATE cxx_std_26)

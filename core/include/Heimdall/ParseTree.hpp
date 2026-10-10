@@ -78,7 +78,9 @@ namespace heimdall
 		LanguageLinkageSpec,
 		// `(T) operand`: child 0 is the TypeSpecifier inside the parentheses, child 1
 		// the operand. Only produced when `T` is certainly a type (see TypeNameOracle).
-		CastExpression
+		CastExpression,
+		StaticAssertDeclaration,
+		SpliceExpression
 	};
 
 	// AoS layout (kept for backward compatibility)

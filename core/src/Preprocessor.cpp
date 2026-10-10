@@ -125,10 +125,25 @@ namespace heimdall
           private:
             void SkipSpace()
             {
-                while (m_pos < m_input.size() &&
-                       std::isspace(static_cast<unsigned char>(m_input[m_pos])))
+                while (m_pos < m_input.size())
                 {
-                    ++m_pos;
+                    if (std::isspace(static_cast<unsigned char>(m_input[m_pos])))
+                    {
+                        ++m_pos;
+                    }
+                    else if (m_input.substr(m_pos, 2) == "//")
+                    {
+                        m_pos = m_input.size();
+                    }
+                    else if (m_input.substr(m_pos, 2) == "/*")
+                    {
+                        const auto close = m_input.find("*/", m_pos + 2);
+                        m_pos = close == std::string_view::npos ? m_input.size() : close + 2;
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
             }
 

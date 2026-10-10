@@ -136,6 +136,21 @@ namespace heimdall
 		bool IsConstevalIfHead(const std::vector<Sig>& sigs, std::size_t consteval_index);
 		constexpr std::size_t kNoSig = static_cast<std::size_t>(-1);
 
+		bool IsSpliceOpen(const std::vector<Sig>& sigs, std::size_t index)
+		{
+			return index < sigs.size() && sigs[index].text == "[" &&
+				index + 1 < sigs.size() && sigs[index + 1].text == ":" &&
+				sigs[index].match != kNoSig && sigs[index].match > index + 2 &&
+				sigs[sigs[index].match - 1].text == ":";
+		}
+
+		bool IsSpliceClose(const std::vector<Sig>& sigs, std::size_t index)
+		{
+			return index + 1 < sigs.size() && sigs[index].text == ":" &&
+				sigs[index + 1].text == "]" && sigs[index + 1].match != kNoSig &&
+				IsSpliceOpen(sigs, sigs[index + 1].match);
+		}
+
 		// File-local named constants for the `cpp/no-magic-numbers` rule
 		// (single-literal initializers, which the rule exempts).
 		constexpr std::size_t kTwoTokenOffset   = 2; // neighbor-token lookbehind/lookahead
@@ -520,6 +535,11 @@ namespace heimdall
 			return IsBinaryOperator(text);
 		}
 
+		bool IsStringLiteral(TokenKind kind)
+		{
+			return kind == TokenKind::StringLiteral || kind == TokenKind::RawStringLiteral;
+		}
+
 		// True when the `:` at sigs[colon] is the else-branch separator of a
 		// ternary `c ? a : b`: scanning back at the same bracket level, a `?` not
 		// already paired with an inner `:` (nested ternaries) precedes it.
@@ -649,6 +669,43 @@ namespace heimdall
 			const TokenKind right_kind   = sigs[cur].kind;
 			const bool left_word         = IsWordish(left_kind) || IsComment(left_kind);
 			const bool right_word        = IsWordish(right_kind) || IsComment(right_kind);
+
+			if (right == "[" && IsSpliceOpen(sigs, cur))
+			{
+				return left == "." || left == "->" || left == "(" || left == "[" ||
+					left == "::" ? 0 : 1;
+			}
+
+			if (right == ":" && IsSpliceOpen(sigs, prev))
+			{
+				return 0;
+			}
+
+			if (left == ":" && prev > 0 && IsSpliceOpen(sigs, prev - 1))
+			{
+				return 1;
+			}
+
+			if (right == ":" && IsSpliceClose(sigs, cur))
+			{
+				return 1;
+			}
+
+			if (left == ":" && IsSpliceClose(sigs, prev))
+			{
+				return 0;
+			}
+
+			if (left == "]" && right == "<" && sigs[prev].match != kNoSig &&
+				IsSpliceOpen(sigs, sigs[prev].match))
+			{
+				return 0;
+			}
+
+			if (left == "^^")
+			{
+				return 0;
+			}
 
 			// `->` after `)` (trailing return `) -> int`): space before, none after.
 			if (right == "->")
@@ -2608,6 +2665,7 @@ namespace heimdall
 			std::size_t paren = 0, bracket = 0;
 			std::vector<char> cond_stack;
 			std::vector<std::size_t> open_stack;  // `(` sig indices for match links
+			std::vector<std::size_t> bracket_stack;
 			std::vector<std::size_t> brace_stack; // `{` sig indices for match links
 			for (std::size_t s = 0; s < sigs.size(); ++s)
 			{
@@ -2659,6 +2717,7 @@ namespace heimdall
 				}
 				else if (c == '[')
 				{
+					bracket_stack.push_back(s);
 					++bracket;
 				}
 				else if (c == ']')
@@ -2666,6 +2725,13 @@ namespace heimdall
 					if (bracket > 0)
 					{
 						--bracket;
+					}
+					if (!bracket_stack.empty())
+					{
+						const auto open = bracket_stack.back();
+						bracket_stack.pop_back();
+						sig.match        = open;
+						sigs[open].match = s;
 					}
 				}
 				else if (c == '{')
@@ -3024,8 +3090,9 @@ namespace heimdall
 			bool prev_label    = false;
 			bool prev_dangling = false;
 			int dangle_level   = 0;
-			for (auto& chunk : chunks)
+			for (std::size_t chunk_index = 0; chunk_index < chunks.size(); ++chunk_index)
 			{
+				auto& chunk = chunks[chunk_index];
 				if (chunk.directive)
 				{
 					pending       = false; // directives break continuation chains
@@ -3045,6 +3112,14 @@ namespace heimdall
 				const std::string_view last = sigs[chunk.end - 1].text;
 				pending =
 					IsContinuationEnd(last) && !(last == "," && IsEntryComma(sigs, chunk.end - 1));
+				if (chunk_index + 1 < chunks.size())
+				{
+					const auto& next = chunks[chunk_index + 1];
+					pending |= IsStringLiteral(sigs[chunk.end - 1].kind) &&
+						!next.directive && !next.verbatim && next.begin < next.end &&
+						IsStringLiteral(sigs[next.begin].kind) &&
+						next.source_line > chunk.source_line;
+				}
 				if (last == ":" && prev_label)
 				{
 					pending = false;
@@ -3654,6 +3729,55 @@ namespace heimdall
 				const std::size_t total_indent =
 					indent_depth +(continuation ? 1 : 0) +
 					(opens_with_brace ? 0 : static_cast<std::size_t>(dangle_bonus));
+				std::size_t indent_spaces = total_indent * m_options.indent_width;
+				if (!m_options.use_tabs && continuation && r > 0 && !out_lines.empty() &&
+					chunks[r - 1].source_line < chunk.source_line &&
+					!chunks[r - 1].directive && !chunks[r - 1].verbatim &&
+					chunks[r - 1].begin < chunks[r - 1].end &&
+					out_lines.back().text.ends_with(rendered[r - 1].text))
+				{
+					const auto& previous = chunks[r - 1];
+					std::size_t anchor = kNoSig;
+					if (sigs[previous.end - 1].text == "/" && sigs[chunk.begin].text == "(")
+					{
+						for (auto i = previous.begin; i + 1 < previous.end; ++i)
+						{
+							if (sigs[i].text == "=")
+							{
+								anchor = i + 1;
+							}
+						}
+					}
+					else if (sigs[previous.end - 1].text == "," &&
+						!IsTypeKeyword(sigs[previous.begin].text))
+					{
+						for (auto i = previous.end - 1; i > previous.begin; --i)
+						{
+							if (sigs[i].text == "(" && sigs[i].match != kNoSig &&
+								sigs[i].match >= chunk.begin && i + 1 < previous.end)
+							{
+								anchor = i + 1;
+								break;
+							}
+						}
+					}
+
+					if (anchor != kNoSig)
+					{
+						std::size_t column = out_lines.back().text.size() - rendered[r - 1].text.size();
+						for (auto i = previous.begin; i < anchor; ++i)
+						{
+							column += sigs[i].text.size();
+							const auto gap = SpacingGap(
+								sigs, i, i + 1, source, tokens, m_options.pointer_alignment,
+								m_options.reference_alignment, m_options.space_before_inheritance_colon,
+								m_options.space_after_c_style_cast, m_options.space_after_logical_not,
+								m_options.space_before_cpp11_braced_list);
+							column += gap > 0 || (gap < 0 && original_gap_had_space(i, i + 1)) ? 1 : 0;
+						}
+						indent_spaces = column;
+					}
+				}
 				std::string text;
 				if (m_options.use_tabs)
 				{
@@ -3661,7 +3785,7 @@ namespace heimdall
 				}
 				else
 				{
-					text.append(total_indent * m_options.indent_width, ' ');
+					text.append(indent_spaces, ' ');
 				}
 
 				const int comment_col =

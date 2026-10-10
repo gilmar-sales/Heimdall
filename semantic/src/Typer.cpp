@@ -2173,6 +2173,11 @@ namespace heimdall
         }
 
         const Tok  first = At(begin);
+        if (first == Tok::CaretCaret &&
+            m_nodes.Kind(kids[0]) != GrammarKind::ErrorExpression)
+        {
+            return m_types.External(m_out.m_externals.InternCopy("std::meta::info"));
+        }
         const bool prefix =
             (first == Tok::Plus || first == Tok::Minus || first == Tok::Bang ||
              first == Tok::Tilde || first == Tok::Star || first == Tok::Amp ||

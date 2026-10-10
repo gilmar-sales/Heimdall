@@ -571,6 +571,39 @@ TEST(CompletionSpec, HoverReturnsSignatureAndDocs)
     EXPECT_EQ(hovered->documentation, "Adds two numbers.");
 }
 
+TEST(CompletionSpec, HoverOnReflectionOperatorShowsMetaInfoAndOperand)
+{
+    constexpr std::string_view source =
+        "struct Sample { int value; };\n"
+        "static_assert(std::meta::identifier_of(^^Sample::value) == \"value\");\n"
+        "auto type = ^^int;\n";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+    ASSERT_TRUE(tree.Diagnostics().empty());
+
+    const auto member = heimdall::CompletionEngine::Hover(
+        tree, options, source.find("^^Sample::value"), nullptr);
+    ASSERT_TRUE(member.has_value());
+    EXPECT_EQ(member->detail, "^^Sample::value: std::meta::info");
+    EXPECT_NE(member->documentation.find("Sample::value"), std::string::npos);
+    EXPECT_NE(member->documentation.find("value: int"), std::string::npos);
+
+    const auto builtin = heimdall::CompletionEngine::Hover(
+        tree, options, source.find("^^int") + 1, nullptr);
+    ASSERT_TRUE(builtin.has_value());
+    EXPECT_EQ(builtin->detail, "^^int: std::meta::info");
+
+    const auto ordinary = heimdall::CompletionEngine::Hover(
+        tree, options, source.find("value;"), nullptr);
+    ASSERT_TRUE(ordinary.has_value());
+    EXPECT_NE(ordinary->detail, member->detail);
+
+    constexpr std::string_view xorSource = "int value = 1 ^ 2;";
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(
+        xorSource, options, xorSource.find('^'), nullptr).has_value());
+}
+
 TEST(CompletionSpec, HoverReturnsNullOffSymbol)
 {
     constexpr std::string_view source = "int value = 1;\n";
@@ -1000,6 +1033,31 @@ TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
     EXPECT_EQ(detail("copy"), "Config");
     EXPECT_EQ(detail("made"), "lib::Config");
     EXPECT_EQ(detail("unknown"), "auto");
+}
+
+TEST(CompletionSpec, HoverOmitsConstevalFromReflectedVariableType)
+{
+    constexpr std::string_view header =
+        "namespace std::meta { struct info {}; "
+        "consteval std::vector<info> parameters_of(info); }\n";
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        header, {});
+    constexpr std::string_view source =
+        "void Function(int value);\n"
+        "void inspect() { const auto parameters = std::meta::parameters_of(^^Function); }\n";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, options, source.find("parameters =") + 1, &index);
+
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->detail, "const std::vector<info>");
+
+    const auto function = heimdall::CompletionEngine::Hover(
+        header, options, header.find("parameters_of") + 1, nullptr);
+    ASSERT_TRUE(function.has_value());
+    EXPECT_NE(function->detail.find("consteval"), std::string::npos);
 }
 
 TEST(CompletionSpec, MemberAccessOnAutoFromAHeaderFunctionReturningAStdType)

@@ -407,7 +407,8 @@ namespace heimdall
                     {
                         flags += " " + argument + " \"" + command->arguments[++i] + "\"";
                     }
-                    else if (argument.starts_with("-std=") || argument.starts_with("-stdlib=") ||
+                    else if (argument == "-freflection" || argument.starts_with("-std=") ||
+                             argument.starts_with("-stdlib=") ||
                              argument.starts_with("-D") || argument.starts_with("-U") ||
                              argument.starts_with("-I") || argument.starts_with("-isystem") ||
                              argument.starts_with("-nostd") || argument.starts_with("--target") ||
@@ -505,6 +506,12 @@ namespace heimdall
         bool IsReservedName(std::string_view name)
         {
             return !name.empty() && name.front() == '_';
+        }
+
+        bool ReflectionEnabled(const CompileCommand& command)
+        {
+            return std::find(command.arguments.begin(), command.arguments.end(), "-freflection") !=
+                   command.arguments.end();
         }
 
         std::string ScopePathKey(const std::vector<std::string>& path)
@@ -1018,6 +1025,8 @@ namespace heimdall
         {
             fingerprint += std::to_string(static_cast<int>(command->standard));
             fingerprint += '\0';
+            fingerprint += ReflectionEnabled(*command) ? '1' : '0';
+            fingerprint += '\0';
             for (const auto& dir : command->include_directories)
             {
                 fingerprint += dir.string();
@@ -1068,6 +1077,8 @@ namespace heimdall
         if (command != nullptr)
         {
             key += std::to_string(static_cast<int>(command->standard));
+            key += '\0';
+            key += ReflectionEnabled(*command) ? '1' : '0';
             key += '\0';
             std::vector<std::string> defines;
             for (const auto& [name, value] : command->defines)

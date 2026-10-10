@@ -267,6 +267,103 @@ TEST(FormatterSpec, NormalizesSpacing)
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
 
+TEST(FormatterSpec, KeepsReflectionAndSpliceDelimitersTogether)
+{
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source =
+        "using ReflectedType =[: ^^ Sample:];\n"
+        "using Alias=typename [: r :]::type;\n"
+        "using MemberType=typename [: ^^Sample::type:];\n"
+        "namespace reflected=[: ns:];\n"
+        "int x=obj.[: member:];\n"
+        "int s=template [: klass:]<int>::value;\n"
+        "int y=array[0]+2;\n"
+        "int z=flag?1:2;\n";
+    constexpr std::string_view expected =
+        "using ReflectedType = [: ^^Sample :];\n"
+        "using Alias = typename [: r :]::type;\n"
+        "using MemberType = typename [: ^^Sample::type :];\n"
+        "namespace reflected = [: ns :];\n"
+        "int x = obj.[: member :];\n"
+        "int s = template [: klass :]<int>::value;\n"
+        "int y = array[0] + 2;\n"
+        "int z = flag ? 1 : 2;\n";
+
+    const auto formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, AlignsAdjacentStringLiteralContinuations)
+{
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source = R"cpp(void f()
+{
+    constexpr std::string_view kSample =
+        "#include <vector>\n"
+    "namespace demo {\n"
+    "template <typename T> struct Box { T value; int get() const { return value; } };\n"
+    "enum class Color { Red, Green = 2 };\n"
+    "int add(int left, int right) {\n"
+    "    if (left > right) { return left - right; }\n"
+    "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
+    "    auto lambda = [&](int x) { return x + left; };\n"
+    "    return lambda(right) + (left ? right : 0);\n"
+    "}\n"
+    "}\n";
+}
+
+)cpp";
+    constexpr std::string_view expected = R"cpp(void f()
+{
+    constexpr std::string_view kSample =
+        "#include <vector>\n"
+        "namespace demo {\n"
+        "template <typename T> struct Box { T value; int get() const { return value; } };\n"
+        "enum class Color { Red, Green = 2 };\n"
+        "int add(int left, int right) {\n"
+        "    if (left > right) { return left - right; }\n"
+        "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
+        "    auto lambda = [&](int x) { return x + left; };\n"
+        "    return lambda(right) + (left ? right : 0);\n"
+        "}\n"
+        "}\n";
+}
+)cpp";
+
+    const auto formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, AlignsDeclarationAndCallContinuations)
+{
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source =
+        "void save(std::string_view suffix, std::filesystem::path directory)\n"
+        "{\n"
+        "    const auto path = std::filesystem::temp_directory_path() /\n"
+        "            (\"heimdall_rule_config_\" + std::string(suffix));\n"
+        "    std::ofstream out(directory / heimdall::RuleConfigFileName,\n"
+        "            std::ios::binary | std::ios::trunc);\n"
+        "}\n";
+    constexpr std::string_view expected =
+        "void save(std::string_view suffix, std::filesystem::path directory)\n"
+        "{\n"
+        "    const auto path = std::filesystem::temp_directory_path() /\n"
+        "                      (\"heimdall_rule_config_\" + std::string(suffix));\n"
+        "    std::ofstream out(directory / heimdall::RuleConfigFileName,\n"
+        "                      std::ios::binary | std::ios::trunc);\n"
+        "}\n";
+
+    const auto formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
 TEST(FormatterSpec, SpacesBracedListsWithoutChangingBlockBraces)
 {
     const heimdall::Formatter formatter;

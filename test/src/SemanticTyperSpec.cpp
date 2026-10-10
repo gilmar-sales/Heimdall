@@ -453,6 +453,28 @@ TEST(Typer, TypesUnaryOperators)
     EXPECT_EQ(typed.Of("u12"), "double");
 }
 
+TEST(Typer, ReflectionOperatorProducesMetaInfoForTypesAndEntities)
+{
+    const Typed typed("struct Widget { int value; };\n"
+                      "void f() { Widget widget; auto type = ^^Widget; "
+                      "auto builtin = ^^int; auto unsigned_type = ^^unsigned long; "
+                      "auto pointer = ^^const int*; "
+                      "auto reference = ^^int&; auto member = ^^Widget::value; "
+                      "auto expression = ^^widget; auto grouped = ^^(widget); "
+                      "int xor_value = 1 ^ 2; }");
+
+    EXPECT_TRUE(typed.tree.Diagnostics().empty());
+    EXPECT_EQ(typed.Of("type"), "std::meta::info");
+    EXPECT_EQ(typed.Of("builtin"), "std::meta::info");
+    EXPECT_EQ(typed.Of("unsigned_type"), "std::meta::info");
+    EXPECT_EQ(typed.Of("pointer"), "std::meta::info");
+    EXPECT_EQ(typed.Of("reference"), "std::meta::info");
+    EXPECT_EQ(typed.Of("member"), "std::meta::info");
+    EXPECT_EQ(typed.Of("expression"), "std::meta::info");
+    EXPECT_EQ(typed.Of("grouped"), "std::meta::info");
+    EXPECT_EQ(typed.Of("xor_value"), "int");
+}
+
 TEST(Typer, TypesPointerArithmeticSubscriptsAndConditionals)
 {
     const Typed typed(Body("int i = 0; long l = 0; int* p = 0; int a[4] = {}; char* s = 0;\n"

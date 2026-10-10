@@ -2406,9 +2406,16 @@ namespace heimdall
 						return {};
 					}
 
-					return CompactWs(SliceRange(tree, tree.NodesSoA().FirstToken(type),
+					std::string result = CompactWs(SliceRange(tree, tree.NodesSoA().FirstToken(type),
 						tree.NodesSoA().TokenCount(type)),
 						kMaxShortDetailLen);
+					constexpr std::string_view kConsteval = "consteval ";
+					if (result.starts_with(kConsteval))
+					{
+						result.erase(0, kConsteval.size());
+					}
+
+					return result;
 				}
 
 				if (kind == GrammarKind::TranslationUnit ||
@@ -6472,6 +6479,53 @@ namespace heimdall
 		if (source.empty())
 		{
 			return std::nullopt;
+		}
+
+		if (source[offset < source.size() ? offset : source.size() - 1] == '^')
+		{
+			const auto& tokens = tree.Tokens();
+			const auto& nodes  = tree.NodesSoA();
+			for (std::size_t node = 0; node < nodes.size(); ++node)
+			{
+				if (nodes.Kind(node) != GrammarKind::UnaryExpression)
+				{
+					continue;
+				}
+
+				const auto first = nodes.FirstToken(node);
+				if (first >= tokens.size() || tree.Text(tokens[first]) != "^^" ||
+					offset < tokens[first].offset || offset >= tokens[first].offset + tokens[first].length)
+				{
+					continue;
+				}
+
+				const auto last = first + nodes.TokenCount(node);
+				if (last <= first + 1 || last > tokens.size())
+				{
+					return std::nullopt;
+				}
+
+				const auto operandStart = tokens[first].offset + tokens[first].length;
+				const auto operandEnd   = tokens[last - 1].offset + tokens[last - 1].length;
+				const auto operand = CompactWs(std::string(source.substr(operandStart,
+					operandEnd - operandStart)), kMaxTypeTextLen);
+				CompletionItem hovered {"^^" + operand, CompletionKind::Type,
+					"^^" + operand + ": std::meta::info", {}};
+				hovered.documentation = "Reflection of `" + operand + "`.";
+				if (operandEnd > operandStart &&
+					IsIdentChar(source[operandEnd - 1]))
+				{
+					if (const auto declaration = Hover(tree, options, operandEnd - 1, external))
+					{
+						const auto description = declaration->detail.find(declaration->label) ==
+							std::string::npos
+							? declaration->label + ": " + declaration->detail
+							: declaration->detail;
+						hovered.documentation += "\n\nDeclaration: `" + description + "`.";
+					}
+				}
+				return hovered;
+			}
 		}
 
 		std::size_t start = offset;

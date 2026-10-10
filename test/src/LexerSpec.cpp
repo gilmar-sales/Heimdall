@@ -43,6 +43,17 @@ TEST(LexerSpec, RoundTripsEmptyAndOrdinarySourceByteExactly)
     }
 }
 
+TEST(LexerSpec, ReflectionOperatorIsOneTokenWithoutChangingXor)
+{
+    constexpr std::string_view source = "^^int ^ value ^= mask";
+    const auto tokens = heimdall::Lexer(source).Lex();
+
+    EXPECT_EQ(tokens.front().tok, heimdall::Tok::CaretCaret);
+    EXPECT_EQ(tokens.front().length, 2);
+    EXPECT_EQ(Reconstruct(source, tokens), source);
+    EXPECT_EQ(tokens[3].tok, heimdall::Tok::Caret);
+}
+
 TEST(LexerSpec, RecognizesTriviaCommentsAndLiteralForms)
 {
     constexpr std::string_view source =

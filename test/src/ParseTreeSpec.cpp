@@ -3,6 +3,8 @@
 #include <Heimdall/ParseTree.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -23,6 +25,24 @@ namespace
     }
 
 } // namespace
+
+TEST(ParseTreeSpec, ReflectionProbeStaticAssertionsAndTypeSpliceAreNotFunctions)
+{
+    const auto path = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test/src/ReflectionProbe.cpp";
+    std::ifstream file(path);
+    ASSERT_TRUE(file.is_open());
+    const std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::StaticAssertDeclaration), 7);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::SpliceExpression), 1);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::UnaryExpression), 7);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
+}
 
 TEST(ParseTreeSpec, ConstructorParametersUseFunctionSuffixWithoutLosingPointerReturnTypes)
 {
@@ -304,6 +324,67 @@ TEST(ParseTreeSpec, ParsesNestedTemplateIdsAsPostfixExpressionsNotComparisons)
     EXPECT_GE(Count(tree, heimdall::GrammarKind::TemplateIdExpression), 3);
     EXPECT_GE(Count(tree, heimdall::GrammarKind::TemplateArgument), 5);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
+}
+
+TEST(ParseTreeSpec, ParsesTemplateSpecializationsAndExplicitInstantiations)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "template<class T> struct Box {};\n"
+        "template<class T> struct Box<T*> {};\n"
+        "template<> struct Box<void> {};\n"
+        "extern template class Box<int>;\n"
+        "template class Box<long>;\n"
+        "int after;\n");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::TemplateDeclaration), 3);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 3);
+    EXPECT_EQ(Count(tree, GrammarKind::Declaration), 3);
+}
+
+TEST(ParseTreeSpec, ParsesRepeatedTemplateHeadsAndNestedParameterDefaults)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "template<class T> struct Outer { template<class U> struct Inner {}; };\n"
+        "template<class T> template<class U> struct Outer<T>::Inner<U*> {};\n"
+        "template<template<class> class C, class T = C<int>> struct Holder {};\n"
+        "template<int N = (1 > 0)> struct Constant {};\n"
+        "int after;\n");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::TemplateDeclaration), 5);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 5);
+    EXPECT_EQ(Count(tree, GrammarKind::Declaration), 1);
+}
+
+TEST(ParseTreeSpec, ParsesExportedModuleTemplatesAndParameterPacks)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "export module sample;\n"
+        "export template<class... Ts> struct Tuple {};\n"
+        "export template<class T, int N = 3> using Array = T[N];\n"
+        "export template<class T> T identity(T value) { return value; }\n"
+        "int after;\n");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::ModuleDeclaration), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::TemplateDeclaration), 3);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::UsingDeclaration), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::Declaration), 1);
+}
+
+TEST(ParseTreeSpec, ReportsUnclosedTemplateHeadWithoutConsumingLaterDeclarations)
+{
+    const auto tree = heimdall::ParseTree::Parse("template<class T\nint value; int after;");
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 1);
 }
 
 TEST(ParseTreeSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)

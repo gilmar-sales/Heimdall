@@ -263,7 +263,7 @@ namespace heimdall
                     }
                     break;
                 case '^':
-                    if (is("^="))
+                    if (is("^^") || is("^="))
                     {
                         return kTwoCharPunctLen;
                     }
