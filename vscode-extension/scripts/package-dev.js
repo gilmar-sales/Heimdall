@@ -77,7 +77,7 @@ function main() {
     fs.writeFileSync(marker, 'dev\n');
     try {
         // Local vsce via node (no shell/npx lookup, works on win32 + POSIX).
-        run(process.execPath, [vsceBin, 'package', '--allow-missing-repository', '--out', outFile], extensionDir);
+        run(process.execPath, [vsceBin, 'package', '--allow-missing-repository', '--no-dependencies', '--out', outFile], extensionDir);
         console.log(`Dev package ready: ${path.join(extensionDir, outFile)}`);
     } finally {
         try {

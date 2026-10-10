@@ -22,7 +22,7 @@ import {
 const SOURCE_FILE_GLOB = '**/*.{c,cc,cpp,cxx,c++,h,hh,hpp,hxx,inl,ipp,tpp,cppm,ixx}';
 
 let client: LanguageClient | undefined;
-let output: vscode.OutputChannel;
+let output: vscode.LogOutputChannel;
 let sourceWatcher: vscode.FileSystemWatcher | undefined;
 let indexStatus: vscode.StatusBarItem | undefined;
 
@@ -291,7 +291,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    output = vscode.window.createOutputChannel('Heimdall');
+    output = vscode.window.createOutputChannel('Heimdall', { log: true });
     context.subscriptions.push(output);
     await startClient(context);
 

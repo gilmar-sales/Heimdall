@@ -53,7 +53,7 @@ namespace
 
         for (int i = 0; i < 12; ++i)
         {
-            readers.push_back(
+            readers.emplace_back(
                 std::async(std::launch::async, [&] { return source->Materialize(); }));
         }
         auto expected = readers.front().get();

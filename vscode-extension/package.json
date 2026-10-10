@@ -6,7 +6,7 @@
   "publisher": "gilmar-sales",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.135.0"
   },
   "categories": [
     "Programming Languages",
@@ -18,8 +18,7 @@
     "onLanguage:cpp",
     "onLanguage:cuda",
     "onLanguage:objective-c",
-    "onLanguage:objective-cpp",
-    "onCommand:heimdall.installServer"
+    "onLanguage:objective-cpp"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -90,21 +89,22 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "tsc -p . && node scripts/bundle.js",
     "watch": "tsc -watch -p .",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package --allow-missing-repository",
     "package:dev": "node scripts/package-dev.js"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
-    "vscode-languageclient": "^9.0.1"
+    "adm-zip": "^0.5.18",
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
-    "@types/node": "^20.12.7",
-    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.135.0",
     "@vscode/vsce": "^4.0.0",
-    "typescript": "^5.4.5"
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
   }
 }
