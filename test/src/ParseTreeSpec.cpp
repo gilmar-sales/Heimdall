@@ -1049,3 +1049,14 @@ TEST(ParseTreeSpec, IfConstexprAndIfConstevalParseWithoutDiagnostics)
         "}\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
 }
+
+TEST(ParseTreeSpec, InlineNamespaceIsANamespaceDefinition)
+{
+    constexpr std::string_view source = "inline namespace v1 { void Stable(); }\n"
+                                        "namespace outer { inline namespace v2 { int Value; } }\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::NamespaceDefinition), 3);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}

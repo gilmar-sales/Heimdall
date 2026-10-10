@@ -4293,7 +4293,10 @@ namespace heimdall
                     }
                 }
 
-                const bool namespace_decl = Is(declaration_start, "namespace");
+                const bool namespace_decl =
+                    Is(declaration_start, "namespace") ||
+                    (Is(declaration_start, "inline") && declaration_start + 1 < end &&
+                     Is(declaration_start + 1, "namespace"));
                 const bool record_decl =
                     Is(declaration_start, "class") || Is(declaration_start, "struct") ||
                     Is(declaration_start, "union") || Is(declaration_start, "enum");

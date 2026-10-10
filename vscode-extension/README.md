@@ -61,6 +61,45 @@ Development Host. Install it with
 | `heimdall.serverVersion` | `""` (= extension version) | Release version to download, e.g. `"0.3.1"`. Tags are `v<version>`. |
 | `heimdall.autoInstallServer` | `true` | Download the server from GitHub releases when none is found. |
 
+## Symbol navigation
+
+The server answers the standard VS Code symbol features; the extension adds no commands
+or shortcuts of its own, so the native ones apply.
+
+| Feature | Default shortcut | Scope |
+| --- | --- | --- |
+| Outline view, Explorer *Symbols*, breadcrumbs | `Ctrl+Shift+O` for the current file | The open file, as a tree: namespaces → types → members, enumerators under their enum. |
+| Go to Symbol in Workspace | `Ctrl+T` | Every C/C++ source and header below the workspace folder. |
+
+Both are **syntactic**: they work with `heimdall.enableSemantic` off and without a
+`compile_commands.json`.
+
+What is listed: namespaces (including `inline` and anonymous ones), classes, structs,
+unions, enums and their enumerators, functions and methods (each overload separately,
+out-of-line definitions as `Type::Member`), constructors, destructors, operators, fields,
+variables, `using` aliases, `typedef`s and concepts. Block-local variables and function
+parameters are not listed, nor are forward declarations and `friend` declarations.
+
+Workspace symbols come from an index built in the background after start-up (logged as
+`symbol index ready`); a search typed before that finishes sees the files indexed so far.
+
+- Files under `build*`, `cmake-build*`, `out`, `node_modules`, `_deps`, `vcpkg_installed` and
+  hidden folders are skipped, as are files over 2 MiB and anything past 20 000 files.
+- Open editors win over disk: unsaved edits are searchable, and closing an editor shows what
+  is on disk again. Files changed outside the editor are re-read through VS Code's file
+  watcher.
+- Results are case-insensitive, best match first (exact name, prefix, substring, subsequence;
+  `Widget::Run` and `ns::` qualified queries work), at most 200 per search.
+- Headers outside the workspace folder (system or SDK headers) and generated or
+  macro-expanded declarations are not indexed; a construct the parser cannot recover is
+  skipped.
+- Set `heimdall.workspaceSymbols` to `false` to turn the workspace index off (the Outline
+  keeps working).
+
+Measured on a Release build with 40 symbols per file: indexing runs at roughly 1–2 ms per file on
+a few helper threads (28-core Windows machine), 20 000 files (the cap) take about 35 s in the background and 90 MB;
+a search over them answers in 6–60 ms, and over 1 000 files in under 3 ms.
+
 ## Build the server
 
 From the repository root:

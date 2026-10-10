@@ -76,6 +76,11 @@
           "default": true,
           "description": "Lint every C++ file in the workspace in the background (not only open files), so the Problems panel shows the project-wide warning count."
         },
+        "heimdall.workspaceSymbols": {
+          "type": "boolean",
+          "default": true,
+          "description": "Index the declarations of every C++ file in the workspace in the background so \"Go to Symbol in Workspace\" (Ctrl+T) finds them. The outline of the current file (Outline view, Ctrl+Shift+O) does not depend on this setting."
+        },
         "heimdall.compileCommands": {
           "type": "string",
           "default": "build/compile_commands.json",

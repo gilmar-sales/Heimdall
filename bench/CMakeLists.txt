@@ -57,6 +57,18 @@ else ()
   target_link_libraries(LspLatencyBench PRIVATE Threads::Threads)
 endif ()
 
+# Outline extraction and workspace symbol index (Ctrl+T) cost: extraction over a 20k-line
+# document, conversion to LSP positions and query latency over synthetic workspaces.
+add_executable(SymbolBench
+  src/SymbolBench.cpp
+  ${PROJECT_SOURCE_DIR}/lsp/Document.cpp
+  ${PROJECT_SOURCE_DIR}/lsp/WorkspaceSymbolIndex.cpp
+)
+target_include_directories(SymbolBench PRIVATE ${PROJECT_SOURCE_DIR}/lsp)
+target_link_libraries(SymbolBench PRIVATE heimdall::core benchmark::benchmark benchmark::benchmark_main)
+target_compile_definitions(SymbolBench PRIVATE ${HEIMDALL_STB_DEFINITION})
+target_compile_features(SymbolBench PRIVATE cxx_std_26)
+
 # In-process parse tree footprint (bytes/line, bytes/token).
 add_executable(DocumentMemoryBench src/DocumentMemoryBench.cpp)
 target_link_libraries(DocumentMemoryBench PRIVATE heimdall::core)

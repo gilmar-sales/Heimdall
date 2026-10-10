@@ -39,6 +39,10 @@ add_executable(Tests_run
   src/SemanticFlowSpec.cpp
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
+  src/SymbolOutlineSpec.cpp
+  src/SymbolProtocolSpec.cpp
+  src/WorkspaceSymbolIndexSpec.cpp
+  src/WorkspaceFilesSpec.cpp
   src/DocumentSpec.cpp
   src/ThreadPoolSpec.cpp
   src/IncludeIndexSpec.cpp
@@ -49,6 +53,10 @@ add_executable(Tests_run
   src/FileDiscoverySpec.cpp
   src/CliOptionsSpec.cpp
   ../../lsp/Document.cpp
+  ../../lsp/JsonRpc.cpp
+  ../../lsp/SymbolProtocol.cpp
+  ../../lsp/WorkspaceFiles.cpp
+  ../../lsp/WorkspaceSymbolIndex.cpp
   ../../src/CliOptions.cpp
   ../../src/FileDiscovery.cpp
   ../../src/Init.cpp
@@ -56,7 +64,7 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::refactor heimdall::config)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::refactor heimdall::config simdjson::simdjson)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_BUILD_DIR="${PROJECT_BINARY_DIR}")
@@ -136,6 +144,11 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspNavigationSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspNavigationSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspSymbolSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspSymbolSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

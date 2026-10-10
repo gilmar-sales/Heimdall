@@ -2,6 +2,7 @@
 
 #include "Document.hpp"
 #include "ThreadPool.hpp"
+#include "WorkspaceSymbolIndex.hpp"
 
 #include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/CompileDatabase.hpp>
@@ -152,6 +153,28 @@ namespace heimdall::lsp
 
 		void HoverDocument(simdjson::dom::element request, std::string_view id);
 
+		// Outline / "Go to Symbol in Editor": syntactic, from the pinned snapshot's parse.
+		void DocumentSymbols(simdjson::dom::element request, std::string_view id);
+
+		// "Go to Symbol in Workspace": answers from the last published symbol index and
+		// never parses or scans while the request is served.
+		void WorkspaceSymbols(simdjson::dom::element request, std::string_view id);
+
+		// Publishes the symbols of an open buffer; runs on the diagnostics worker right
+		// after the version's parse, so the tree is shared and no extra parse happens.
+		void IndexOpenSymbols(const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			const heimdall::ParseTree& tree,
+			std::int64_t version);
+
+		// Re-reads `file` from disk and replaces its disk entry (or drops it when the file
+		// is gone, unreadable or too large). An open buffer keeps shadowing the entry.
+		void IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop);
+
+		void SymbolIndexMain(std::stop_token stop);
+
+		void WatchedFilesChanged(simdjson::dom::element request);
+
 		void GotoDocument(simdjson::dom::element request, std::string_view id, bool implementation);
 
 		// Non-blocking variant of HeaderScopes for the interactive path.
@@ -195,8 +218,6 @@ namespace heimdall::lsp
 		// Returns the number of diagnostics published, or -1 when the file was
 		// skipped (open in the editor, unreadable, cancelled).
 		int PublishWorkspaceFile(const std::filesystem::path& file, std::stop_token stop);
-
-		static bool IsWorkspaceSource(const std::filesystem::path& file);
 
 		void IndexWorkerMain(std::stop_token stop);
 
@@ -386,6 +407,13 @@ namespace heimdall::lsp
 
 		std::atomic<bool> m_enable_semantic = false;
 		std::atomic<bool> m_workspace_scan  = true;
+		std::atomic<bool> m_workspace_symbols    = true;
+		std::atomic<bool> m_hierarchical_symbols = false;
+		WorkspaceSymbolIndex m_symbol_index;
+		// Orders "buffer indexed" against "buffer closed" so a late index pass cannot
+		// resurrect the entry of a document that was closed meanwhile.
+		std::mutex m_symbol_mu;
+		std::jthread m_symbol_worker;
 		std::filesystem::path m_workspace_root; // guarded by m_init_mu
 		std::jthread m_scan_worker;
 		std::string m_initialization_error;

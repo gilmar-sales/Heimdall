@@ -4,6 +4,9 @@ add_executable(heimdall-lsp
   Document.cpp
   JsonRpc.cpp
   Server.cpp
+  SymbolProtocol.cpp
+  WorkspaceFiles.cpp
+  WorkspaceSymbolIndex.cpp
 )
 
 target_link_libraries(heimdall-lsp PRIVATE heimdall::refactor heimdall::config simdjson::simdjson)

@@ -131,8 +131,11 @@ syntax errors using the file's `compile_commands.json` dialect and macros),
 brace-indent formatter, and scope-aware code completion (visible locals and
 parameters, plus `ns::`, `Type::` and `::global` qualified lookup over the
 current file and its transitively included headers, with signature details,
-`///`/`/**` documentation popups, and hover information). Known completion gaps and
-their fixes are tracked in `docs/completion-limitations.md`. Set `heimdall.serverPath` if the server is not found in the
+`///`/`/**` documentation popups, and hover information), plus symbol navigation: the
+Outline / *Go to Symbol in Editor* of the open file and *Go to Symbol in Workspace*
+(`Ctrl+T`) over a background index of the workspace, both syntactic and independent of
+`compile_commands.json` (coverage and limits in `vscode-extension/README.md`). Known
+completion gaps and their fixes are tracked in `docs/completion-limitations.md`. Set `heimdall.serverPath` if the server is not found in the
 workspace build directory or `PATH`. This replaces the lint/format portion of
 Microsoft's extension; full IntelliSense (member completion after `.`/`->`),
 debugging, and build integration are not implemented yet.
@@ -168,7 +171,7 @@ semantic/               # heimdall_semantic: compile DB + local oracle (simdjson
   src/
 analysis/               # shared Workspace, AnalysisSnapshot/Context, features, scheduler and experimental Plugin API
 src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Init/Pipeline/Reporting
-lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modules (simdjson PRIVATE)
+lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modules, SymbolProtocol, WorkspaceFiles, WorkspaceSymbolIndex (simdjson PRIVATE)
 schemas/                # heimdall.schema.json: JSON Schema for .heimdall.json (used by init docs)
 vscode-extension/       # VS Code extension manifest and LSP client
 test/                   # GoogleTest suite, incl. core dependency-policy guard (explicit sources)

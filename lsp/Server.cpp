@@ -2,6 +2,8 @@
 
 #include "Document.hpp"
 #include "JsonRpc.hpp"
+#include "SymbolProtocol.hpp"
+#include "WorkspaceFiles.hpp"
 
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Formatter.hpp>
@@ -14,6 +16,7 @@
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
 #include <Heimdall/SemanticRules.hpp>
+#include <Heimdall/SymbolOutline.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -63,6 +66,7 @@ namespace heimdall::lsp
 		m_document_pool.Shutdown();
 		m_index_worker.request_stop();
 		m_scan_worker.request_stop();
+		m_symbol_worker.request_stop();
 		m_index_cv.notify_all();
 		m_diag_worker.request_stop();
 		{
@@ -83,6 +87,11 @@ namespace heimdall::lsp
 		if (m_scan_worker.joinable())
 		{
 			m_scan_worker.join();
+		}
+
+		if (m_symbol_worker.joinable())
+		{
+			m_symbol_worker.join();
 		}
 
 		DrainRequests();
@@ -125,6 +134,7 @@ namespace heimdall::lsp
 				m_diag_stop.request_stop();
 			}
 			m_scan_worker.request_stop();
+			m_symbol_worker.request_stop();
 			m_index_cv.notify_all();
 			m_diag_cv.notify_all();
 			if (m_diag_worker.joinable())
@@ -140,6 +150,11 @@ namespace heimdall::lsp
 			if (m_scan_worker.joinable())
 			{
 				m_scan_worker.join();
+			}
+
+			if (m_symbol_worker.joinable())
+			{
+				m_symbol_worker.join();
 			}
 
 			DrainRequests();
@@ -183,6 +198,8 @@ namespace heimdall::lsp
 					LoadInitializationOptions(request);
 					const std::string rename_capability =
 						m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
+					const std::string workspace_symbol_capability =
+						m_workspace_symbols.load(std::memory_order_relaxed) ? "true" : "false";
 					Respond(id_json,
 						"{\"capabilities\":{\"textDocumentSync\":2,"
 						"\"documentFormattingProvider\":true,"
@@ -192,7 +209,9 @@ namespace heimdall::lsp
 						"\"refactor.extract.variable\",\"refactor.extract.function\","
 						"\"refactor.inline.variable\"]},\"hoverProvider\":true,"
 						"\"definitionProvider\":true,\"implementationProvider\":true,"
-						"\"referencesProvider\":true,\"renameProvider\":" +
+						"\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":" +
+						workspace_symbol_capability +
+						",\"referencesProvider\":true,\"renameProvider\":" +
 						rename_capability +
 						","
 						"\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\","
@@ -208,6 +227,15 @@ namespace heimdall::lsp
 							std::jthread([this](std::stop_token stop)
 							{
 								WorkspaceScanMain(stop);
+						});
+					}
+
+					if (m_workspace_symbols.load(std::memory_order_relaxed))
+					{
+						m_symbol_worker =
+							std::jthread([this](std::stop_token stop)
+							{
+								SymbolIndexMain(stop);
 						});
 					}
 				}
@@ -303,6 +331,26 @@ namespace heimdall::lsp
 						{
 							HoverDocument(request, id);
 					});
+				}
+				else if (method == "textDocument/documentSymbol")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							DocumentSymbols(request, id);
+					});
+				}
+				else if (method == "workspace/symbol")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							WorkspaceSymbols(request, id);
+					});
+				}
+				else if (method == "workspace/didChangeWatchedFiles")
+				{
+					WatchedFilesChanged(request);
 				}
 				else if (method == "$/cancelRequest")
 				{
@@ -597,6 +645,18 @@ namespace heimdall::lsp
 			}
 		}
 
+		simdjson::dom::object text_document_capabilities, symbol_capabilities;
+		if (has_params && GetObject(params, "capabilities", capabilities) &&
+			GetObject(capabilities, "textDocument", text_document_capabilities) &&
+			GetObject(text_document_capabilities, "documentSymbol", symbol_capabilities))
+		{
+			bool hierarchical = false;
+			if (!symbol_capabilities["hierarchicalDocumentSymbolSupport"].get_bool().get(hierarchical))
+			{
+				m_hierarchical_symbols.store(hierarchical, std::memory_order_relaxed);
+			}
+		}
+
 		std::filesystem::path workspace_root;
 		if (has_params)
 		{
@@ -694,6 +754,12 @@ namespace heimdall::lsp
 			m_workspace_scan.store(scan, std::memory_order_relaxed);
 		}
 
+		bool symbols = true;
+		if (has_options && !options["workspaceSymbols"].get_bool().get(symbols))
+		{
+			m_workspace_symbols.store(symbols, std::memory_order_relaxed);
+		}
+
 		bool enabled = false;
 		if (has_options && options["enableSemantic"].get_bool().get(enabled))
 		{
@@ -760,6 +826,7 @@ namespace heimdall::lsp
 			return;
 		}
 
+		IndexOpenSymbols(uri, text, *tree, version);
 		const auto diagnostics = RuleDiagnostics(uri, tree, command);
 		if (!IsCurrentVersion(uri, version))
 		{
@@ -1252,6 +1319,28 @@ namespace heimdall::lsp
 			}
 		}
 		const std::filesystem::path closed_path = PathFromUri(uri);
+		if (m_workspace_symbols.load(std::memory_order_relaxed))
+		{
+			// The buffer stops shadowing its file: serve what is on disk if the workspace owns it.
+			{
+				const std::lock_guard<std::mutex> lock(m_symbol_mu);
+				m_symbol_index.ClearOpen(FileKey(closed_path));
+			}
+			std::filesystem::path root;
+			{
+				const std::lock_guard<std::mutex> lock(m_init_mu);
+				root = m_workspace_root;
+			}
+			if (IsWorkspaceSource(closed_path) && IsUnderRoot(closed_path, root))
+			{
+				m_pool.Submit(ThreadPool::Task([this, closed_path]()
+					{
+						IndexDiskSymbols(closed_path, std::stop_token {});
+				}),
+					ThreadPool::Priority::Background);
+			}
+		}
+
 		if (m_workspace_scan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
 		{
 			// The file stays part of the workspace: show what is on disk instead of clearing.
@@ -1270,35 +1359,16 @@ namespace heimdall::lsp
 		Send(message);
 	}
 
-	bool LanguageServer::IsWorkspaceSource(const std::filesystem::path& file)
-	{
-		static constexpr std::string_view kExtensions[] = {
-			".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx",
-			".h", ".ipp", ".tpp", ".inl", ".cppm", ".ixx",
-		};
-		const std::string extension = file.extension().string();
-		return std::ranges::find(kExtensions, extension) != std::end(kExtensions);
-	}
-
 	int LanguageServer::PublishWorkspaceFile(const std::filesystem::path& file,
 		std::stop_token stop)
 	{
-		constexpr std::uintmax_t kMaxFileBytes = 2u * 1024u * 1024u;
-		std::error_code error;
-		const auto size = std::filesystem::file_size(file, error);
-		if (error || size > kMaxFileBytes)
+		auto contents = ReadWorkspaceFile(file);
+		if (!contents)
 		{
 			return -1;
 		}
 
-		std::ifstream input(file, std::ios::binary);
-		if (!input)
-		{
-			return -1;
-		}
-
-		auto text = std::make_shared<std::string>((std::istreambuf_iterator<char>(input)),
-			std::istreambuf_iterator<char>());
+		auto text = std::make_shared<std::string>(std::move(*contents));
 		const std::string uri = UriFromPath(file);
 		const auto is_open =[&]
 		{
@@ -1396,36 +1466,10 @@ namespace heimdall::lsp
 			return;
 		}
 
-		constexpr std::size_t kMaxFiles = 20000;
-		const auto skipped_directory =[](const std::string& name)
+		const std::vector<std::filesystem::path> files = DiscoverWorkspaceSources(root, stop);
+		if (stop.stop_requested())
 		{
-			return name.starts_with('.') || name.starts_with("build") ||
-				name.starts_with("cmake-build") || name == "node_modules" || name == "_deps" ||
-				name == "vcpkg_installed" || name == "out";
-		};
-
-		std::vector<std::filesystem::path> files;
-		for (std::filesystem::recursive_directory_iterator
-			it(root, std::filesystem::directory_options::skip_permission_denied, error),
-			end;
-			!error && it != end && files.size() < kMaxFiles; it.increment(error))
-		{
-			if (stop.stop_requested())
-			{
-				return;
-			}
-
-			if (it->is_directory(error))
-			{
-				if (skipped_directory(it->path().filename().string()))
-				{
-					it.disable_recursion_pending();
-				}
-			}
-			else if (IsWorkspaceSource(it->path()))
-			{
-				files.push_back(it->path());
-			}
+			return;
 		}
 
 		std::size_t scanned  = 0;
@@ -3621,6 +3665,229 @@ namespace heimdall::lsp
 
 		response += ']';
 		Respond(id, response);
+	}
+
+	void LanguageServer::DocumentSymbols(simdjson::dom::element request, std::string_view id)
+	{
+		std::string_view uri;
+		simdjson::dom::object text_document;
+		if (!DocumentParams(request, uri, text_document))
+		{
+			Respond(id, "[]");
+			return;
+		}
+
+		const std::string uri_string(uri);
+		const auto document = GetDocument(uri_string);
+		if (!document)
+		{
+			Respond(id, "[]");
+			return;
+		}
+
+		const auto tree =
+			CachedParse(uri_string, document->text, document->version, CommandFor(uri_string));
+		if (!tree || RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		const auto symbols = heimdall::SymbolOutline::Extract(*tree);
+		std::string response;
+		if (m_hierarchical_symbols.load(std::memory_order_relaxed))
+		{
+			AppendDocumentSymbols(symbols, *document->lines, response);
+		}
+		else
+		{
+			AppendFlatDocumentSymbols(symbols, uri, *document->lines, response);
+		}
+
+		Respond(id, response);
+	}
+
+	void LanguageServer::WorkspaceSymbols(simdjson::dom::element request, std::string_view id)
+	{
+		simdjson::dom::object params;
+		std::string_view query;
+		if (!GetObject(request, "params", params) ||!GetString(params, "query", query))
+		{
+			Respond(id, "[]");
+			return;
+		}
+
+		const auto hits =
+			m_symbol_index.Query(query, WorkspaceSymbolIndex::kDefaultLimit, CurrentStop());
+		if (RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		std::string response;
+		AppendWorkspaceSymbols(hits, response);
+		Respond(id, response);
+	}
+
+	void LanguageServer::IndexOpenSymbols(const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		const heimdall::ParseTree& tree,
+		std::int64_t version)
+	{
+		if (!m_workspace_symbols.load(std::memory_order_relaxed))
+		{
+			return;
+		}
+
+		LineIndex lines;
+		lines.Build(*text);
+		const auto outline = heimdall::SymbolOutline::Extract(tree);
+		auto file          = BuildIndexedFile(uri, outline, lines);
+		const std::lock_guard<std::mutex> lock(m_symbol_mu);
+		if (IsCurrentVersion(uri, version))
+		{
+			m_symbol_index.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+		}
+	}
+
+	void LanguageServer::IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop)
+	{
+		const std::string key = FileKey(file);
+		try
+		{
+			auto contents = ReadWorkspaceFile(file);
+			if (!contents)
+			{
+				m_symbol_index.RemoveDisk(key);
+				return;
+			}
+
+			auto text             = std::make_shared<const std::string>(std::move(*contents));
+			const std::string uri = UriFromPath(file);
+			const auto tree       = heimdall::ParseTree::ParseSnapshot(
+                text, ParserOptionsFor(CommandFor(uri)), stop);
+			if (tree.Cancelled())
+			{
+				return;
+			}
+
+			LineIndex lines;
+			lines.Build(*text);
+			m_symbol_index.SetDisk(
+				key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
+		}
+		catch (...)
+		{
+			// Out of memory or an unreadable tree: keep whatever was indexed before.
+			return;
+		}
+	}
+
+	void LanguageServer::SymbolIndexMain(std::stop_token stop)
+	{
+		std::filesystem::path root;
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			root = m_workspace_root;
+		}
+		if (root.empty())
+		{
+			return;
+		}
+
+		const std::vector<std::filesystem::path> files = DiscoverWorkspaceSources(root, stop);
+		// Reading files dominates, so a few helpers overlap the I/O; the pool that serves
+		// requests is left alone, and shutdown never waits for this scan.
+		constexpr std::size_t kMaxIndexThreads = 4;
+		constexpr unsigned kCoresPerIndexThread = 4;
+		const std::size_t threads = std::clamp<std::size_t>(
+			std::thread::hardware_concurrency() / kCoresPerIndexThread, 1, kMaxIndexThreads);
+		std::atomic<std::size_t> next {0};
+		const auto drain = [&]
+		{
+			// Relaxed is enough: the counter only hands out distinct file indexes, and each
+			// file's result is published through WorkspaceSymbolIndex's own lock.
+			for (std::size_t i = next.fetch_add(1, std::memory_order_relaxed);
+				i < files.size() &&!stop.stop_requested();
+				i = next.fetch_add(1, std::memory_order_relaxed))
+			{
+				IndexDiskSymbols(files[i], stop);
+			}
+		};
+		{
+			std::vector<std::jthread> helpers;
+			for (std::size_t i = 1; i < threads; ++i)
+			{
+				helpers.emplace_back(drain);
+			}
+
+			drain();
+		}
+		if (stop.stop_requested())
+		{
+			return;
+		}
+
+		std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
+		"logMessage\",\"params\":{\"type\":3,\"message\":";
+		QuoteJson("Heimdall: symbol index ready: " + std::to_string(files.size()) + " files",
+			notification);
+		notification += "}}";
+		Send(notification);
+	}
+
+	void LanguageServer::WatchedFilesChanged(simdjson::dom::element request)
+	{
+		if (!m_workspace_symbols.load(std::memory_order_relaxed))
+		{
+			return;
+		}
+
+		simdjson::dom::object params;
+		simdjson::dom::array changes;
+		if (!GetObject(request, "params", params) || params["changes"].get_array().get(changes))
+		{
+			return;
+		}
+
+		std::filesystem::path root;
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			root = m_workspace_root;
+		}
+		constexpr std::int64_t kDeleted = 3;
+		for (const auto change : changes)
+		{
+			simdjson::dom::object entry;
+			std::string_view uri;
+			std::int64_t type = 0;
+			if (change.get_object().get(entry) ||!GetString(entry, "uri", uri) ||
+				entry["type"].get_int64().get(type))
+			{
+				continue;
+			}
+
+			const std::filesystem::path path = PathFromUri(uri);
+			if (!IsUnderRoot(path, root))
+			{
+				continue;
+			}
+
+			if (type == kDeleted)
+			{
+				// A removed folder is reported once, not once per file inside it.
+				m_symbol_index.RemoveDiskUnder(FileKey(path));
+			}
+			else if (IsWorkspaceSource(path))
+			{
+				m_pool.Submit(ThreadPool::Task([this, path]()
+					{
+						IndexDiskSymbols(path, std::stop_token {});
+				}),
+					ThreadPool::Priority::Background);
+			}
+		}
 	}
 
 } // namespace heimdall::lsp

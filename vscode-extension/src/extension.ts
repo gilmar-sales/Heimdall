@@ -17,8 +17,13 @@ import {
     releaseDownloadUrl,
 } from './serverInstall';
 
+// Source and header files the server indexes for "Go to Symbol in Workspace"; the watcher
+// tells it when one changes on disk (saved elsewhere, created, deleted, branch switch).
+const SOURCE_FILE_GLOB = '**/*.{c,cc,cpp,cxx,c++,h,hh,hpp,hxx,inl,ipp,tpp,cppm,ixx}';
+
 let client: LanguageClient | undefined;
 let output: vscode.OutputChannel;
+let sourceWatcher: vscode.FileSystemWatcher | undefined;
 
 function findOnPath(executable: string): string | undefined {
     try {
@@ -209,6 +214,9 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         run: { command: stagedServerPath, args: [] },
         debug: { command: stagedServerPath, args: [] },
     };
+    sourceWatcher?.dispose();
+    sourceWatcher = vscode.workspace.createFileSystemWatcher(SOURCE_FILE_GLOB);
+    context.subscriptions.push(sourceWatcher);
     const clientOptions: LanguageClientOptions = {
         documentSelector: [
             { scheme: 'file', language: 'c' },
@@ -217,10 +225,11 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
             { scheme: 'file', language: 'objective-c' },
             { scheme: 'file', language: 'objective-cpp' },
         ],
-        synchronize: { configurationSection: 'heimdall' },
+        synchronize: { configurationSection: 'heimdall', fileEvents: sourceWatcher },
         initializationOptions: {
             enableSemantic: configuration.get<boolean>('enableSemantic', false),
             workspaceDiagnostics: configuration.get<boolean>('workspaceDiagnostics', true),
+            workspaceSymbols: configuration.get<boolean>('workspaceSymbols', true),
             compileCommands,
             workspaceRoot,
         },
@@ -281,6 +290,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             event.affectsConfiguration('heimdall.serverVersion') ||
             event.affectsConfiguration('heimdall.enableSemantic') ||
             event.affectsConfiguration('heimdall.workspaceDiagnostics') ||
+            event.affectsConfiguration('heimdall.workspaceSymbols') ||
             event.affectsConfiguration('heimdall.compileCommands')) {
             await restartClient(context);
         }
