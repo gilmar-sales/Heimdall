@@ -63,6 +63,8 @@ namespace heimdall::detail
 			Entry {RuleId::CallArgumentCount, &SemanticRules::AnalyzeCallArguments},
 			Entry {RuleId::CallArgumentType, &SemanticRules::AnalyzeCallArgumentTypes},
 			Entry {RuleId::DotOnPointer, &SemanticRules::AnalyzeDotOnPointer},
+			Entry {RuleId::InaccessibleMember, &SemanticRules::AnalyzeAccessControl},
+			Entry {RuleId::ConflictingDeclaration, &SemanticRules::AnalyzeConflictingDeclarations},
 			Entry {RuleId::UnreachableCode, &SemanticRules::AnalyzeUnreachable},
 			Entry {RuleId::MissingReturn, &SemanticRules::AnalyzeMissingReturn},
 			Entry {RuleId::ReturnType, &SemanticRules::AnalyzeReturnTypes},

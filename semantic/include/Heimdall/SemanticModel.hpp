@@ -62,6 +62,13 @@ namespace heimdall
         TypeAlias
     };
 
+    enum class AccessLevel : std::uint8_t
+    {
+        Public,
+        Protected,
+        Private
+    };
+
     // Bit set stored in SymbolTable::flags.
     namespace SymbolFlag
     {
@@ -97,6 +104,7 @@ namespace heimdall
         std::pmr::vector<ScopeId>       scope; // scope the symbol is declared in
         std::pmr::vector<SymbolKind>    kind;
         std::pmr::vector<std::uint32_t> flags;
+        std::pmr::vector<AccessLevel>  access;
         std::pmr::vector<std::uint32_t> decl_token;   // index into ParseTree::Tokens()
         std::pmr::vector<std::uint32_t> decl_node;    // index into ParseTree::Nodes()
         std::pmr::vector<ScopeId>       member_scope; // namespaces and classes: where members live

@@ -2500,6 +2500,8 @@ namespace heimdall
 				AnalyzeCallArguments(model),
 				AnalyzeCallArgumentTypes(types),
 				AnalyzeDotOnPointer(types),
+				AnalyzeAccessControl(types),
+				AnalyzeConflictingDeclarations(types),
 				AnalyzeUnreachable(flow),
 				AnalyzeMissingReturn(flow),
 				AnalyzeReturnTypes(flow)

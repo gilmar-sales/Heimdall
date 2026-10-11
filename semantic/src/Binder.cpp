@@ -114,6 +114,8 @@ namespace heimdall
 
         std::uint32_t PointerFlags(std::uint32_t declarator) const;
 
+        AccessLevel AccessFor(ScopeId scope, std::uint32_t token) const;
+
         std::uint32_t ReturnsPointerFlag(std::uint32_t function) const;
 
         // First significant position at or after raw token `token`.
@@ -334,6 +336,65 @@ namespace heimdall
         }
 
         return operators > 0 ? SymbolFlag::Pointer : 0;
+    }
+
+    AccessLevel BinderImpl::AccessFor(ScopeId scope, std::uint32_t token) const
+    {
+        if (scope >= m_model.m_scopes.Size() ||
+            m_model.m_scopes.kind[scope] != ScopeKind::Class)
+        {
+            return AccessLevel::Public;
+        }
+
+        const auto record = m_model.m_scopes.node[scope];
+        const auto [begin, end] = NodeSig(record);
+        AccessLevel access = begin < end && Is(m_sig[begin], Tok::KwClass)
+            ? AccessLevel::Private : AccessLevel::Public;
+        const auto target = SigAtOrAfter(token);
+        std::size_t open = begin;
+        while (open < end && !Is(m_sig[open], Tok::LBrace))
+        {
+            ++open;
+        }
+
+        if (open == end)
+        {
+            return access;
+        }
+
+        for (auto i = open + 1; i < target && i < end; ++i)
+        {
+            const auto current = m_sig[i];
+            if (Is(current, Tok::LBrace))
+            {
+                const auto close = MatchSig(i, end);
+                if (close > i)
+                {
+                    i = close;
+                }
+                continue;
+            }
+
+            if (i + 1 >= target || !Is(m_sig[i + 1], Tok::Colon))
+            {
+                continue;
+            }
+
+            if (Is(current, Tok::KwPublic))
+            {
+                access = AccessLevel::Public;
+            }
+            else if (Is(current, Tok::KwProtected))
+            {
+                access = AccessLevel::Protected;
+            }
+            else if (Is(current, Tok::KwPrivate))
+            {
+                access = AccessLevel::Private;
+            }
+        }
+
+        return access;
     }
 
     // `ReturnsPointer` when the written return type is a pointer.
@@ -779,6 +840,7 @@ namespace heimdall
         symbols.scope.push_back(scope);
         symbols.kind.push_back(kind);
         symbols.flags.push_back(flags);
+        symbols.access.push_back(AccessFor(scope, token));
         symbols.decl_token.push_back(token);
         symbols.decl_node.push_back(node);
         symbols.member_scope.push_back(member_scope);

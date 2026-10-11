@@ -39,6 +39,13 @@ namespace heimdall
 		/** Reports '.' member access on a receiver the typer knows is a pointer. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeDotOnPointer(const TypeModel& types);
 
+		/** Reports member access that violates public, protected, or private access rules. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeAccessControl(const TypeModel& types);
+
+		/** Reports conflicting same-scope automatic variable declarations. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConflictingDeclarations(
+			const TypeModel& types);
+
 		/** Reports unreachable statements in complete control-flow graphs. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUnreachable(const FlowModel& flow);
 

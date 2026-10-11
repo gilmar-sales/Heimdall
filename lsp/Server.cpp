@@ -1035,6 +1035,19 @@ namespace heimdall::lsp
 			QuoteJson(diagnostic.code, message);
 			message += ",\"source\":\"heimdall\",\"message\":";
 			QuoteJson(diagnostic.message, message);
+			if (diagnostic.has_related_information)
+			{
+				message += ",\"relatedInformation\":[{\"location\":{\"uri\":";
+				QuoteJson(uri, message);
+				message += ",\"range\":{\"start\":";
+				AppendPosition(lines.ToPosition(diagnostic.related_offset), message);
+				message += ",\"end\":";
+				AppendPosition(
+					lines.ToPosition(diagnostic.related_offset + diagnostic.related_length), message);
+				message += "}},\"message\":";
+				QuoteJson(diagnostic.related_message, message);
+				message += "}]";
+			}
 			message += '}';
 		}
 
@@ -3471,11 +3484,177 @@ namespace heimdall::lsp
 		const std::size_t last_line = PositionNumber(end, "line");
 		const std::size_t first_offset = lines->OffsetFromPosition({first_line, 0});
 		const std::size_t last_offset = lines->OffsetFromPosition({last_line + 1, 0});
+		const auto& tokens = tree->Tokens();
+		const auto& nodes = tree->NodesSoA();
+		const auto& semantic = context.Semantic();
+		const auto& semantic_symbols = context.Symbols();
+		const auto next_significant = [&](std::size_t token, std::size_t limit)
+		{
+			while (token < limit && (tokens[token].kind == heimdall::TokenKind::Whitespace ||
+				tokens[token].kind == heimdall::TokenKind::LineComment ||
+				tokens[token].kind == heimdall::TokenKind::BlockComment))
+			{
+				++token;
+			}
+			return token;
+		};
+		const auto spell_type = [&](std::uint32_t type_begin, std::size_t limit)
+		{
+			if (type_begin >= tokens.size())
+			{
+				return std::string {};
+			}
+			std::size_t type_end = type_begin;
+			const auto template_open = next_significant(type_begin + 1, limit);
+			if (template_open < limit && tokens[template_open].tok == heimdall::Tok::Lt)
+			{
+				int depth = 0;
+				for (auto token = template_open; token < limit; ++token)
+				{
+					if (tokens[token].tok == heimdall::Tok::Lt)
+					{
+						++depth;
+					}
+					else if (tokens[token].tok == heimdall::Tok::Gt && --depth == 0)
+					{
+						type_end = token;
+						break;
+					}
+					else if (tokens[token].tok == heimdall::Tok::Shr)
+					{
+						depth -= 2;
+						if (depth <= 0)
+						{
+							type_end = token;
+							break;
+						}
+					}
+				}
+			}
+			const auto begin_offset = tokens[type_begin].offset;
+			const auto& last_token = tokens[type_end];
+			return std::string(tree->Source().substr(
+				begin_offset, last_token.offset + last_token.length - begin_offset));
+		};
+		const auto inferred_spelling = [&](heimdall::SymbolId symbol)
+		{
+			const auto declaration = semantic_symbols.decl_node[symbol];
+			if (declaration >= nodes.size())
+			{
+				return std::string {};
+			}
+			const auto declaration_begin = nodes.FirstToken(declaration);
+			const auto declaration_end = std::min<std::size_t>(
+				declaration_begin + nodes.TokenCount(declaration), tokens.size());
+			const auto name_token = semantic_symbols.decl_token[symbol];
+			bool auto_declared = false;
+			for (auto token = declaration_begin; token < name_token && token < declaration_end; ++token)
+			{
+				auto_declared |= tokens[token].tok == heimdall::Tok::KwAuto;
+			}
+			if (!auto_declared)
+			{
+				return std::string {};
+			}
+
+			std::size_t initializer = declaration_end;
+			for (auto token = name_token + 1; token < declaration_end; ++token)
+			{
+				if (tokens[token].tok == heimdall::Tok::Eq)
+				{
+					initializer = next_significant(token + 1, declaration_end);
+					break;
+				}
+			}
+			if (initializer >= declaration_end)
+			{
+				return std::string {};
+			}
+			if (tokens[initializer].tok == heimdall::Tok::KwNew)
+			{
+				const auto type = spell_type(initializer + 1, declaration_end);
+				return type.empty() ? type : type + "*";
+			}
+			if (tokens[initializer].kind != heimdall::TokenKind::Identifier)
+			{
+				return std::string {};
+			}
+
+			const auto spelling = tree->Text(tokens[initializer]);
+			const auto name = semantic.Names().Find(spelling);
+			const auto candidate = name == heimdall::kNone
+				? heimdall::kNone
+				: semantic.Lookup(semantic.ScopeOfNode(declaration), name, initializer);
+			if (candidate != heimdall::kNone &&
+				semantic_symbols.kind[candidate] == heimdall::SymbolKind::Class)
+			{
+				return spell_type(initializer, declaration_end);
+			}
+			const auto after_initializer = next_significant(initializer + 1, declaration_end);
+			if (tokens[initializer].tok == heimdall::Tok::None &&
+				after_initializer < declaration_end &&
+				tokens[after_initializer].tok == heimdall::Tok::Lt)
+			{
+				for (heimdall::SymbolId type = 0; type < semantic_symbols.Size(); ++type)
+				{
+					if (semantic_symbols.kind[type] == heimdall::SymbolKind::Class &&
+						semantic_symbols.name[type] == name)
+					{
+						return spell_type(initializer, declaration_end);
+					}
+				}
+			}
+			auto function = semantic.ResolveToken(static_cast<std::uint32_t>(initializer));
+			if (function == heimdall::kNone && name != heimdall::kNone)
+			{
+				function = semantic.Lookup(
+					semantic.ScopeOfNode(declaration), name, static_cast<std::uint32_t>(initializer));
+			}
+			if (function == heimdall::kNone ||
+				semantic_symbols.kind[function] != heimdall::SymbolKind::Function)
+			{
+				return std::string {};
+			}
+			const auto function_declaration = semantic_symbols.decl_node[function];
+			if (function_declaration >= nodes.size())
+			{
+				return std::string {};
+			}
+			const auto function_name = semantic_symbols.decl_token[function];
+			auto return_begin = nodes.FirstToken(function_declaration);
+			while (return_begin < function_name && tokens[return_begin].tok == heimdall::Tok::KwTemplate)
+			{
+				while (return_begin < function_name && tokens[return_begin].tok != heimdall::Tok::Gt)
+				{
+					++return_begin;
+				}
+				++return_begin;
+			}
+			if (return_begin >= function_name)
+			{
+				return std::string {};
+			}
+			const auto begin_offset = tokens[return_begin].offset;
+			const auto end_offset = tokens[function_name].offset;
+			std::string_view return_type = tree->Source().substr(
+				begin_offset, end_offset - begin_offset);
+			while (!return_type.empty() && (return_type.back() == ' ' || return_type.back() == '\t'))
+			{
+				return_type.remove_suffix(1);
+			}
+			return std::string(return_type);
+		};
 		std::string response = "[";
 		bool first = true;
 		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
 			if (symbols.kind[symbol] != heimdall::SymbolKind::Variable)
+			{
+				continue;
+			}
+			const auto scope = symbols.scope[symbol];
+			if (scope < context.Semantic().Scopes().Size() &&
+				context.Semantic().Scopes().kind[scope] == heimdall::ScopeKind::Class)
 			{
 				continue;
 			}
@@ -3490,16 +3669,17 @@ namespace heimdall::lsp
 			{
 				continue;
 			}
-			const std::size_t statement_start = text->find_last_of(";{}\n", token_offset) == std::string::npos
-				? 0 : text->find_last_of(";{}\n", token_offset) + 1;
-			const std::string_view declaration(*text);
-			const auto auto_pos = declaration.substr(statement_start, token_offset - statement_start).find("auto");
-			if (auto_pos == std::string_view::npos)
-			{
-				continue;
-			}
 			const auto type = context.Types().SymbolType(symbol);
-			if (!context.Types().Types().IsKnown(type))
+			std::string type_spelling;
+			if (context.Types().Types().IsKnown(type))
+			{
+				type_spelling = context.Types().Spell(type);
+			}
+			else
+			{
+				type_spelling = inferred_spelling(symbol);
+			}
+			if (type_spelling.empty())
 			{
 				continue;
 			}
@@ -3512,7 +3692,7 @@ namespace heimdall::lsp
 			response += "{\"position\":";
 			AppendPosition(lines->ToPosition(hint_offset), response);
 			response += ",\"label\":";
-			QuoteJson(": " + context.Types().Spell(type), response);
+			QuoteJson(": " + type_spelling, response);
 			response += ",\"kind\":1,\"paddingLeft\":true}";
 		}
 		response += ']';

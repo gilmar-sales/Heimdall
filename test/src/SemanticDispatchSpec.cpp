@@ -133,7 +133,9 @@ namespace
                 rule.id == RuleId::ApiPassByConstReference ||
                 rule.id == RuleId::ApiConstCorrectness || rule.id == RuleId::ApiUnsafeDowncast ||
                 rule.id == RuleId::ApiSlicing || rule.id == RuleId::CallArgumentType ||
-                rule.id == RuleId::DotOnPointer || rule.id == RuleId::UnreachableCode || rule.id == RuleId::MissingReturn ||
+				 rule.id == RuleId::DotOnPointer || rule.id == RuleId::InaccessibleMember ||
+				 rule.id == RuleId::ConflictingDeclaration ||
+				 rule.id == RuleId::UnreachableCode || rule.id == RuleId::MissingReturn ||
                 rule.id == RuleId::ReturnType;
             EXPECT_EQ(context.Snapshot().Metrics().bind_count, 1);
             EXPECT_EQ(context.Snapshot().Metrics().type_count, typed ? 1 : 0);

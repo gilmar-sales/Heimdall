@@ -25,6 +25,7 @@ add_library(heimdall_semantic STATIC
   src/DesignatedInit.cpp
   src/CallArguments.cpp
   src/MemberAccess.cpp
+  src/AccessControl.cpp
   src/ControlFlowRules.cpp
   src/Documentation.cpp
 )

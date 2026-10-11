@@ -60,14 +60,18 @@ private:
 	Node<TValue>* mRoot;
 };
 
+LinkedList<int> CreateList()
+{
+	return {};
+}
+
+auto list = CreateList();
+
 int main()
 {
 	auto list = LinkedList<int>();
 
-	list.mRoot = new Node<int>
-	{
-		.value = 20;
-	};
+	list.Push("");
 
 	return 0;
 }

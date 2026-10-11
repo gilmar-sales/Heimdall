@@ -15,6 +15,14 @@ namespace
         return heimdall::SemanticRules::AnalyzeOverride(model);
     }
 
+    std::vector<heimdall::Diagnostic> AccessControl(const std::string& source)
+    {
+        const auto tree = heimdall::ParseTree::Parse(source);
+        const auto model = heimdall::Binder::Bind(tree);
+        const auto types = heimdall::Typer::Type(model);
+        return heimdall::SemanticRules::AnalyzeAccessControl(types);
+    }
+
     std::string Fixed(std::string source, const heimdall::Diagnostic& diagnostic)
     {
         source.replace(diagnostic.fix.offset, diagnostic.fix.length, diagnostic.fix.replacement);
@@ -22,6 +30,114 @@ namespace
     }
 
 } // namespace
+
+TEST(AccessControl, ReportsPrivateMemberAccessOutsideTheClass)
+{
+    const auto diagnostics = AccessControl(
+        "class List { int root; public: void Set() { root = 1; } };\n"
+        "void f(List list) { list.root = 2; }\n");
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "cpp/access-control");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+    EXPECT_NE(diagnostics[0].message.find("private"), std::string::npos);
+    EXPECT_EQ(diagnostics[0].line, 2u);
+}
+
+TEST(AccessControl, AllowsPublicAndSameClassPrivateAccess)
+{
+    EXPECT_TRUE(AccessControl(
+        "class List { int root; public: int value; void Set() { root = value; } };\n"
+        "void f(List list) { list.value = 2; }\n")
+        .empty());
+}
+
+TEST(AccessControl, AllowsFriendClassesAndFriendMethods)
+{
+    EXPECT_TRUE(AccessControl(
+        "class List { int root; friend class Inspector; };\n"
+        "class Inspector { void Read(List& list) { (void)list.root; } };\n")
+        .empty());
+    EXPECT_TRUE(AccessControl(
+        "class Inspector;\n"
+        "class List { int root; friend void Inspector::Read(List&); };\n"
+        "class Inspector { public: void Read(List& list); };\n"
+        "void Inspector::Read(List& list) { (void)list.root; }\n")
+        .empty());
+}
+
+TEST(AccessControl, ResolvesTemplateClassMembersForVisibility)
+{
+    const auto diagnostics = AccessControl(
+        "template<class T> struct Node {};\n"
+        "template<class T> class LinkedList { Node<T>* mRoot; public: void Clear() {} };\n"
+        "void f() { auto list = LinkedList<int>(); list.mRoot = nullptr; }\n");
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].message,
+        "'Node<int>* LinkedList<int>::mRoot' is private within this context");
+}
+
+TEST(AccessControl, ResolvesAutoTemplateTypeFromFactoryForVisibility)
+{
+    const auto diagnostics = AccessControl(
+        "template<class T> struct Node {};\n"
+        "template<class T> class LinkedList { Node<T>* mRoot; };\n"
+        "LinkedList<int> CreateList() { return {}; }\n"
+        "void f() { auto list = CreateList(); list.mRoot = nullptr; }\n");
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].message,
+        "'Node<int>* LinkedList<int>::mRoot' is private within this context");
+}
+
+TEST(AccessControl, ChecksProtectedAccessAndNestedClassPrivileges)
+{
+    EXPECT_EQ(AccessControl(
+        "struct Base { protected: int value; };\n"
+        "struct Derived : Base { void Set(Derived& other) { other.value = 1; } };\n"
+        "void f(Base& base) { base.value = 2; }\n")
+        .size(),
+        1u);
+    EXPECT_TRUE(AccessControl(
+        "class Outer { int value; class Inner { void Read(Outer& outer) { (void)outer.value; } }; };\n")
+        .empty());
+    EXPECT_EQ(AccessControl(
+        "class Outer { class Inner { int value; }; void Read(Inner& inner) { (void)inner.value; } };\n")
+        .size(),
+        1u);
+}
+
+TEST(AccessControl, AllowsFriendFreeFunctions)
+{
+    EXPECT_TRUE(AccessControl(
+        "class List { int root; friend void Inspect(List&); };\n"
+        "void Inspect(List& list) { (void)list.root; }\n")
+        .empty());
+}
+
+TEST(ConflictingDeclaration, ReportsRepeatedAutoNameWithPreviousLocation)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "template<class T> class LinkedList {};\n"
+        "LinkedList<int> CreateList() { return {}; }\n"
+        "void f() {\n"
+        "    auto list = CreateList();\n"
+        "    auto list = LinkedList<int>();\n"
+        "}\n");
+    const auto model = heimdall::Binder::Bind(tree);
+    const auto types = heimdall::Typer::Type(model);
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConflictingDeclarations(types);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "cpp/conflicting-declaration");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+    EXPECT_NE(diagnostics[0].message.find("auto list"), std::string::npos);
+    EXPECT_TRUE(diagnostics[0].has_related_information);
+    EXPECT_EQ(diagnostics[0].related_message,
+        "previous declaration as 'LinkedList<int> list' is here");
+    EXPECT_LT(diagnostics[0].related_offset, diagnostics[0].offset);
+}
 
 TEST(ModernizeOverride, ReportsAnOverrideWithoutTheKeyword)
 {

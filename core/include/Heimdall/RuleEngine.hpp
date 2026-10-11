@@ -70,6 +70,8 @@ namespace heimdall
 		CallArgumentCount,
 		CallArgumentType,
 		DotOnPointer,
+		InaccessibleMember,
+		ConflictingDeclaration,
 		UnreachableCode,
 		MissingReturn,
 		ReturnType,
@@ -120,6 +122,10 @@ namespace heimdall
 		// Unsafe ones are only offered as editor quick fixes.
 		bool fix_is_safe = true;
 		std::string fix_title;
+		bool has_related_information = false;
+		std::size_t related_offset = 0;
+		std::size_t related_length = 0;
+		std::string related_message;
 	};
 
 	// Include groups recognized by cpp/sort-includes. The configured

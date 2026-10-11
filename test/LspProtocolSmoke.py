@@ -8,15 +8,37 @@ compile_commands = sys.argv[2]
 fixture = Path(sys.argv[3]).resolve()
 uri = fixture.as_uri()
 broken_uri = uri + ".broken.cpp"
+access_uri = uri + ".access.cpp"
+inlay_uri = uri + ".inlay.cpp"
 messages = [
     {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "initializationOptions": {"enableSemantic": True, "compileCommands": compile_commands}}},
+        "initializationOptions": {"enableSemantic": True,
+                                   "compileCommands": compile_commands}}},
     {"jsonrpc": "2.0", "method": "initialized", "params": {}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
         "uri": uri, "languageId": "cpp", "version": 1, "text": "void f()\n{\nint value=NULL;\n    int unused = NULL;\n}\n"}}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
         "uri": broken_uri, "languageId": "cpp", "version": 1,
         "text": "int broken()\n{\n    int value = 1\n    return value;\n}\n"}}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+        "uri": access_uri, "languageId": "cpp", "version": 1,
+        "text": "template<class T> struct Node {};\n"
+               "template<class T> class LinkedList { Node<T>* mRoot; };\n"
+               "LinkedList<int> CreateList() { return {}; }\n"
+               "int main() { auto list = CreateList(); list.mRoot = nullptr; }\n"}}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+        "uri": inlay_uri, "languageId": "cpp", "version": 1,
+        "text": "template<class T> class LinkedList {};\n"
+               "LinkedList<int> CreateList() { return {}; }\n"
+               "struct Holder { auto member = LinkedList<int>(); };\n"
+               "void f() {\n"
+               "    auto list = CreateList();\n"
+               "    auto list = LinkedList<int>();\n"
+               "}\n"}}},
+    {"jsonrpc": "2.0", "id": 13, "method": "textDocument/inlayHint", "params": {
+        "textDocument": {"uri": inlay_uri},
+        "range": {"start": {"line": 0, "character": 0},
+                  "end": {"line": 5, "character": 0}}}},
     {"jsonrpc": "2.0", "id": 2, "method": "textDocument/formatting", "params": {
         "textDocument": {"uri": uri}, "options": {"tabSize": 4, "insertSpaces": True}}},
     {"jsonrpc": "2.0", "id": 3, "method": "textDocument/codeAction", "params": {
@@ -74,6 +96,25 @@ diagnostics = next(item for item in responses
                    if item.get("method") == "textDocument/publishDiagnostics" and item["params"]["uri"] == uri)
 codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
 assert {"cpp/modernize-const", "cpp/no-null", "semantic/no-unused-local"} <= codes, diagnostics
+access = next(item for item in responses
+              if item.get("method") == "textDocument/publishDiagnostics"
+              and item["params"]["uri"] == access_uri)
+assert any(item["code"] == "cpp/access-control" and
+           item["severity"] == 1 and
+           "mRoot" in item["message"] and "private" in item["message"]
+           for item in access["params"]["diagnostics"]), access
+inlays = next(item for item in responses if item.get("id") == 13)["result"]
+assert [hint["label"] for hint in inlays] == [": LinkedList<int>", ": LinkedList<int>"], inlays
+redecl = next(item for item in responses
+              if item.get("method") == "textDocument/publishDiagnostics"
+              and item["params"]["uri"] == inlay_uri)
+conflict = next(item for item in redecl["params"]["diagnostics"]
+                if item["code"] == "cpp/conflicting-declaration")
+assert conflict["severity"] == 1, conflict
+assert "auto list" in conflict["message"], conflict
+related = conflict["relatedInformation"][0]
+assert related["location"]["range"]["start"]["line"] == 4, related
+assert "previous declaration as 'LinkedList<int> list'" in related["message"], related
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
 assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused = NULL;\n}\n"
 broken = next(item for item in responses
