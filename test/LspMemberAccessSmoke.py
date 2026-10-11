@@ -62,7 +62,8 @@ def open_document(path, text):
         "uri": path.as_uri(), "languageId": "cpp", "version": 1, "text": text}}})
 
 
-request(1, "initialize", {"initializationOptions": {"compileCommands": compile_commands.as_posix()}})
+request(1, "initialize", {"initializationOptions": {
+    "enableSemantic": True, "compileCommands": compile_commands.as_posix()}})
 send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
 # 1. `s.` on a header alias of a header record that inherits from another record.
@@ -104,6 +105,37 @@ reply = request(601, "textDocument/hover", {
     "textDocument": {"uri": hover_user.as_uri()}, "position": {"line": 3, "character": 1}})
 value = reply["result"]["contents"]["value"]
 assert "**Size:** 1 bytes" in value and "**Align:** 1 bytes" in value, value
+
+# 4. The semantic pointer diagnostic offers a localized dot-to-arrow quick fix.
+pointer_user = workspace / "pointer_user.cpp"
+pointer_text = "struct Node { int value; };\nvoid f(Node* p) { p.value = 1; }\n"
+open_document(pointer_user, pointer_text)
+reply = request(700, "textDocument/codeAction", {
+    "textDocument": {"uri": pointer_user.as_uri()},
+    "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 40}},
+    "context": {"diagnostics": []}})
+fixes = [action for action in reply["result"]
+         if action["title"] == "Replace '.' with '->'"]
+assert len(fixes) == 1, reply
+edit = fixes[0]["edit"]["changes"][pointer_user.as_uri()][0]
+assert edit["newText"] == "->", edit
+assert edit["range"]["start"] == {"line": 1, "character": 19}, edit
+assert edit["range"]["end"] == {"line": 1, "character": 20}, edit
+
+chain_user = workspace / "pointer_chain.cpp"
+chain_text = ("struct Node { Node* next; };\n"
+              "void f(Node* next) { next.next.next.next.next = nullptr; }\n")
+open_document(chain_user, chain_text)
+reply = request(701, "textDocument/codeAction", {
+    "textDocument": {"uri": chain_user.as_uri()},
+    "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 70}},
+    "context": {"diagnostics": []}})
+fixes = [action for action in reply["result"]
+         if action["title"] == "Replace '.' with '->'"]
+assert len(fixes) == 4, reply
+for action in fixes:
+    edit = action["edit"]["changes"][chain_user.as_uri()][0]
+    assert edit["newText"] == "->", edit
 
 request(900, "shutdown", {})
 send({"jsonrpc": "2.0", "method": "exit"})

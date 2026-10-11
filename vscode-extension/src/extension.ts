@@ -265,6 +265,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
             enableSemantic: configuration.get<boolean>('enableSemantic', true),
             workspaceDiagnostics: configuration.get<boolean>('workspaceDiagnostics', true),
             workspaceSymbols: configuration.get<boolean>('workspaceSymbols', true),
+            inlayHints: configuration.get<boolean>('inlayHints', true),
             indexStatus: true,
             compileCommands,
             workspaceRoot,
@@ -420,6 +421,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             event.affectsConfiguration('heimdall.enableSemantic') ||
             event.affectsConfiguration('heimdall.workspaceDiagnostics') ||
             event.affectsConfiguration('heimdall.workspaceSymbols') ||
+            event.affectsConfiguration('heimdall.inlayHints') ||
             event.affectsConfiguration('heimdall.compileCommands')) {
             await restartClient(context);
         }

@@ -2,16 +2,6 @@
 #include <string>
 #include <string_view>
 
-/**
- * @brief An linked list node.
- *
- */
-struct Node
-{
-	Node* next;
-	int value;
-};
-
 auto sizeOfNode  = sizeof(Node);
 auto alignOfNode = alignof(Node);
 
@@ -48,6 +38,17 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 	constexpr auto test = 0;
 }
 
+/**
+ * @brief An linked list node.
+ *
+ */
+struct Node
+{
+	Node* next;
+	int value;
+	float another_bigger_member;
+};
+
 int main()
 {
 	auto next = new Node
@@ -56,8 +57,13 @@ int main()
 	};
 	auto root = new Node
 	{
-		.next = next,.value = 20
+		.next = next,
+		.value = 20,
+		.another_bigger_member = 30.f
 	};
+
+	root->value                  = 39;
+	next->next->next->next->next = 30;
 
 	return 0;
 }

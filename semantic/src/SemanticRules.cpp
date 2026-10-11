@@ -1344,7 +1344,7 @@ namespace heimdall
 			if (is_pointer && table.Element(type) == TypeTable::Unknown)
 			{
 				subject = table.IsArray(type) ? "an array of unknown type"
-					: "a pointer of unknown type";
+				: "a pointer of unknown type";
 			}
 			else
 			{
@@ -1364,10 +1364,10 @@ namespace heimdall
 			// Quick fix only: `p` becomes `p != nullptr`. Under `!`, the whole
 			// `!p` becomes `p == nullptr` so the negation is preserved.
 			const std::string text(model.Tree().Source().substr(offset, length));
-			auto              fix_offset  = offset;
-			auto              fix_length  = length;
-			auto              replacement = text + " != nullptr";
-			const auto        parent      = nodes.Parent(operand);
+			auto fix_offset   = offset;
+			auto fix_length   = length;
+			auto replacement  = text + " != nullptr";
+			const auto parent = nodes.Parent(operand);
 			if (parent < nodes.size() && nodes.Kind(parent) == GrammarKind::UnaryExpression)
 			{
 				const auto[parent_begin, parent_end] = view.Range(parent);
@@ -2499,6 +2499,7 @@ namespace heimdall
 				AnalyzeIntegerToPointer(model),
 				AnalyzeCallArguments(model),
 				AnalyzeCallArgumentTypes(types),
+				AnalyzeDotOnPointer(types),
 				AnalyzeUnreachable(flow),
 				AnalyzeMissingReturn(flow),
 				AnalyzeReturnTypes(flow)

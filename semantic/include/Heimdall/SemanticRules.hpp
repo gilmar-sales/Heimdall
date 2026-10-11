@@ -36,6 +36,9 @@ namespace heimdall
 		/** Reports proven argument-type mismatches, accepting known implicit conversions. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(const TypeModel& types);
 
+		/** Reports '.' member access on a receiver the typer knows is a pointer. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeDotOnPointer(const TypeModel& types);
+
 		/** Reports unreachable statements in complete control-flow graphs. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUnreachable(const FlowModel& flow);
 

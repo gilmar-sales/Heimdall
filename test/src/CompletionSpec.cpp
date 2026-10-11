@@ -1290,6 +1290,75 @@ TEST(CompletionSpec, HoverOfAutoFromANewExpressionIsAPointer)
     EXPECT_EQ(detail("plain"), "Node");
 }
 
+TEST(CompletionSpec, HoverPrefersVisibleLocalOverSameNamedMember)
+{
+    const std::string multiline =
+        "struct Node { Node* next; int value; };\n"
+        "int main() {\n"
+        "\tauto next = new Node\n"
+        "\t{\n"
+        "\t\t.value = 20\n"
+        "\t};\n"
+        "\tnext.value = 30;\n"
+        "\treturn 0;\n"
+        "}\n";
+    const std::string singleline =
+        "struct Node { Node* next; int value; };\n"
+        "int main() {\n"
+        "\tauto next = new Node { .value = 20 };\n"
+        "\tnext.value = 30;\n"
+        "\treturn 0;\n"
+        "}\n";
+    for (const std::string& source : {multiline, singleline})
+    {
+        // The use, not the member declaration: the local shadows `Node::next`.
+        const auto hover = heimdall::CompletionEngine::Hover(
+            source, {}, source.find("next.value") + 1);
+        ASSERT_TRUE(hover.has_value());
+        EXPECT_EQ(hover->detail, "Node*");
+    }
+}
+
+TEST(CompletionSpec, HoverOfDesignatorShowsTheFieldType)
+{
+    const std::string source =
+        "struct Node { Node* next; int value; };\n"
+        "int main() {\n"
+        "\tauto next = new Node\n"
+        "\t{\n"
+        "\t\t.value = 20\n"
+        "\t};\n"
+        "\tauto root = new Node\n"
+        "\t{\n"
+        "\t\t.next = next,\n"
+        "\t\t.value = 20\n"
+        "\t};\n"
+        "\troot.value = 39;\n"
+        "\tnext.value = 30;\n"
+        "\treturn 0;\n"
+        "}\n";
+    const auto detail = [&](const char* needle, int occurrence = 0) {
+        std::size_t at = 0;
+        for (int i = 0; i <= occurrence; ++i)
+        {
+            at = source.find(needle, at) + 1;
+        }
+
+        const auto hover = heimdall::CompletionEngine::Hover(source, {}, at);
+        return hover.has_value() ? hover->detail : std::string("<none>");
+    };
+    // Designators name fields: the pointer declarator is part of the type.
+    EXPECT_EQ(detail(".next"), "Node *");
+    EXPECT_EQ(detail(".value", 1), "int");
+    // Same items through ordinary member access: the object keeps its
+    // deduced type while the member keeps its full spelling.
+    EXPECT_EQ(detail("root.value"), "Node*");
+    const auto member = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("root.value") + 5);
+    ASSERT_TRUE(member.has_value());
+    EXPECT_EQ(member->detail, "int");
+}
+
 TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
 {
     const auto labels = [](std::string source) {
@@ -1744,3 +1813,5 @@ TEST(CompletionSpec, HoverOnOffsetofEvaluatesTheMember)
     EXPECT_FALSE(
         OffsetAtHover("struct P { int a; };\nauto w = offsetof(P, nope);\n", "offsetof").known);
 }
+
+

@@ -960,6 +960,20 @@ namespace heimdall
 			}
 		}
 
+		// Fields complete and hover with their declared type, not just the
+		// specifier: `Node* next;` reads `Node *`, not `Node`. The index stores
+		// the specifier spelling, so member listings upgrade the copy.
+		CompletionItem WithFieldDetail(CompletionItem item)
+		{
+			if (item.kind == CompletionKind::Variable && item.detail != item.layout_type &&
+				!item.layout_type.empty() && item.layout_type != "?")
+			{
+				item.detail = item.layout_type;
+			}
+
+			return item;
+		}
+
 		// --- Scope-aware name resolution -------------------------------------------
 		// Unqualified lookup walks the scope chain (block, function, namespace,
 		// global) honoring the point of declaration; qualified lookup (`ns::name`)
@@ -3892,66 +3906,74 @@ namespace heimdall
 			// Declared names upgrade the kind (function/type vs plain variable) and
 			// carry signatures plus documentation. Tag names (`struct Widget`) are
 			// not always DeclaredName nodes, so collect them lexically as well.
+			// Visible locals go first: unqualified lookup finds the innermost
+			// scope, so a local shadows same-named members and globals in the
+			// same-label merge below (hover and completion follow lookup).
 			CollectTagNames(source, tokens, interner, best, prefix);
-			for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
+			for (std::size_t pass = 0; pass < 2; ++pass)
 			{
-				if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
+				for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
 				{
-					continue;
-				}
-
-				const std::size_t token_index = tree.NodesSoA().FirstToken(n);
-				if (token_index >= tree.Tokens().size())
-				{
-					continue;
-				}
-
-				const std::string_view name = tree.Text(tree.Tokens()[token_index]);
-				if (name.empty())
-				{
-					continue;
-				}
-
-				if (!prefix.empty() && !StartsWith(name, prefix))
-				{
-					continue;
-				}
-
-				const LocalInfo local = AnalyzeLocal(tree, n);
-				if (local.is_local)
-				{
-					// Point of declaration: usable only inside the owning block and
-					// once the declaration itself is complete.
-					if (local.owner == NoIndex)
+					if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
 					{
 						continue;
 					}
 
-					const auto[block_start, block_end] = NodeRange(tree, local.boundary);
-					if (offset < block_start || offset > block_end)
+					const std::size_t token_index = tree.NodesSoA().FirstToken(n);
+					if (token_index >= tree.Tokens().size())
 					{
 						continue;
 					}
 
-					const Token& name_token = tree.Tokens()[token_index];
-					if (name_token.offset + name_token.length > offset)
+					const std::string_view name = tree.Text(tree.Tokens()[token_index]);
+					if (name.empty())
 					{
 						continue;
 					}
 
-					InsertItem(
-						interner, best,
-						DescribeDeclared(tree, source, tokens, n, name, CompletionKind::Variable));
-					continue;
-				}
+					if (!prefix.empty() && !StartsWith(name, prefix))
+					{
+						continue;
+					}
 
-				const CompletionKind kind = ClassifyDeclaredName(tree, n);
-				if (IsKeyword(name) && kind == CompletionKind::Variable)
-				{
-					continue;
-				}
+					const LocalInfo local = AnalyzeLocal(tree, n);
+					bool usable_local     = false;
+					if (local.is_local && local.owner != NoIndex)
+					{
+						// Point of declaration: usable only inside the owning block and
+						// once the declaration itself is complete.
+						const auto[block_start, block_end] = NodeRange(tree, local.boundary);
+						const Token& name_token            = tree.Tokens()[token_index];
+						usable_local = offset >= block_start && offset <= block_end &&
+							name_token.offset + name_token.length <= offset;
+					}
 
-				InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
+					if (local.is_local)
+					{
+						if (!usable_local || pass != 0)
+						{
+							continue;
+						}
+
+						InsertItem(
+							interner, best,
+							DescribeDeclared(tree, source, tokens, n, name, CompletionKind::Variable));
+						continue;
+					}
+
+					if (pass != 1)
+					{
+						continue;
+					}
+
+					const CompletionKind kind = ClassifyDeclaredName(tree, n);
+					if (IsKeyword(name) && kind == CompletionKind::Variable)
+					{
+						continue;
+					}
+
+					InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
+				}
 			}
 
 			// Top-level namespaces are visible unqualified (as qualifier heads) with
@@ -4901,7 +4923,7 @@ namespace heimdall
 						if (member.kind == CompletionKind::Variable &&
 							!used.contains(member.label) && MatchesPrefix(member.label, prefix))
 						{
-							InsertItem(interner, best, member);
+							InsertItem(interner, best, WithFieldDetail(member));
 						}
 					}
 				}
@@ -5223,7 +5245,8 @@ namespace heimdall
 							continue;
 						}
 
-						InsertItem(interner, best, member);
+						CompletionItem item = member;
+						InsertItem(interner, best, WithFieldDetail(std::move(item)));
 					}
 				}
 

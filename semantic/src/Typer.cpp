@@ -701,6 +701,12 @@ namespace heimdall
 		std::pair<TypeId, Category> AutoInitializer(std::uint32_t node, std::uint32_t init,
 			std::size_t name_pos);
 
+		// Allocated type of a `new`-expression as written after the keyword:
+		// `new T...` is a prvalue of type `T*`. `new` has no dedicated node,
+		// so this scans the tokens instead. Unknown when unresolvable.
+		std::pair<TypeId, Category> NewExpressionType(std::size_t new_pos, std::size_t end,
+			ScopeId scope);
+
 		TypeId NumberType(std::string_view text);
 
 		TypeId CharType(std::string_view text);
@@ -1724,6 +1730,80 @@ namespace heimdall
 		return DeclaratorType(base, declarator, m_symbols.kind[symbol], init_type, category);
 	}
 
+	// `new` has no dedicated node: the grammar leaves the keyword, the
+	// allocated type and the initializer as siblings. Read the allocated
+	// type from the tokens so `auto p = new T...` deduces `T*`. Placement
+	// arguments, array extents and direct/braced initializers only end the
+	// type; anything unresolvable stays Unknown.
+	std::pair<TypeId, TyperImpl::Category> TyperImpl::NewExpressionType(
+		std::size_t new_pos, std::size_t end, ScopeId scope)
+	{
+		const std::pair<TypeId, Category> unknown {TypeTable::Unknown, Category::Unknown};
+		if (At(new_pos) != Tok::KwNew)
+		{
+			return unknown;
+		}
+
+		const auto before = m_sig[new_pos];
+		std::size_t pos   = new_pos + 1;
+		if (At(pos) == Tok::LParen)
+		{
+			pos = MatchParen(pos, end) + 1; // placement arguments
+		}
+
+		if (pos >= end)
+		{
+			return unknown;
+		}
+
+		// The allocated type ends at the initializer or array extent, skipping
+		// template argument lists as a unit.
+		const auto type_begin = pos;
+		auto type_end         = pos;
+		while (type_end < end)
+		{
+			const Tok tok = At(type_end);
+			if (tok == Tok::Lt)
+			{
+				const auto close = MatchAngle(type_end, end);
+				if (close >= end)
+				{
+					return unknown;
+				}
+
+				type_end = close + 1;
+				continue;
+			}
+
+			if (tok == Tok::LParen || tok == Tok::LBrace || tok == Tok::LBracket ||
+				tok == Tok::Semi)
+			{
+				break;
+			}
+
+			++type_end;
+		}
+
+		if (type_end <= type_begin)
+		{
+			return unknown;
+		}
+
+		const auto allocated = ParseTypeTokens(type_begin, type_end, scope, before);
+		if (allocated == TypeTable::Unknown)
+		{
+			return unknown;
+		}
+
+		const auto kind = m_types.Kind(m_types.Strip(allocated));
+		if (kind == TypeKind::LRef || kind == TypeKind::RRef || kind == TypeKind::Unknown)
+		{
+			return unknown;
+		}
+
+		return {m_types.Pointer(allocated), Category::PRValue};
+	}
+
 	// `= e`, `{e}`, `(e)` after the name, or the range of a range-for.
 	std::pair<TypeId, TyperImpl::Category> TyperImpl::AutoInitializer(
 		std::uint32_t node, std::uint32_t init, std::size_t name_pos)
@@ -1736,6 +1816,19 @@ namespace heimdall
 
 		if (At(name_pos + 1) == Tok::Eq && init != kNone)
 		{
+			// `auto p = new T...`: `new` has no dedicated node, so no child
+			// spans the whole initializer. Deduce from the tokens instead.
+			const auto first = name_pos + 2;
+			if (At(first) == Tok::KwNew)
+			{
+				const auto allocated = NewExpressionType(
+					first, NodeSig(init).second, m_model.ScopeOfNode(node));
+				if (allocated.first != TypeTable::Unknown)
+				{
+					return allocated;
+				}
+			}
+
 			const auto init_end = NodeSig(init).second;
 			for (const auto child : m_model.ChildrenOf(init))
 			{

@@ -242,6 +242,7 @@ namespace heimdall::lsp
 						",\"referencesProvider\":true,\"renameProvider\":" +
 						rename_capability +
 						","
+						"\"inlayHintProvider\":true,"
 						"\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\","
 						"\"#\",\"/\",\"<\",\"\\\"\"],"
 						"\"resolveProvider\":false}},"
@@ -366,6 +367,14 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							HoverDocument(request, id);
+					});
+				}
+				else if (method == "textDocument/inlayHint")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							InlayHints(request, id);
 					});
 				}
 				else if (method == "textDocument/documentSymbol")
@@ -891,6 +900,12 @@ namespace heimdall::lsp
 		if (has_options && !options["workspaceSymbols"].get_bool().get(symbols))
 		{
 			m_workspace_symbols.store(symbols, std::memory_order_relaxed);
+		}
+
+		bool inlay_hints = true;
+		if (has_options && !options["inlayHints"].get_bool().get(inlay_hints))
+		{
+			m_inlay_hints.store(inlay_hints, std::memory_order_relaxed);
 		}
 
 		bool index_status = false;
@@ -3409,6 +3424,98 @@ namespace heimdall::lsp
 		std::string response = "{\"contents\":{\"kind\":\"markdown\",\"value\":";
 		QuoteJson(value, response);
 		response += "}}";
+		Respond(id, response);
+	}
+
+	void LanguageServer::InlayHints(simdjson::dom::element request, std::string_view id)
+	{
+		if (!m_inlay_hints.load(std::memory_order_relaxed))
+		{
+			Respond(id, "[]");
+			return;
+		}
+
+		std::string_view uri;
+		simdjson::dom::object text_document;
+		if (!DocumentParams(request, uri, text_document))
+		{
+			Respond(id, "[]");
+			return;
+		}
+		simdjson::dom::object params, range, start, end;
+		if (!GetObject(request, "params", params) || !GetObject(params, "range", range) ||
+			!GetObject(range, "start", start) || !GetObject(range, "end", end))
+		{
+			Respond(id, "[]");
+			return;
+		}
+		const std::string uri_string(uri);
+		const auto document = GetDocument(uri_string);
+		if (!document)
+		{
+			Respond(id, "[]");
+			return;
+		}
+		const auto text = document->text;
+		const auto lines = document->lines;
+		const auto* command = CommandFor(uri_string);
+		const auto tree = CachedParse(uri_string, text, document->version, command);
+		if (!tree)
+		{
+			RespondCancelled(id);
+			return;
+		}
+		const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
+		const auto& symbols = context.Symbols();
+		const std::size_t first_line = PositionNumber(start, "line");
+		const std::size_t last_line = PositionNumber(end, "line");
+		const std::size_t first_offset = lines->OffsetFromPosition({first_line, 0});
+		const std::size_t last_offset = lines->OffsetFromPosition({last_line + 1, 0});
+		std::string response = "[";
+		bool first = true;
+		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+		{
+			if (symbols.kind[symbol] != heimdall::SymbolKind::Variable)
+			{
+				continue;
+			}
+			const auto token_index = symbols.decl_token[symbol];
+			if (token_index >= tree->Tokens().size())
+			{
+				continue;
+			}
+			const auto& token = tree->Tokens()[token_index];
+			const std::size_t token_offset = token.offset;
+			if (token_offset < first_offset || token_offset >= last_offset)
+			{
+				continue;
+			}
+			const std::size_t statement_start = text->find_last_of(";{}\n", token_offset) == std::string::npos
+				? 0 : text->find_last_of(";{}\n", token_offset) + 1;
+			const std::string_view declaration(*text);
+			const auto auto_pos = declaration.substr(statement_start, token_offset - statement_start).find("auto");
+			if (auto_pos == std::string_view::npos)
+			{
+				continue;
+			}
+			const auto type = context.Types().SymbolType(symbol);
+			if (!context.Types().Types().IsKnown(type))
+			{
+				continue;
+			}
+			const std::size_t hint_offset = token_offset + token.length;
+			if (!first)
+			{
+				response += ',';
+			}
+			first = false;
+			response += "{\"position\":";
+			AppendPosition(lines->ToPosition(hint_offset), response);
+			response += ",\"label\":";
+			QuoteJson(": " + context.Types().Spell(type), response);
+			response += ",\"kind\":1,\"paddingLeft\":true}";
+		}
+		response += ']';
 		Respond(id, response);
 	}
 

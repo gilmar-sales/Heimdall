@@ -69,6 +69,7 @@ namespace heimdall
 		NoIntegerToPointer,
 		CallArgumentCount,
 		CallArgumentType,
+		DotOnPointer,
 		UnreachableCode,
 		MissingReturn,
 		ReturnType,

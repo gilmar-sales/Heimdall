@@ -34,6 +34,7 @@ add_executable(Tests_run
   src/ApiRulesSpec.cpp
   src/DesignatedInitSpec.cpp
   src/CallArgumentsSpec.cpp
+  src/MemberAccessSpec.cpp
   src/DocumentationSpec.cpp
   src/DoxygenNavigationSpec.cpp
   src/SemanticModernizeSpec.cpp

@@ -200,6 +200,8 @@ namespace heimdall::lsp
 
 		void HoverDocument(simdjson::dom::element request, std::string_view id);
 
+		void InlayHints(simdjson::dom::element request, std::string_view id);
+
 		// Outline / "Go to Symbol in Editor": syntactic, from the pinned snapshot's parse.
 		void DocumentSymbols(simdjson::dom::element request, std::string_view id);
 
@@ -487,6 +489,7 @@ namespace heimdall::lsp
 		std::atomic<bool> m_enable_semantic      = false;
 		std::atomic<bool> m_workspace_scan       = true;
 		std::atomic<bool> m_workspace_symbols    = true;
+		std::atomic<bool> m_inlay_hints          = true;
 		std::atomic<bool> m_hierarchical_symbols = false;
 		// The client can show `$/progress` for tokens the server creates.
 		std::atomic<bool> m_work_done_progress = false;

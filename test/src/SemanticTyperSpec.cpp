@@ -391,6 +391,27 @@ TEST(Typer, AutoPointerDeduction)
     EXPECT_EQ(typed.Of("u"), "<unknown>"); // ill-formed: not a pointer
 }
 
+TEST(Typer, AutoDeducesNewExpressions)
+{
+    const Typed typed("struct Node { Node* next; int value; };\n"
+        "void f(void* buffer) {\n"
+        "auto a = new Node;\n"
+        "auto b = new Node();\n"
+        "auto c = new int;\n"
+        "auto d = new Node[3];\n"
+        "auto e = new (buffer) Node;\n"
+        "auto n = new Node { .value = 20 };\n"
+        "auto g = new Unknown;\n"
+        "}\n");
+    EXPECT_EQ(typed.Of("a"), "Node*");
+    EXPECT_EQ(typed.Of("b"), "Node*");
+    EXPECT_EQ(typed.Of("c"), "int*");
+    EXPECT_EQ(typed.Of("d"), "Node*");
+    EXPECT_EQ(typed.Of("e"), "Node*");
+    EXPECT_EQ(typed.Of("n"), "Node*");
+    EXPECT_EQ(typed.Of("g"), "<unknown>"); // unresolvable stays silent
+}
+
 TEST(Typer, AutoForwardingReferences)
 {
     const Typed typed(

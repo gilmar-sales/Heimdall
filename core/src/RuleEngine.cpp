@@ -814,6 +814,8 @@ namespace heimdall
 				"semantic", false, "function call with an incorrect number of arguments"},
 			{RuleId::CallArgumentType, "cpp/call-argument-type", "cpp", Severity::Error,
 				"semantic", false, "function argument without a valid implicit conversion"},
+			{RuleId::DotOnPointer, "cpp/dot-on-pointer", "cpp", Severity::Error,
+				"semantic", false, "member accessed with '.' on a pointer (use '->')"},
 			{RuleId::UnreachableCode, "cpp/unreachable-code", "cpp", Severity::Warning,
 				"semantic", false, "statement that cannot be reached"},
 			{RuleId::MissingReturn, "cpp/missing-return", "cpp", Severity::Error,

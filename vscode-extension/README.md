@@ -97,6 +97,8 @@ before the indexing ends sees the files indexed so far.
   skipped.
 - Set `heimdall.workspaceSymbols` to `false` to turn the workspace index off (the Outline
   keeps working).
+- Inferred type inlay hints for `auto` variables are enabled by default; set
+  `heimdall.inlayHints` to `false` to disable them.
 
 Measured on a Release build with 40 symbols per file: indexing runs at roughly 1–2 ms per file on
 a few helper threads (28-core Windows machine), 20 000 files (the cap) take about 35 s in the background and 90 MB;
