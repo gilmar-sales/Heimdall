@@ -1463,6 +1463,40 @@ TEST(CompletionSpec, HoverReportsLayoutOnBuiltinTypeTokens)
     EXPECT_EQ(boolean.align, alignof(bool));
 }
 
+TEST(CompletionSpec, HoverSourceAndParseTreePathsAgree)
+{
+    constexpr std::string_view source =
+        "struct Packet { int id; };\n"
+        "Packet packet;\n"
+        "int size = sizeof(int);\n";
+    const auto tree = heimdall::ParseTree::Parse(source, {});
+    const std::vector<std::string_view> probes = { "Packet packet", "packet", "id", "sizeof" };
+
+    for (const auto probe : probes)
+    {
+        const auto found = source.find(probe);
+        ASSERT_NE(found, std::string_view::npos) << probe;
+        const auto offset = found + 1;
+        const auto from_source = heimdall::CompletionEngine::Hover(source, {}, offset);
+        const auto from_tree = heimdall::CompletionEngine::Hover(tree, {}, offset);
+
+        EXPECT_EQ(from_source.has_value(), from_tree.has_value()) << probe;
+        if (!from_source.has_value())
+        {
+            continue;
+        }
+
+        EXPECT_EQ(from_source->label, from_tree->label) << probe;
+        EXPECT_EQ(from_source->kind, from_tree->kind) << probe;
+        EXPECT_EQ(from_source->detail, from_tree->detail) << probe;
+        EXPECT_EQ(from_source->has_layout, from_tree->has_layout) << probe;
+        EXPECT_EQ(from_source->size_bytes, from_tree->size_bytes) << probe;
+        EXPECT_EQ(from_source->align_bytes, from_tree->align_bytes) << probe;
+    }
+
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(tree, {}, source.size() + 20).has_value());
+}
+
 TEST(CompletionSpec, HoverAliasesCarryOriginDocumentationAndLayout)
 {
     constexpr std::string_view source =
@@ -1813,5 +1847,4 @@ TEST(CompletionSpec, HoverOnOffsetofEvaluatesTheMember)
     EXPECT_FALSE(
         OffsetAtHover("struct P { int a; };\nauto w = offsetof(P, nope);\n", "offsetof").known);
 }
-
 

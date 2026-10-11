@@ -6584,17 +6584,20 @@ namespace heimdall
 			CompletionItem hovered {word, CompletionKind::Type, word, {}};
 			// Keep multiword specifiers together (`unsigned long long`,
 			// `long double`) whichever component the cursor is over.
-			const auto& tokens = tree.Tokens();
-			std::size_t first  = 0;
-			while (first < tokens.size() && tokens[first].offset != start)
-			{
-				++first;
-			}
-
-			if (first >= tokens.size() || tokens[first].kind != TokenKind::Identifier)
+			const auto& tokens      = tree.Tokens();
+			const auto& identifiers = tree.IdentifierTokens();
+			const auto found = std::lower_bound(
+				identifiers.begin(), identifiers.end(), start,
+				[&](std::uint32_t token, std::size_t offset)
+				{
+					return tokens[token].offset < offset;
+			});
+			if (found == identifiers.end() || tokens[*found].offset != start)
 			{
 				return std::nullopt;
 			}
+
+			std::size_t first = *found;
 
 			std::size_t last = first;
 			while (first < tokens.size())

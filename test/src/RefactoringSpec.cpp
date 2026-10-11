@@ -208,12 +208,11 @@ namespace
         EXPECT_EQ(global->documents.front().edits.size(), 1u);
     }
 
-    TEST(RenameSpec, BlocksUnmodeledOccurrencesMacrosTemplatesAndCaptures)
+    TEST(RenameSpec, BlocksUnmodeledOccurrencesMacrosAndCaptures)
     {
         for (const auto text :
             {
                 "int f(int value) { auto fn = [&value] { return value; }; return value; }",
-                "template<class T> int f(int value) { return value; }",
                 "#define USE value\nint f(int value) { return USE; }",
                 "#include <vector>\nint f(int value) { return value; }",
                 "int f(int value) { int data[]{value}; return value; }"
@@ -227,6 +226,31 @@ namespace
         options.predefined_macros.emplace("HIDDEN", "value");
         Fixture f("int f(int value) { return value; }", options);
         EXPECT_FALSE(f.Rename("value", "renamed"));
+    }
+
+    TEST(RenameSpec, RenamesLexicallyBoundNamesInsideTemplates)
+    {
+        for (const auto source :
+            {
+                "template<class T> int f(int value) { return value; }",
+                "template<class T> T f(T value) { T local = value; return local; }",
+                "template<class T> struct Box { T value; T get() { return value; } };"
+        })
+        {
+            Fixture f(source);
+            const auto result = f.Rename("value", "renamed");
+            ASSERT_TRUE(result) << source << ": " << result.error().message;
+        }
+    }
+
+    TEST(RenameSpec, RejectsUnresolvedDependentTemplateMembers)
+    {
+        Fixture f("template<class T> struct Box { int value; "
+            "int get(T object) { return object.value; } };");
+        const auto result = f.Rename("value", "renamed");
+
+        EXPECT_FALSE(result);
+        EXPECT_EQ(result.error().code, RefactoringErrorCode::IncompleteAnalysis);
     }
 
     TEST(RenameSpec, AllowsExistingNamesInIndependentScopes)
@@ -1009,6 +1033,43 @@ namespace
         ASSERT_TRUE(refs) << refs.error().message;
         EXPECT_EQ(refs->tokens.size(), 2u);
         EXPECT_EQ(refs->offset, snapshot.Source(f.id)->rfind("value"));
+    }
+
+    TEST(RenameSpec, RenameFromAnyUseChangesOnlyBoundOccurrences)
+    {
+        Fixture f("int f(int value) { return value + value; }\n"
+            "int g(int value) { return value; }");
+        const auto snapshot = f.Snapshot();
+        const auto source = snapshot.Source(f.id);
+        const auto plan = RefactoringService::RenameLocal(
+            snapshot, f.id, source->find("value +"), "amount");
+
+        ASSERT_TRUE(plan) << plan.error().message;
+        ASSERT_EQ(plan->documents.size(), 1u);
+        EXPECT_EQ(plan->documents.front().edits.size(), 3u);
+        const auto preview = PreviewRefactoring(snapshot, *plan);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->front().source,
+                  "int f(int amount) { return amount + amount; }\n"
+            "int g(int value) { return value; }");
+    }
+
+    TEST(RenameSpec, RejectsRenameOnNonIdentifierTokens)
+    {
+        Fixture f("int f(int value) { return value + 1; }");
+        const auto snapshot = f.Snapshot();
+        const auto source = snapshot.Source(f.id);
+
+        for (const auto offset :
+            {
+                source->find("return"), source->find('+'), source->find('1')
+        })
+        {
+            const auto plan =
+                RefactoringService::RenameLocal(snapshot, f.id, offset, "amount");
+            EXPECT_FALSE(plan) << offset;
+            EXPECT_EQ(plan.error().code, RefactoringErrorCode::InvalidSelection) << offset;
+        }
     }
 
     TEST(RenameSpec, RenamesTheRealCliConstexprLocalWithItsCompilationCommand)

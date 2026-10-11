@@ -585,32 +585,6 @@ namespace heimdall
 			const NodeId class_node =
 				class_scope < scopes.Size() ? scopes.node[class_scope] : 0;
 
-			// Template-owned fields have dependent bindings.
-			if (class_node < soa.size())
-			{
-				for (auto ancestor = class_node; ancestor < soa.size();
-					ancestor = soa.Parent(ancestor))
-				{
-					if (stop.stop_requested())
-					{
-						return std::unexpected(
-							Error(RefactoringErrorCode::Cancelled, "Request cancelled"));
-					}
-
-					if (soa.Kind(ancestor) == GrammarKind::TemplateDeclaration)
-					{
-						return std::unexpected(
-							Error(RefactoringErrorCode::IncompleteAnalysis,
-							"Template-dependent bindings are not supported"));
-					}
-
-					if (ancestor == 0 || soa.Parent(ancestor) == ancestor)
-					{
-						break;
-					}
-				}
-			}
-
 			SymbolOccurrences result {target,
 				tokens[selected].offset,
 				tokens[selected].length,
@@ -1171,10 +1145,10 @@ namespace heimdall
 			// does not model, but only when they can interact. A lambda vetoes
 			// on an explicit capture of the name; implicit captures and
 			// parameter/body mentions are attributed by the reference scan
-			// (lambda parameters are declared). Templates and
-			// requires-expressions keep the mention veto: their parameters
-			// are still unmodeled.
-			// (The template-ancestor walk below still guards dependent contexts.)
+			// (lambda parameters are declared). Requires-expressions keep the
+			// mention veto because their parameters are still unmodeled. Template
+			// bodies are checked occurrence-by-occurrence: lexical bindings remain
+			// stable even when declared types depend on template parameters.
 			const std::string_view old_name = model->Names().Text(symbols.name[target]);
 			for (auto i = scan_node; i < soa.SubtreeEnd(scan_node); ++i)
 			{
@@ -1188,8 +1162,7 @@ namespace heimdall
 							"Lambda captures are not modeled"));
 					}
 				}
-				else if ((kind == GrammarKind::TemplateDeclaration ||
-					kind == GrammarKind::RequiresExpression) &&
+				else if (kind == GrammarKind::RequiresExpression &&
 					MentionsName(*tree, i, old_name))
 				{
 					return std::unexpected(
@@ -1198,19 +1171,9 @@ namespace heimdall
 				}
 			}
 
-			for (auto ancestor = node; ancestor < soa.size(); ancestor = soa.Parent(ancestor))
-			{
-				if (soa.Kind(ancestor) == GrammarKind::TemplateDeclaration)
-				{
-					return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
-						"Template-dependent bindings are not supported"));
-				}
-
-				if (ancestor == 0 || soa.Parent(ancestor) == ancestor)
-				{
-					break;
-				}
-			}
+			// Template contexts are supported when every occurrence is bound by
+			// the lexical binder. Unresolved names still fail closed in the
+			// occurrence scan and post-edit identity verification.
 
 			const auto begin          = soa.FirstToken(node);
 			const auto end            = begin + soa.TokenCount(node);
