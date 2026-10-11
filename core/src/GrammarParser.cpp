@@ -536,6 +536,132 @@ namespace heimdall
             return end;
         }
 
+        // A fold operator of [expr.prim.fold]: `+ - * / % ^ & | << >> += -= *=
+        // /= %= ^= &= |= <<= >>= = == != < > <= >= && || , .* ->*`.
+        static bool IsFoldOperator(std::string_view op)
+        {
+            return op == "," || op == "+" || op == "-" || op == "*" || op == "/" || op == "%" ||
+                   op == "^" || op == "&" || op == "|" || op == "<<" || op == ">>" || op == "&&" ||
+                   op == "||" || op == "==" || op == "!=" || op == "<" || op == ">" ||
+                   op == "<=" || op == ">=" || op == "<=>" || op == "=" || op == "+=" ||
+                   op == "-=" || op == "*=" || op == "/=" || op == "%=" || op == "^=" ||
+                   op == "&=" || op == "|=" || op == "<<=" || op == ">>=" || op == ".*" ||
+                   op == "->*";
+        }
+
+        // A fold-expression `(pack op ...)` / `(... op pack)` /
+        // `(pack op ... op init)` holds `...` at the top level of the parentheses
+        // (cppreference [expr.prim.fold]). `...` nested in brackets or template
+        // arguments (a pack expansion such as `X<Ts...>`) does not count, and a
+        // lone `(...)` is still an error.
+        bool IsFoldExpression(std::size_t open, std::size_t close) const
+        {
+            bool        saw_ellipsis = false;
+            bool        saw_operand  = false;
+            std::size_t angle_depth  = 0;
+            for (auto i = open + 1; i < close;)
+            {
+                if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+                    m_match[i] > i)
+                {
+                    saw_operand = true;
+                    i           = m_match[i] + 1;
+                    continue;
+                }
+
+                if (Is(i, "<") && i > open + 1 &&
+                    (m_tree.Tokens()[m_sig[i - 1]].kind == TokenKind::Identifier ||
+                     Is(i - 1, ">") || Is(i - 1, ">>")))
+                {
+                    ++angle_depth;
+                }
+                else if (Is(i, ">") && angle_depth != 0)
+                {
+                    --angle_depth;
+                }
+                else if (Is(i, ">>") && angle_depth != 0)
+                {
+                    angle_depth = angle_depth > 1 ? angle_depth - kTwo : 0;
+                }
+                else if (Is(i, "...") && angle_depth == 0)
+                {
+                    saw_ellipsis = true;
+                }
+                else if (angle_depth == 0 && !IsFoldOperator(Text(i)))
+                {
+                    saw_operand = true;
+                }
+
+                ++i;
+            }
+
+            return saw_ellipsis && saw_operand;
+        }
+
+        // Parses the operand segments of a fold-expression around its top-level
+        // `...` markers as children of `node`. One fold operator on each side of
+        // a segment belongs to the fold itself (`(args + ...)`), so it is left
+        // out; the operands stay plain expressions, which the later layers
+        // already treat conservatively (Unknown/Escape) instead of crashing.
+        void ParseFoldExpression(std::size_t open, std::size_t close, std::size_t node)
+        {
+            auto segment = open + 1;
+            while (segment < close)
+            {
+                auto ellipsis    = segment;
+                auto angle_depth = 0;
+                for (; ellipsis < close;)
+                {
+                    if ((Is(ellipsis, "(") || Is(ellipsis, "[") || Is(ellipsis, "{")) &&
+                        m_match[ellipsis] != Invalid && m_match[ellipsis] > ellipsis)
+                    {
+                        ellipsis = m_match[ellipsis] + 1;
+                        continue;
+                    }
+
+                    if (Is(ellipsis, "<") && ellipsis > segment &&
+                        (m_tree.Tokens()[m_sig[ellipsis - 1]].kind == TokenKind::Identifier ||
+                         Is(ellipsis - 1, ">") || Is(ellipsis - 1, ">>")))
+                    {
+                        ++angle_depth;
+                    }
+                    else if (Is(ellipsis, ">") && angle_depth != 0)
+                    {
+                        --angle_depth;
+                    }
+                    else if (Is(ellipsis, ">>") && angle_depth != 0)
+                    {
+                        angle_depth = angle_depth > 1 ? angle_depth - kTwo : 0;
+                    }
+                    else if (Is(ellipsis, "...") && angle_depth == 0)
+                    {
+                        break;
+                    }
+
+                    ++ellipsis;
+                }
+
+                auto begin = segment;
+                auto end   = ellipsis;
+                if (begin < end && IsFoldOperator(Text(begin)))
+                {
+                    ++begin;
+                }
+
+                if (begin < end && IsFoldOperator(Text(end - 1)))
+                {
+                    --end;
+                }
+
+                if (begin < end)
+                {
+                    ParseExpression(begin, end, node);
+                }
+
+                segment = ellipsis < close ? ellipsis + 1 : close;
+            }
+        }
+
         std::size_t FindTemplateClose(std::size_t open, std::size_t end) const
         {
             if (!Is(open, "<"))
@@ -2645,8 +2771,15 @@ namespace heimdall
             {
                 const auto close = m_match[pos];
                 const auto node = Add(GrammarKind::ParenthesizedExpression, pos, close + 1, parent);
-                auto       inner = pos + 1;
-                ParseExpression(inner, close, node);
+                if (IsFoldExpression(pos, close))
+                {
+                    ParseFoldExpression(pos, close, node);
+                }
+                else
+                {
+                    auto inner = pos + 1;
+                    ParseExpression(inner, close, node);
+                }
                 pos         = close + 1;
                 root        = node;
                 prefix_kind = GrammarKind::ParenthesizedExpression;

@@ -92,7 +92,7 @@
     "compile": "tsc -p . && node scripts/bundle.js",
     "watch": "tsc -watch -p .",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package --allow-missing-repository",
+    "package": "vsce package --allow-missing-repository --no-dependencies",
     "package:dev": "node scripts/package-dev.js"
   },
   "dependencies": {

@@ -16,8 +16,7 @@ auto sizeOfNode  = sizeof(Node);
 auto alignOfNode = alignof(Node);
 
 /**
- * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1
- * otherwise.
+ * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1 otherwise.
  *
  * @param first Describe this parameter.
  * @param b Describe this parameter.
@@ -37,9 +36,16 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 	return 1;
 }
 
-std::string_view unreacheable_code()
+/**
+ * @brief Describe unreacheable_code.
+ *
+ * @return Describe the returned value.
+ */
+[[nodiscard]] std::string_view unreacheable_code()
 {
 	return "";
+
+	constexpr auto test = 0;
 }
 
 int main()

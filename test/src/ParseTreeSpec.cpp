@@ -389,6 +389,53 @@ TEST(ParseTreeSpec, ReportsUnclosedTemplateHeadWithoutConsumingLaterDeclarations
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 1);
 }
 
+TEST(ParseTreeSpec, ParsesFoldExpressionsWithoutDiagnostics)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "template<typename... Ts> int sum(Ts... args) { return (args + ...); }\n"
+        "template<typename... Ts> bool all(Ts... args) { return (... && args); }\n"
+        "template<typename... Ts> int sum_init(Ts... args) { return (args + ... + 0); }\n"
+        "template<typename... Ts> void sink(Ts... args) { (args, ...); }\n"
+        "int after;\n");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::FunctionDefinition), 4);
+    EXPECT_GE(Count(tree, GrammarKind::ParenthesizedExpression), 4);
+}
+
+TEST(ParseTreeSpec, ParsesCommaFoldOverImmediatelyInvokedLambda)
+{
+    using heimdall::GrammarKind;
+    const auto tree = heimdall::ParseTree::Parse(
+        "template<typename T> struct is_remove { static constexpr bool value = false; };\n"
+        "struct Signature { template<typename T> void AddComponent(); };\n"
+        "template<typename... Ts> Signature MakeSignatureFromComponents()\n"
+        "{\n"
+        "    Signature signature;\n"
+        "    (([&] {\n"
+        "         if constexpr (!is_remove<Ts>::value)\n"
+        "             signature.AddComponent<Ts>();\n"
+        "     }()),\n"
+        "     ...);\n"
+        "    return signature;\n"
+        "}\n"
+        "int after;\n");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_GE(Count(tree, GrammarKind::LambdaExpression), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::FunctionDefinition), 1);
+    // The member declaration `void AddComponent();` plus `int after;`.
+    EXPECT_EQ(Count(tree, GrammarKind::Declaration), 2);
+}
+
+TEST(ParseTreeSpec, LoneEllipsisInParenthesesStillReportsAnError)
+{
+    const auto tree = heimdall::ParseTree::Parse("int f() { int x = (...); return x; }\n");
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+}
+
 TEST(ParseTreeSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)
 {
     const auto tree = heimdall::ParseTree::Parse(
