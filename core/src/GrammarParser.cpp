@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory_resource>
 #include <stop_token>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -4502,6 +4503,7 @@ namespace heimdall
                 const bool is_template = Is(declaration_start, "template") &&
                                          Is(declaration_start + 1, "<");
                 bool malformed_template_head = false;
+                std::size_t undeclared_template_name = Invalid;
                 while (Is(declaration_start, "template") &&
                        Is(declaration_start + 1, "<"))
                 {
@@ -4553,6 +4555,12 @@ namespace heimdall
                         break;
                     }
 
+                    if (angle == open + 3 &&
+                        m_tree.Tokens()[m_sig[open + 1]].kind == TokenKind::Identifier)
+                    {
+                        undeclared_template_name = m_sig[open + 1];
+                    }
+
                     declaration_start = angle;
                 }
 
@@ -4563,6 +4571,14 @@ namespace heimdall
                         break;
                     }
                     continue;
+                }
+
+                if (undeclared_template_name != Invalid)
+                {
+                    const auto& token = m_tree.Tokens()[undeclared_template_name];
+                    const auto name = m_tree.Text(token);
+                    m_tree.m_diagnostics.push_back(
+                        { token.offset, "'" + std::string(name) + "' has not been declared" });
                 }
 
                 if (Is(pos, "static_assert"))
@@ -4577,9 +4593,12 @@ namespace heimdall
 
                 if (is_template && declaration_start >= end)
                 {
-                    m_tree.m_diagnostics.push_back(
-                        { m_tree.Tokens()[m_sig[start]].offset,
-                          "expected declaration after template parameter list" });
+                    if (undeclared_template_name == Invalid)
+                    {
+                        m_tree.m_diagnostics.push_back(
+                            { m_tree.Tokens()[m_sig[start]].offset,
+                              "expected declaration after template parameter list" });
+                    }
                     Add(GrammarKind::Error, start, end, parent);
                     break;
                 }

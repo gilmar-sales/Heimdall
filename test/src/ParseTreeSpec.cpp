@@ -389,6 +389,22 @@ TEST(ParseTreeSpec, ReportsUnclosedTemplateHeadWithoutConsumingLaterDeclarations
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 1);
 }
 
+TEST(ParseTreeSpec, ReportsUndeclaredNameInMalformedTemplateHead)
+{
+    constexpr std::string_view source = "template <TValue>\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    ASSERT_EQ(tree.Diagnostics().size(), 1u);
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("TValue"));
+    EXPECT_EQ(tree.Diagnostics()[0].message, "'TValue' has not been declared");
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 1);
+
+    const auto declaration = heimdall::ParseTree::Parse(
+        "template <TValue>\nstruct Box {};\n");
+    ASSERT_EQ(declaration.Diagnostics().size(), 1u);
+    EXPECT_EQ(declaration.Diagnostics()[0].message, "'TValue' has not been declared");
+}
+
 TEST(ParseTreeSpec, ParsesFoldExpressionsWithoutDiagnostics)
 {
     using heimdall::GrammarKind;

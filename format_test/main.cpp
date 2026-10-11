@@ -2,9 +2,6 @@
 #include <string>
 #include <string_view>
 
-auto sizeOfNode  = sizeof(Node);
-auto alignOfNode = alignof(Node);
-
 /**
  * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1 otherwise.
  *
@@ -39,14 +36,17 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 }
 
 /**
+ *
  * @brief An linked list node.
  *
+ *
+ * @tparam TValue value type
  */
+template <typename TValue>
 struct Node
 {
 	Node* next;
-	int value;
-	float another_bigger_member;
+	TValue value;
 };
 
 template <typename TValue>
@@ -54,26 +54,20 @@ class LinkedList
 {
 
 public:
-	void Push(int value)
+	void Push(const TValue& value);
+
 private:
-		Node* mRoot;
+	Node<TValue>* mRoot;
 };
 
 int main()
 {
-	auto next = new Node
-	{
-		.value = 20
-	};
-	auto root = new Node
-	{
-		.next                  = next,
-		.value                 = 20,
-		.another_bigger_member = 30.f
-	};
+	auto list = LinkedList<int>();
 
-	root->value                  = 39;
-	next->next->next->next->next = 30;
+	list.mRoot = new Node<int>
+	{
+		.value = 20;
+	};
 
 	return 0;
 }
