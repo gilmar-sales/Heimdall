@@ -17,6 +17,7 @@
   },
   "format": {
     "use-tabs": true,
+    "column-limit": 100,
     "pointer-alignment": "left",
     "reference-alignment": "left",
     "align-consecutive-assignments": true,

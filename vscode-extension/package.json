@@ -21,6 +21,23 @@
     "onLanguage:objective-cpp"
   ],
   "main": "./out/extension.js",
+  "configurationDefaults": {
+    "[c]": {
+      "editor.rulers": [100]
+    },
+    "[cpp]": {
+      "editor.rulers": [100]
+    },
+    "[cuda]": {
+      "editor.rulers": [100]
+    },
+    "[objective-c]": {
+      "editor.rulers": [100]
+    },
+    "[objective-cpp]": {
+      "editor.rulers": [100]
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -84,6 +101,11 @@
           "type": "string",
           "default": "build/compile_commands.json",
           "description": "Path to compile_commands.json, relative to the first workspace folder unless absolute."
+        },
+        "heimdall.dynamicRulers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Follow the workspace .heimdall.json format.column-limit with a vertical editor ruler for C++ languages. Only applies when you have not set editor.rulers yourself."
         }
       }
     }

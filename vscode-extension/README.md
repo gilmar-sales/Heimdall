@@ -129,6 +129,18 @@ your rebuilt `build/lsp/heimdall-lsp` and Reload Window. Otherwise, a release in
 can take precedence over the local build. An explicitly saved
 `heimdall.enableSemantic: false` still disables semantic diagnostics.
 
+A vertical ruler follows the workspace `.heimdall.json` `format.column-limit`
+(the nearest definition wins; a `"root": true` file stops the lookup, and `0`
+clears the guide since wrapping is disabled). When the repo has a
+`.heimdall.json` without a limit, the ruler shows the formatter default of
+column 100 explicitly; with no config file at all, the packaged default of 100
+applies. The ruler is only written when you have not set `editor.rulers`
+yourself, is updated live when `.heimdall.json` changes, and is withdrawn when
+the config goes away — set `heimdall.dynamicRulers` to `false` to turn this off.
+To move or remove the guide manually, set `editor.rulers` for `[cpp]`
+(e.g. `"[cpp]": { "editor.rulers": [120] }`). If the guide does not appear,
+check the Output panel (Heimdall channel) for the `Heimdall rulers ...` lines.
+
 ## Build the extension
 
 ```powershell

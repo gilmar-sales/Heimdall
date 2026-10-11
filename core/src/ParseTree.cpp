@@ -13,10 +13,10 @@
 
 namespace heimdall
 {
-    using ParseClock = std::chrono::steady_clock;
+	using ParseClock = std::chrono::steady_clock;
 
-    ParseTree ParseTree::Parse(std::string_view source, CppStandard standard)
-    {
+	ParseTree ParseTree::Parse(std::string_view source, CppStandard standard)
+	{
 		ParserOptions options;
 		options.standard = standard;
 		return Parse(source, options);
@@ -37,23 +37,25 @@ namespace heimdall
 		ParseTree tree;
 		tree.m_source   = source;
 		tree.m_standard = options.standard;
-        if (source.size() > kMaxSourceBytes)
-        {
-            tree.m_diagnostics.push_back({ 0, "source exceeds the 32-bit token offset limit" });
-            return tree;
-        }
-        if (stop.stop_requested())
-        {
-            tree.m_cancelled = true;
-            return tree;
-        }
-        const auto lexStart = ParseClock::now();
-        tree.m_tokens       = lexed != nullptr ? *lexed : Lexer(source).Lex(stop);
-        tree.mMetrics.lexNs = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
-                .count());
-        tree.Build(options, stop, reuse);
-        return tree;
+		if (source.size() > kMaxSourceBytes)
+		{
+			tree.m_diagnostics.emplace_back(0, "source exceeds the 32-bit token offset limit");
+			return tree;
+		}
+
+		if (stop.stop_requested())
+		{
+			tree.m_cancelled = true;
+			return tree;
+		}
+
+		const auto lexStart = ParseClock::now();
+		tree.m_tokens       = lexed != nullptr ? *lexed : Lexer(source).Lex(stop);
+		tree.mMetrics.lexNs = static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
+			.count());
+		tree.Build(options, stop, reuse);
+		return tree;
 	}
 
 	ParseTree ParseTree::ParseSnapshot(
@@ -68,23 +70,24 @@ namespace heimdall
 		tree.m_owned_source = std::move(source);
 		tree.m_source =
 			tree.m_owned_source ? std::string_view(*tree.m_owned_source) : std::string_view {};
-		tree.m_standard      = options.standard;
-        if (tree.m_source.size() > kMaxSourceBytes)
-        {
-            tree.m_diagnostics.push_back({ 0, "source exceeds the 32-bit token offset limit" });
-            return tree;
-        }
-        tree.m_shared_tokens = std::move(lexed);
-        if (!tree.m_shared_tokens)
+		tree.m_standard = options.standard;
+		if (tree.m_source.size() > kMaxSourceBytes)
 		{
-            const auto lexStart = ParseClock::now();
-            tree.m_tokens       = Lexer(tree.m_source).Lex(stop);
-            tree.mMetrics.lexNs = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
-                    .count());
-        }
+			tree.m_diagnostics.emplace_back(0, "source exceeds the 32-bit token offset limit");
+			return tree;
+		}
 
-        tree.Build(options, stop, reuse);
+		tree.m_shared_tokens = std::move(lexed);
+		if (!tree.m_shared_tokens)
+		{
+			const auto lexStart = ParseClock::now();
+			tree.m_tokens       = Lexer(tree.m_source).Lex(stop);
+			tree.mMetrics.lexNs = static_cast<std::uint64_t>(
+				std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
+				.count());
+		}
+
+		tree.Build(options, stop, reuse);
 		return tree;
 	}
 
@@ -106,76 +109,80 @@ namespace heimdall
 				std::min(reuse->previous->NodesSoA().size(), tree.Tokens().size() * 2 + 1));
 		}
 
-        const auto         preprocessingStart = ParseClock::now();
-        PreprocessorResult preprocessing;
-        if (reuse && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
-        {
-            preprocessing     = reuse->previous->mPreprocessing;
-            const auto oldEnd = reuse->offset + reuse->old_length;
-            const auto shift  = static_cast<std::ptrdiff_t>(reuse->new_length) -
-                                static_cast<std::ptrdiff_t>(reuse->old_length);
-            for (auto& range : preprocessing.active_ranges)
-            {
-                if (range.offset <= reuse->offset && range.offset + range.length >= oldEnd)
-                {
-                    range.length =
-                        static_cast<std::size_t>(static_cast<std::ptrdiff_t>(range.length) + shift);
-                }
-                else if (range.offset >= oldEnd)
-                {
-                    range.offset =
-                        static_cast<std::size_t>(static_cast<std::ptrdiff_t>(range.offset) + shift);
-                }
-            }
-            for (auto& directive : preprocessing.directives)
-            {
-                if (directive.offset >= oldEnd)
-                {
-                    directive.offset = static_cast<std::size_t>(
-                        static_cast<std::ptrdiff_t>(directive.offset) + shift);
-                }
-            }
-            for (auto& diagnostic : preprocessing.diagnostics)
-            {
-                if (diagnostic.offset >= oldEnd)
-                {
-                    diagnostic.offset = static_cast<std::size_t>(
-                        static_cast<std::ptrdiff_t>(diagnostic.offset) + shift);
-                }
-            }
-            mMetrics.reusedPreprocessing = true;
-        }
-        else
-        {
-            preprocessing = Preprocessor(options.Macros()).Process(tree.m_source, false, stop);
-        }
-        mMetrics.preprocessingNs =
-            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                           ParseClock::now() - preprocessingStart)
-                                           .count());
-        if (stop.stop_requested())
-        {
+		const auto preprocessingStart = ParseClock::now();
+		PreprocessorResult preprocessing;
+		if (reuse && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
+		{
+			preprocessing     = reuse->previous->mPreprocessing;
+			const auto oldEnd = reuse->offset + reuse->old_length;
+			const auto shift = static_cast<std::ptrdiff_t>(reuse->new_length) -
+				static_cast<std::ptrdiff_t>(reuse->old_length);
+			for (auto& range : preprocessing.active_ranges)
+			{
+				if (range.offset <= reuse->offset && range.offset + range.length >= oldEnd)
+				{
+					range.length =
+						static_cast<std::size_t>(static_cast<std::ptrdiff_t>(range.length) + shift);
+				}
+				else if (range.offset >= oldEnd)
+				{
+					range.offset =
+						static_cast<std::size_t>(static_cast<std::ptrdiff_t>(range.offset) + shift);
+				}
+			}
+
+			for (auto& directive : preprocessing.directives)
+			{
+				if (directive.offset >= oldEnd)
+				{
+					directive.offset = static_cast<std::size_t>(
+						static_cast<std::ptrdiff_t>(directive.offset) + shift);
+				}
+			}
+
+			for (auto& diagnostic : preprocessing.diagnostics)
+			{
+				if (diagnostic.offset >= oldEnd)
+				{
+					diagnostic.offset = static_cast<std::size_t>(
+						static_cast<std::ptrdiff_t>(diagnostic.offset) + shift);
+				}
+			}
+
+			mMetrics.reusedPreprocessing = true;
+		}
+		else
+		{
+			preprocessing = Preprocessor(options.Macros()).Process(tree.m_source, false, stop);
+		}
+
+		mMetrics.preprocessingNs =
+			static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			ParseClock::now() - preprocessingStart)
+			.count());
+		if (stop.stop_requested())
+		{
 			m_cancelled = true;
 			return;
 		}
 
-        const auto grammarStart = ParseClock::now();
-        detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse,
-                                 options.type_names.get());
-        mMetrics.grammarNs = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - grammarStart)
-                .count());
-        tree.mPreprocessing = std::move(preprocessing);
-        if (m_cancelled || stop.stop_requested())
-        {
+		const auto grammarStart = ParseClock::now();
+		detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse,
+			options.type_names.get());
+		mMetrics.grammarNs = static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - grammarStart)
+			.count());
+		tree.mPreprocessing = std::move(preprocessing);
+		if (m_cancelled || stop.stop_requested())
+		{
 			m_cancelled = true;
 			return;
 		}
 
 		// Build subtree_end for each node (pre-order traversal property)
-        const auto        auxiliaryStart = ParseClock::now();
-        const std::size_t node_count     = tree.m_nodes_soa.size();
-        for (std::size_t n = 0; n < node_count; ++n)
+		const auto auxiliaryStart    = ParseClock::now();
+		const std::size_t node_count = tree.m_nodes_soa.size();
+		for (std::size_t n = 0; n < node_count; ++n)
 		{
 			tree.m_nodes_soa.subtree_end[n] = static_cast<std::uint32_t>(n + 1);
 		}
@@ -195,48 +202,50 @@ namespace heimdall
 
 		// Build auxiliary structures for fast queries
 		tree.BuildAuxiliary();
-        mMetrics.auxiliaryNs = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - auxiliaryStart)
-                .count());
-    }
+		mMetrics.auxiliaryNs = static_cast<std::uint64_t>(
+			std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - auxiliaryStart)
+			.count());
+	}
 
-    std::size_t ParseTree::StorageBytes() const noexcept
+	std::size_t ParseTree::StorageBytes() const noexcept
 	{
 		std::size_t bytes =
 			m_nodes_soa.kind.capacity() +
 			sizeof(std::uint32_t) *
 			(m_nodes_soa.first_token.capacity() + m_nodes_soa.token_count.capacity() +
 			m_nodes_soa.parent.capacity() + m_nodes_soa.subtree_end.capacity());
-        bytes += Tokens().capacity() * sizeof(Token) + m_items.capacity() * sizeof(TopLevelItem) +
-                 mPreprocessing.directives.capacity() * sizeof(PreprocessorDirective) +
-                 m_diagnostics.capacity() * sizeof(GrammarDiagnostic) +
-                 m_token_kind_mask.capacity() +
-                 sizeof(std::uint32_t) *
-                     (m_identifier_tokens.capacity() + m_directive_tokens.capacity()) +
-                 (m_decoration.capacity() + 7) / 8;
-        for (const auto& diagnostic : m_diagnostics)
-        {
+		bytes += Tokens().capacity() * sizeof(Token) + m_items.capacity() * sizeof(TopLevelItem) +
+			mPreprocessing.directives.capacity() * sizeof(PreprocessorDirective) +
+			m_diagnostics.capacity() * sizeof(GrammarDiagnostic) +
+			m_token_kind_mask.capacity() +
+			sizeof(std::uint32_t) *
+			(m_identifier_tokens.capacity() + m_directive_tokens.capacity()) +
+			(m_decoration.capacity() + 7) / 8;
+		for (const auto& diagnostic : m_diagnostics)
+		{
 			bytes += diagnostic.message.capacity();
 		}
 
-        bytes += mPreprocessing.active_ranges.capacity() * sizeof(ActiveSourceRange) +
-                 mPreprocessing.diagnostics.capacity() * sizeof(PreprocessorDiagnostic);
-        for (const auto& diagnostic : mPreprocessing.diagnostics)
-        {
-            bytes += diagnostic.message.capacity();
-        }
-        for (const auto& [name, replacement] : mPreprocessing.local_macros)
-        {
-            bytes += name.capacity() + replacement.capacity() +
-                     sizeof(decltype(mPreprocessing.local_macros)::value_type);
-        }
-        const std::lock_guard lock(*mNodesAoSMutex);
-        bytes += m_nodes_aos.capacity() * sizeof(GrammarNode);
-        return bytes;
-    }
+		bytes += mPreprocessing.active_ranges.capacity() * sizeof(ActiveSourceRange) +
+			mPreprocessing.diagnostics.capacity() * sizeof(PreprocessorDiagnostic);
+		for (const auto& diagnostic : mPreprocessing.diagnostics)
+		{
+			bytes += diagnostic.message.capacity();
+		}
 
-    void ParseTree::HoldSource(std::shared_ptr<const std::string> owned)
-    {
+		for (const auto& [name, replacement] : mPreprocessing.local_macros)
+		{
+			bytes += name.capacity() + replacement.capacity() +
+				sizeof(decltype(mPreprocessing.local_macros)::value_type);
+		}
+
+		const std::lock_guard lock(*mNodesAoSMutex);
+		bytes += m_nodes_aos.capacity() * sizeof(GrammarNode);
+		return bytes;
+	}
+
+	void ParseTree::HoldSource(std::shared_ptr<const std::string> owned)
+	{
 		m_owned_source = std::move(owned);
 		if (m_owned_source && m_source.empty())
 		{
@@ -300,10 +309,10 @@ namespace heimdall
 		m_identifier_tokens.clear();
 		m_directive_tokens.clear();
 		m_identifier_tokens.reserve(m_tokens.size() / 8);
-        m_directive_tokens.reserve(mPreprocessing.directives.size() * 4);
+		m_directive_tokens.reserve(mPreprocessing.directives.size() * 4);
 
-        for (std::size_t i = 0; i < m_tokens.size(); ++i)
-        {
+		for (std::size_t i = 0; i < m_tokens.size(); ++i)
+		{
 			const TokenKind kind = m_tokens[i].kind;
 			const bool is_trivia =
 				(kind == TokenKind::Whitespace || kind == TokenKind::LineComment ||
@@ -318,9 +327,9 @@ namespace heimdall
 
 		// Directive token indices. Tokens are ordered by offset, so each
 		// directive's range is found by binary search instead of a full scan.
-        for (const auto& dir : mPreprocessing.directives)
-        {
-            const auto first = std::lower_bound(
+		for (const auto& dir : mPreprocessing.directives)
+		{
+			const auto first = std::lower_bound(
 				m_tokens.begin(), m_tokens.end(), dir.offset,
 				[](const Token& token, std::size_t offset)
 				{
@@ -336,14 +345,14 @@ namespace heimdall
 
 				m_directive_tokens.push_back(static_cast<std::uint32_t>(it - m_tokens.begin()));
 			}
-        }
-    }
+		}
+	}
 
 	void ParseTree::EnsureNodesAoS() const
 	{
-        const std::lock_guard lock(*mNodesAoSMutex);
-        if (!m_nodes_aos_dirty)
-        {
+		const std::lock_guard lock(*mNodesAoSMutex);
+		if (!m_nodes_aos_dirty)
+		{
 			return;
 		}
 

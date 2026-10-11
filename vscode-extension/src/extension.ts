@@ -9,6 +9,7 @@ import {
     Trace,
 } from 'vscode-languageclient/node';
 import { stageServerBinary } from './serverStaging';
+import { CPP_LANGUAGES, FORMATTER_DEFAULT_COLUMN_LIMIT, equalArrays, findHeimdallConfig, resolveColumnLimit, rulersForColumnLimit } from './columnRulers';
 import {
     findInstalledServer,
     getServerAssetName,
@@ -25,6 +26,9 @@ let client: LanguageClient | undefined;
 let output: vscode.LogOutputChannel;
 let sourceWatcher: vscode.FileSystemWatcher | undefined;
 let indexStatus: vscode.StatusBarItem | undefined;
+// Rulers this extension wrote, keyed by `${folder}|${language}`, so user-owned
+// `editor.rulers` values are never touched and ours can be withdrawn again.
+const appliedRulers = new Map<string, number[]>();
 
 interface IndexStatus {
     state: 'indexing' | 'ready';
@@ -290,10 +294,91 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     }
 }
 
+// Mirrors the workspace .heimdall.json `format.column-limit` as a vertical
+// `editor.rulers` guide for C++ languages. Values the user set explicitly are
+// never touched; ours are withdrawn when the config goes away or the
+// `heimdall.dynamicRulers` setting is disabled.
+function syncRulers(): void {
+    try {
+        syncRulersInner();
+    } catch (error) {
+        output.appendLine(`Heimdall could not sync the column rulers: ${String(error)}`);
+    }
+}
+
+function syncRulersInner(): void {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const enabled = vscode.workspace.getConfiguration('heimdall').get<boolean>('dynamicRulers', true);
+    const multiRoot = folders.length > 1;
+    for (const folder of folders) {
+        const configFile = findHeimdallConfig(folder.uri.fsPath, fs);
+        const limit = enabled ? resolveColumnLimit(folder.uri.fsPath, fs) : undefined;
+        let desired = enabled ? rulersForColumnLimit(limit) : undefined;
+        if (enabled && desired === undefined && configFile !== undefined) {
+            // The repo uses Heimdall but sets no limit: state the formatter
+            // default explicitly instead of relying on the packaged default.
+            desired = [FORMATTER_DEFAULT_COLUMN_LIMIT];
+        }
+        output.appendLine(
+            `Heimdall rulers for ${folder.uri.fsPath}: ` +
+            (enabled ? `column-limit ${limit === undefined ? '(unset)' : limit}` : '(dynamic rulers off)'),
+        );
+        const target = multiRoot
+            ? vscode.ConfigurationTarget.WorkspaceFolder
+            : vscode.ConfigurationTarget.Workspace;
+        for (const language of CPP_LANGUAGES) {
+            const key = `${folder.uri.fsPath}|${language}`;
+            const config = vscode.workspace.getConfiguration('editor', { uri: folder.uri, languageId: language });
+            const inspected = config.inspect<number[]>('rulers');
+            const explicit = inspected?.workspaceValue ?? inspected?.workspaceFolderValue ?? inspected?.globalValue;
+            const owned = appliedRulers.get(key);
+            if (explicit !== undefined && (owned === undefined || !equalArrays(explicit, owned))) {
+                // The user (or another extension) owns this value; leave it alone.
+                output.appendLine(`Heimdall rulers: leaving user-configured rulers for ${language} untouched.`);
+                appliedRulers.delete(key);
+                continue;
+            }
+            if (desired === undefined) {
+                if (owned !== undefined && explicit !== undefined) {
+                    void config.update('rulers', undefined, target, true).then(
+                        () => {
+                            appliedRulers.delete(key);
+                            output.appendLine(`Heimdall rulers: cleared ruler for ${language}.`);
+                        },
+                        (error: unknown) => output.appendLine(`Heimdall could not clear the ruler: ${String(error)}`),
+                    );
+                } else {
+                    appliedRulers.delete(key);
+                }
+                continue;
+            }
+            if (explicit !== undefined && equalArrays(explicit, desired)) {
+                appliedRulers.set(key, [...desired]);
+                continue;
+            }
+            void config.update('rulers', [...desired], target, true).then(
+                () => {
+                    appliedRulers.set(key, [...desired]);
+                    output.appendLine(`Heimdall rulers: set [${desired.join(', ')}] for ${language}.`);
+                },
+                (error: unknown) => output.appendLine(`Heimdall could not set the ruler: ${String(error)}`),
+            );
+        }
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     output = vscode.window.createOutputChannel('Heimdall', { log: true });
     context.subscriptions.push(output);
     await startClient(context);
+    syncRulers();
+    const configWatcher = vscode.workspace.createFileSystemWatcher('**/.heimdall.json');
+    context.subscriptions.push(
+        configWatcher,
+        configWatcher.onDidChange(() => syncRulers()),
+        configWatcher.onDidCreate(() => syncRulers()),
+        configWatcher.onDidDelete(() => syncRulers()),
+    );
 
     context.subscriptions.push(vscode.commands.registerCommand('heimdall.installServer', async () => {
         const version = serverVersion(context);
@@ -326,6 +411,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
+        if (event.affectsConfiguration('heimdall.dynamicRulers')) {
+            syncRulers();
+            return;
+        }
         if (event.affectsConfiguration('heimdall.serverPath') ||
             event.affectsConfiguration('heimdall.serverVersion') ||
             event.affectsConfiguration('heimdall.enableSemantic') ||
