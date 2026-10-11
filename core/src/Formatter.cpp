@@ -4015,7 +4015,7 @@ namespace heimdall
 		if (m_options.align_consecutive_macros || m_options.align_consecutive_assignments)
 		{
 			auto alignment_column =[](std::string_view text,
-				bool macro)->std::optional<std::size_t>
+				bool macro, bool designated = false)->std::optional<std::size_t>
 			{
 				if (text.empty() || text.back() == '\\')
 				{
@@ -4075,6 +4075,18 @@ namespace heimdall
 					return significant[replacement].offset;
 				}
 
+				if (designated)
+				{
+					if (significant.size() < 4 || significant[0].tok != Tok::Dot ||
+						significant[1].kind != TokenKind::Identifier ||
+						significant[2].tok != Tok::Eq)
+					{
+						return std::nullopt;
+					}
+
+					return significant[2].offset;
+				}
+
 				if (significant.empty() || significant.back().tok != Tok::Semi)
 				{
 					return std::nullopt;
@@ -4108,7 +4120,7 @@ namespace heimdall
 				return column;
 			};
 
-			auto align_runs =[&](bool macro)
+			auto align_runs =[&](bool macro, bool designated = false)
 			{
 				std::size_t runStart = 0;
 				while (runStart < out_lines.size())
@@ -4119,7 +4131,7 @@ namespace heimdall
 					if (out_lines[runStart].blank ||
 						out_lines[runStart].is_include ||
 						macro != macroLine ||
-						!alignment_column(out_lines[runStart].text, macro))
+						!alignment_column(out_lines[runStart].text, macro, designated))
 					{
 						++runStart;
 						continue;
@@ -4135,7 +4147,8 @@ namespace heimdall
 						out_lines[runEnd].text.find_first_not_of(" \t") == indentEnd &&
 						(macro ==(out_lines[runEnd].text[indentEnd] == '#')))
 					{
-						const auto column = alignment_column(out_lines[runEnd].text, macro);
+						const auto column = alignment_column(
+							out_lines[runEnd].text, macro, designated);
 						if (!column)
 						{
 							break;
@@ -4149,7 +4162,8 @@ namespace heimdall
 					{
 						for (auto i = runStart; i < runEnd; ++i)
 						{
-							const auto column  = *alignment_column(out_lines[i].text, macro);
+							const auto column  = *alignment_column(
+								out_lines[i].text, macro, designated);
 							const auto padding = target - column;
 							out_lines[i].text.insert(column, padding, ' ');
 							if (out_lines[i].trailing_comment_col >= 0 &&
@@ -4173,6 +4187,7 @@ namespace heimdall
 			if (m_options.align_consecutive_assignments)
 			{
 				align_runs(false);
+				align_runs(false, true);
 			}
 		}
 

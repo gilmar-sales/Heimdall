@@ -49,6 +49,16 @@ struct Node
 	float another_bigger_member;
 };
 
+template <typename TValue>
+class LinkedList
+{
+
+public:
+	void Push(int value)
+private:
+		Node* mRoot;
+};
+
 int main()
 {
 	auto next = new Node
@@ -57,8 +67,8 @@ int main()
 	};
 	auto root = new Node
 	{
-		.next = next,
-		.value = 20,
+		.next                  = next,
+		.value                 = 20,
 		.another_bigger_member = 30.f
 	};
 

@@ -449,6 +449,30 @@ TEST(FormatterSpec, AlignsConsecutiveAssignmentsWithoutTouchingComparisons)
               "auto a      = \"x=y\";\nauto longer = \"z\";\n");
 }
 
+TEST(FormatterSpec, AlignsDesignatedInitializerAssignments)
+{
+    const heimdall::Formatter formatter({ .align_consecutive_assignments = true });
+    constexpr std::string_view source =
+        "auto root = new Node\n"
+        "{\n"
+        ".next = next,\n"
+        ".value = 20,\n"
+        ".another_bigger_member = 30.f\n"
+        "};\n";
+    constexpr std::string_view expected =
+        "auto root = new Node\n"
+        "{\n"
+        "    .next                  = next,\n"
+        "    .value                 = 20,\n"
+        "    .another_bigger_member = 30.f\n"
+        "};\n";
+
+    const std::string formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
 TEST(FormatterSpec, AlignsOnlyConsecutiveSingleLineMacroDefinitions)
 {
     const heimdall::Formatter formatter({ .align_consecutive_macros = true });
