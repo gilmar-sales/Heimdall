@@ -13,14 +13,12 @@ namespace
     struct Typed
     {
         explicit Typed(std::string text) :
-            source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
-            model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model))
-        {
-        }
+        source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
+            model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model)) {}
 
         Typed(const Typed&) = delete;
 
-        Typed& operator=(const Typed&) = delete;
+        Typed& operator= (const Typed&) = delete;
 
         heimdall::SymbolId Find(const std::string& name) const
         {
@@ -40,13 +38,13 @@ namespace
         {
             const auto symbol = Find(name);
             return symbol == heimdall::kNone ? "<no symbol>"
-                                             : types.Spell(types.SymbolType(symbol));
+            : types.Spell(types.SymbolType(symbol));
         }
 
-        std::string             source;
-        heimdall::ParseTree     tree;
+        std::string source;
+        heimdall::ParseTree tree;
         heimdall::SemanticModel model;
-        heimdall::TypeModel     types;
+        heimdall::TypeModel types;
     };
 
     std::string Body(const std::string& statements)
@@ -95,17 +93,36 @@ TEST(Typer, TypesUnnamedPrototypeParametersAndPreservesReferences)
         }
     }
 
-    EXPECT_EQ(spellings, (std::vector<std::string> { "int*", "const int&", "std::string" }));
+    EXPECT_EQ(spellings, (std::vector<std::string> {"int*", "const int&", "std::string"}));
     EXPECT_EQ(typed.types.ParameterType(heimdall::kNone), heimdall::TypeTable::Unknown);
+}
+
+TEST(Typer, LambdaReturnTypeDoesNotBecomeTheClosureExpressionType)
+{
+    const Typed typed("void f() { auto callback = []() -> int { return 1; }; }");
+    const auto& nodes = typed.tree.NodesSoA();
+
+    bool found = false;
+    for (std::uint32_t node = 0; node < nodes.size(); ++node)
+    {
+        if (nodes.Kind(node) == heimdall::GrammarKind::LambdaExpression)
+        {
+            found = true;
+            EXPECT_EQ(typed.types.Spell(typed.types.LambdaReturnType(node)), "int");
+            EXPECT_EQ(typed.types.NodeType(node), heimdall::TypeTable::Unknown);
+        }
+    }
+
+    EXPECT_TRUE(found);
 }
 
 // ---- TypeTable -----------------------------------------------------------------
 
 TEST(TypeTable, HashConsesEqualTypes)
 {
-    heimdall::Arena     arena;
+    heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
-    const auto          i = table.Builtin(heimdall::BuiltinType::Int);
+    const auto i = table.Builtin(heimdall::BuiltinType::Int);
     EXPECT_EQ(i, table.Builtin(heimdall::BuiltinType::Int));
     EXPECT_NE(i, table.Builtin(heimdall::BuiltinType::UInt));
     EXPECT_EQ(table.Pointer(i), table.Pointer(i));
@@ -118,7 +135,7 @@ TEST(TypeTable, HashConsesEqualTypes)
 
 TEST(TypeTable, UnknownStaysUnknownWhereNothingIsLearned)
 {
-    heimdall::Arena     arena;
+    heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
     EXPECT_EQ(table.Const(heimdall::TypeTable::Unknown), heimdall::TypeTable::Unknown);
     EXPECT_EQ(table.LRef(heimdall::TypeTable::Unknown), heimdall::TypeTable::Unknown);
@@ -130,9 +147,9 @@ TEST(TypeTable, UnknownStaysUnknownWhereNothingIsLearned)
 
 TEST(TypeTable, ConstOfAnArrayQualifiesItsElements)
 {
-    heimdall::Arena     arena;
+    heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
-    const auto          i = table.Builtin(heimdall::BuiltinType::Int);
+    const auto i = table.Builtin(heimdall::BuiltinType::Int);
     EXPECT_EQ(table.Const(table.Array(i, 2)), table.Array(table.Const(i), 2));
     EXPECT_TRUE(table.IsConstQualified(table.Array(table.Const(i), 2)));
     EXPECT_FALSE(table.IsConstQualified(table.Array(i, 2)));
@@ -140,9 +157,12 @@ TEST(TypeTable, ConstOfAnArrayQualifiesItsElements)
 
 TEST(TypeTable, ClassifiesBuiltinTypes)
 {
-    heimdall::Arena     arena;
+    heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
-    const auto          of = [&](heimdall::BuiltinType type) { return table.Builtin(type); };
+    const auto of =[&](heimdall::BuiltinType type)
+    {
+        return table.Builtin(type);
+    };
     EXPECT_TRUE(table.IsInteger(of(heimdall::BuiltinType::Char)));
     EXPECT_TRUE(table.IsInteger(of(heimdall::BuiltinType::SizeT)));
     EXPECT_FALSE(table.IsInteger(of(heimdall::BuiltinType::Bool)));
@@ -158,10 +178,10 @@ TEST(TypeTable, ClassifiesBuiltinTypes)
 TEST(Typer, ReadsBuiltinTypes)
 {
     const Typed typed(Body("int a; unsigned long b; const char* c; long long d; unsigned char e; "
-                           "bool f; double g; float h;\n"
-                           "unsigned u; short s; long double ld; signed char sc; unsigned short "
-                           "us; char8_t c8; wchar_t w;\n"
-                           "static const int k = 1; constexpr unsigned long long big = 1;"));
+        "bool f; double g; float h;\n"
+        "unsigned u; short s; long double ld; signed char sc; unsigned short "
+        "us; char8_t c8; wchar_t w;\n"
+        "static const int k = 1; constexpr unsigned long long big = 1;"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "unsigned long");
     EXPECT_EQ(typed.Of("c"), "const char*");
@@ -184,8 +204,8 @@ TEST(Typer, ReadsBuiltinTypes)
 TEST(Typer, ReadsPointersReferencesAndArrays)
 {
     const Typed typed(Body("int* p; int** pp; int x = 0; const int& r = x; int a[3]; char* "
-                           "names[2]; int* const cp = 0;\n"
-                           "int m[2][3]; int&& rr = 1; const char* const s = 0;"));
+        "names[2]; int* const cp = 0;\n"
+        "int m[2][3]; int&& rr = 1; const char* const s = 0;"));
     EXPECT_EQ(typed.Of("p"), "int*");
     EXPECT_EQ(typed.Of("pp"), "int**");
     EXPECT_EQ(typed.Of("r"), "const int&");
@@ -231,8 +251,8 @@ TEST(Typer, ResolvesClassesEnumsAndAliases)
 TEST(Typer, KeepsLibraryTypesAsExternal)
 {
     const Typed typed(Body("std::vector<int> v; std::string s; std::map<int, std::vector<int>> m; "
-                           "std::size_t n; size_t k;\n"
-                           "std::unique_ptr<int> up;"));
+        "std::size_t n; size_t k;\n"
+        "std::unique_ptr<int> up;"));
     EXPECT_EQ(typed.Of("v"), "std::vector<int>");
     EXPECT_EQ(typed.Of("s"), "std::string");
     EXPECT_EQ(typed.Of("m"), "std::map<int,std::vector<int>>");
@@ -245,7 +265,7 @@ TEST(Typer, KeepsLibraryTypesAsExternal)
 TEST(Typer, UnknownWhenTheTypeIsNotDeclaredHere)
 {
     const Typed typed("template <class T> void g(T a, T* b, T& c) {}\n"
-                      "void f() { Foo x; ns::Bar y; Box<int> z; typename T::type w; }\n");
+        "void f() { Foo x; ns::Bar y; Box<int> z; typename T::type w; }\n");
     EXPECT_EQ(typed.Of("a"), "<unknown>");
     EXPECT_EQ(typed.Of("b"), "<unknown>*");
     EXPECT_EQ(typed.Of("c"), "<unknown>");
@@ -258,8 +278,8 @@ TEST(Typer, UnknownWhenTheTypeIsNotDeclaredHere)
 TEST(Typer, TemplateClassesAndTemplateAliasesAreUnknown)
 {
     const Typed typed("template <class T> struct Box {};\n"
-                      "template <class T> using Vec = std::vector<T>;\n"
-                      "void f() { Box<int> b; Vec<int> v; }\n");
+        "template <class T> using Vec = std::vector<T>;\n"
+        "void f() { Box<int> b; Vec<int> v; }\n");
     EXPECT_EQ(typed.Of("b"), "<unknown>");
     EXPECT_EQ(typed.Of("v"), "<unknown>");
 }
@@ -267,9 +287,9 @@ TEST(Typer, TemplateClassesAndTemplateAliasesAreUnknown)
 TEST(Typer, CyclesTerminateAsUnknown)
 {
     const Typed typed("using A = A;\n"
-                      "using B = C;\n"
-                      "using C = B;\n"
-                      "void f() { A a; B b; auto x = x; }\n");
+        "using B = C;\n"
+        "using C = B;\n"
+        "void f() { A a; B b; auto x = x; }\n");
     EXPECT_EQ(typed.Of("a"), "<unknown>");
     EXPECT_EQ(typed.Of("b"), "<unknown>");
     EXPECT_EQ(typed.Of("x"), "<unknown>");
@@ -280,12 +300,12 @@ TEST(Typer, CyclesTerminateAsUnknown)
 TEST(Typer, TypesLiterals)
 {
     const Typed typed(Body("auto a = 1; auto b = 1u; auto c = 1.5; auto d = 1.5f; auto e = 'x'; "
-                           "auto f = true; auto g = \"s\";\n"
-                           "auto h = nullptr; auto i = 5L; auto j = 5ull; auto k = 0x10; auto l = "
-                           "3000000000; auto m = 1e3;\n"
-                           "auto n = 2.0L; auto o = L'x'; auto p = u8'x'; auto q = 0b101; auto r = "
-                           "010; auto s = 1'000;\n"
-                           "auto t = 5ul; auto u = 5lu; auto v = 5ll; auto w = 5lul;"));
+        "auto f = true; auto g = \"s\";\n"
+        "auto h = nullptr; auto i = 5L; auto j = 5ull; auto k = 0x10; auto l = "
+        "3000000000; auto m = 1e3;\n"
+        "auto n = 2.0L; auto o = L'x'; auto p = u8'x'; auto q = 0b101; auto r = "
+        "010; auto s = 1'000;\n"
+        "auto t = 5ul; auto u = 5lu; auto v = 5ll; auto w = 5lul;"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "unsigned int");
     EXPECT_EQ(typed.Of("c"), "double");
@@ -314,9 +334,9 @@ TEST(Typer, TypesLiterals)
 TEST(Typer, AutoDropsReferencesAndTopLevelConst)
 {
     const Typed typed(Body("int x = 0; const int cx = 0; int& rx = x; int arr[3] = {};\n"
-                           "auto a = x; auto b = cx; auto c = rx; auto d = arr; const auto e = x; "
-                           "auto& f = x; const auto& g = x;\n"
-                           "auto& h = cx;"));
+        "auto a = x; auto b = cx; auto c = rx; auto d = arr; const auto e = x; "
+        "auto& f = x; const auto& g = x;\n"
+        "auto& h = cx;"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "int");
     EXPECT_EQ(typed.Of("c"), "int");
@@ -330,8 +350,8 @@ TEST(Typer, AutoDropsReferencesAndTopLevelConst)
 TEST(Typer, AutoPointerDeduction)
 {
     const Typed typed(Body("int x = 0; const int cx = 0; int arr[3] = {};\n"
-                           "auto* p = &x; const auto* q = &x; auto* r = arr; auto* const s = &x; "
-                           "auto* t = &cx; auto* u = x;"));
+        "auto* p = &x; const auto* q = &x; auto* r = arr; auto* const s = &x; "
+        "auto* t = &cx; auto* u = x;"));
     EXPECT_EQ(typed.Of("p"), "int*");
     EXPECT_EQ(typed.Of("q"), "const int*");
     EXPECT_EQ(typed.Of("r"), "int*");
@@ -344,7 +364,7 @@ TEST(Typer, AutoForwardingReferences)
 {
     const Typed typed(
         Body("int x = 0; const int cx = 0;\n"
-             "auto&& a = x; auto&& b = cx; auto&& c = 1; auto&& d = x + 1; const auto&& e = 2;"));
+        "auto&& a = x; auto&& b = cx; auto&& c = 1; auto&& d = x + 1; const auto&& e = 2;"));
     EXPECT_EQ(typed.Of("a"), "int&");
     EXPECT_EQ(typed.Of("b"), "const int&");
     EXPECT_EQ(typed.Of("c"), "int&&");
@@ -355,7 +375,7 @@ TEST(Typer, AutoForwardingReferences)
 TEST(Typer, AutoWithDirectAndBraceInitialization)
 {
     const Typed typed(Body("int x = 0; double d = 0;\n"
-                           "auto a{x}; auto b{d}; auto c = {x}; auto e{1, 2}; auto& f{x};"));
+        "auto a{x}; auto b{d}; auto c = {x}; auto e{1, 2}; auto& f{x};"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "double");
     EXPECT_EQ(typed.Of("c"), "<unknown>"); // std::initializer_list
@@ -410,14 +430,14 @@ TEST(Typer, AutoReturnTypeIsDeducedFromTheBody)
 TEST(Typer, AppliesTheUsualArithmeticConversions)
 {
     const Typed typed(Body("int i = 0; long l = 0; double d = 0; unsigned u = 0; char c = 0; float "
-                           "fl = 0; short sh = 0; bool b = true;\n"
-                           "unsigned long ul = 0; long long ll = 0; std::size_t sz = 0;\n"
-                           "auto s1 = i + l; auto s2 = i + d; auto s3 = i + u; auto s4 = c + c; "
-                           "auto s5 = fl * i; auto s6 = sh - sh;\n"
-                           "auto s7 = b + b; auto s8 = l + ul; auto s9 = ll + u; auto s10 = l + u; "
-                           "auto s11 = sz - i; auto s12 = d / fl;\n"
-                           "auto s13 = i % l; auto s14 = d % i; auto s15 = i & u; auto s16 = i << "
-                           "l; auto s17 = i ^ c;"));
+        "fl = 0; short sh = 0; bool b = true;\n"
+        "unsigned long ul = 0; long long ll = 0; std::size_t sz = 0;\n"
+        "auto s1 = i + l; auto s2 = i + d; auto s3 = i + u; auto s4 = c + c; "
+        "auto s5 = fl * i; auto s6 = sh - sh;\n"
+        "auto s7 = b + b; auto s8 = l + ul; auto s9 = ll + u; auto s10 = l + u; "
+        "auto s11 = sz - i; auto s12 = d / fl;\n"
+        "auto s13 = i % l; auto s14 = d % i; auto s15 = i & u; auto s16 = i << "
+        "l; auto s17 = i ^ c;"));
     EXPECT_EQ(typed.Of("s1"), "long");
     EXPECT_EQ(typed.Of("s2"), "double");
     EXPECT_EQ(typed.Of("s3"), "unsigned int");
@@ -440,10 +460,13 @@ TEST(Typer, AppliesTheUsualArithmeticConversions)
 TEST(Typer, TypesComparisonsAndLogicalOperators)
 {
     const Typed typed(Body("int i = 0; long l = 0; int* p = 0; double d = 0;\n"
-                           "auto c1 = i < l; auto c2 = p == nullptr; auto c3 = d != i; auto c4 = i "
-                           "&& l; auto c5 = !i; auto c6 = p || d;\n"
-                           "auto c7 = !p;"));
-    for (const char* name : { "c1", "c2", "c3", "c4", "c5", "c6", "c7" })
+        "auto c1 = i < l; auto c2 = p == nullptr; auto c3 = d != i; auto c4 = i "
+        "&& l; auto c5 = !i; auto c6 = p || d;\n"
+        "auto c7 = !p;"));
+    for (const char* name :
+        {
+            "c1", "c2", "c3", "c4", "c5", "c6", "c7"
+    })
     {
         EXPECT_EQ(typed.Of(name), "bool") << name;
     }
@@ -474,12 +497,12 @@ TEST(Typer, TypesUnaryOperators)
 TEST(Typer, ReflectionOperatorProducesMetaInfoForTypesAndEntities)
 {
     const Typed typed("struct Widget { int value; };\n"
-                      "void f() { Widget widget; auto type = ^^Widget; "
-                      "auto builtin = ^^int; auto unsigned_type = ^^unsigned long; "
-                      "auto pointer = ^^const int*; "
-                      "auto reference = ^^int&; auto member = ^^Widget::value; "
-                      "auto expression = ^^widget; auto grouped = ^^(widget); "
-                      "int xor_value = 1 ^ 2; }");
+        "void f() { Widget widget; auto type = ^^Widget; "
+        "auto builtin = ^^int; auto unsigned_type = ^^unsigned long; "
+        "auto pointer = ^^const int*; "
+        "auto reference = ^^int&; auto member = ^^Widget::value; "
+        "auto expression = ^^widget; auto grouped = ^^(widget); "
+        "int xor_value = 1 ^ 2; }");
 
     EXPECT_TRUE(typed.tree.Diagnostics().empty());
     EXPECT_EQ(typed.Of("type"), "std::meta::info");
@@ -496,11 +519,11 @@ TEST(Typer, ReflectionOperatorProducesMetaInfoForTypesAndEntities)
 TEST(Typer, TypesPointerArithmeticSubscriptsAndConditionals)
 {
     const Typed typed(Body("int i = 0; long l = 0; int* p = 0; int a[4] = {}; char* s = 0;\n"
-                           "auto p1 = p + 1; auto p2 = 1 + p; auto p3 = p - 1; auto p4 = a[1]; "
-                           "auto p5 = p[i]; auto p6 = s[0];\n"
-                           "auto p7 = i ? l : i; auto p8 = i ? p : nullptr; auto p9 = i ? p : s; "
-                           "auto p10 = (i); auto p11 = a + 1;\n"
-                           "auto p12 = p - p;"));
+        "auto p1 = p + 1; auto p2 = 1 + p; auto p3 = p - 1; auto p4 = a[1]; "
+        "auto p5 = p[i]; auto p6 = s[0];\n"
+        "auto p7 = i ? l : i; auto p8 = i ? p : nullptr; auto p9 = i ? p : s; "
+        "auto p10 = (i); auto p11 = a + 1;\n"
+        "auto p12 = p - p;"));
     EXPECT_EQ(typed.Of("p1"), "int*");
     EXPECT_EQ(typed.Of("p2"), "int*");
     EXPECT_EQ(typed.Of("p3"), "int*");
@@ -518,12 +541,12 @@ TEST(Typer, TypesPointerArithmeticSubscriptsAndConditionals)
 TEST(Typer, TypesAssignmentsAndCasts)
 {
     const Typed typed(Body("int i = 0; long l = 0; double d = 0;\n"
-                           "auto a1 = (i = 2); auto a2 = (l += i); auto a3 = static_cast<char>(i); "
-                           "auto a4 = static_cast<double>(i);\n"
-                           "auto a5 = reinterpret_cast<long*>(&i); auto a6 = static_cast<const "
-                           "int&>(i); auto a7 = int(d);\n"
-                           "auto a8 = sizeof(i); auto a9 = static_cast<Foo>(i); auto a10 = "
-                           "static_cast<std::vector<int>>(i);"));
+        "auto a1 = (i = 2); auto a2 = (l += i); auto a3 = static_cast<char>(i); "
+        "auto a4 = static_cast<double>(i);\n"
+        "auto a5 = reinterpret_cast<long*>(&i); auto a6 = static_cast<const "
+        "int&>(i); auto a7 = int(d);\n"
+        "auto a8 = sizeof(i); auto a9 = static_cast<Foo>(i); auto a10 = "
+        "static_cast<std::vector<int>>(i);"));
     EXPECT_EQ(typed.Of("a1"), "int");
     EXPECT_EQ(typed.Of("a2"), "long");
     EXPECT_EQ(typed.Of("a3"), "char");
@@ -564,9 +587,9 @@ TEST(Typer, TypesMembersAndCalls)
 TEST(Typer, FindsInheritedMembers)
 {
     const Typed typed("struct B { int bx; long bf(); };\n"
-                      "struct D : B { double dx; };\n"
-                      "void f(D d, D* dp) { auto a = d.bx; auto b = d.bf(); auto c = dp->dx; auto "
-                      "e = dp->bx; }\n");
+        "struct D : B { double dx; };\n"
+        "void f(D d, D* dp) { auto a = d.bx; auto b = d.bf(); auto c = dp->dx; auto "
+        "e = dp->bx; }\n");
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "long");
     EXPECT_EQ(typed.Of("c"), "double");
@@ -576,10 +599,10 @@ TEST(Typer, FindsInheritedMembers)
 TEST(Typer, TypesThisAndImplicitMembers)
 {
     const Typed typed("struct S {\n"
-                      "    int v;\n"
-                      "    int m() { auto t = this; auto w = v; auto z = this->v; return w; }\n"
-                      "};\n"
-                      "int S::n() { auto q = this; return 0; }\n");
+        "    int v;\n"
+        "    int m() { auto t = this; auto w = v; auto z = this->v; return w; }\n"
+        "};\n"
+        "int S::n() { auto q = this; return 0; }\n");
     EXPECT_EQ(typed.Of("t"), "S*");
     EXPECT_EQ(typed.Of("w"), "int");
     EXPECT_EQ(typed.Of("z"), "int");
@@ -590,19 +613,19 @@ TEST(Typer, MemberSymbolResolvesFieldsThroughObjectsPointersAndInheritance)
 {
     using namespace heimdall;
     const Typed typed("struct Base { int base_field; };\n"
-                      "struct Derived : Base { int own; };\n"
-                      "struct Holder { Derived value; Derived* ptr; };\n"
-                      "int f(Holder h) {\n"
-                      "    h.value.own = 1;\n"
-                      "    h.ptr->own = 2;\n"
-                      "    h.value.base_field = 3;\n"
-                      "    return h.value.own;\n"
-                      "}\n");
-    const auto&       tree    = typed.tree;
-    const auto&       model   = typed.model;
-    const auto&       types   = typed.types;
-    const auto&       soa     = tree.NodesSoA();
-    std::size_t       members = 0;
+        "struct Derived : Base { int own; };\n"
+        "struct Holder { Derived value; Derived* ptr; };\n"
+        "int f(Holder h) {\n"
+        "    h.value.own = 1;\n"
+        "    h.ptr->own = 2;\n"
+        "    h.value.base_field = 3;\n"
+        "    return h.value.own;\n"
+        "}\n");
+    const auto& tree = typed.tree;
+    const auto& model = typed.model;
+    const auto& types = typed.types;
+    const auto& soa = tree.NodesSoA();
+    std::size_t members = 0;
     for (std::uint32_t node = 0; node < soa.size(); ++node)
     {
         if (soa.Kind(node) != GrammarKind::MemberExpression)
@@ -613,11 +636,11 @@ TEST(Typer, MemberSymbolResolvesFieldsThroughObjectsPointersAndInheritance)
         const auto kids = model.ChildrenOf(node);
         ASSERT_EQ(kids.size(), 2u);
         const auto name_token = soa.FirstToken(kids[1]);
-        const auto member     = types.MemberSymbol(node);
+        const auto member = types.MemberSymbol(node);
         ASSERT_NE(member, kNone) << tree.Text(tree.Tokens()[name_token]);
         // The resolved field is spelled exactly like the member token.
         EXPECT_EQ(model.Names().Text(model.Symbols().name[member]),
-            tree.Text(tree.Tokens()[name_token]));
+                  tree.Text(tree.Tokens()[name_token]));
         ++members;
     }
 
@@ -630,10 +653,10 @@ TEST(Typer, MemberSymbolIsUnknownForUnknowableReceivers)
 {
     using namespace heimdall;
     const Typed typed("struct Opaque;\n"
-                      "void f(Opaque* p) { p->x = 1; }\n"
-                      "void g() { missing.m = 2; }\n");
-    const auto& soa     = typed.tree.NodesSoA();
-    bool        checked = false;
+        "void f(Opaque* p) { p->x = 1; }\n"
+        "void g() { missing.m = 2; }\n");
+    const auto& soa = typed.tree.NodesSoA();
+    bool checked = false;
     for (std::uint32_t node = 0; node < soa.size(); ++node)
     {
         if (soa.Kind(node) == GrammarKind::MemberExpression)
@@ -649,9 +672,9 @@ TEST(Typer, MemberSymbolIsUnknownForUnknowableReceivers)
 TEST(Typer, OverloadsShareAReturnTypeOrAreUnknown)
 {
     const Typed typed("int same(int); int same(double);\n"
-                      "int mixed(); long mixed(int);\n"
-                      "template <class T> int generic(T);\n"
-                      "void f() { auto a = same(1); auto b = mixed(); auto c = generic(1); }\n");
+        "int mixed(); long mixed(int);\n"
+        "template <class T> int generic(T);\n"
+        "void f() { auto a = same(1); auto b = mixed(); auto c = generic(1); }\n");
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "<unknown>");
     EXPECT_EQ(typed.Of("c"), "<unknown>");
@@ -660,10 +683,10 @@ TEST(Typer, OverloadsShareAReturnTypeOrAreUnknown)
 TEST(Typer, KnowsStandardContainerObservers)
 {
     const Typed typed(Body("std::vector<int> v; std::string s; std::deque<int> d; std::array<int, "
-                           "3> a; std::list<int> l;\n"
-                           "auto n = v.size(); auto e = v.empty(); auto len = s.length(); auto c = "
-                           "d.size(); auto f = a.size();\n"
-                           "auto cap = v.capacity(); auto b = v.begin(); auto x = l.length();"));
+        "3> a; std::list<int> l;\n"
+        "auto n = v.size(); auto e = v.empty(); auto len = s.length(); auto c = "
+        "d.size(); auto f = a.size();\n"
+        "auto cap = v.capacity(); auto b = v.begin(); auto x = l.length();"));
     EXPECT_EQ(typed.Of("n"), "size_t");
     EXPECT_EQ(typed.Of("e"), "bool");
     EXPECT_EQ(typed.Of("len"), "size_t");
@@ -677,16 +700,16 @@ TEST(Typer, KnowsStandardContainerObservers)
 TEST(Typer, UsesTheOperatorSubscriptOfAClass)
 {
     const Typed typed("struct Grid { long operator[](int); };\n"
-                      "void f(Grid g) { auto a = g[1]; }\n");
+        "void f(Grid g) { auto a = g[1]; }\n");
     EXPECT_EQ(typed.Of("a"), "long");
 }
 
 TEST(Typer, UnknownPropagatesThroughExpressions)
 {
     const Typed typed(Body("int i = 0; auto a = missing(); auto b = a + 1; auto c = i + a; auto d "
-                           "= unknown.field; auto e = i < a;\n"
-                           "auto f = a ? i : i; auto g = -a; auto h = *a; auto m = a[0]; auto n = "
-                           "i + unknown_global;"));
+        "= unknown.field; auto e = i < a;\n"
+        "auto f = a ? i : i; auto g = -a; auto h = *a; auto m = a[0]; auto n = "
+        "i + unknown_global;"));
     EXPECT_EQ(typed.Of("a"), "<unknown>");
     EXPECT_EQ(typed.Of("b"), "<unknown>");
     EXPECT_EQ(typed.Of("c"), "<unknown>");
@@ -702,8 +725,8 @@ TEST(Typer, UnknownPropagatesThroughExpressions)
 TEST(Typer, ClassOperatorsAreNotGuessed)
 {
     const Typed typed("struct V {};\n"
-                      "void f(V a, V b) { auto s = a + b; auto c = a < b; auto n = !a; auto p = "
-                      "&a; auto m = a && b; }\n");
+        "void f(V a, V b) { auto s = a + b; auto c = a < b; auto n = !a; auto p = "
+        "&a; auto m = a && b; }\n");
     EXPECT_EQ(typed.Of("s"), "<unknown>");
     EXPECT_EQ(typed.Of("c"), "<unknown>");
     EXPECT_EQ(typed.Of("n"), "<unknown>");
@@ -716,7 +739,7 @@ TEST(Typer, BuiltinCastsTypeTheirWholeExpression)
     // Before the parser knew `(int)` was a cast these read as the operand's type, so
     // the Typer answered Unknown to stay safe; now the cast is its own node.
     const Typed typed(Body("double d = 0; int i = 0;\n"
-                           "auto a = (int)d; auto b = (double)i / 2; auto c = (long)i + 1;"));
+        "auto a = (int)d; auto b = (double)i / 2; auto c = (long)i + 1;"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "double");
     EXPECT_EQ(typed.Of("c"), "long");
@@ -725,7 +748,7 @@ TEST(Typer, BuiltinCastsTypeTheirWholeExpression)
 TEST(Typer, NodeTypeCoversEveryExpression)
 {
     const Typed typed(Body("int i = 0; long l = 0; auto x = i + l;"));
-    const auto& nodes  = typed.tree.Nodes();
+    const auto& nodes = typed.tree.Nodes();
     std::size_t binary = 0;
     for (std::uint32_t node = 0; node < nodes.size(); ++node)
     {
@@ -747,7 +770,7 @@ TEST(Typer, NodeTypeCoversEveryExpression)
 
 TEST(Typer, HandlesVeryLongExpressionChains)
 {
-    std::string left  = "int a = 1";
+    std::string left = "int a = 1";
     std::string right = "int b; void f() { int c = 0; c = ";
     for (int i = 0; i < 3000; ++i)
     {
@@ -779,28 +802,30 @@ TEST(Typer, ToleratesBrokenInput)
     for (std::size_t length = 0; length <= sample.size(); ++length)
     {
         const std::string cut = sample.substr(0, length);
-        const Typed       typed(cut);
+        const Typed typed(cut);
         EXPECT_NO_FATAL_FAILURE((void) heimdall::SemanticRules::Analyze(typed.model, typed.types))
-            << cut;
+        << cut;
     }
 
     for (const char* source :
-         { "auto x = ;", "int [", "void f( { int a = (", "a b c d", "auto = 1;", "int a[",
-           "using = int;", "struct { int x; } s; auto y = s.x;", "std::vector<", "static_cast<>(",
-           "x = y ? : z;" })
+        {
+            "auto x = ;", "int [", "void f( { int a = (", "a b c d", "auto = 1;", "int a[",
+            "using = int;", "struct { int x; } s; auto y = s.x;", "std::vector<", "static_cast<>(",
+            "x = y ? : z;"
+    })
     {
         const Typed typed(source);
         EXPECT_NO_FATAL_FAILURE((void) heimdall::SemanticRules::Analyze(typed.model, typed.types))
-            << source;
+        << source;
     }
 }
 
 TEST(Typer, IgnoresInactiveCode)
 {
     const Typed typed("#if 0\n"
-                      "int dead = 1;\n"
-                      "#endif\n"
-                      "void f() { int live = 1; }\n");
+        "int dead = 1;\n"
+        "#endif\n"
+        "void f() { int live = 1; }\n");
     EXPECT_EQ(typed.Of("live"), "int");
 }
 
@@ -840,10 +865,10 @@ TEST(ImplicitBool, ReportsOperandsOfLogicalOperators)
 {
     const std::string source =
         Body("int a = 0; int* p = 0; bool ok = true;\n"
-             "if (!a) {}\n"
-             "if (ok && p) {}\n"
-             "if (a || ok) {}\n"
-             "bool r = !p;");
+        "if (!a) {}\n"
+        "if (ok && p) {}\n"
+        "if (a || ok) {}\n"
+        "bool r = !p;");
     const auto diagnostics = ImplicitBool(source);
     ASSERT_EQ(diagnostics.size(), 4u);
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "a");
@@ -857,8 +882,8 @@ TEST(ImplicitBool, ReportsOperandsOfLogicalOperators)
 
 TEST(ImplicitBool, ReportsTheLocationOfTheOperand)
 {
-    const std::string source      = "void f(int n) {\n    if (n + 1) {}\n}\n";
-    const auto        diagnostics = ImplicitBool(source);
+    const std::string source = "void f(int n) {\n    if (n + 1) {}\n}\n";
+    const auto diagnostics = ImplicitBool(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "n + 1");
     EXPECT_EQ(diagnostics[0].line, 2u); // 1-based
@@ -931,14 +956,14 @@ TEST(ImplicitBool, SilentForDeclarationConditionsAndInitStatements)
 {
     const std::string source =
         Body("int* next();\n"
-             "while (int* p = next()) {}\n"
-             "if (int* q = next()) {}");
+        "while (int* p = next()) {}\n"
+        "if (int* q = next()) {}");
     EXPECT_TRUE(ImplicitBool(source).empty());
     // The init-statement declarator is not a condition, but the condition after
     // the `;` is analyzed like any other boolean context now that the grammar
     // models it.
     const std::string with_init = Body("int a = 0;\nif (int b = 1; a) {}");
-    const auto        diagnostics = ImplicitBool(with_init);
+    const auto diagnostics = ImplicitBool(with_init);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(with_init.substr(diagnostics[0].offset, diagnostics[0].length), "a");
 }
@@ -978,9 +1003,11 @@ TEST(ImplicitBool, IgnoresInactiveCode)
 TEST(ImplicitBool, ToleratesBrokenInput)
 {
     for (const char* source :
-         { "void f(int n) { if (n", "void f() { while (", "void f(int a) { if (a &&",
-           "void f() { for (;", "void f(int a) { a ? : ; }", "void f(int a) { if (a ? b : ) }",
-           "void f(int a) { !", "if ()" })
+        {
+            "void f(int n) { if (n", "void f() { while (", "void f(int a) { if (a &&",
+            "void f() { for (;", "void f(int a) { a ? : ; }", "void f(int a) { if (a ? b : ) }",
+            "void f(int a) { !", "if ()"
+    })
     {
         EXPECT_NO_FATAL_FAILURE(ImplicitBool(source)) << source;
     }
@@ -1006,10 +1033,10 @@ TEST(RangeLoop, ConvertsAnIndexLoopOverAVector)
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               "void f(std::vector<int>& v) {\n"
-              "    for (auto& element : v) {\n"
-              "        use(element);\n"
-              "    }\n"
-              "}\n");
+        "    for (auto& element : v) {\n"
+        "        use(element);\n"
+        "    }\n"
+        "}\n");
 }
 
 TEST(RangeLoop, ConvertsLoopsOverArrays)
@@ -1024,16 +1051,16 @@ TEST(RangeLoop, ConvertsLoopsOverArrays)
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               "void f() {\n"
-              "    int a[8];\n"
-              "    for (auto& element : a) element = 0;\n"
-              "    for (size_t j = 0; j < std::size(a); j += 1) { a[j] += a[j]; }\n"
-              "}\n");
+        "    int a[8];\n"
+        "    for (auto& element : a) element = 0;\n"
+        "    for (size_t j = 0; j < std::size(a); j += 1) { a[j] += a[j]; }\n"
+        "}\n");
     EXPECT_EQ(ApplyFix(source, diagnostics[1]),
               "void f() {\n"
-              "    int a[8];\n"
-              "    for (unsigned i = 0; i < 8; i++) a[i] = 0;\n"
-              "    for (auto& element : a) { element += element; }\n"
-              "}\n");
+        "    int a[8];\n"
+        "    for (unsigned i = 0; i < 8; i++) a[i] = 0;\n"
+        "    for (auto& element : a) { element += element; }\n"
+        "}\n");
 }
 
 TEST(RangeLoop, ConvertsLoopsOverStrings)
@@ -1048,10 +1075,10 @@ TEST(RangeLoop, ConvertsLoopsOverStrings)
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               "int f(const std::string& s) {\n"
-              "    int n = 0;\n"
-              "    for (const auto& element : s) { if (element == 'a') ++n; }\n"
-              "    return n;\n"
-              "}\n");
+        "    int n = 0;\n"
+        "    for (const auto& element : s) { if (element == 'a') ++n; }\n"
+        "    return n;\n"
+        "}\n");
 }
 
 TEST(RangeLoop, KeepsConstOfConstArrays)
@@ -1223,10 +1250,10 @@ TEST(LoopConvert, ConvertsAnIteratorLoop)
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               "void f(std::vector<int>& v) {\n"
-              "    for (auto& element : v) {\n"
-              "        use(element);\n"
-              "    }\n"
-              "}\n");
+        "    for (auto& element : v) {\n"
+        "        use(element);\n"
+        "    }\n"
+        "}\n");
 }
 
 TEST(LoopConvert, ConvertsMemberAccessAndMapIteration)
@@ -1240,14 +1267,14 @@ TEST(LoopConvert, ConvertsMemberAccessAndMapIteration)
     ASSERT_EQ(diagnostics.size(), 2u);
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               "void f(std::map<int, std::string>& m, std::list<Foo>& l) {\n"
-              "    for (auto& element : m) use(element.first, element.second);\n"
-              "    for (auto it = l.begin(); it != l.end(); ++it) { it->run(); (*it).stop(); }\n"
-              "}\n");
+        "    for (auto& element : m) use(element.first, element.second);\n"
+        "    for (auto it = l.begin(); it != l.end(); ++it) { it->run(); (*it).stop(); }\n"
+        "}\n");
     EXPECT_EQ(ApplyFix(source, diagnostics[1]),
               "void f(std::map<int, std::string>& m, std::list<Foo>& l) {\n"
-              "    for (auto it = m.begin(); it != m.end(); it++) use(it->first, it->second);\n"
-              "    for (auto& element : l) { element.run(); (element).stop(); }\n"
-              "}\n");
+        "    for (auto it = m.begin(); it != m.end(); it++) use(it->first, it->second);\n"
+        "    for (auto& element : l) { element.run(); (element).stop(); }\n"
+        "}\n");
 }
 
 TEST(LoopConvert, UsesConstForConstContainersAndCbegin)
@@ -1388,17 +1415,20 @@ TEST(LoopConvert, ToleratesBrokenInput)
 
 TEST(TyperRules, AreInTheCatalog)
 {
-    for (const char* code : { "cpp/no-implicit-bool-conversion", "cpp/modernize-range-loop",
-                              "cpp/modernize-loop-convert" })
+    for (const char* code :
+        {
+            "cpp/no-implicit-bool-conversion", "cpp/modernize-range-loop",
+            "cpp/modernize-loop-convert"
+    })
     {
         EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
     }
 
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-implicit-bool-conversion")->id,
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/no-implicit-bool-conversion") -> id,
               heimdall::RuleId::NoImplicitBoolConversion);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-range-loop")->id,
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-range-loop") -> id,
               heimdall::RuleId::ModernizeRangeLoop);
-    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-loop-convert")->id,
+    EXPECT_EQ(heimdall::FindRuleByCode("cpp/modernize-loop-convert") -> id,
               heimdall::RuleId::ModernizeLoopConvert);
 }
 
@@ -1412,8 +1442,8 @@ TEST(TyperRules, AnalyzeRunsThemAllSortedByOffset)
         "    void* p = (void*)0;\n"
         "}\n";
     const Typed typed(source);
-    const auto  with_types = heimdall::SemanticRules::Analyze(typed.model, typed.types);
-    const auto  standalone = heimdall::SemanticRules::Analyze(typed.model);
+    const auto with_types = heimdall::SemanticRules::Analyze(typed.model, typed.types);
+    const auto standalone = heimdall::SemanticRules::Analyze(typed.model);
     ASSERT_EQ(with_types.size(), 4u);
     ASSERT_EQ(standalone.size(), with_types.size());
     EXPECT_EQ(with_types[0].code, "cpp/no-implicit-bool-conversion");
@@ -1435,7 +1465,7 @@ TEST(TyperRules, PolicyCanDisableAndSuppressEachRule)
         "    for (auto it = v.begin(); it != v.end(); ++it) { use(*it); }\n"
         "}\n";
     const Typed typed(source);
-    const auto  raw = heimdall::SemanticRules::Analyze(typed.model, typed.types);
+    const auto raw = heimdall::SemanticRules::Analyze(typed.model, typed.types);
     ASSERT_EQ(raw.size(), 3u);
 
     heimdall::RuleOptions options;
@@ -1449,10 +1479,13 @@ TEST(TyperRules, TypeModelIsIndependentOfTheRuleThatAsksForIt)
 {
     // Two models over the same source agree: the Typer is deterministic.
     const std::string source = Body("int a = 1; long b = a + 2; auto c = &b;");
-    const Typed       first(source);
-    const Typed       second(source);
+    const Typed first(source);
+    const Typed second(source);
     ASSERT_EQ(first.types.Types().Size(), second.types.Types().Size());
-    for (const char* name : { "a", "b", "c" })
+    for (const char* name :
+        {
+            "a", "b", "c"
+    })
     {
         EXPECT_EQ(first.Of(name), second.Of(name));
     }
@@ -1463,11 +1496,11 @@ TEST(TyperRules, TypeModelIsIndependentOfTheRuleThatAsksForIt)
 TEST(Typer, CStyleCastsTakeTheCastType)
 {
     const Typed typed("struct Foo { int v; };\n"
-                      "void f(void* p, double d) {\n"
-                      "    auto a = (Foo*)p; auto b = (int)d; auto c = (unsigned long)d; auto e = "
-                      "(const Foo*)p;\n"
-                      "    auto g = (Unknown*)p;\n"
-                      "}\n");
+        "void f(void* p, double d) {\n"
+        "    auto a = (Foo*)p; auto b = (int)d; auto c = (unsigned long)d; auto e = "
+        "(const Foo*)p;\n"
+        "    auto g = (Unknown*)p;\n"
+        "}\n");
     EXPECT_EQ(typed.Of("a"), "Foo*");
     EXPECT_EQ(typed.Of("b"), "int");
     EXPECT_EQ(typed.Of("c"), "unsigned long");

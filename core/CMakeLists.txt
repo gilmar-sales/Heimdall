@@ -8,6 +8,7 @@
 # and new files require a CMake configure.
 
 add_library(heimdall_core STATIC
+  src/Doxygen.cpp
   src/Arena.cpp
   src/SourceSnapshot.cpp
   src/TokenSnapshot.cpp

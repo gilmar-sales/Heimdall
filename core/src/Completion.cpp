@@ -1,4 +1,5 @@
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/Doxygen.hpp>
 
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/Navigation.hpp>
@@ -2120,8 +2121,8 @@ namespace heimdall
 		{
 			// Strip the opening `/**` / `/*!` and closing `*/`, then one leading `*`
 			// per line (doxygen style).
-			constexpr std::size_t kBlockOpenLen    = 2;
-			constexpr std::size_t kBlockDelimTotal = 4;
+			const std::size_t kBlockOpenLen    = IsDocBlockComment(text) ? 3 : 2;
+			const std::size_t kBlockDelimTotal = kBlockOpenLen + 2;
 			std::string_view inner = text.substr(
 				kBlockOpenLen, text.size() > kBlockDelimTotal ? text.size() - kBlockDelimTotal : 0);
 			std::string out;
@@ -2210,6 +2211,7 @@ namespace heimdall
 			constexpr std::size_t kDocLinePrefixLen     = 3;
 			constexpr std::size_t kMinBlockCommentLen   = 4;
 			std::vector<std::string> lines;
+			bool hasDoxygen   = false;
 			std::size_t total = 0;
 			for (std::size_t j = anchor_token; j > 0;)
 			{
@@ -2256,6 +2258,7 @@ namespace heimdall
 
 				if (token.kind == TokenKind::LineComment && IsDocLineComment(text))
 				{
+					hasDoxygen               = true;
 					std::string_view content = text.substr(kDocLinePrefixLen);
 					if (!content.empty() && content.front() == ' ')
 					{
@@ -2276,6 +2279,7 @@ namespace heimdall
 					(IsDocBlockComment(text) || CommentStartsLine(source, tokens, j)))
 				{
 					const std::string block = CleanBlockComment(text);
+					hasDoxygen |= IsDocBlockComment(text);
 					if (block.empty())
 					{
 						break;
@@ -2310,7 +2314,7 @@ namespace heimdall
 				out.pop_back();
 			}
 
-			return out;
+			return hasDoxygen ? RenderDoxygen(out) : out;
 		}
 
 		// First token of the outermost declaration owning a DeclaredName (through

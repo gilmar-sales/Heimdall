@@ -1,6 +1,11 @@
-#include <cstddef>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
+/**
+ * @brief An linked list node.
+ *
+ */
 struct Node
 {
 	Node* next;
@@ -11,22 +16,30 @@ auto sizeOfNode  = sizeof(Node);
 auto alignOfNode = alignof(Node);
 
 /**
- * @brief Describe test_method.
+ * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1
+ * otherwise.
  *
- * @param a Describe this parameter.
+ * @param first Describe this parameter.
  * @param b Describe this parameter.
  * @param desc Describe this parameter.
+ *
+ * @return void
  */
-void test_method(int a, int b, std::string desc)
+int test_method(std::uint32_t first, int b, const std::string& desc)
 {
-	auto value = a + b;
+	auto value = first + b;
+
+	if (value > 10)
+	{
+		return 100;
+	}
+
+	return 1;
 }
 
-void unreacheable_code() {
-	return;
-
-	auto unreacheable_variable = 10;
-	unreacheable_variable++;
+std::string_view unreacheable_code()
+{
+	return "";
 }
 
 int main()
@@ -39,7 +52,6 @@ int main()
 	{
 		.next = next,.value = 20
 	};
-
 
 	return 0;
 }

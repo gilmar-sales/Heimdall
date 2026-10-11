@@ -1,4 +1,5 @@
 #include <Heimdall/Navigation.hpp>
+#include <Heimdall/Doxygen.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -1887,9 +1888,232 @@ namespace heimdall
 		return out;
 	}
 
+	namespace
+	{
+		bool Descendant(const ParseTree& tree, std::uint32_t node, std::uint32_t ancestor)
+		{
+			const auto& nodes = tree.NodesSoA();
+			for (std::size_t steps = 0; node < nodes.size() && steps < nodes.size(); ++steps)
+			{
+				if (node == ancestor)
+				{
+					return true;
+				}
+
+				const auto parent = nodes.Parent(node);
+				if (parent == node)
+				{
+					break;
+				}
+
+				node = parent;
+			}
+
+			return false;
+		}
+
+		std::string Compact(std::string_view text)
+		{
+			std::string result;
+			for (const char value : text)
+			{
+				if (value != ' ' && value != '\t' && value != '\n' && value != '\r')
+				{
+					result += value;
+				}
+			}
+
+			return result;
+		}
+
+		std::string ParameterSignature(const ParseTree& tree, std::size_t declaration)
+		{
+			const auto& tokens   = tree.Tokens();
+			const auto& nodes    = tree.NodesSoA();
+			std::uint32_t suffix = ~0u;
+			for (std::uint32_t node = 0; node < nodes.size(); ++node)
+			{
+				if (nodes.Kind(node) == GrammarKind::FunctionSuffix &&
+					tokens[nodes.FirstToken(node)].offset > declaration &&
+					(suffix ==~0u || nodes.FirstToken(node) < nodes.FirstToken(suffix)))
+				{
+					suffix = node;
+				}
+			}
+
+			if (suffix ==~0u)
+			{
+				return {};
+			}
+
+			std::string signature = "(";
+			bool first            = true;
+			for (std::uint32_t node = 0; node < nodes.size(); ++node)
+			{
+				if (nodes.Kind(node) != GrammarKind::ParameterDeclaration || nodes.Parent(node) != suffix)
+				{
+					continue;
+				}
+
+				std::uint32_t name = ~0u;
+				for (std::uint32_t child = 0; child < nodes.size(); ++child)
+				{
+					if (nodes.Kind(child) == GrammarKind::DeclaredName && Descendant(tree, child, node))
+					{
+						name = nodes.FirstToken(child);
+						break;
+					}
+				}
+
+				if (!first)
+				{
+					signature += ',';
+				}
+
+				first          = false;
+				const auto end = nodes.FirstToken(node) + nodes.TokenCount(node);
+				for (auto token = nodes.FirstToken(node); token < end && token < tokens.size(); ++token)
+				{
+					if (tokens[token].tok == Tok::Eq)
+					{
+						break;
+					}
+
+					if (token != name && !IsTrivia(tokens[token].kind))
+					{
+						signature += tree.Text(tokens[token]);
+					}
+				}
+			}
+
+			return signature + ')';
+		}
+
+		std::vector<NavTarget> DocumentationDefinition(const ParseTree& tree, std::size_t offset,
+			const ScopeIndex* external)
+		{
+			const auto references = DoxygenReferences(tree);
+			const auto selected = std::find_if(references.begin(), references.end(),[offset](const auto& ref)
+				{
+					return offset >= ref.offset && offset < ref.offset + ref.length;
+			});
+			if (selected == references.end())
+			{
+				return {};
+			}
+
+			if (selected->parameter)
+			{
+				const auto& nodes  = tree.NodesSoA();
+				const auto& tokens = tree.Tokens();
+				std::size_t next   = selected->commentEnd;
+				for (const auto& token : tokens)
+				{
+					if (token.offset >= next && !IsTrivia(token.kind))
+					{
+						next = token.offset;
+						break;
+					}
+				}
+
+				std::uint32_t owner = ~0u;
+				for (std::uint32_t node = 0; node < nodes.size(); ++node)
+				{
+					if ((nodes.Kind(node) == GrammarKind::FunctionDefinition ||
+						nodes.Kind(node) == GrammarKind::Declaration) &&
+						tokens[nodes.FirstToken(node)].offset == next)
+					{
+						owner = node;
+						break;
+					}
+				}
+
+				if (owner ==~0u)
+				{
+					return {};
+				}
+
+				for (std::uint32_t node = 0; node < nodes.size(); ++node)
+				{
+					if (nodes.Kind(node) != GrammarKind::DeclaredName ||!Descendant(tree, node, owner))
+					{
+						continue;
+					}
+
+					const auto& token = tokens[nodes.FirstToken(node)];
+					if (tree.Text(token) == selected->target)
+					{
+						const auto parent = nodes.Parent(node);
+						if (parent < nodes.size() && nodes.Parent(parent) < nodes.size() &&
+							nodes.Kind(nodes.Parent(parent)) == GrammarKind::ParameterDeclaration)
+						{
+							NavTarget target;
+							target.name   = selected->target;
+							target.offset = token.offset;
+							target.length = token.length;
+							return {target};
+						}
+					}
+				}
+
+				return {};
+			}
+
+			const Model model(tree, external);
+			const auto signature = selected->target.find('(');
+			const auto name      = selected->target.substr(0, signature);
+			const auto scopeEnd  = name.rfind("::");
+			std::vector<Candidate> candidates;
+			if (scopeEnd == std::string::npos)
+			{
+				candidates = LookupUnqualified(model, name, selected->commentEnd).found;
+			}
+			else
+			{
+				Path scope;
+				for (std::size_t position = 0; position < scopeEnd;)
+				{
+					const auto end = name.find("::", position);
+					scope.push_back(name.substr(position, end - position));
+					position = end + 2;
+				}
+
+				model.Members(scope, name.substr(scopeEnd + 2), candidates);
+			}
+
+			if (signature != std::string::npos)
+			{
+				const auto expected = Compact(selected->target.substr(signature));
+				std::erase_if(candidates,[&](const auto& candidate)
+					{
+						return candidate.decl == kNone ||
+						ParameterSignature(tree, model.Decls()[candidate.decl].offset) != expected;
+				});
+			}
+
+			return ToTargets(model, PreferDefinitions(model, std::move(candidates)));
+		}
+	}
+
 	std::vector<NavTarget> Navigation::Definition(const ParseTree& tree, std::size_t offset,
 		const ScopeIndex* external)
 	{
+		const auto& tokens = tree.Tokens();
+		const auto comment = std::upper_bound(tokens.begin(), tokens.end(), offset,
+			[](std::size_t position, const Token& token)
+			{
+				return position < token.offset;
+		});
+		if (comment != tokens.begin())
+		{
+			const auto& token = *(comment - 1);
+			if ((token.kind == TokenKind::BlockComment || token.kind == TokenKind::LineComment) &&
+				offset < token.offset + token.length)
+			{
+				return DocumentationDefinition(tree, offset, external);
+			}
+		}
+
 		const Model model(tree, external);
 		bool ambiguous               = false;
 		std::vector<Candidate> found = ResolveAt(model, offset, ambiguous);

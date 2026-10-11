@@ -51,7 +51,7 @@ namespace
 
             root = std::filesystem::temp_directory_path() /
                    ("heimdall-rename-cross-" +
-                   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
             std::filesystem::create_directory(root);
             const auto write =[&](const char* name, std::string_view text)
             {
@@ -60,9 +60,9 @@ namespace
                 return file.good();
             };
             wrote = write("add.hpp", header_text) && write("add.cpp", impl_text) &&
-                    write("main.cpp", caller_text) &&
-                    write("compile_commands.json",
-                "[{\"directory\":\"" + root.generic_string() + "\",\"file\":\"" +
+                write("main.cpp", caller_text) &&
+                write("compile_commands.json",
+                      "[{\"directory\":\"" + root.generic_string() + "\",\"file\":\"" +
                 (root / "add.cpp").generic_string() + "\",\"arguments\":[\"" +
                 std::filesystem::path(HEIMDALL_TEST_CXX_COMPILER).generic_string() +
                 "\",\"-std=c++20\",\"-c\",\"add.cpp\",\"-o\",\"unused.o\"]},"
@@ -83,17 +83,21 @@ namespace
             }
 
             workspace.SetCompilationDatabase(std::make_shared<const CompileDatabase>(*database));
-            auto open =[&](const char* name, std::string_view text) {
+            auto open =[&](const char* name, std::string_view text)
+            {
                 std::ifstream input(root / name, std::ios::binary);
-                const std::string content { std::istreambuf_iterator<char>(input),
-                                            std::istreambuf_iterator<char>() };
+                const std::string content
+                {
+                    std::istreambuf_iterator<char>(input),
+                        std::istreambuf_iterator<char>()
+                };
                 return workspace.Open(root / name,
-                    std::make_shared<const std::string>(content), 1);
+                                      std::make_shared<const std::string>(content), 1);
             };
             header = open("add.hpp", header_text);
-            impl   = open("add.cpp", impl_text);
+            impl = open("add.cpp", impl_text);
             caller = open("main.cpp", caller_text);
-            wrote  = wrote && header && impl && caller;
+            wrote = wrote && header && impl && caller;
         }
 
         ~CrossFile()
@@ -109,9 +113,9 @@ namespace
             return wrote && compiler != "cl" && compiler != "clang-cl";
         }
 
-        Workspace                          workspace;
-        std::filesystem::path              root;
-        bool                               wrote = false;
+        Workspace workspace;
+        std::filesystem::path root;
+        bool wrote = false;
         std::expected<DocumentId, WorkspaceError> header, impl, caller;
     };
 
@@ -125,7 +129,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "int f(int argument)\r\n{\r\n    // input remains a comment\r\n    int value = "
+                  "int f(int argument)\r\n{\r\n    // input remains a comment\r\n    int value = "
             "argument;\r\n    return value + argument;\r\n}\r\n");
     }
 
@@ -140,6 +144,46 @@ namespace
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("int value = 2; value++"), std::string::npos);
         EXPECT_NE(preview->front().source.find("int value = 3; return value"), std::string::npos);
+    }
+
+    TEST(RenameSpec, RenamesParameterInItsDoxygenParamTag)
+    {
+        const std::string source =
+            "/**\n"
+            " * @brief Describe test_method.\n"
+            " *\n"
+            " * @param a Describe this parameter.\n"
+            " * @param b Describe this parameter.\n"
+            " * @param desc Describe this parameter.\n"
+            " */\n"
+            "void test_method(int a, int b, std::string desc)\n"
+            "{\n"
+            "    auto value = a + b;\n"
+            "}\n";
+        Fixture fixture(source);
+        const auto snapshot = fixture.Snapshot();
+
+        const auto plan = RefactoringService::RenameLocal(
+            snapshot, fixture.id, source.find("int a") + std::string("int ").size(), "first");
+
+        ASSERT_TRUE(plan) << plan.error().message;
+        ASSERT_EQ(plan->documents.size(), 1u);
+        EXPECT_EQ(plan->documents.front().edits.size(), 3u);
+        const auto preview = PreviewRefactoring(snapshot, *plan);
+        ASSERT_TRUE(preview);
+        ASSERT_EQ(preview->size(), 1u);
+        EXPECT_EQ(preview->front().source,
+                  "/**\n"
+            " * @brief Describe test_method.\n"
+            " *\n"
+            " * @param first Describe this parameter.\n"
+            " * @param b Describe this parameter.\n"
+            " * @param desc Describe this parameter.\n"
+            " */\n"
+            "void test_method(int first, int b, std::string desc)\n"
+            "{\n"
+            "    auto value = first + b;\n"
+            "}\n");
     }
 
     TEST(RenameSpec, RejectsCollisionsAndInvalidNames)
@@ -553,8 +597,8 @@ namespace
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
-        const auto source   = snapshot.Source(*files.impl);
-        const auto plan     = RefactoringService::RenameLocal(
+        const auto source = snapshot.Source(*files.impl);
+        const auto plan = RefactoringService::RenameLocal(
             snapshot, *files.impl, source->find("add(int"), "sum");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.size(), 3u);
@@ -573,6 +617,101 @@ namespace
         }
     }
 
+    TEST(RenameCrossFileSpec, RenamesFunctionInDoxygenBriefAndReferences)
+    {
+        const std::string header =
+            "/**\n"
+            " * @brief Describe add.\n"
+            " * @param a First operand.\n"
+            " * @param b Second operand.\n"
+            " * @return The sum.\n"
+            " */\n"
+            "int add(int a, int b);\n";
+        const std::string implementation =
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n";
+        const std::string caller =
+            "#include \"add.hpp\"\n"
+            "/** @brief Calls @ref add.\n"
+            " * @see add\n"
+            " */\n"
+            "int run() { return add(1, 2); }\n";
+        CrossFile files(header, implementation, caller);
+        ASSERT_TRUE(files.Ready());
+        const auto snapshot = files.workspace.Snapshot();
+
+        const auto plan = RefactoringService::RenameLocal(
+            snapshot, *files.impl, implementation.find("add(int"), "sum");
+
+        ASSERT_TRUE(plan) << plan.error().message;
+        const auto preview = PreviewRefactoring(snapshot, *plan);
+        ASSERT_TRUE(preview);
+        ASSERT_EQ(preview->size(), 3u);
+        for (const auto& document : *preview)
+        {
+            if (document.path.filename() == "add.hpp")
+            {
+                EXPECT_EQ(document.source,
+                          "/**\n"
+                    " * @brief Describe sum.\n"
+                    " * @param a First operand.\n"
+                    " * @param b Second operand.\n"
+                    " * @return The sum.\n"
+                    " */\n"
+                    "int sum(int a, int b);\n");
+            }
+            else if (document.path.filename() == "add.cpp")
+            {
+                EXPECT_EQ(document.source,
+                          "#include \"add.hpp\"\n"
+                    "int sum(int a, int b) { return a + b; }\n");
+            }
+            else
+            {
+                EXPECT_EQ(document.path.filename(), "main.cpp");
+                EXPECT_EQ(document.source,
+                          "#include \"add.hpp\"\n"
+                    "/** @brief Calls @ref sum.\n"
+                    " * @see sum\n"
+                    " */\n"
+                    "int run() { return sum(1, 2); }\n");
+            }
+        }
+    }
+
+    TEST(RenameSpec, RenamesClassInDoxygenBriefAndReferences)
+    {
+        const std::string source =
+            "/**\n"
+            " * @brief Describe Node.\n"
+            " */\n"
+            "class Node {};\n"
+            "/** @brief Uses @ref Node.\n"
+            " * @see Node\n"
+            " */\n"
+            "void use(Node* node) {}\n";
+        Fixture fixture(source);
+        const auto snapshot = fixture.Snapshot();
+
+        const auto plan = RefactoringService::RenameLocal(
+            snapshot, fixture.id, source.find("class Node") + std::string("class ").size(),
+            "Element");
+
+        ASSERT_TRUE(plan) << plan.error().message;
+        const auto preview = PreviewRefactoring(snapshot, *plan);
+        ASSERT_TRUE(preview);
+        ASSERT_EQ(preview->size(), 1u);
+        EXPECT_EQ(preview->front().source,
+                  "/**\n"
+            " * @brief Describe Element.\n"
+            " */\n"
+            "class Element {};\n"
+            "/** @brief Uses @ref Element.\n"
+            " * @see Element\n"
+            " */\n"
+            "void use(Element* node) {}\n");
+    }
+
     TEST(RenameCrossFileSpec, FindsReferencesAcrossDocuments)
     {
         Workspace workspace;
@@ -581,12 +720,12 @@ namespace
         ASSERT_TRUE(impl);
         const auto caller = workspace.Open("b.cpp",
             std::make_shared<const std::string>(
-                "int add(int a, int b);\nint run() { return add(1, 2); }"),
+            "int add(int a, int b);\nint run() { return add(1, 2); }"),
             1);
         ASSERT_TRUE(caller);
         const auto snapshot = workspace.Snapshot();
-        const auto source   = snapshot.Source(*impl);
-        const auto refs     = RefactoringService::WorkspaceReferences(
+        const auto source = snapshot.Source(*impl);
+        const auto refs = RefactoringService::WorkspaceReferences(
             snapshot, *impl, source->find("add"), true);
         ASSERT_TRUE(refs) << refs.error().message;
         ASSERT_EQ(refs->size(), 2u);
@@ -611,7 +750,8 @@ namespace
         EXPECT_EQ(uses, 1u);
     }
 
-    TEST(RenameCrossFileSpec, RenamesAcrossDocumentsWithoutIncludes)    {
+    TEST(RenameCrossFileSpec, RenamesAcrossDocumentsWithoutIncludes)
+    {
         // No directives: the caller redeclares the function, so the index can
         // link the documents without include edges or a compile database.
         Workspace workspace;
@@ -620,12 +760,12 @@ namespace
         ASSERT_TRUE(impl);
         const auto caller = workspace.Open("b.cpp",
             std::make_shared<const std::string>(
-                "int add(int a, int b);\nint run() { return add(1, 2); }"),
+            "int add(int a, int b);\nint run() { return add(1, 2); }"),
             1);
         ASSERT_TRUE(caller);
         const auto snapshot = workspace.Snapshot();
-        const auto source   = snapshot.Source(*impl);
-        const auto plan     = RefactoringService::RenameLocal(
+        const auto source = snapshot.Source(*impl);
+        const auto plan = RefactoringService::RenameLocal(
             snapshot, *impl, source->find("add"), "sum");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.size(), 2u);
@@ -645,8 +785,8 @@ namespace
             "int get() { return total; }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
-        const auto source   = snapshot.Source(*files.impl);
-        const auto plan     = RefactoringService::RenameLocal(
+        const auto source = snapshot.Source(*files.impl);
+        const auto plan = RefactoringService::RenameLocal(
             snapshot, *files.impl, source->find("total"), "count");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.size(), 3u);
@@ -655,14 +795,14 @@ namespace
     TEST(RenameCrossFileSpec, RejectsOverloadsAndCollisionsAcrossFiles)
     {
         CrossFile overloaded("int add(int a, int b);\ndouble add(double a, double b);\n",
-            "#include \"add.hpp\"\n"
+                             "#include \"add.hpp\"\n"
             "int add(int a, int b) { return a + b; }\n"
             "double add(double a, double b) { return a + b; }\n", "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(overloaded.Ready());
         const auto over_snapshot = overloaded.workspace.Snapshot();
-        const auto over_source   = over_snapshot.Source(*overloaded.impl);
-        const auto over_plan     = RefactoringService::RenameLocal(
+        const auto over_source = over_snapshot.Source(*overloaded.impl);
+        const auto over_plan = RefactoringService::RenameLocal(
             over_snapshot, *overloaded.impl, over_source->find("add(int"), "sum");
         ASSERT_FALSE(over_plan);
         EXPECT_EQ(over_plan.error().code, RefactoringErrorCode::IncompleteAnalysis);
@@ -672,7 +812,7 @@ namespace
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
-        const auto source   = snapshot.Source(*files.caller);
+        const auto source = snapshot.Source(*files.caller);
         const auto collision = RefactoringService::RenameLocal(
             snapshot, *files.caller, source->find("add("), "run");
         ASSERT_FALSE(collision);
@@ -686,8 +826,8 @@ namespace
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
-        const auto source   = snapshot.Source(*files.impl);
-        const auto plan     = RefactoringService::AddParameter(
+        const auto source = snapshot.Source(*files.impl);
+        const auto plan = RefactoringService::AddParameter(
             snapshot, *files.impl, source->find("add(int"), "int", "c", "0");
         ASSERT_TRUE(plan) << plan.error().message;
         // Declaration and definition gain the parameter; the call is preserved.
@@ -698,7 +838,7 @@ namespace
         {
             // Declaration and definition gain the parameter...
             EXPECT_NE(refactored.source.find("int add(int a, int b, int c = 0)"),
-                std::string::npos)
+                      std::string::npos)
             << refactored.path;
             // ...while the existing call keeps working untouched.
             if (refactored.document == *files.caller)
@@ -719,8 +859,8 @@ namespace
             "int run() { return add(1, 2) + add(3, 4); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
-        const auto source   = snapshot.Source(*files.impl);
-        const auto plan     = RefactoringService::RemoveParameter(
+        const auto source = snapshot.Source(*files.impl);
+        const auto plan = RefactoringService::RemoveParameter(
             snapshot, *files.impl, source->find("add(int"), "b");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.size(), 3u);
@@ -740,13 +880,14 @@ namespace
         }
     }
 
-    TEST(ChangeSignatureSpec, RejectsUsedParametersAddressTakersAndOverloads)    {
+    TEST(ChangeSignatureSpec, RejectsUsedParametersAddressTakersAndOverloads)
+    {
         CrossFile used("int add(int a, int b);\n", "#include \"add.hpp\"\n"
             "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(used.Ready());
         const auto used_snapshot = used.workspace.Snapshot();
-        const auto used_source   = used_snapshot.Source(*used.impl);
+        const auto used_source = used_snapshot.Source(*used.impl);
         EXPECT_FALSE(RefactoringService::RemoveParameter(
             used_snapshot, *used.impl, used_source->find("add(int"), "b"));
 
@@ -755,7 +896,7 @@ namespace
             "auto taken = &add;\nint run() { return taken(1, 2); }\n");
         ASSERT_TRUE(taken.Ready());
         const auto taken_snapshot = taken.workspace.Snapshot();
-        const auto taken_source   = taken_snapshot.Source(*taken.impl);
+        const auto taken_source = taken_snapshot.Source(*taken.impl);
         EXPECT_FALSE(RefactoringService::AddParameter(
             taken_snapshot, *taken.impl, taken_source->find("add(int"), "int", "c", "0"));
         EXPECT_FALSE(RefactoringService::RemoveParameter(
@@ -766,8 +907,8 @@ namespace
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(collision.Ready());
         const auto collision_snapshot = collision.workspace.Snapshot();
-        const auto collision_source   = collision_snapshot.Source(*collision.impl);
-        const auto colliding          = RefactoringService::AddParameter(collision_snapshot,
+        const auto collision_source = collision_snapshot.Source(*collision.impl);
+        const auto colliding = RefactoringService::AddParameter(collision_snapshot,
             *collision.impl, collision_source->find("add(int"), "int", "a", "0");
         ASSERT_FALSE(colliding);
         EXPECT_EQ(colliding.error().code, RefactoringErrorCode::NameCollision);
@@ -778,21 +919,21 @@ namespace
         Workspace workspace;
         const auto impl = workspace.Open("a.cpp",
             std::make_shared<const std::string>(
-                "namespace util { int helper() { return 1; } }\n"
-                "int add(int a, int b) { return a + b; }\n"
-                "int run() { return add(1, 2) + util::helper(); }\n"),
+            "namespace util { int helper() { return 1; } }\n"
+            "int add(int a, int b) { return a + b; }\n"
+            "int run() { return add(1, 2) + util::helper(); }\n"),
             1);
         ASSERT_TRUE(impl);
         const auto snapshot = workspace.Snapshot();
-        const auto source   = snapshot.Source(*impl);
-        const auto plan     = RefactoringService::MoveToNamespace(
+        const auto source = snapshot.Source(*impl);
+        const auto plan = RefactoringService::MoveToNamespace(
             snapshot, *impl, source->find("add(int"), "util");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.size(), 1u);
         const auto preview = PreviewRefactoring(snapshot, *plan);
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("int util::add(int a, int b)"),
-            std::string::npos);
+                  std::string::npos);
         EXPECT_NE(preview->front().source.find("util::add(1, 2)"), std::string::npos);
         EXPECT_NE(preview->front().source.find("util::helper()"), std::string::npos);
     }
@@ -804,18 +945,18 @@ namespace
             Workspace workspace;
             const auto impl = workspace.Open("a.cpp",
                 std::make_shared<const std::string>(
-                    "namespace util { int helper() { return 1; } }\n"
-                    "int add(int a, int b) { return a + b; }\n"),
+                "namespace util { int helper() { return 1; } }\n"
+                "int add(int a, int b) { return a + b; }\n"),
                 1);
             ASSERT_TRUE(impl);
             const auto caller = workspace.Open("b.cpp",
                 std::make_shared<const std::string>(
-                    "int add(int a, int b);\nint run() { return add(1, 2); }\n"),
+                "int add(int a, int b);\nint run() { return add(1, 2); }\n"),
                 1);
             ASSERT_TRUE(caller);
             const auto snapshot = workspace.Snapshot();
-            const auto source   = snapshot.Source(*impl);
-            const auto plan     = RefactoringService::MoveToNamespace(
+            const auto source = snapshot.Source(*impl);
+            const auto plan = RefactoringService::MoveToNamespace(
                 snapshot, *impl, source->find("add(int"), "util");
             ASSERT_FALSE(plan);
             EXPECT_EQ(plan.error().code, RefactoringErrorCode::IncompleteAnalysis);
@@ -826,13 +967,13 @@ namespace
             Workspace workspace;
             const auto impl = workspace.Open("a.cpp",
                 std::make_shared<const std::string>(
-                    "namespace util { int helper() { return 1; } }\n"
-                    "int add(int a, int b) { return a + b; }\n"
-                    "int run() { return add(1, 2); }\n"),
+                "namespace util { int helper() { return 1; } }\n"
+                "int add(int a, int b) { return a + b; }\n"
+                "int run() { return add(1, 2); }\n"),
                 1);
             ASSERT_TRUE(impl);
             const auto snapshot = workspace.Snapshot();
-            const auto source   = snapshot.Source(*impl);
+            const auto source = snapshot.Source(*impl);
             EXPECT_FALSE(RefactoringService::MoveToNamespace(
                 snapshot, *impl, source->find("add(int"), "missing"));
             Fixture collision(
@@ -840,7 +981,7 @@ namespace
                 "int add(int a, int b) { return a + b; }\n"
                 "int run() { return add(1, 2); }\n");
             const auto collision_snapshot = collision.Snapshot();
-            const auto collision_plan      = RefactoringService::MoveToNamespace(collision_snapshot,
+            const auto collision_plan = RefactoringService::MoveToNamespace(collision_snapshot,
                 collision.id, collision_snapshot.Source(collision.id)->rfind("add(int"), "util");
             ASSERT_FALSE(collision_plan);
             EXPECT_EQ(collision_plan.error().code, RefactoringErrorCode::NameCollision);
@@ -909,7 +1050,7 @@ namespace
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source.find("kExitUsageError"), std::string::npos);
         EXPECT_NE(preview->front().source.find("constexpr int kUsageErrorExitCode = 2;"),
-            std::string::npos);
+                  std::string::npos);
     }
 
     TEST(RenameSpec, PreservesIncludeSearchOrderAndRejectsDirtyTransitiveHeaders)
@@ -977,7 +1118,7 @@ namespace
         Workspace workspace;
         workspace.SetCompilationDatabase(std::make_shared<const CompileDatabase>(*database));
         const std::string source = "#include \"local.hpp\"\n#include <relative.hpp>\n"
-        "int f(int value) { return value; }";
+            "int f(int value) { return value; }";
         const auto document = workspace.Open(path, std::make_shared<const std::string>(source), 1);
         ASSERT_TRUE(document);
         const auto rename =[&]
@@ -990,10 +1131,10 @@ namespace
         EXPECT_EQ(initial->documents.front().edits.size(), 2u);
         // A dirty header shadowed by the source-local include is not a dependency.
         ASSERT_TRUE(workspace.Open(root / "quote/local.hpp",
-            std::make_shared<const std::string>("#define renamed 7\n"), 1));
+                                   std::make_shared<const std::string>("#define renamed 7\n"), 1));
         const auto header =
             workspace.Open(root / "includes/nested.hpp",
-            std::make_shared<const std::string>("// saved transitive header\n"), 1);
+                           std::make_shared<const std::string>("// saved transitive header\n"), 1);
         ASSERT_TRUE(header);
         const auto clean = rename();
         ASSERT_TRUE(clean) << clean.error().message;
@@ -1030,15 +1171,15 @@ namespace
         const auto valid = *plan;
         plan->documents[0].edits.push_back(plan->documents[0].edits[0]);
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan).error().code,
-            RefactoringErrorCode::ConflictingEdits);
+                  RefactoringErrorCode::ConflictingEdits);
         *plan = valid;
         plan->documents[0].edits[0].offset = 9999;
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan).error().code,
-            RefactoringErrorCode::InvalidEdit);
+                  RefactoringErrorCode::InvalidEdit);
         *plan = valid;
         plan->documents[0].edits[0].expected = "wrong";
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan).error().code,
-            RefactoringErrorCode::InvalidEdit);
+                  RefactoringErrorCode::InvalidEdit);
     }
 
     TEST(RefactoringPlanSpec, ValidatesAllDocumentsAndPinnedParserOptions)
@@ -1049,11 +1190,11 @@ namespace
         const auto valid = *plan;
         plan->documents[0].options->standard = CppStandard::Cpp23;
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan).error().code,
-            RefactoringErrorCode::StaleSnapshot);
+                  RefactoringErrorCode::StaleSnapshot);
         *plan = valid;
         plan->documents.push_back(plan->documents.front());
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan).error().code,
-            RefactoringErrorCode::ConflictingEdits);
+                  RefactoringErrorCode::ConflictingEdits);
     }
 
     TEST(RefactoringPlanSpec, CancellationReturnsNoPartialPreview)
@@ -1064,7 +1205,7 @@ namespace
         std::stop_source stop;
         stop.request_stop();
         EXPECT_EQ(PreviewRefactoring(f.Snapshot(), *plan, stop.get_token()).error().code,
-            RefactoringErrorCode::Cancelled);
+                  RefactoringErrorCode::Cancelled);
         EXPECT_FALSE(RefactoringService::RenameLocal(
             f.Snapshot(), f.id, f.At("value"), "renamed", stop.get_token()));
     }
@@ -1078,7 +1219,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "int f()\r\n{\r\n    auto result = 1 + 2;\r\n    return result;\r\n}\r\n");
+                  "int f()\r\n{\r\n    auto result = 1 + 2;\r\n    return result;\r\n}\r\n");
     }
 
     TEST(ExtractVariableSpec, RejectsEffectsPartialSelectionsUnbracedStatementsAndDeducedReturn)
@@ -1172,7 +1313,7 @@ namespace
             Fixture f("int f() { return " + std::string(expression) + "; }");
             const auto plan =
                 RefactoringService::ExtractVariable(f.Snapshot(), f.id, f.At(expression),
-                std::string_view(expression).size(), "result");
+                                                    std::string_view(expression).size(), "result");
             ASSERT_TRUE(plan) << expression << ": " << plan.error().message;
         }
     }
@@ -1186,7 +1327,7 @@ namespace
         const auto local_preview = PreviewRefactoring(local.Snapshot(), *local_plan);
         ASSERT_TRUE(local_preview);
         EXPECT_EQ(local_preview->front().source,
-            "int f(int x) { auto result = x + 1; return result; }");
+                  "int f(int x) { auto result = x + 1; return result; }");
 
         Fixture field("struct S { int m; };\n"
             "int f(S s) { return s.m + 1; }");
@@ -1208,21 +1349,21 @@ namespace
     {
         Fixture f("int f(int x) { return x + 42 + 42; }");
         const auto snapshot = f.Snapshot();
-        const auto plan     = RefactoringService::ExtractConstant(
+        const auto plan = RefactoringService::ExtractConstant(
             snapshot, f.id, snapshot.Source(f.id)->find("42"), 2, "answer");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.front().edits.size(), 3u);
         const auto preview = PreviewRefactoring(snapshot, *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "int f(int x) { static constexpr int answer = 42; return x + answer + answer; }");
+                  "int f(int x) { static constexpr int answer = 42; return x + answer + answer; }");
     }
 
     TEST(ExtractConstantSpec, ExtractsDoublesAndRejectsNonArithmetic)
     {
         Fixture doubles("double f() { return 1.5 + 1.5; }");
         const auto doubles_snapshot = doubles.Snapshot();
-        const auto doubles_plan      = RefactoringService::ExtractConstant(doubles_snapshot,
+        const auto doubles_plan = RefactoringService::ExtractConstant(doubles_snapshot,
             doubles.id, doubles_snapshot.Source(doubles.id)->find("1.5"), 3, "half_pi");
         ASSERT_TRUE(doubles_plan) << doubles_plan.error().message;
 
@@ -1288,7 +1429,7 @@ namespace
         {
             const auto snapshot = shadowed.Snapshot();
             EXPECT_FALSE(RefactoringService::ExtractVariable(snapshot, shadowed.id,
-                snapshot.Source(shadowed.id)->find("x + 1"), 5, "result"));
+                                                             snapshot.Source(shadowed.id)->find("x + 1"), 5, "result"));
         }
 
         // Predefined macros behave like file defines when named.
@@ -1300,7 +1441,7 @@ namespace
                 clean.Snapshot(), clean.id, clean.At("x + 1"), 5, "result"));
             Fixture dirty("int f() { int LIMIT = 1; return LIMIT + 1; }\n", options);
             EXPECT_FALSE(RefactoringService::ExtractVariable(dirty.Snapshot(), dirty.id,
-                dirty.Snapshot().Source(dirty.id)->find("LIMIT + 1"), 9, "result"));
+                                                             dirty.Snapshot().Source(dirty.id)->find("LIMIT + 1"), 9, "result"));
         }
     }
 
@@ -1317,7 +1458,7 @@ namespace
         {
             Fixture f(source);
             const auto offset = f.Snapshot().Source(f.id)->find("return ") + 7;
-            const auto end    = f.Snapshot().Source(f.id)->find(';', offset);
+            const auto end = f.Snapshot().Source(f.id)->find(';', offset);
             EXPECT_FALSE(RefactoringService::ExtractVariable(
                 f.Snapshot(), f.id, offset, end - offset, "result"))
             << source;
@@ -1333,7 +1474,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "int f(int input) {  if (input) { return 42; } return 42; }");
+                  "int f(int input) {  if (input) { return 42; } return 42; }");
     }
 
     TEST(InlineVariableSpec, BlocksConversionsEffectsWritesStaticAndDeclarationComments)
@@ -1364,7 +1505,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "static constexpr int answer() noexcept\n{\n    return 42;\n}\n\nconstexpr int "
+                  "static constexpr int answer() noexcept\n{\n    return 42;\n}\n\nconstexpr int "
             "f() { return answer(); }");
     }
 
@@ -1379,11 +1520,11 @@ namespace
         {
             Fixture f(source);
             const auto literal = f.At("42");
-            const auto offset  = literal == std::string::npos ? f.At("value;") : literal;
-            const auto found   = offset == std::string::npos
-                ? f.Snapshot().Source(f.id)->find("return ") + 7
-                : offset;
-            const auto end     = f.Snapshot().Source(f.id)->find(';', found);
+            const auto offset = literal == std::string::npos ? f.At("value;") : literal;
+            const auto found = offset == std::string::npos
+            ? f.Snapshot().Source(f.id)->find("return ") + 7
+            : offset;
+            const auto end = f.Snapshot().Source(f.id)->find(';', found);
             EXPECT_FALSE(RefactoringService::ExtractFunction(
                 f.Snapshot(), f.id, found, end - found, "answer"))
             << source;
@@ -1399,7 +1540,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "static constexpr int combine(int x, int y) noexcept\n{\n    return x * 2 + y;\n}\n\nint "
+                  "static constexpr int combine(int x, int y) noexcept\n{\n    return x * 2 + y;\n}\n\nint "
             "f(int x, int y) { return combine(x, y); }");
 
         Fixture field("struct S { int m; };\n"
@@ -1411,7 +1552,7 @@ namespace
         ASSERT_TRUE(field_preview);
         EXPECT_NE(field_preview->front().source.find("combine(int m, int k)"), std::string::npos);
         EXPECT_NE(field_preview->front().source.find("return combine(s.m, k);"),
-            std::string::npos);
+                  std::string::npos);
     }
 
     TEST(ExtractFunctionSpec, ExtractsStatementRangesWithOneLiveOutput)
@@ -1422,17 +1563,17 @@ namespace
             "    return b;\n"
             "}");
         const auto snapshot = f.Snapshot();
-        const auto source   = snapshot.Source(f.id);
-        const auto start    = source->find("int a");
-        const auto end      = source->find("return b");
-        const auto plan     = RefactoringService::ExtractFunction(
+        const auto source = snapshot.Source(f.id);
+        const auto start = source->find("int a");
+        const auto end = source->find("return b");
+        const auto plan = RefactoringService::ExtractFunction(
             snapshot, f.id, start, end - start, "combine");
         ASSERT_TRUE(plan) << plan.error().message;
         ASSERT_EQ(plan->documents.front().edits.size(), 2u);
         const auto preview = PreviewRefactoring(snapshot, *plan);
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("static constexpr int combine(int x) noexcept"),
-            std::string::npos);
+                  std::string::npos);
         EXPECT_NE(preview->front().source.find("return b;"), std::string::npos);
         EXPECT_NE(preview->front().source.find("auto b = combine(x);"), std::string::npos);
     }
@@ -1447,9 +1588,9 @@ namespace
             "}");
         {
             const auto snapshot = two.Snapshot();
-            const auto source   = snapshot.Source(two.id);
+            const auto source = snapshot.Source(two.id);
             EXPECT_FALSE(RefactoringService::ExtractFunction(snapshot, two.id,
-                source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
+                                                             source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
         }
 
         // Dead range: nothing used afterwards.
@@ -1459,9 +1600,9 @@ namespace
             "}");
         {
             const auto snapshot = dead.Snapshot();
-            const auto source   = snapshot.Source(dead.id);
+            const auto source = snapshot.Source(dead.id);
             EXPECT_FALSE(RefactoringService::ExtractFunction(snapshot, dead.id,
-                source->find("int a"), source->find("return x") - source->find("int a"), "combine"));
+                                                             source->find("int a"), source->find("return x") - source->find("int a"), "combine"));
         }
 
         // Same spelling, different values (plain read vs member read).
@@ -1472,9 +1613,9 @@ namespace
             "}");
         {
             const auto snapshot = conflict.Snapshot();
-            const auto source   = snapshot.Source(conflict.id);
+            const auto source = snapshot.Source(conflict.id);
             EXPECT_FALSE(RefactoringService::ExtractFunction(snapshot, conflict.id,
-                source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
+                                                             source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
         }
 
         // Control flow inside the range.
@@ -1485,9 +1626,9 @@ namespace
             "}");
         {
             const auto snapshot = flow.Snapshot();
-            const auto source   = snapshot.Source(flow.id);
+            const auto source = snapshot.Source(flow.id);
             EXPECT_FALSE(RefactoringService::ExtractFunction(snapshot, flow.id,
-                source->find("int a"), source->find("return 0") - source->find("int a"), "combine"));
+                                                             source->find("int a"), source->find("return 0") - source->find("int a"), "combine"));
         }
 
         // Later case label crossed by the moved span.
@@ -1502,9 +1643,9 @@ namespace
             "}");
         {
             const auto snapshot = cases.Snapshot();
-            const auto source   = snapshot.Source(cases.id);
+            const auto source = snapshot.Source(cases.id);
             EXPECT_FALSE(RefactoringService::ExtractFunction(snapshot, cases.id,
-                source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
+                                                             source->find("int a"), source->find("return a") - source->find("int a"), "combine"));
         }
     }
 
@@ -1513,26 +1654,26 @@ namespace
         Fixture f("static int twice(int v) { return v * 2; }\n"
             "int f(int x) { return twice(x) + 1; }");
         const auto snapshot = f.Snapshot();
-        const auto plan      = RefactoringService::InlineFunction(
+        const auto plan = RefactoringService::InlineFunction(
             snapshot, f.id, snapshot.Source(f.id)->find("twice(x)"));
         ASSERT_TRUE(plan) << plan.error().message;
         const auto preview = PreviewRefactoring(snapshot, *plan);
         ASSERT_TRUE(preview);
         EXPECT_EQ(preview->front().source,
-            "static int twice(int v) { return v * 2; }\n"
+                  "static int twice(int v) { return v * 2; }\n"
             "int f(int x) { return ((x) * 2) + 1; }");
 
         Fixture precedence("static int add(int a, int b) { return a + b; }\n"
             "int f(int x) { return add(x, 1) * 2; }");
         const auto precedence_snapshot = precedence.Snapshot();
-        const auto precedence_plan      = RefactoringService::InlineFunction(
+        const auto precedence_plan = RefactoringService::InlineFunction(
             precedence_snapshot, precedence.id,
             precedence_snapshot.Source(precedence.id)->find("add(x, 1)"));
         ASSERT_TRUE(precedence_plan) << precedence_plan.error().message;
         const auto precedence_preview = PreviewRefactoring(precedence_snapshot, *precedence_plan);
         ASSERT_TRUE(precedence_preview);
         EXPECT_EQ(precedence_preview->front().source,
-            "static int add(int a, int b) { return a + b; }\n"
+                  "static int add(int a, int b) { return a + b; }\n"
             "int f(int x) { return ((x) + (1)) * 2; }");
     }
 
@@ -1552,7 +1693,7 @@ namespace
         {
             Fixture f(source);
             const auto snapshot = f.Snapshot();
-            const auto call     = snapshot.Source(f.id)->rfind('(');
+            const auto call = snapshot.Source(f.id)->rfind('(');
             EXPECT_FALSE(RefactoringService::InlineFunction(snapshot, f.id, call))
             << source;
         }
@@ -1568,7 +1709,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("int combined() const { return m + 1; }"),
-            std::string::npos);
+                  std::string::npos);
         EXPECT_NE(preview->front().source.find("return this->combined();"), std::string::npos);
     }
 
@@ -1581,7 +1722,7 @@ namespace
         const auto preview = PreviewRefactoring(f.Snapshot(), *plan);
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("static int doubled(int x) { return x * 2; }"),
-            std::string::npos);
+                  std::string::npos);
         EXPECT_NE(preview->front().source.find("return doubled(x);"), std::string::npos);
     }
 
@@ -1595,7 +1736,7 @@ namespace
 
         Fixture templated("template<class T> struct S { T m; T get() { return m; } };");
         const auto templated_snapshot = templated.Snapshot();
-        const auto templated_plan      = RefactoringService::ExtractMethod(templated_snapshot,
+        const auto templated_plan = RefactoringService::ExtractMethod(templated_snapshot,
             templated.id, templated_snapshot.Source(templated.id)->find("return m") + 7, 1,
             "combined");
         ASSERT_FALSE(templated_plan);

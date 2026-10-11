@@ -24,6 +24,7 @@ add_library(heimdall_semantic STATIC
   src/ApiRules.cpp
   src/DesignatedInit.cpp
   src/CallArguments.cpp
+  src/ControlFlowRules.cpp
   src/Documentation.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)

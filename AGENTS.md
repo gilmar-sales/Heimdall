@@ -59,7 +59,24 @@ This repository adopts the reusable C++ coding practices from `C:/dev/Freyr`: `A
 
 ### Formatting
 
-Use Freyr's actual `.clang-format` settings as the baseline. Its `AGENTS.md` says 120 columns, but the effective configuration says **100**; use **100**. Heimdall currently has no root `.clang-format`; the following records the baseline without requiring an external file:
+**All supported source code must be formatted using Heimdall.** Heimdall and the
+applicable `.heimdall.json` are the formatting source of truth. Format new and
+materially changed C++ files with the selected build's executable before finishing:
+
+```bash
+./build/src/heimdall format --write <changed-cpp-files-and-headers...>
+```
+
+Substitute the selected build directory and executable location for your platform.
+Accept Heimdall's output: do not fight it with manual alignment/indentation changes
+or run clang-format as a competing formatter. Do not bulk-format unrelated files.
+For languages Heimdall does not support (including the TypeScript extension), keep
+their existing project formatting workflow rather than passing them to the C++ formatter.
+
+The Freyr settings below are historical style guidance, not an alternative formatter
+configuration. Heimdall's configured output takes precedence over this baseline and
+the formatting guidance below, including indentation, wrapping, and alignment.
+The historical column limit is **100**, not 120:
 
 ```yaml
 BasedOnStyle: Microsoft
@@ -95,7 +112,7 @@ UseTab: Never
 PenaltyIndentedWhitespace: 1
 ```
 
-- Allman braces for namespaces, classes, functions, and multiline control-flow bodies; four spaces, no tabs; indent namespace contents and case labels.
+- Allman braces for namespaces, classes, functions, and multiline control-flow bodies; use Heimdall's configured indentation (the root `.heimdall.json` currently enables tabs).
 - Bind pointers and references to the type (`Token* token`, `const Token& token`); Heimdall explicitly configures both alignments as left.
 - Use a space before control-statement parentheses (`if (...)`), not function-call parentheses (`Parse(...)`), and before braced initialization (`Token {}`).
 - Break template declarations onto their own line; wrap long declarations/calls at 100 columns and align continuation arguments. Align adjacent declarations/assignments when appropriate.

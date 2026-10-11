@@ -35,11 +35,14 @@ add_executable(Tests_run
   src/DesignatedInitSpec.cpp
   src/CallArgumentsSpec.cpp
   src/DocumentationSpec.cpp
+  src/DoxygenNavigationSpec.cpp
   src/SemanticModernizeSpec.cpp
   src/ModernizeCxxSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
   src/SemanticTyperSpec.cpp
   src/SemanticFlowSpec.cpp
+  src/UnreachableCodeSpec.cpp
+  src/ReturnValidationSpec.cpp
   src/CompletionSpec.cpp
   src/NavigationSpec.cpp
   src/SymbolOutlineSpec.cpp
@@ -133,6 +136,11 @@ add_test(
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME LspDoxygenFlowSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspDoxygenFlowSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
   add_test(
     NAME LspProtocolSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspProtocolSmoke.py"
