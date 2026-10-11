@@ -24,18 +24,6 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 }
 
 /**
- * @brief Describe unreacheable_code.
- *
- * @return Describe the returned value.
- */
-[[nodiscard]] std::string_view unreacheable_code()
-{
-	return "";
-
-	constexpr auto test = 0;
-}
-
-/**
  *
  * @brief An linked list node.
  *
@@ -45,8 +33,8 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 template <typename TValue>
 struct Node
 {
-	Node* next;
-	TValue value;
+	Node* next   = nullptr;
+	TValue value = {};
 };
 
 template <typename TValue>
@@ -54,7 +42,28 @@ class LinkedList
 {
 
 public:
-	void Push(const TValue& value);
+	void Push(const TValue& value)
+	{
+		const auto node = new Node<TValue>
+		{
+			.value = value;
+		};
+
+		if (mRoot == nullptr)
+		{
+			mRoot = node;
+			return;
+		}
+
+		auto current = mRoot;
+
+		while (current->next != nullptr)
+		{
+			current = current->next;
+		}
+
+		current->next = node;
+	}
 
 private:
 	Node<TValue>* mRoot;
@@ -71,7 +80,7 @@ int main()
 {
 	auto list = LinkedList<int>();
 
-	list.Push("");
+	list.Push(2);
 
 	return 0;
 }

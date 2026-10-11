@@ -2502,6 +2502,7 @@ namespace heimdall
 				AnalyzeDotOnPointer(types),
 				AnalyzeAccessControl(types),
 				AnalyzeConflictingDeclarations(types),
+				AnalyzeUndeclaredType(model),
 				AnalyzeUnreachable(flow),
 				AnalyzeMissingReturn(flow),
 				AnalyzeReturnTypes(flow)

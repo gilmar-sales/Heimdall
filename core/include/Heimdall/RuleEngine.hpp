@@ -72,6 +72,7 @@ namespace heimdall
 		DotOnPointer,
 		InaccessibleMember,
 		ConflictingDeclaration,
+		UndeclaredType,
 		UnreachableCode,
 		MissingReturn,
 		ReturnType,

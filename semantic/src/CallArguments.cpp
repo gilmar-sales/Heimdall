@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <Heimdall/LineTable.hpp>
+#include <Heimdall/Lexer.hpp>
 #include <Heimdall/SemanticRules.hpp>
 #include <string>
 #include <vector>
@@ -307,6 +308,267 @@ namespace heimdall
 			ParameterCount count;
 			std::size_t first = 0;
 		};
+
+		struct ClassInstance
+		{
+			SymbolId symbol = kNone;
+			std::string spelling;
+		};
+
+		[[nodiscard]] std::string_view Trim(std::string_view text)
+		{
+			while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+			{
+				text.remove_prefix(1);
+			}
+
+			while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+			{
+				text.remove_suffix(1);
+			}
+
+			return text;
+		}
+
+		[[nodiscard]] ClassInstance ClassOfExpression(
+			const TypeModel& types, std::uint32_t expression)
+		{
+			const auto& model   = types.Model();
+			const auto& tree    = model.Tree();
+			const auto& nodes   = tree.NodesSoA();
+			const auto& symbols = model.Symbols();
+			const auto& table   = types.Types();
+			TypeId type         = table.Strip(types.NodeType(expression));
+			if (table.IsPointer(type))
+			{
+				type = table.Strip(table.Element(type));
+			}
+
+			if (table.Kind(type) == TypeKind::Class)
+			{
+				return {table.Arg(type), std::string(model.Names().Text(symbols.name[table.Arg(type)]))};
+			}
+
+			if (expression >= nodes.size() || nodes.Kind(expression) != GrammarKind::IdentifierExpression)
+			{
+				return {};
+			}
+
+			const auto variable = model.ResolveToken(nodes.FirstToken(expression));
+			if (variable == kNone || symbols.kind[variable] != SymbolKind::Variable)
+			{
+				return {};
+			}
+
+			const auto declaration = symbols.decl_node[variable];
+			if (declaration >= nodes.size())
+			{
+				return {};
+			}
+
+			const auto nameToken = symbols.decl_token[variable];
+			const auto scope     = model.ScopeOfNode(declaration);
+			const auto& tokens   = tree.Tokens();
+			for (auto token = nodes.FirstToken(declaration); token < nameToken && token < tokens.size(); ++token)
+			{
+				if (tokens[token].kind != TokenKind::Identifier)
+				{
+					continue;
+				}
+
+				const auto name      = model.Names().Find(tree.Text(tokens[token]));
+				const auto candidate = name == kNone ? kNone : model.Lookup(scope, name, token);
+				if (candidate != kNone && symbols.kind[candidate] == SymbolKind::Class)
+				{
+					const auto typeBegin = tokens[token].offset;
+					const auto typeEnd   = tokens[nameToken].offset;
+					return {candidate, std::string(Trim(tree.Source().substr(typeBegin, typeEnd - typeBegin)))};
+				}
+			}
+
+			const auto end = std::min<std::size_t>(
+				nodes.FirstToken(declaration) + nodes.TokenCount(declaration), tokens.size());
+			bool initializer = false;
+			for (auto token = nameToken + 1; token < end; ++token)
+			{
+				if (!initializer)
+				{
+					initializer = tokens[token].tok == Tok::Eq;
+					continue;
+				}
+
+				if (tokens[token].kind != TokenKind::Identifier)
+				{
+					continue;
+				}
+
+				const auto name      = model.Names().Find(tree.Text(tokens[token]));
+				const auto candidate = name == kNone ? kNone : model.Lookup(scope, name, token);
+				if (candidate != kNone && symbols.kind[candidate] == SymbolKind::Class)
+				{
+					auto typeEnd = token;
+					int depth    = 0;
+					bool opened  = false;
+					for (auto i = token + 1; i < end; ++i)
+					{
+						if (tokens[i].kind == TokenKind::Whitespace)
+						{
+							continue;
+						}
+
+						if (tokens[i].tok == Tok::Lt)
+						{
+							opened = true;
+							++depth;
+						}
+						else if (tokens[i].tok == Tok::Gt && --depth == 0)
+						{
+							typeEnd = i;
+							break;
+						}
+						else if (!opened)
+						{
+							break;
+						}
+					}
+
+					const auto start  = tokens[token].offset;
+					const auto finish = tokens[typeEnd].offset + tokens[typeEnd].length;
+					return {candidate, std::string(tree.Source().substr(start, finish - start))};
+				}
+
+				const auto function = model.ResolveToken(token);
+				if (function == kNone || symbols.kind[function] != SymbolKind::Function)
+				{
+					continue;
+				}
+
+				const auto functionNode = symbols.decl_node[function];
+				const auto functionName = symbols.decl_token[function];
+				if (functionNode >= nodes.size() || functionName >= tokens.size())
+				{
+					continue;
+				}
+
+				for (auto typeToken = nodes.FirstToken(functionNode);
+					typeToken < functionName && typeToken < tokens.size(); ++typeToken)
+				{
+					if (tokens[typeToken].kind != TokenKind::Identifier)
+					{
+						continue;
+					}
+
+					const auto typeName = model.Names().Find(tree.Text(tokens[typeToken]));
+					const auto typeSymbol = typeName == kNone ? kNone :
+					model.Lookup(model.ScopeOfNode(functionNode), typeName, typeToken);
+					if (typeSymbol == kNone || symbols.kind[typeSymbol] != SymbolKind::Class)
+					{
+						continue;
+					}
+
+					const auto start  = tokens[typeToken].offset;
+					const auto finish = tokens[functionName].offset;
+					return {typeSymbol,
+						std::string(Trim(tree.Source().substr(start, finish - start)))};
+				}
+			}
+
+			return {};
+		}
+
+		[[nodiscard]] std::string InstantiateParameterType(
+			const SemanticModel& model,
+			SymbolId owner,
+			std::string_view instanceType,
+			std::uint32_t parameter)
+		{
+			const auto& tree          = model.Tree();
+			const auto& nodes         = tree.NodesSoA();
+			const auto& tokens        = tree.Tokens();
+			const auto parameterBegin = nodes.FirstToken(parameter);
+			const auto parameterEnd = std::min<std::size_t>(
+				parameterBegin + nodes.TokenCount(parameter), tokens.size());
+			std::uint32_t parameterName = kNone;
+			for (auto token = parameterBegin; token < parameterEnd; ++token)
+			{
+				if (tokens[token].kind == TokenKind::Identifier)
+				{
+					parameterName = token;
+				}
+			}
+
+			if (parameterName == kNone)
+			{
+				return {};
+			}
+
+			auto type = Trim(tree.Source().substr(tokens[parameterBegin].offset,
+				tokens[parameterName].offset - tokens[parameterBegin].offset));
+			const auto& symbols = model.Symbols();
+			const auto record   = symbols.decl_node[owner];
+			if (record >= nodes.size())
+			{
+				return std::string(type);
+			}
+
+			const auto parent = nodes.Parent(record);
+			if (parent >= nodes.size() || nodes.Kind(parent) != GrammarKind::TemplateDeclaration)
+			{
+				return std::string(type);
+			}
+
+			const auto recordStart = nodes.FirstToken(record);
+			std::string_view templateParameter;
+			for (auto token = nodes.FirstToken(parent); token < recordStart; ++token)
+			{
+				if (tokens[token].tok == Tok::KwClass || tokens[token].tok == Tok::KwTypename)
+				{
+					for (++token; token < recordStart; ++token)
+					{
+						if (tokens[token].kind == TokenKind::Identifier)
+						{
+							templateParameter = tree.Text(tokens[token]);
+							break;
+						}
+					}
+
+					break;
+				}
+			}
+
+			const auto open  = instanceType.find('<');
+			const auto close = instanceType.rfind('>');
+			if (templateParameter.empty() || open == std::string_view::npos ||
+				close == std::string_view::npos || close <= open)
+			{
+				return std::string(type);
+			}
+
+			const auto argument = Trim(instanceType.substr(open + 1, close - open - 1));
+			const auto lexed    = Lexer(type).Lex();
+			std::string substituted;
+			std::size_t cursor = 0;
+			for (const auto& token : lexed)
+			{
+				if (token.kind != TokenKind::Identifier ||
+					type.substr(token.offset, token.length) != templateParameter)
+				{
+					continue;
+				}
+
+				substituted.append(type.substr(cursor, token.offset - cursor));
+				substituted.append(argument);
+				cursor = token.offset + token.length;
+			}
+
+			if (cursor == 0)
+			{
+				return std::string(type);
+			}
+
+			substituted.append(type.substr(cursor));
+			return substituted;
+		}
 	}
 
 	detail::ConversionResult detail::CheckImplicitConversion(const TypeModel& types,
@@ -476,19 +738,53 @@ namespace heimdall
 			}
 
 			const auto children = model.ChildrenOf(node);
-			if (children.empty() ||
-				nodes.Kind(children.front()) != GrammarKind::IdentifierExpression)
+			if (children.empty())
 			{
 				continue;
 			}
 
-			const auto[begin, end] = view.Range(children.front());
-			if (end != begin + 1 ||!view.IsWord(begin))
+			const auto callee      = children.front();
+			const auto[begin, end] = view.Range(callee);
+			SymbolId target        = kNone;
+			std::string callName;
+			ClassInstance instance;
+			bool memberCall = false;
+			if (nodes.Kind(callee) == GrammarKind::IdentifierExpression)
+			{
+				if (end != begin + 1 ||!view.IsWord(begin))
+				{
+					continue;
+				}
+
+				target   = model.ResolveToken(view.TokenAt(begin));
+				callName = std::string(view.Text(begin));
+			}
+			else if (nodes.Kind(callee) == GrammarKind::MemberExpression)
+			{
+				const auto memberChildren = model.ChildrenOf(callee);
+				if (memberChildren.size() != 2)
+				{
+					continue;
+				}
+
+				instance               = ClassOfExpression(types, memberChildren[0]);
+				const auto memberToken = nodes.FirstToken(memberChildren[1]);
+				if (instance.symbol == kNone || memberToken >= model.Tree().Tokens().size())
+				{
+					continue;
+				}
+
+				const auto& memberNameToken = model.Tree().Tokens()[memberToken];
+				const auto memberName       = model.Names().Find(model.Tree().Text(memberNameToken));
+				target                      = memberName == kNone ? kNone : model.LookupMember(instance.symbol, memberName);
+				callName                    = std::string(model.Tree().Text(memberNameToken));
+				memberCall                  = true;
+			}
+			else
 			{
 				continue;
 			}
 
-			const auto target = model.ResolveToken(view.TokenAt(begin));
 			if (target == kNone || symbols.kind[target] != SymbolKind::Function)
 			{
 				continue;
@@ -516,6 +812,7 @@ namespace heimdall
 			bool unknown             = false;
 			std::size_t invalidIndex = 0;
 			TypeId expected          = TypeTable::Unknown;
+			std::string expectedSpelling;
 			const auto overloadScope = symbols.scope[target];
 			const bool allowForward = overloadScope < model.Scopes().kind.size() &&
 				model.Scopes().kind[overloadScope] == ScopeKind::Class;
@@ -543,15 +840,68 @@ namespace heimdall
 				bool rejected = false;
 				for (std::size_t index = 0; index < std::min(supplied, count.total); ++index)
 				{
-					const auto parameter = types.ParameterType(parameters[range.first + index]);
-					if (ImplicitConversion(types, view, children[index + 1], parameter) ==
-						Conversion::Invalid)
+					const auto parameterNode = parameters[range.first + index];
+					const auto parameter     = types.ParameterType(parameterNode);
+					Conversion conversion = ImplicitConversion(
+						types, view, children[index + 1], parameter);
+					std::string spelling;
+					if (memberCall && parameter == TypeTable::Unknown)
+					{
+						spelling = InstantiateParameterType(
+							model, instance.symbol, instance.spelling, parameterNode);
+						std::string_view base = Trim(spelling);
+						if (base.starts_with("const "))
+						{
+							base.remove_prefix(6);
+						}
+
+						while (!base.empty() &&
+							(base.back() == '&' || base.back() == '*' || base.back() == ' '))
+						{
+							base.remove_suffix(1);
+						}
+
+						TypeId instantiated = TypeTable::Unknown;
+						for (TypeId candidate = 1; candidate < types.Types().Size(); ++candidate)
+						{
+							if (types.Spell(candidate) == base)
+							{
+								instantiated = candidate;
+								break;
+							}
+						}
+
+						if (instantiated != TypeTable::Unknown)
+						{
+							conversion = ImplicitConversion(
+								types, view, children[index + 1], instantiated);
+						}
+						else if (!spelling.empty())
+						{
+							const auto source = types.Types().Strip(types.NodeType(children[index + 1]));
+							const bool expectedNumeric = base == "bool" || base == "char" ||
+								base == "short" || base == "int" || base == "long" ||
+								base == "float" || base == "double";
+							if (expectedNumeric && (types.Types().IsPointer(source) ||
+								types.Types().IsArray(source)))
+							{
+								conversion = Conversion::Invalid;
+							}
+							else
+							{
+								conversion = Conversion::Unknown;
+							}
+						}
+					}
+
+					if (conversion == Conversion::Invalid)
 					{
 						rejected = true;
 						if (expected == TypeTable::Unknown)
 						{
-							invalidIndex = index;
-							expected     = parameter;
+							invalidIndex     = index;
+							expected         = parameter;
+							expectedSpelling = std::move(spelling);
 						}
 
 						break;
@@ -561,7 +911,8 @@ namespace heimdall
 				viable |=!rejected;
 			}
 
-			if (viable || unknown || expected == TypeTable::Unknown)
+			if (viable || unknown ||
+				(expected == TypeTable::Unknown && expectedSpelling.empty()))
 			{
 				continue;
 			}
@@ -583,10 +934,10 @@ namespace heimdall
 			const auto position = lines.Lookup(offset);
 			diagnostics.push_back(Diagnostic {
 					RuleId::CallArgumentType, Severity::Error, "cpp/call-argument-type",
-					"no matching overload for '" + std::string(view.Text(begin)) + "': argument " +
+					"no matching overload for '" + callName + "': argument " +
 					std::to_string(invalidIndex + 1) + " of type '" +
 					types.Spell(types.NodeType(argument)) + "' cannot implicitly convert to '" +
-					types.Spell(expected) + "'",
+					(expectedSpelling.empty() ? types.Spell(expected) : expectedSpelling) + "'",
 					offset, view.End(argumentEnd - 1) - offset,
 					position.line, position.column, false, {}
 			});

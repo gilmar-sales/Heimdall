@@ -46,6 +46,10 @@ namespace heimdall
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConflictingDeclarations(
 			const TypeModel& types);
 
+		/** Reports case-mismatched class names used as declaration types. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUndeclaredType(
+			const SemanticModel& model);
+
 		/** Reports unreachable statements in complete control-flow graphs. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUnreachable(const FlowModel& flow);
 

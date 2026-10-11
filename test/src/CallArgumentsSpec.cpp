@@ -164,6 +164,26 @@ TEST(CallArgumentsSpec, RejectsProvenInvalidStandardConversions)
     EXPECT_EQ(AnalyzeCalls("void f(const std::string&); void g() { f(1); }").size(), 1u);
 }
 
+TEST(CallArgumentsSpec, ValidatesArgumentsAgainstInstantiatedClassTemplateMethods)
+{
+    const std::string source =
+        "template<class TValue> class LinkedList { public: void Push(const TValue& value); };\n"
+        "void f() { auto list = LinkedList<int>(); list.Push(\"\"); }\n";
+
+    const auto diagnostics = AnalyzeCalls(source);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "cpp/call-argument-type");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "\"\"");
+    EXPECT_NE(diagnostics[0].message.find("int"), std::string::npos);
+
+    EXPECT_TRUE(AnalyzeCalls(
+        "template<class TValue> class LinkedList { public: void Push(const TValue& value); };\n"
+        "void f() { auto list = LinkedList<int>(); list.Push(20); }\n")
+        .empty());
+}
+
 TEST(CallArgumentsSpec, AcceptsAnyOverloadWithCompatibleTypes)
 {
     EXPECT_TRUE(AnalyzeCalls("void f(int); void f(std::string); void g() { f(1); }").empty());

@@ -65,6 +65,7 @@ namespace heimdall::detail
 			Entry {RuleId::DotOnPointer, &SemanticRules::AnalyzeDotOnPointer},
 			Entry {RuleId::InaccessibleMember, &SemanticRules::AnalyzeAccessControl},
 			Entry {RuleId::ConflictingDeclaration, &SemanticRules::AnalyzeConflictingDeclarations},
+			Entry {RuleId::UndeclaredType, &SemanticRules::AnalyzeUndeclaredType},
 			Entry {RuleId::UnreachableCode, &SemanticRules::AnalyzeUnreachable},
 			Entry {RuleId::MissingReturn, &SemanticRules::AnalyzeMissingReturn},
 			Entry {RuleId::ReturnType, &SemanticRules::AnalyzeReturnTypes},

@@ -10,6 +10,9 @@ uri = fixture.as_uri()
 broken_uri = uri + ".broken.cpp"
 access_uri = uri + ".access.cpp"
 inlay_uri = uri + ".inlay.cpp"
+call_uri = uri + ".template-call.cpp"
+type_uri = uri + ".wrong-type.cpp"
+member_inlay_uri = uri + ".member-inlay.cpp"
 messages = [
     {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "initializationOptions": {"enableSemantic": True,
@@ -28,17 +31,46 @@ messages = [
                "int main() { auto list = CreateList(); list.mRoot = nullptr; }\n"}}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
         "uri": inlay_uri, "languageId": "cpp", "version": 1,
-        "text": "template<class T> class LinkedList {};\n"
+        "text": "template<class T> class LinkedList { public: "
+               "void Push(const T& value); };\n"
                "LinkedList<int> CreateList() { return {}; }\n"
                "struct Holder { auto member = LinkedList<int>(); };\n"
                "void f() {\n"
                "    auto list = CreateList();\n"
                "    auto list = LinkedList<int>();\n"
+               "    list.Push(\"\");\n"
                "}\n"}}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+        "uri": call_uri, "languageId": "cpp", "version": 1,
+        "text": "template<class TValue> class LinkedList { public: "
+               "void Push(const TValue& value); };\n"
+               "void f() { auto list = LinkedList<int>(); list.Push(\"\"); }\n"}}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+        "uri": type_uri, "languageId": "cpp", "version": 1,
+        "text": "template<class TValue> struct Node { TValue value; };\n"
+               "template<class TValue> class LinkedList {\n"
+               "public:\n"
+               "void Push(const TValue& value) {\n"
+               "const node = new Node<TValue>{.value = value};\n"
+               "}\n};\n"}}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+        "uri": member_inlay_uri, "languageId": "cpp", "version": 1,
+        "text": "template<class TValue> struct Node { TValue value; };\n"
+               "template<class TValue> class LinkedList {\n"
+               "Node<TValue>* mRoot;\n"
+               "public:\n"
+               "void Push(const TValue& value) {\n"
+               "const auto node = new Node<TValue>{.value = value};\n"
+               "auto current = mRoot;\n"
+               "}\n};\n"}}},
+    {"jsonrpc": "2.0", "id": 14, "method": "textDocument/inlayHint", "params": {
+        "textDocument": {"uri": member_inlay_uri},
+        "range": {"start": {"line": 0, "character": 0},
+                  "end": {"line": 8, "character": 0}}}},
     {"jsonrpc": "2.0", "id": 13, "method": "textDocument/inlayHint", "params": {
         "textDocument": {"uri": inlay_uri},
         "range": {"start": {"line": 0, "character": 0},
-                  "end": {"line": 5, "character": 0}}}},
+                  "end": {"line": 7, "character": 0}}}},
     {"jsonrpc": "2.0", "id": 2, "method": "textDocument/formatting", "params": {
         "textDocument": {"uri": uri}, "options": {"tabSize": 4, "insertSpaces": True}}},
     {"jsonrpc": "2.0", "id": 3, "method": "textDocument/codeAction", "params": {
@@ -115,6 +147,26 @@ assert "auto list" in conflict["message"], conflict
 related = conflict["relatedInformation"][0]
 assert related["location"]["range"]["start"]["line"] == 4, related
 assert "previous declaration as 'LinkedList<int> list'" in related["message"], related
+template_call = next(item for item in redecl["params"]["diagnostics"]
+                     if item["code"] == "cpp/call-argument-type")
+assert template_call["severity"] == 1, template_call
+assert "Push" in template_call["message"] and "int" in template_call["message"], template_call
+template_call = next(item for item in responses
+                     if item.get("method") == "textDocument/publishDiagnostics"
+                     and item["params"]["uri"] == call_uri)
+call_error = next(item for item in template_call["params"]["diagnostics"]
+                  if item["code"] == "cpp/call-argument-type")
+assert call_error["severity"] == 1, call_error
+assert "Push" in call_error["message"] and "int" in call_error["message"], call_error
+wrong_type = next(item for item in responses
+                  if item.get("method") == "textDocument/publishDiagnostics"
+                  and item["params"]["uri"] == type_uri)
+type_error = next(item for item in wrong_type["params"]["diagnostics"]
+                  if item["code"] == "cpp/undeclared-type")
+assert type_error["severity"] == 1, type_error
+assert "'node' does not name a type" in type_error["message"] and "'Node'" in type_error["message"], type_error
+member_hints = next(item for item in responses if item.get("id") == 14)["result"]
+assert [hint["label"] for hint in member_hints] == [": Node<TValue>*", ": Node<TValue>*"], member_hints
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
 assert formatted[0]["newText"] == "void f()\n{\n    int value = NULL;\n    int unused = NULL;\n}\n"
 broken = next(item for item in responses

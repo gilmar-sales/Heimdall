@@ -139,6 +139,28 @@ TEST(ConflictingDeclaration, ReportsRepeatedAutoNameWithPreviousLocation)
     EXPECT_LT(diagnostics[0].related_offset, diagnostics[0].offset);
 }
 
+TEST(UndeclaredType, SuggestsTheDeclaredClassNameWithMatchingCase)
+{
+    const std::string source =
+        "template<class TValue> struct Node { TValue value; };\n"
+        "template<class TValue> class LinkedList {\n"
+        "public:\n"
+        "void Push(const TValue& value) {\n"
+        "const node = new Node<TValue>{.value = value};\n"
+        "}\n"
+        "};\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    const auto model = heimdall::Binder::Bind(tree);
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeUndeclaredType(model);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "cpp/undeclared-type");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+    EXPECT_EQ(diagnostics[0].offset, source.find("node ="));
+    EXPECT_EQ(diagnostics[0].message,
+        "'node' does not name a type; did you mean 'Node'? [-Wtemplate-body]");
+}
+
 TEST(ModernizeOverride, ReportsAnOverrideWithoutTheKeyword)
 {
     const std::string source      = "struct Base { virtual void f(int x); };\n"

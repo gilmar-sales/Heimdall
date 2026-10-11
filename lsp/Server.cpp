@@ -3572,7 +3572,8 @@ namespace heimdall::lsp
 			}
 			if (tokens[initializer].tok == heimdall::Tok::KwNew)
 			{
-				const auto type = spell_type(initializer + 1, declaration_end);
+				const auto allocatedType = next_significant(initializer + 1, declaration_end);
+				const auto type = spell_type(allocatedType, declaration_end);
 				return type.empty() ? type : type + "*";
 			}
 			if (tokens[initializer].kind != heimdall::TokenKind::Identifier)
@@ -3589,6 +3590,78 @@ namespace heimdall::lsp
 				semantic_symbols.kind[candidate] == heimdall::SymbolKind::Class)
 			{
 				return spell_type(initializer, declaration_end);
+			}
+			auto sourceSymbol = semantic.ResolveToken(static_cast<std::uint32_t>(initializer));
+			if (sourceSymbol == heimdall::kNone && name != heimdall::kNone)
+			{
+				sourceSymbol = semantic.Lookup(
+					semantic.ScopeOfNode(declaration), name,
+					static_cast<std::uint32_t>(initializer));
+			}
+			if (sourceSymbol != heimdall::kNone &&
+				(semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Variable ||
+					semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Parameter))
+			{
+				const auto declaredType = context.Types().SymbolType(sourceSymbol);
+				if (context.Types().Types().IsKnown(declaredType))
+				{
+					const auto declaredSpelling = context.Types().Spell(declaredType);
+					if (declaredSpelling.find("<unknown>") == std::string::npos)
+					{
+						return declaredSpelling;
+					}
+				}
+				const auto sourceDeclaration = semantic_symbols.decl_node[sourceSymbol];
+				const auto sourceName = semantic_symbols.decl_token[sourceSymbol];
+				if (sourceDeclaration < nodes.size() && sourceName < tokens.size())
+				{
+					const auto typeBegin = nodes.FirstToken(sourceDeclaration);
+					if (typeBegin < sourceName)
+					{
+						const auto beginOffset = tokens[typeBegin].offset;
+						const auto endOffset = tokens[sourceName].offset;
+						auto writtenType = tree->Source().substr(beginOffset, endOffset - beginOffset);
+						while (!writtenType.empty() &&
+							(writtenType.back() == ' ' || writtenType.back() == '\t'))
+						{
+							writtenType.remove_suffix(1);
+						}
+						return std::string(writtenType);
+					}
+				}
+			}
+			for (heimdall::SymbolId member = 0; member < semantic_symbols.Size(); ++member)
+			{
+				if (semantic_symbols.kind[member] != heimdall::SymbolKind::Variable ||
+					semantic_symbols.name[member] != name)
+				{
+					continue;
+				}
+				const auto memberScope = semantic_symbols.scope[member];
+				if (memberScope >= semantic.Scopes().Size() ||
+					semantic.Scopes().kind[memberScope] != heimdall::ScopeKind::Class)
+				{
+					continue;
+				}
+				const auto memberDeclaration = semantic_symbols.decl_node[member];
+				const auto memberName = semantic_symbols.decl_token[member];
+				if (memberDeclaration >= nodes.size() || memberName >= tokens.size())
+				{
+					continue;
+				}
+				const auto typeBegin = nodes.FirstToken(memberDeclaration);
+				if (typeBegin < memberName)
+				{
+					const auto beginOffset = tokens[typeBegin].offset;
+					const auto endOffset = tokens[memberName].offset;
+					auto writtenType = tree->Source().substr(beginOffset, endOffset - beginOffset);
+					while (!writtenType.empty() &&
+						(writtenType.back() == ' ' || writtenType.back() == '\t'))
+					{
+						writtenType.remove_suffix(1);
+					}
+					return std::string(writtenType);
+				}
 			}
 			const auto after_initializer = next_significant(initializer + 1, declaration_end);
 			if (tokens[initializer].tok == heimdall::Tok::None &&
@@ -3674,8 +3747,12 @@ namespace heimdall::lsp
 			if (context.Types().Types().IsKnown(type))
 			{
 				type_spelling = context.Types().Spell(type);
+				if (type_spelling.find("<unknown>") != std::string::npos)
+				{
+					type_spelling.clear();
+				}
 			}
-			else
+			if (type_spelling.empty())
 			{
 				type_spelling = inferred_spelling(symbol);
 			}

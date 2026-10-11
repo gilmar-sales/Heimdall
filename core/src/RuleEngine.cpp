@@ -820,6 +820,8 @@ namespace heimdall
 				"semantic", false, "member access is not permitted by its access level"},
 			{RuleId::ConflictingDeclaration, "cpp/conflicting-declaration", "cpp", Severity::Error,
 				"semantic", false, "variable redeclared with an incompatible declaration"},
+			{RuleId::UndeclaredType, "cpp/undeclared-type", "cpp", Severity::Error,
+				"semantic", false, "unknown type name in a declaration"},
 			{RuleId::UnreachableCode, "cpp/unreachable-code", "cpp", Severity::Warning,
 				"semantic", false, "statement that cannot be reached"},
 			{RuleId::MissingReturn, "cpp/missing-return", "cpp", Severity::Error,
