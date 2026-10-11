@@ -1193,3 +1193,45 @@ TEST(ParseTreeSpec, StorageAccountingIncludesTheMaterializedCompatibilityAdapter
 
     EXPECT_EQ(tree.StorageBytes(), before + nodes.capacity() * sizeof(heimdall::GrammarNode));
 }
+
+namespace
+{
+    std::vector<std::string> DeclaredNames(const heimdall::ParseTree& tree)
+    {
+        std::vector<std::string> names;
+        for (const auto& node : tree.Nodes())
+        {
+            if (node.kind == heimdall::GrammarKind::DeclaredName)
+            {
+                names.emplace_back(tree.Text(tree.Tokens()[node.first_token]));
+            }
+        }
+
+        return names;
+    }
+}
+
+TEST(ParseTreeSpec, EveryDeclaratorAfterASharedSpecifierDeclaresAName)
+{
+    constexpr std::string_view source = "int a = 1, *b = &a, c[3], d{4};\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(DeclaredNames(tree), (std::vector<std::string> { "a", "b", "c", "d" }));
+}
+
+TEST(ParseTreeSpec, ExplicitObjectParameterDeclaresItsName)
+{
+    constexpr std::string_view source =
+        "struct A {\n"
+        "    void foo(this A& self, int arg);\n"
+        "    void bar(this auto&& self);\n"
+        "};\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(DeclaredNames(tree),
+              (std::vector<std::string> { "foo", "self", "arg", "bar", "self" }));
+}

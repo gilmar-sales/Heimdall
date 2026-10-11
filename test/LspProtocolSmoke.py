@@ -78,7 +78,7 @@ messages = [
         "range": {"start": {"line": 0, "character": 0}, "end": {"line": 3, "character": 0}},
         "context": {"diagnostics": []}}},
     {"jsonrpc": "2.0", "id": 4, "method": "textDocument/completion", "params": {
-        "textDocument": {"uri": uri}, "position": {"line": 3, "character": 11}}},
+        "textDocument": {"uri": uri}, "position": {"line": 3, "character": 19}}},
     {"jsonrpc": "2.0", "id": 5, "method": "textDocument/hover", "params": {
         "textDocument": {"uri": uri}, "position": {"line": 3, "character": 10}}},
     {"jsonrpc": "2.0", "id": 7, "method": "textDocument/rangeFormatting", "params": {
@@ -203,16 +203,19 @@ assert quick_fixes(10) == [], quick_fixes(10)
 assert quick_fixes(11) == line_two, quick_fixes(11)
 assert quick_fixes(3) == line_two, quick_fixes(3)
 assert {a["title"] for a in quick_fixes(12)} == {a["title"] for a in line_two + line_three}, quick_fixes(12)
-# Line 3 is "    int unused = NULL;": (3,11) sits after "unu", so "unused" must be
-# offered with a textEdit replacing just the typed prefix.
+# Line 3 is "    int unused = NULL;": (3,19) sits after "NU", so "NULL" must be
+# offered with a textEdit replacing just the typed prefix. (Completing inside the
+# declared name `unu|sed` offers nothing: it names a new variable.)
 completion = next(item for item in responses if item.get("id") == 4)["result"]
 assert completion["isIncomplete"] is False
 labels = [item["label"] for item in completion["items"]]
-assert "unused" in labels, labels
-unused = next(item for item in completion["items"] if item["label"] == "unused")
-assert unused["textEdit"]["range"]["start"] == {"line": 3, "character": 8}
-assert unused["textEdit"]["range"]["end"] == {"line": 3, "character": 11}
-assert unused["textEdit"]["newText"] == "unused"
+assert "NULL" in labels, labels
+null = next(item for item in completion["items"] if item["label"] == "NULL")
+assert null["textEdit"]["range"]["start"] == {"line": 3, "character": 17}
+assert null["textEdit"]["range"]["end"] == {"line": 3, "character": 19}
+assert null["textEdit"]["newText"] == "NULL"
+assert [item["sortText"] for item in completion["items"]] == sorted(
+    item["sortText"] for item in completion["items"])
 # Range formatting touches only the requested lines: line 1 is normalized
 # while lines 0 and 2 produce no edits.
 ranged = next(item for item in responses if item.get("id") == 7)["result"]

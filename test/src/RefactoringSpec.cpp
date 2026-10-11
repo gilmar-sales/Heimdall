@@ -243,7 +243,17 @@ namespace
         }
     }
 
-    TEST(RenameSpec, RejectsUnresolvedDependentTemplateMembers)
+    TEST(RenameSpec, RejectsTemplateParameterNameCapture)
+    {
+        Fixture f("template<class T> int f(int value) { return value; }");
+
+        const auto result = f.Rename("value", "T");
+
+        EXPECT_FALSE(result);
+        EXPECT_EQ(result.error().code, RefactoringErrorCode::NameCollision);
+    }
+
+    TEST(RenameSpec, RefusesUnresolvedDependentTemplateMembers)
     {
         Fixture f("template<class T> struct Box { int value; "
             "int get(T object) { return object.value; } };");

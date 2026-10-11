@@ -18,6 +18,7 @@
 #include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/Doxygen.hpp>
 #include <Heimdall/SymbolOutline.hpp>
+#include <Heimdall/TypeHierarchy.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -237,7 +238,7 @@ namespace heimdall::lsp
 						"\"refactor.inline.variable\",\"refactor.inline.function\",\"refactor.extract.constant\",\"refactor.extract.method\"]},\"hoverProvider\":true,"
 						"\"definitionProvider\":true,\"implementationProvider\":true,"
 						"\"documentLinkProvider\":{\"resolveProvider\":false},"
-						"\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":" +
+						"\"documentSymbolProvider\":true,\"typeHierarchyProvider\":true,\"workspaceSymbolProvider\":" +
 						workspace_symbol_capability +
 						",\"referencesProvider\":true,\"renameProvider\":" +
 						rename_capability +
@@ -385,6 +386,30 @@ namespace heimdall::lsp
 							DocumentSymbols(request, id);
 					});
 				}
+				else if (method == "textDocument/prepareTypeHierarchy")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							TypeHierarchyRequest(request, id, TypeHierarchyMode::Prepare);
+					});
+				}
+				else if (method == "typeHierarchy/supertypes")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							TypeHierarchyRequest(request, id, TypeHierarchyMode::Supertypes);
+					});
+				}
+				else if (method == "typeHierarchy/subtypes")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							TypeHierarchyRequest(request, id, TypeHierarchyMode::Subtypes);
+					});
+				}
 				else if (method == "workspace/symbol")
 				{
 					Dispatch(body, request, id_json,
@@ -516,6 +541,12 @@ namespace heimdall::lsp
 		std::string_view uri;
 		simdjson::dom::object document;
 		if (DocumentParams(request, uri, document))
+		{
+			job->context.document_uri = uri;
+		}
+		else if (simdjson::dom::object params, item, data;
+			GetObject(request, "params", params) && GetObject(params, "item", item) &&
+			GetObject(item, "data", data) && GetString(data, "uri", uri))
 		{
 			job->context.document_uri = uri;
 		}
@@ -1048,6 +1079,7 @@ namespace heimdall::lsp
 				QuoteJson(diagnostic.related_message, message);
 				message += "}]";
 			}
+
 			message += '}';
 		}
 
@@ -2871,19 +2903,35 @@ namespace heimdall::lsp
 
 		std::string response = headers.complete ? "{\"isIncomplete\":false,\"items\":["
 		: "{\"isIncomplete\":true,\"items\":[";
-		bool first = true;
+		// Items arrive ranked (exact prefix, case-insensitive prefix, fuzzy);
+		// `sortText` keeps that order instead of the client's alphabetical one.
+		constexpr std::size_t kSortTextWidth = 6;
+		std::size_t rank                     = 0;
 		for (const auto& item : items)
 		{
-			if (!first)
+			if (rank != 0)
 			{
 				response += ',';
 			}
 
-			first = false;
+			std::string sort_text = std::to_string(rank++);
+			sort_text.insert(0, kSortTextWidth - std::min(kSortTextWidth, sort_text.size()), '0');
 			response += "{\"label\":";
 			QuoteJson(item.label, response);
 			response += ",\"kind\":" + std::to_string(ToLspKind(item.kind)) + ",\"detail\":";
 			QuoteJson(item.detail, response);
+			response += ",\"sortText\":";
+			QuoteJson(sort_text, response);
+			if (!item.filter_text.empty())
+			{
+				response += ",\"filterText\":";
+				QuoteJson(item.filter_text, response);
+			}
+
+			if (item.deprecated)
+			{
+				response += ",\"tags\":[1]"; // CompletionItemTag.Deprecated
+			}
 			if (!item.documentation.empty())
 			{
 				response += ",\"documentation\":{\"kind\":\"markdown\",\"value\":";
@@ -3455,13 +3503,15 @@ namespace heimdall::lsp
 			Respond(id, "[]");
 			return;
 		}
+
 		simdjson::dom::object params, range, start, end;
-		if (!GetObject(request, "params", params) || !GetObject(params, "range", range) ||
-			!GetObject(range, "start", start) || !GetObject(range, "end", end))
+		if (!GetObject(request, "params", params) ||!GetObject(params, "range", range) ||
+			!GetObject(range, "start", start) ||!GetObject(range, "end", end))
 		{
 			Respond(id, "[]");
 			return;
 		}
+
 		const std::string uri_string(uri);
 		const auto document = GetDocument(uri_string);
 		if (!document)
@@ -3469,26 +3519,28 @@ namespace heimdall::lsp
 			Respond(id, "[]");
 			return;
 		}
-		const auto text = document->text;
-		const auto lines = document->lines;
+
+		const auto text     = document->text;
+		const auto lines    = document->lines;
 		const auto* command = CommandFor(uri_string);
-		const auto tree = CachedParse(uri_string, text, document->version, command);
+		const auto tree     = CachedParse(uri_string, text, document->version, command);
 		if (!tree)
 		{
 			RespondCancelled(id);
 			return;
 		}
-		const auto context = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
-		const auto& symbols = context.Symbols();
-		const std::size_t first_line = PositionNumber(start, "line");
-		const std::size_t last_line = PositionNumber(end, "line");
+
+		const auto context             = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
+		const auto& symbols            = context.Symbols();
+		const std::size_t first_line   = PositionNumber(start, "line");
+		const std::size_t last_line    = PositionNumber(end, "line");
 		const std::size_t first_offset = lines->OffsetFromPosition({first_line, 0});
-		const std::size_t last_offset = lines->OffsetFromPosition({last_line + 1, 0});
-		const auto& tokens = tree->Tokens();
-		const auto& nodes = tree->NodesSoA();
-		const auto& semantic = context.Semantic();
-		const auto& semantic_symbols = context.Symbols();
-		const auto next_significant = [&](std::size_t token, std::size_t limit)
+		const std::size_t last_offset  = lines->OffsetFromPosition({last_line + 1, 0});
+		const auto& tokens             = tree->Tokens();
+		const auto& nodes              = tree->NodesSoA();
+		const auto& semantic           = context.Semantic();
+		const auto& semantic_symbols   = context.Symbols();
+		const auto next_significant =[&](std::size_t token, std::size_t limit)
 		{
 			while (token < limit && (tokens[token].kind == heimdall::TokenKind::Whitespace ||
 				tokens[token].kind == heimdall::TokenKind::LineComment ||
@@ -3496,15 +3548,17 @@ namespace heimdall::lsp
 			{
 				++token;
 			}
+
 			return token;
 		};
-		const auto spell_type = [&](std::uint32_t type_begin, std::size_t limit)
+		const auto spell_type =[&](std::uint32_t type_begin, std::size_t limit)
 		{
 			if (type_begin >= tokens.size())
 			{
 				return std::string {};
 			}
-			std::size_t type_end = type_begin;
+
+			std::size_t type_end     = type_begin;
 			const auto template_open = next_significant(type_begin + 1, limit);
 			if (template_open < limit && tokens[template_open].tok == heimdall::Tok::Lt)
 			{
@@ -3531,27 +3585,30 @@ namespace heimdall::lsp
 					}
 				}
 			}
+
 			const auto begin_offset = tokens[type_begin].offset;
-			const auto& last_token = tokens[type_end];
+			const auto& last_token  = tokens[type_end];
 			return std::string(tree->Source().substr(
 				begin_offset, last_token.offset + last_token.length - begin_offset));
 		};
-		const auto inferred_spelling = [&](heimdall::SymbolId symbol)
+		const auto inferred_spelling =[&](heimdall::SymbolId symbol)
 		{
 			const auto declaration = semantic_symbols.decl_node[symbol];
 			if (declaration >= nodes.size())
 			{
 				return std::string {};
 			}
+
 			const auto declaration_begin = nodes.FirstToken(declaration);
 			const auto declaration_end = std::min<std::size_t>(
 				declaration_begin + nodes.TokenCount(declaration), tokens.size());
 			const auto name_token = semantic_symbols.decl_token[symbol];
-			bool auto_declared = false;
+			bool auto_declared    = false;
 			for (auto token = declaration_begin; token < name_token && token < declaration_end; ++token)
 			{
 				auto_declared |= tokens[token].tok == heimdall::Tok::KwAuto;
 			}
+
 			if (!auto_declared)
 			{
 				return std::string {};
@@ -3566,31 +3623,109 @@ namespace heimdall::lsp
 					break;
 				}
 			}
+
 			if (initializer >= declaration_end)
 			{
 				return std::string {};
 			}
+
 			if (tokens[initializer].tok == heimdall::Tok::KwNew)
 			{
 				const auto allocatedType = next_significant(initializer + 1, declaration_end);
-				const auto type = spell_type(allocatedType, declaration_end);
+				const auto type          = spell_type(allocatedType, declaration_end);
 				return type.empty() ? type : type + "*";
 			}
+
 			if (tokens[initializer].kind != heimdall::TokenKind::Identifier)
 			{
 				return std::string {};
 			}
 
 			const auto spelling = tree->Text(tokens[initializer]);
-			const auto name = semantic.Names().Find(spelling);
+			const auto name     = semantic.Names().Find(spelling);
 			const auto candidate = name == heimdall::kNone
-				? heimdall::kNone
-				: semantic.Lookup(semantic.ScopeOfNode(declaration), name, initializer);
+			? heimdall::kNone
+			: semantic.Lookup(semantic.ScopeOfNode(declaration), name, initializer);
 			if (candidate != heimdall::kNone &&
 				semantic_symbols.kind[candidate] == heimdall::SymbolKind::Class)
 			{
 				return spell_type(initializer, declaration_end);
 			}
+
+			if (candidate != heimdall::kNone &&
+				semantic_symbols.kind[candidate] == heimdall::SymbolKind::TypeAlias)
+			{
+				const auto alias_type = context.Types().SymbolType(candidate);
+				if (context.Types().Types().IsKnown(alias_type))
+				{
+					return context.Types().Spell(alias_type);
+				}
+			}
+
+			std::size_t qualified_type = initializer;
+			for (auto token = initializer; token < declaration_end; ++token)
+			{
+				if (tokens[token].tok == heimdall::Tok::LBrace ||
+					tokens[token].tok == heimdall::Tok::LParen ||
+					tokens[token].tok == heimdall::Tok::Eq ||
+					tokens[token].tok == heimdall::Tok::Semi)
+				{
+					break;
+				}
+
+				if (tokens[token].kind == heimdall::TokenKind::Identifier)
+				{
+					qualified_type = token;
+				}
+			}
+
+			if (qualified_type != initializer)
+			{
+				const auto qualified_symbol = semantic.ResolveToken(
+					static_cast<std::uint32_t>(qualified_type));
+				if (qualified_symbol != heimdall::kNone &&
+					semantic_symbols.kind[qualified_symbol] == heimdall::SymbolKind::Class)
+				{
+					return std::string(semantic.Names().Text(semantic_symbols.name[qualified_symbol]));
+				}
+
+				if (qualified_symbol != heimdall::kNone &&
+					semantic_symbols.kind[qualified_symbol] == heimdall::SymbolKind::TypeAlias)
+				{
+					const auto alias_type = context.Types().SymbolType(qualified_symbol);
+					if (context.Types().Types().IsKnown(alias_type))
+					{
+						return context.Types().Spell(alias_type);
+					}
+				}
+			}
+
+			if (qualified_type != initializer)
+			{
+				const auto namespace_name = semantic.Names().Find(spelling);
+				const auto component      = tree->Text(tokens[qualified_type]);
+				const auto component_name = semantic.Names().Find(component);
+				if (namespace_name != heimdall::kNone && component_name != heimdall::kNone)
+				{
+					for (heimdall::SymbolId name_space = 0;
+						name_space < semantic_symbols.Size(); ++name_space)
+					{
+						if (semantic_symbols.kind[name_space] != heimdall::SymbolKind::Namespace ||
+							semantic_symbols.name[name_space] != namespace_name)
+						{
+							continue;
+						}
+
+						const auto member = semantic.LookupMember(name_space, component_name);
+						if (member != heimdall::kNone &&
+							semantic_symbols.kind[member] == heimdall::SymbolKind::Class)
+						{
+							return std::string(semantic.Names().Text(semantic_symbols.name[member]));
+						}
+					}
+				}
+			}
+
 			auto sourceSymbol = semantic.ResolveToken(static_cast<std::uint32_t>(initializer));
 			if (sourceSymbol == heimdall::kNone && name != heimdall::kNone)
 			{
@@ -3598,9 +3733,10 @@ namespace heimdall::lsp
 					semantic.ScopeOfNode(declaration), name,
 					static_cast<std::uint32_t>(initializer));
 			}
+
 			if (sourceSymbol != heimdall::kNone &&
 				(semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Variable ||
-					semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Parameter))
+				semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Parameter))
 			{
 				const auto declaredType = context.Types().SymbolType(sourceSymbol);
 				if (context.Types().Types().IsKnown(declaredType))
@@ -3611,25 +3747,28 @@ namespace heimdall::lsp
 						return declaredSpelling;
 					}
 				}
+
 				const auto sourceDeclaration = semantic_symbols.decl_node[sourceSymbol];
-				const auto sourceName = semantic_symbols.decl_token[sourceSymbol];
+				const auto sourceName        = semantic_symbols.decl_token[sourceSymbol];
 				if (sourceDeclaration < nodes.size() && sourceName < tokens.size())
 				{
 					const auto typeBegin = nodes.FirstToken(sourceDeclaration);
 					if (typeBegin < sourceName)
 					{
 						const auto beginOffset = tokens[typeBegin].offset;
-						const auto endOffset = tokens[sourceName].offset;
-						auto writtenType = tree->Source().substr(beginOffset, endOffset - beginOffset);
+						const auto endOffset   = tokens[sourceName].offset;
+						auto writtenType       = tree->Source().substr(beginOffset, endOffset - beginOffset);
 						while (!writtenType.empty() &&
 							(writtenType.back() == ' ' || writtenType.back() == '\t'))
 						{
 							writtenType.remove_suffix(1);
 						}
+
 						return std::string(writtenType);
 					}
 				}
 			}
+
 			for (heimdall::SymbolId member = 0; member < semantic_symbols.Size(); ++member)
 			{
 				if (semantic_symbols.kind[member] != heimdall::SymbolKind::Variable ||
@@ -3637,32 +3776,37 @@ namespace heimdall::lsp
 				{
 					continue;
 				}
+
 				const auto memberScope = semantic_symbols.scope[member];
 				if (memberScope >= semantic.Scopes().Size() ||
 					semantic.Scopes().kind[memberScope] != heimdall::ScopeKind::Class)
 				{
 					continue;
 				}
+
 				const auto memberDeclaration = semantic_symbols.decl_node[member];
-				const auto memberName = semantic_symbols.decl_token[member];
+				const auto memberName        = semantic_symbols.decl_token[member];
 				if (memberDeclaration >= nodes.size() || memberName >= tokens.size())
 				{
 					continue;
 				}
+
 				const auto typeBegin = nodes.FirstToken(memberDeclaration);
 				if (typeBegin < memberName)
 				{
 					const auto beginOffset = tokens[typeBegin].offset;
-					const auto endOffset = tokens[memberName].offset;
-					auto writtenType = tree->Source().substr(beginOffset, endOffset - beginOffset);
+					const auto endOffset   = tokens[memberName].offset;
+					auto writtenType       = tree->Source().substr(beginOffset, endOffset - beginOffset);
 					while (!writtenType.empty() &&
 						(writtenType.back() == ' ' || writtenType.back() == '\t'))
 					{
 						writtenType.remove_suffix(1);
 					}
+
 					return std::string(writtenType);
 				}
 			}
+
 			const auto after_initializer = next_significant(initializer + 1, declaration_end);
 			if (tokens[initializer].tok == heimdall::Tok::None &&
 				after_initializer < declaration_end &&
@@ -3677,94 +3821,276 @@ namespace heimdall::lsp
 					}
 				}
 			}
+
 			auto function = semantic.ResolveToken(static_cast<std::uint32_t>(initializer));
 			if (function == heimdall::kNone && name != heimdall::kNone)
 			{
 				function = semantic.Lookup(
 					semantic.ScopeOfNode(declaration), name, static_cast<std::uint32_t>(initializer));
 			}
+
 			if (function == heimdall::kNone ||
 				semantic_symbols.kind[function] != heimdall::SymbolKind::Function)
 			{
 				return std::string {};
 			}
+
 			const auto function_declaration = semantic_symbols.decl_node[function];
 			if (function_declaration >= nodes.size())
 			{
 				return std::string {};
 			}
+
 			const auto function_name = semantic_symbols.decl_token[function];
-			auto return_begin = nodes.FirstToken(function_declaration);
+			auto return_begin        = nodes.FirstToken(function_declaration);
 			while (return_begin < function_name && tokens[return_begin].tok == heimdall::Tok::KwTemplate)
 			{
 				while (return_begin < function_name && tokens[return_begin].tok != heimdall::Tok::Gt)
 				{
 					++return_begin;
 				}
+
 				++return_begin;
 			}
+
 			if (return_begin >= function_name)
 			{
 				return std::string {};
 			}
+
 			const auto begin_offset = tokens[return_begin].offset;
-			const auto end_offset = tokens[function_name].offset;
+			const auto end_offset   = tokens[function_name].offset;
 			std::string_view return_type = tree->Source().substr(
 				begin_offset, end_offset - begin_offset);
 			while (!return_type.empty() && (return_type.back() == ' ' || return_type.back() == '\t'))
 			{
 				return_type.remove_suffix(1);
 			}
+
 			return std::string(return_type);
 		};
+		const auto is_auto_declaration =[&](heimdall::SymbolId symbol)
+		{
+			const auto declaration = semantic_symbols.decl_node[symbol];
+			if (declaration >= nodes.size())
+			{
+				return false;
+			}
+
+			const auto declaration_begin = nodes.FirstToken(declaration);
+			const auto declaration_end = std::min<std::size_t>(
+				declaration_begin + nodes.TokenCount(declaration), tokens.size());
+			for (auto token = declaration_begin;
+				token < semantic_symbols.decl_token[symbol] && token < declaration_end; ++token)
+			{
+				if (tokens[token].tok == heimdall::Tok::KwAuto)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+		const auto structured_binding_type =[&](heimdall::SymbolId symbol, heimdall::TypeId type)
+		{
+			const auto declaration = semantic_symbols.decl_node[symbol];
+			const auto name_token  = semantic_symbols.decl_token[symbol];
+			if (declaration >= nodes.size() || name_token >= tokens.size())
+			{
+				return heimdall::TypeTable::Unknown;
+			}
+
+			const auto declaration_begin = nodes.FirstToken(declaration);
+			std::size_t open             = name_token;
+			for (auto token = declaration_begin; token < name_token; ++token)
+			{
+				if (tokens[token].tok == heimdall::Tok::LBracket)
+				{
+					open = token;
+					break;
+				}
+			}
+
+			if (open == name_token)
+			{
+				return heimdall::TypeTable::Unknown;
+			}
+
+			std::size_t close = open + 1;
+			while (close < tokens.size() && tokens[close].tok != heimdall::Tok::RBracket)
+			{
+				++close;
+			}
+
+			const auto declaration_end = std::min<std::size_t>(
+				nodes.FirstToken(declaration) + nodes.TokenCount(declaration), tokens.size());
+			for (auto token = close + 1; token < declaration_end; ++token)
+			{
+				if (tokens[token].tok != heimdall::Tok::Eq)
+				{
+					continue;
+				}
+
+				const auto initializer = next_significant(token + 1, declaration_end);
+				if (initializer < declaration_end)
+				{
+					const auto source = semantic.ResolveToken(static_cast<std::uint32_t>(initializer));
+					if (source != heimdall::kNone &&
+						(semantic_symbols.kind[source] == heimdall::SymbolKind::Variable ||
+						semantic_symbols.kind[source] == heimdall::SymbolKind::Function))
+					{
+						const auto source_type = context.Types().SymbolType(source);
+						if (context.Types().Types().IsKnown(source_type))
+						{
+							type = source_type;
+						}
+					}
+				}
+
+				break;
+			}
+
+			std::size_t binding_index = 0;
+			for (auto token = open + 1; token < name_token; ++token)
+			{
+				if (tokens[token].kind == heimdall::TokenKind::Identifier)
+				{
+					++binding_index;
+				}
+			}
+
+			const auto& types = context.Types().Types();
+			if (types.Kind(type) == heimdall::TypeKind::Array)
+			{
+				return types.Element(type);
+			}
+
+			if (types.Kind(type) != heimdall::TypeKind::Class)
+			{
+				return heimdall::TypeTable::Unknown;
+			}
+
+			const auto class_symbol = types.Arg(type);
+			if (class_symbol >= semantic_symbols.Size())
+			{
+				return heimdall::TypeTable::Unknown;
+			}
+
+			const auto member_scope = semantic_symbols.member_scope[class_symbol];
+			for (heimdall::SymbolId member = 0; member < semantic_symbols.Size(); ++member)
+			{
+				if (semantic_symbols.kind[member] != heimdall::SymbolKind::Variable ||
+					semantic_symbols.scope[member] != member_scope)
+				{
+					continue;
+				}
+
+				if (binding_index == 0)
+				{
+					return context.Types().SymbolType(member);
+				}
+
+				--binding_index;
+			}
+
+			return heimdall::TypeTable::Unknown;
+		};
+		const auto is_structured_binding =[&](heimdall::SymbolId symbol)
+		{
+			const auto declaration = semantic_symbols.decl_node[symbol];
+			const auto name_token  = semantic_symbols.decl_token[symbol];
+			if (declaration >= nodes.size() || name_token >= tokens.size())
+			{
+				return false;
+			}
+
+			for (auto token = nodes.FirstToken(declaration); token < name_token; ++token)
+			{
+				if (tokens[token].tok == heimdall::Tok::LBracket)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
 		std::string response = "[";
-		bool first = true;
+		bool first           = true;
 		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
 			if (symbols.kind[symbol] != heimdall::SymbolKind::Variable)
 			{
 				continue;
 			}
+
 			const auto scope = symbols.scope[symbol];
 			if (scope < context.Semantic().Scopes().Size() &&
 				context.Semantic().Scopes().kind[scope] == heimdall::ScopeKind::Class)
 			{
 				continue;
 			}
+
 			const auto token_index = symbols.decl_token[symbol];
 			if (token_index >= tree->Tokens().size())
 			{
 				continue;
 			}
-			const auto& token = tree->Tokens()[token_index];
+
+			const auto& token              = tree->Tokens()[token_index];
 			const std::size_t token_offset = token.offset;
 			if (token_offset < first_offset || token_offset >= last_offset)
 			{
 				continue;
 			}
-			const auto type = context.Types().SymbolType(symbol);
+
+			if (!is_auto_declaration(symbol))
+			{
+				continue;
+			}
+
+			const auto type               = context.Types().SymbolType(symbol);
+			const bool structured_binding = is_structured_binding(symbol);
 			std::string type_spelling;
 			if (context.Types().Types().IsKnown(type))
 			{
 				type_spelling = context.Types().Spell(type);
-				if (type_spelling.find("<unknown>") != std::string::npos)
+				if (type_spelling.find("<unknown>") != std::string::npos ||
+					type_spelling == "auto")
 				{
 					type_spelling.clear();
 				}
 			}
+
+			const auto binding_type = structured_binding_type(symbol, type);
+			if (binding_type != heimdall::TypeTable::Unknown)
+			{
+				type_spelling = context.Types().Spell(binding_type);
+			}
+
 			if (type_spelling.empty())
 			{
-				type_spelling = inferred_spelling(symbol);
+				if (!structured_binding)
+				{
+					type_spelling = inferred_spelling(symbol);
+				}
 			}
+
+			if (type_spelling == "auto")
+			{
+				type_spelling.clear();
+			}
+
 			if (type_spelling.empty())
 			{
 				continue;
 			}
+
 			const std::size_t hint_offset = token_offset + token.length;
 			if (!first)
 			{
 				response += ',';
 			}
+
 			first = false;
 			response += "{\"position\":";
 			AppendPosition(lines->ToPosition(hint_offset), response);
@@ -3772,6 +4098,7 @@ namespace heimdall::lsp
 			QuoteJson(": " + type_spelling, response);
 			response += ",\"kind\":1,\"paddingLeft\":true}";
 		}
+
 		response += ']';
 		Respond(id, response);
 	}
@@ -4668,6 +4995,138 @@ namespace heimdall::lsp
 		}
 
 		Respond(id, response);
+	}
+
+	void LanguageServer::TypeHierarchyRequest(
+		simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode)
+	{
+		simdjson::dom::object params;
+		std::string_view uri;
+		std::size_t offset = 0;
+		if (!GetObject(request, "params", params))
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		if (mode == TypeHierarchyMode::Prepare)
+		{
+			simdjson::dom::object textDocument;
+			simdjson::dom::object position;
+			if (!GetObject(params, "textDocument", textDocument) ||
+				!GetString(textDocument, "uri", uri) || !GetObject(params, "position", position))
+			{
+				Respond(id, "null");
+				return;
+			}
+
+			const auto document = GetDocument(std::string(uri));
+			if (!document)
+			{
+				Respond(id, "null");
+				return;
+			}
+
+			offset = document->lines->OffsetFromPosition(
+				{static_cast<std::size_t>(PositionNumber(position, "line")),
+				static_cast<std::size_t>(PositionNumber(position, "character"))});
+		}
+		else
+		{
+			simdjson::dom::object item;
+			simdjson::dom::object data;
+			if (!GetObject(params, "item", item) || !GetObject(item, "data", data) ||
+				!GetString(data, "uri", uri))
+			{
+				Respond(id, "[]");
+				return;
+			}
+
+			offset = static_cast<std::size_t>(PositionNumber(data, "offset"));
+		}
+
+		const char* empty = mode == TypeHierarchyMode::Prepare ? "null" : "[]";
+		const std::string uriString(uri);
+		const auto document = GetDocument(uriString);
+		if (!document)
+		{
+			Respond(id, empty);
+			return;
+		}
+
+		const auto* command = CommandFor(uriString);
+		const auto tree     = CachedParse(uriString, document->text, document->version, command);
+		if (!tree || RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		const auto analysis = AnalysisFor(uriString, tree, ParserOptionsFor(command));
+		const auto& model   = analysis.Semantic();
+		const auto token    = heimdall::TypeHierarchy::TokenAt(model, offset);
+		const auto klass    =
+			token == heimdall::kNone
+			? heimdall::kNone
+			: heimdall::TypeHierarchy::FindClassAt(model, analysis.Types(), token);
+		if (klass == heimdall::kNone)
+		{
+			Respond(id, empty);
+			return;
+		}
+
+		std::vector<heimdall::SymbolId> classes;
+		switch (mode)
+		{
+		case TypeHierarchyMode::Prepare:
+			classes = {klass};
+			break;
+		case TypeHierarchyMode::Supertypes:
+			classes = heimdall::TypeHierarchy::Parents(model, klass);
+			break;
+		case TypeHierarchyMode::Subtypes:
+			classes = heimdall::TypeHierarchy::Children(model, klass);
+			break;
+		}
+
+		const auto& symbols = model.Symbols();
+		const auto& tokens  = model.Tree().Tokens();
+		const auto& lines   = *document->lines;
+		std::string response = "[";
+		for (const auto symbol : classes)
+		{
+			const auto nameToken = symbols.decl_token[symbol];
+			if (nameToken >= tokens.size())
+			{
+				continue;
+			}
+
+			const auto range = analysis.NodeRange(symbols.decl_node[symbol]);
+			const auto& name = tokens[nameToken];
+			if (response.size() > 1)
+			{
+				response += ',';
+			}
+
+			response += "{\"name\":";
+			QuoteJson(model.Names().Text(symbols.name[symbol]), response);
+			response += ",\"kind\":23,\"uri\":";
+			QuoteJson(uriString, response);
+			response += ",\"range\":{\"start\":";
+			AppendPosition(lines.ToPosition(range.offset), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(range.offset + range.length), response);
+			response += "},\"selectionRange\":{\"start\":";
+			AppendPosition(lines.ToPosition(name.offset), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(name.offset + name.length), response);
+			response += "},\"data\":{\"uri\":";
+			QuoteJson(uriString, response);
+			response += ",\"offset\":" + std::to_string(name.offset) + "}}";
+		}
+
+		response += ']';
+		Respond(id, mode == TypeHierarchyMode::Prepare && response.size() == 2 ? "null" : response);
 	}
 
 	void LanguageServer::WorkspaceSymbols(simdjson::dom::element request, std::string_view id)

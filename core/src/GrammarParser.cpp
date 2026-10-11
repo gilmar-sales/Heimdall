@@ -1305,6 +1305,15 @@ namespace heimdall
                     continue;
                 }
 
+                // C++23 explicit object parameter: `this Self& self`, `this auto&& self`.
+                if (text == "this" && i == spec_start && i + 1 < end &&
+                    (IsIdentifierToken(i + 1) || Is(i + 1, "::") ||
+                     IsDeclSpecifierKeyword(Text(i + 1))))
+                {
+                    ++i;
+                    continue;
+                }
+
                 // User-defined type: nested-name-specifier? identifier [<...>] (but not the
                 // declarator name). Only absorb a type when none has been seen yet; otherwise the
                 // identifier is the declarator name (e.g. `left` in `int left`).
@@ -2399,15 +2408,18 @@ namespace heimdall
             }
 
             auto part = body_start;
+            // After a missing `;` the rest is a new declaration with its own type.
+            bool shares_type = has_shared_type;
             while (part < end)
             {
                 const auto  comma      = FindComma(part, end);
                 const auto  declarator = Add(GrammarKind::InitDeclarator, part, comma, parent);
                 std::size_t consumed   = part;
-                if (part == body_start && has_shared_type)
+                if (shares_type)
                 {
-                    // First declarator reuses the shared TypeSpecifier node above.
-                    const auto code_begin = spec_end;
+                    // Every declarator reuses the shared TypeSpecifier node above:
+                    // `int a, b;` declares `b`, it does not name a type `b`.
+                    const auto code_begin = part == body_start ? spec_end : part;
                     const auto init       = TopLevelAssignment(code_begin, comma);
                     const auto code_end   = init < comma ? init : comma;
                     if (code_begin < code_end)
@@ -2458,7 +2470,8 @@ namespace heimdall
                                                      std::string("expected ';' before '") +
                                                          std::string(Text(consumed)) + "'" });
                     SetNodeRange(declarator, part, consumed);
-                    part = consumed;
+                    part        = consumed;
+                    shares_type = false;
                     continue;
                 }
 

@@ -30,6 +30,7 @@ add_executable(Tests_run
   src/RuleEngineSpec.cpp
   src/SemanticAnalyzerSpec.cpp
   src/SemanticModelSpec.cpp
+  src/TypeHierarchySpec.cpp
   src/SemanticRulesSpec.cpp
   src/ApiRulesSpec.cpp
   src/DesignatedInitSpec.cpp
@@ -45,6 +46,7 @@ add_executable(Tests_run
   src/UnreachableCodeSpec.cpp
   src/ReturnValidationSpec.cpp
   src/CompletionSpec.cpp
+  src/CompletionParitySpec.cpp
   src/NavigationSpec.cpp
   src/SymbolOutlineSpec.cpp
   src/SymbolProtocolSpec.cpp
@@ -151,6 +153,11 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspInlayHintsSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspInlayHintsSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspTypeHierarchySmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspTypeHierarchySmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

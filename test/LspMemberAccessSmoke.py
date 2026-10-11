@@ -80,8 +80,9 @@ for attempt in range(60):
     time.sleep(0.25)
 
 assert not result["isIncomplete"], "header index never completed"
-for expected in ("area", "cached", "base_value", "base_run"):
+for expected in ("area", "base_value", "base_run"):
     assert expected in labels, (expected, labels)
+assert "cached" not in labels, labels  # private member of Shape
 
 # 2. Go-to-definition from a header that is not in compile_commands.json.
 header_text = '#include "mylib/shapes.hpp"\nmylib::Shape value;\n'

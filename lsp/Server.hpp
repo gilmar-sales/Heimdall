@@ -205,6 +205,16 @@ namespace heimdall::lsp
 		// Outline / "Go to Symbol in Editor": syntactic, from the pinned snapshot's parse.
 		void DocumentSymbols(simdjson::dom::element request, std::string_view id);
 
+		enum class TypeHierarchyMode
+		{
+			Prepare,
+			Supertypes,
+			Subtypes
+		};
+
+		void TypeHierarchyRequest(
+			simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode);
+
 		// "Go to Symbol in Workspace": answers from the last published symbol index and
 		// never parses or scans while the request is served.
 		void WorkspaceSymbols(simdjson::dom::element request, std::string_view id);

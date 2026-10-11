@@ -312,26 +312,27 @@ namespace heimdall
 		template <typename Map>
 		std::vector<CompletionItem> CollectAndSort(const Map& map, const StringInterner& interner)
 		{
+			(void) interner;
+			// Labels are the map keys, so they are unique: sort pointers by label and
+			// copy each item once instead of swapping whole items.
+			std::vector<const CompletionItem*> sorted;
+			sorted.reserve(map.Size());
+			map.ForEach([&](std::uint32_t, const CompletionItem& value)
+				{
+					sorted.push_back(&value);
+			});
+			std::sort(sorted.begin(), sorted.end(),
+				[](const CompletionItem* left, const CompletionItem* right)
+				{
+					return left->label < right->label;
+			});
 			std::vector<CompletionItem> items;
-			items.reserve(map.Size());
-			map.ForEach([&](std::uint32_t key, const CompletionItem& value)
-				{
-					items.push_back(value);
-			});
-			std::sort(items.begin(), items.end(),
-				[&](const CompletionItem& left, const CompletionItem& right)
-				{
-					const std::string_view l = interner.Resolve(
-					std::uint32_t(left.label.empty() ? 0 : interner.Get(left.label)));
-					const std::string_view r = interner.Resolve(
-					std::uint32_t(right.label.empty() ? 0 : interner.Get(right.label)));
-					if (l != r)
-					{
-						return l < r;
-				}
+			items.reserve(sorted.size());
+			for (const CompletionItem* item : sorted)
+			{
+				items.push_back(*item);
+			}
 
-					return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-			});
 			return items;
 		}
 
@@ -574,6 +575,188 @@ namespace heimdall
 			return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 		}
 
+		constexpr char FoldCase(char c)
+		{
+			return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+		}
+
+		// How well a candidate matches the typed word, best first in the ranking.
+		enum class MatchQuality : std::uint8_t
+		{
+			None,
+			Fuzzy,
+			FoldedPrefix,
+			Prefix,
+		};
+
+		// Start of a word segment: `Bar` and `bar` in `FooBar`, `foo_bar`, `x2bar`.
+		bool IsSegmentStart(std::string_view name, std::size_t at)
+		{
+			if (at == 0)
+			{
+				return true;
+			}
+
+			const char previous = name[at - 1];
+			const char current  = name[at];
+			const auto is_lower =[](char c)
+			{
+				return c >= 'a' && c <= 'z';
+			};
+			const auto is_upper =[](char c)
+			{
+				return c >= 'A' && c <= 'Z';
+			};
+			const auto is_digit =[](char c)
+			{
+				return c >= '0' && c <= '9';
+			};
+			return (previous == '_' && current != '_') ||(is_upper(current) && is_lower(previous)) ||
+				(!is_digit(current) && is_digit(previous));
+		}
+
+		// Exact prefix, then case-insensitive prefix, then a case-insensitive fuzzy
+		// match in clangd's style: the first character matches a segment start and
+		// each following one either continues the previous match or starts a new
+		// segment (`Foba` finds `FooBar`, `ba` finds `BigBang`, `ec` misses `explicit`).
+		MatchQuality MatchName(std::string_view name, std::string_view query)
+		{
+			if (query.empty() || StartsWith(name, query))
+			{
+				return MatchQuality::Prefix;
+			}
+
+			if (name.size() < query.size())
+			{
+				return MatchQuality::None;
+			}
+
+			bool folded = true;
+			for (std::size_t i = 0; i < query.size(); ++i)
+			{
+				if (FoldCase(name[i]) != FoldCase(query[i]))
+				{
+					folded = false;
+					break;
+				}
+			}
+
+			if (folded)
+			{
+				return MatchQuality::FoldedPrefix;
+			}
+
+			constexpr std::size_t kMaxFuzzyName = 256;
+			if (name.size() > kMaxFuzzyName)
+			{
+				return MatchQuality::None;
+			}
+
+			// matched[j]: query[0..i] matches with query[i] at name[j].
+			std::array<bool, kMaxFuzzyName> matched {};
+			std::array<bool, kMaxFuzzyName> next {};
+			for (std::size_t j = 0; j < name.size(); ++j)
+			{
+				matched[j] = FoldCase(name[j]) == FoldCase(query[0]) && IsSegmentStart(name, j);
+			}
+
+			for (std::size_t i = 1; i < query.size(); ++i)
+			{
+				bool any_before = false;
+				for (std::size_t j = 0; j < name.size(); ++j)
+				{
+					const bool same = FoldCase(name[j]) == FoldCase(query[i]);
+					next[j] = same && j > 0 &&
+						(matched[j - 1] ||(any_before && IsSegmentStart(name, j)));
+					any_before = any_before || matched[j];
+				}
+
+				matched = next;
+			}
+
+			for (std::size_t j = 0; j < name.size(); ++j)
+			{
+				if (matched[j])
+				{
+					return MatchQuality::Fuzzy;
+				}
+			}
+
+			return MatchQuality::None;
+		}
+
+		bool MatchesPrefix(std::string_view name, std::string_view prefix)
+		{
+			return !name.empty() && MatchName(name, prefix) != MatchQuality::None;
+		}
+
+		// Macros only complete from an exact prefix: fuzzy matches on them are noise.
+		bool MatchesItem(const CompletionItem& item, std::string_view prefix)
+		{
+			if (item.kind == CompletionKind::Macro)
+			{
+				return prefix.empty() || StartsWith(item.label, prefix);
+			}
+
+			return MatchesPrefix(item.filter_text.empty() ? std::string_view(item.label)
+				: std::string_view(item.filter_text), prefix);
+		}
+
+		// Candidate label for filtering: override suggestions are labeled with the
+		// whole signature but filtered by the function name.
+		std::string_view FilterTextOf(const CompletionItem& item)
+		{
+			return item.filter_text.empty() ? std::string_view(item.label)
+			: std::string_view(item.filter_text);
+		}
+
+		// Records and enums are listed by their owner with the scope item shape
+		// (detail `struct ns::Name`); completion reports them as types.
+		CompletionItem NormalizeForCompletion(CompletionItem item)
+		{
+			if (item.kind == CompletionKind::Namespace && !item.detail.starts_with("namespace"))
+			{
+				item.kind = CompletionKind::Type;
+			}
+
+			return item;
+		}
+
+		std::vector<CompletionItem> RankItems(std::vector<CompletionItem> items,
+			std::string_view prefix)
+		{
+			if (prefix.empty())
+			{
+				for (auto& item : items)
+				{
+					item = NormalizeForCompletion(std::move(item));
+				}
+
+				return items;
+			}
+
+			std::vector<std::pair<MatchQuality, CompletionItem>> ranked;
+			ranked.reserve(items.size());
+			for (auto& item : items)
+			{
+				const MatchQuality quality = MatchName(FilterTextOf(item), prefix);
+				ranked.emplace_back(quality, NormalizeForCompletion(std::move(item)));
+			}
+
+			std::stable_sort(ranked.begin(), ranked.end(),
+				[](const auto& left, const auto& right)
+				{
+					return left.first > right.first;
+			});
+			items.clear();
+			for (auto& [quality, item] : ranked)
+			{
+				items.push_back(std::move(item));
+			}
+
+			return items;
+		}
+
 		enum class CursorContext
 		{
 			Expression,
@@ -688,6 +871,159 @@ namespace heimdall
 			return tokens.size();
 		}
 
+		// Whether offset lies in a conditional branch that is provably skipped:
+		// `#if 0`, `#if false`, the `#else` of `#if 1`. Conditions it cannot
+		// evaluate (macros, `defined`) count as active.
+		bool InDisabledBranch(std::string_view source, const std::vector<Token>& tokens,
+			std::size_t offset)
+		{
+			struct Frame
+			{
+				bool known  = false;
+				bool active = true;
+				bool taken  = false;
+			};
+
+			enum class Truth : std::uint8_t
+			{
+				Unknown,
+				False,
+				True
+			};
+
+			const auto evaluate =[](std::string_view condition)
+			{
+				while (!condition.empty() && (condition.front() == ' ' || condition.front() == '\t'))
+				{
+					condition.remove_prefix(1);
+				}
+
+				const std::size_t comment = condition.find("//");
+				condition                 = condition.substr(0, comment);
+				const std::size_t block   = condition.find("/*");
+				condition                 = condition.substr(0, block);
+				while (!condition.empty() &&
+					(condition.back() == ' ' || condition.back() == '\t' || condition.back() == '\r'))
+				{
+					condition.remove_suffix(1);
+				}
+
+				if (condition == "0" || condition == "false")
+				{
+					return Truth::False;
+				}
+
+				if (condition == "1" || condition == "true")
+				{
+					return Truth::True;
+				}
+
+				return Truth::Unknown;
+			};
+
+			std::vector<Frame> frames;
+			for (std::size_t i = 0; i < tokens.size() && tokens[i].offset < offset; ++i)
+			{
+				if (tokens[i].kind != TokenKind::Punctuation || TokenText(source, tokens[i]) != "#")
+				{
+					continue;
+				}
+
+				std::size_t name = i + 1;
+				while (name < tokens.size() && tokens[name].kind == TokenKind::Whitespace &&
+					TokenText(source, tokens[name]).find('\n') == std::string_view::npos)
+				{
+					++name;
+				}
+
+				if (name >= tokens.size() || tokens[name].kind != TokenKind::Identifier)
+				{
+					continue;
+				}
+
+				const std::string_view directive = TokenText(source, tokens[name]);
+				const std::size_t rest           = tokens[name].offset + tokens[name].length;
+				std::size_t line_end             = source.find('\n', rest);
+				line_end                         = line_end == std::string_view::npos ? source.size() : line_end;
+				const std::string_view condition = source.substr(rest, line_end - rest);
+				if (directive == "if")
+				{
+					const Truth truth = evaluate(condition);
+					frames.push_back({truth != Truth::Unknown, truth != Truth::False,
+							truth == Truth::True});
+				}
+				else if (directive == "ifdef" || directive == "ifndef")
+				{
+					frames.push_back({});
+				}
+				else if (directive == "elif" && !frames.empty())
+				{
+					Frame& frame      = frames.back();
+					const Truth truth = evaluate(condition);
+					if (frame.known && frame.taken)
+					{
+						frame.active = false;
+					}
+					else if (frame.known && truth != Truth::Unknown)
+					{
+						frame.active = truth == Truth::True;
+						frame.taken  = frame.active;
+					}
+					else
+					{
+						frame = {};
+					}
+				}
+				else if (directive == "else" && !frames.empty())
+				{
+					Frame& frame = frames.back();
+					frame.active = !frame.known ||!frame.taken;
+				}
+				else if (directive == "endif" && !frames.empty())
+				{
+					frames.pop_back();
+				}
+			}
+
+			return std::any_of(frames.begin(), frames.end(),[](const Frame& frame)
+				{
+					return !frame.active;
+			});
+		}
+
+		// `int na|`: the word being typed names a new variable or parameter.
+		bool NamesNewDeclarator(
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			std::size_t offset,
+			std::string_view prefix)
+		{
+			static constexpr std::string_view kCompleteTypes[] = {
+				"bool", "char", "char8_t", "char16_t", "char32_t", "wchar_t", "int", "float",
+				"double", "void", "auto"
+			};
+			std::size_t start = offset - std::min(offset, prefix.size());
+			while (start > 0 && (source[start - 1] == ' ' || source[start - 1] == '\t'))
+			{
+				--start;
+			}
+
+			if (start == offset - std::min(offset, prefix.size()))
+			{
+				return false;
+			}
+
+			const std::size_t before = TokenBefore(tokens, start);
+			if (before >= tokens.size() || tokens[before].kind != TokenKind::Identifier)
+			{
+				return false;
+			}
+
+			const std::string_view word = TokenText(source, tokens[before]);
+			return std::find(std::begin(kCompleteTypes), std::end(kCompleteTypes), word) !=
+				std::end(kCompleteTypes);
+		}
+
 		CursorContext ClassifyContext(
 			std::string_view source,
 			const std::vector<Token>& tokens,
@@ -735,6 +1071,11 @@ namespace heimdall
 			if (first < offset && source[first] == '#')
 			{
 				return CursorContext::Preprocessor;
+			}
+
+			if (InDisabledBranch(source, tokens, offset))
+			{
+				return CursorContext::Suppressed;
 			}
 
 			// Member / scope access: look at the significant token before the prefix.
@@ -838,6 +1179,135 @@ namespace heimdall
 			return CompletionKind::Variable;
 		}
 
+		struct DetailParameter
+		{
+			std::string_view type; // as written, without the name or default
+			std::string_view name; // empty when unnamed
+		};
+
+		// Parameters of a function detail (`int add(int left, int right = 0)`),
+		// split at top-level commas. Empty for `()`.
+		std::vector<DetailParameter> DetailParameters(std::string_view detail,
+			std::string_view label)
+		{
+			std::vector<DetailParameter> parameters;
+			std::size_t open = std::string_view::npos;
+			for (std::size_t at = detail.find(label); at != std::string_view::npos;
+				at = detail.find(label, at + 1))
+			{
+				const std::size_t after = at + label.size();
+				if ((at == 0 ||!IsIdentChar(detail[at - 1])) && after < detail.size() &&
+					detail[after] == '(')
+				{
+					open = after;
+					break;
+				}
+			}
+
+			if (open == std::string_view::npos)
+			{
+				open = detail.find('(');
+			}
+
+			if (open == std::string_view::npos)
+			{
+				return parameters;
+			}
+
+			const auto trim =[](std::string_view text)
+			{
+				while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+				{
+					text.remove_prefix(1);
+				}
+
+				while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+				{
+					text.remove_suffix(1);
+				}
+
+				return text;
+			};
+			const auto add =[&](std::string_view parameter)
+			{
+				int depth          = 0;
+				std::size_t equals = parameter.size();
+				for (std::size_t i = 0; i < parameter.size(); ++i)
+				{
+					const char c = parameter[i];
+					depth += c == '(' || c == '<' || c == '[' || c == '{' ? 1
+					: c == ')' || c == '>' || c == ']' || c == '}' ? -1
+					: 0;
+					if (c == '=' && depth == 0)
+					{
+						equals = i;
+						break;
+					}
+				}
+
+				parameter = trim(parameter.substr(0, equals));
+				if (parameter.empty() || parameter == "void")
+				{
+					return;
+				}
+
+				std::size_t word = parameter.size();
+				while (word > 0 && IsIdentChar(parameter[word - 1]))
+				{
+					--word;
+				}
+
+				const std::string_view last = parameter.substr(word);
+				const std::string_view rest = trim(parameter.substr(0, word));
+				const bool named = !last.empty() && !rest.empty() && rest != "this" &&
+					!IsKeyword(last) && !IsBuiltinType(last) && rest.back() != ':';
+				parameters.push_back(named ? DetailParameter {rest, last}
+					: DetailParameter
+					{
+						parameter, {}
+				});
+			};
+			int depth         = 0;
+			std::size_t start = open + 1;
+			for (std::size_t i = open + 1; i < detail.size(); ++i)
+			{
+				const char c = detail[i];
+				if (c == '(' || c == '<' || c == '[' || c == '{')
+				{
+					++depth;
+				}
+				else if (c == ')' && depth == 0)
+				{
+					add(detail.substr(start, i - start));
+					break;
+				}
+				else if (c == ')' || c == '>' || c == ']' || c == '}')
+				{
+					--depth;
+				}
+				else if (c == ',' && depth == 0)
+				{
+					add(detail.substr(start, i - start));
+					start = i + 1;
+				}
+			}
+
+			return parameters;
+		}
+
+		// Parameters of a function detail that carry a name (`int day` but not `int`),
+		// so a redeclaration with names describes the function better.
+		std::size_t NamedParameterCount(std::string_view detail)
+		{
+			std::size_t named = 0;
+			for (const auto& parameter : DetailParameters(detail, {}))
+			{
+				named += parameter.name.empty() ? 0 : 1;
+			}
+
+			return named;
+		}
+
 		// InsertItem for FlatHashMap with StringInterner
 		void InsertItem(StringInterner& interner, FlatHashMap<CompletionItem>& best,
 			CompletionItem item)
@@ -855,6 +1325,8 @@ namespace heimdall
 			}
 
 			CompletionItem& old = entry->value;
+			item.deprecated     = item.deprecated || old.deprecated;
+			old.deprecated      = item.deprecated;
 			if (KindPriority(item.kind) > KindPriority(old.kind) ||
 				(KindPriority(item.kind) == KindPriority(old.kind) && item.is_definition &&
 				!old.is_definition &&
@@ -892,6 +1364,14 @@ namespace heimdall
 
 				if (old.detail == KindDetail(old.kind) && item.detail != KindDetail(item.kind))
 				{
+					old.detail = std::move(item.detail);
+				}
+				else if (old.kind == CompletionKind::Function &&
+					old.param_count == item.param_count &&
+					NamedParameterCount(item.detail) >= NamedParameterCount(old.detail) &&
+					NamedParameterCount(item.detail) > 0)
+				{
+					// Redeclarations: the one naming its parameters reads best.
 					old.detail = std::move(item.detail);
 				}
 			}
@@ -1638,6 +2118,193 @@ namespace heimdall
 			return false;
 		}
 
+		// Only spaces and tabs precede `offset` on its line.
+		bool StartsLine(std::string_view source, std::size_t offset)
+		{
+			for (std::size_t i = offset; i > 0; --i)
+			{
+				const char c = source[i - 1];
+				if (c == '\n')
+				{
+					return true;
+				}
+
+				if (c != ' ' && c != '\t')
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		// End of the directive starting at `hash`, following `\` line continuations.
+		std::size_t DirectiveLineEnd(std::string_view source, std::size_t hash)
+		{
+			std::size_t end = hash;
+			while (end < source.size())
+			{
+				const std::size_t newline = source.find('\n', end);
+				if (newline == std::string_view::npos)
+				{
+					return source.size();
+				}
+
+				std::size_t last = newline;
+				while (last > end && (source[last - 1] == '\r' || source[last - 1] == ' '))
+				{
+					--last;
+				}
+
+				if (last == end || source[last - 1] != '\\')
+				{
+					return newline;
+				}
+
+				end = newline + 1;
+			}
+
+			return end;
+		}
+
+		// Merged offset ranges of class/struct/union and scoped-enum bodies whose
+		// members are not visible unqualified at the cursor. Unscoped enum bodies
+		// never hide their enumerators; a body containing the cursor hides nothing,
+		// unless the cursor sits in an explicit-object member function, which has no
+		// implicit `this`.
+		class HiddenBodies
+		{
+		public:
+			HiddenBodies(const ParseTree& tree, std::size_t offset, bool hide_enclosing_record)
+			{
+				std::vector<ScopeInterval> hidden;
+				std::size_t innermost_start = NoIndex;
+				std::size_t innermost_end   = NoIndex;
+				for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
+				{
+					if (tree.NodesSoA().Kind(n) != GrammarKind::RecordDefinition ||
+						IsUnscopedEnum(tree, n))
+					{
+						continue;
+					}
+
+					const auto[start, end] = RecordBodyRange(tree, n);
+					if (end <= start)
+					{
+						continue;
+					}
+
+					if (start <= offset && offset < end)
+					{
+						if (innermost_start == NoIndex || start >= innermost_start)
+						{
+							innermost_start = start;
+							innermost_end   = end;
+						}
+
+						continue;
+					}
+
+					hidden.push_back({start, end});
+				}
+
+				if (hide_enclosing_record && innermost_start != NoIndex)
+				{
+					hidden.push_back({innermost_start, innermost_end});
+				}
+
+				std::sort(hidden.begin(), hidden.end(),
+					[](const ScopeInterval& left, const ScopeInterval& right)
+					{
+						return left.start < right.start;
+				});
+				for (const auto& interval : hidden)
+				{
+					if (!mMerged.empty() && interval.start <= mMerged.back().end)
+					{
+						mMerged.back().end = std::max(mMerged.back().end, interval.end);
+						continue;
+					}
+
+					mMerged.push_back(interval);
+				}
+			}
+
+			[[nodiscard]] bool Contains(std::size_t offset) const
+			{
+				const auto after = std::upper_bound(mMerged.begin(), mMerged.end(), offset,
+					[](std::size_t value, const ScopeInterval& interval)
+					{
+						return value < interval.start;
+				});
+				return after != mMerged.begin() && offset < std::prev(after) -> end;
+			}
+
+			// `enum E { A }` (not `enum class`): enumerators belong to the enclosing scope.
+			static bool IsUnscopedEnum(const ParseTree& tree, std::size_t node)
+			{
+				const auto grammar = tree.NodesSoA()[node];
+				const std::size_t end =
+					std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+					tree.Tokens().size());
+				bool after_enum = false;
+				for (std::size_t t = grammar.GetFirstToken(); t < end; ++t)
+				{
+					const Token& token = tree.Tokens()[t];
+					if (IsTriviaKind(token.kind) || tree.IsDecorationToken(t))
+					{
+						continue;
+					}
+
+					const std::string_view word = tree.Text(token);
+					if (after_enum)
+					{
+						return word != "class" && word != "struct";
+					}
+
+					if (word == "enum")
+					{
+						after_enum = true;
+					}
+					else if (word == "class" || word == "struct" || word == "union" || word == "{")
+					{
+						return false;
+					}
+				}
+
+				return false;
+			}
+
+			// From the opening brace of the record body to its end.
+			static std::pair<std::size_t, std::size_t> RecordBodyRange(const ParseTree& tree,
+				std::size_t node)
+			{
+				const auto grammar = tree.NodesSoA()[node];
+				const std::size_t end =
+					std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+					tree.Tokens().size());
+				for (std::size_t t = grammar.GetFirstToken(); t < end; ++t)
+				{
+					const Token& token = tree.Tokens()[t];
+					if (token.kind == TokenKind::Punctuation && tree.Text(token) == "{")
+					{
+						return {token.offset, NodeRange(tree, node).second};
+					}
+				}
+
+				return {0, 0};
+			}
+
+		private:
+			static bool IsTriviaKind(TokenKind kind)
+			{
+				return kind == TokenKind::Whitespace || kind == TokenKind::LineComment ||
+					kind == TokenKind::BlockComment;
+			}
+
+			std::vector<ScopeInterval> mMerged;
+		};
+
 		// The grammar does not always materialize the tag name itself as a
 		// DeclaredName (e.g. `struct Widget { ... };`), so collect tag names
 		// lexically as a fallback: `class/struct/union/enum [class/struct] Name`
@@ -2260,7 +2927,14 @@ namespace heimdall
 						content.remove_suffix(1);
 					}
 
-					if (total + content.size() > kCap)
+					// `// ------`: a separator ends the comment block above the symbol.
+					constexpr std::size_t kMinRulerLen = 3;
+					const bool ruler = content.size() >= kMinRulerLen &&
+						std::none_of(content.begin(), content.end(),[](char c)
+						{
+							return IsIdentChar(c) || c == ' ';
+					});
+					if (ruler || total + content.size() > kCap)
 					{
 						break;
 					}
@@ -2820,6 +3494,141 @@ namespace heimdall
 			return full + dims;
 		}
 
+		bool HasWord(std::string_view text, std::string_view word)
+		{
+			for (std::size_t at = text.find(word); at != std::string_view::npos;
+				at = text.find(word, at + 1))
+			{
+				const bool starts = at == 0 ||!IsIdentChar(text[at - 1]);
+				const bool ends = at + word.size() >= text.size() ||
+					!IsIdentChar(text[at + word.size()]);
+				if (starts && ends)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		// Qualifiers read from a function signature (`virtual void f(int) const override`).
+		void ApplyFunctionQualifiers(CompletionItem& item)
+		{
+			const std::string_view detail = item.detail;
+			std::size_t open              = std::string_view::npos;
+			for (std::size_t at = detail.find(item.label); at != std::string_view::npos;
+				at = detail.find(item.label, at + 1))
+			{
+				const std::size_t after = at + item.label.size();
+				if ((at == 0 ||!IsIdentChar(detail[at - 1])) && after < detail.size() &&
+					detail[after] == '(')
+				{
+					open = after;
+					break;
+				}
+			}
+
+			if (open == std::string_view::npos)
+			{
+				return;
+			}
+
+			int depth         = 0;
+			std::size_t close = std::string_view::npos;
+			for (std::size_t i = open; i < detail.size(); ++i)
+			{
+				if (detail[i] == '(')
+				{
+					++depth;
+				}
+				else if (detail[i] == ')' && --depth == 0)
+				{
+					close = i;
+					break;
+				}
+			}
+
+			if (close == std::string_view::npos)
+			{
+				return;
+			}
+
+			std::string_view suffix = detail.substr(close + 1);
+			suffix                  = suffix.substr(0, suffix.find("->"));
+			std::string_view params = detail.substr(open + 1, close - open - 1);
+			while (!params.empty() && params.front() == ' ')
+			{
+				params.remove_prefix(1);
+			}
+
+			item.explicit_object = params.starts_with("this ") || params.starts_with("this\t");
+			item.is_virtual = HasWord(detail.substr(0, open), "virtual") ||
+				HasWord(suffix, "override") || HasWord(suffix, "final");
+			// Callable on a const object: const-qualified, static, or taking the
+			// explicit object by value or by const reference.
+			const std::string_view self = params.substr(0, params.find(','));
+			item.is_const = HasWord(suffix, "const") || HasWord(detail.substr(0, open), "static") ||
+				(item.explicit_object &&
+				(HasWord(self, "const") || self.find('&') == std::string_view::npos));
+		}
+
+		// `[[deprecated]]`, `[[deprecated("...")]]` or `__attribute__((deprecated))`
+		// written before the declared name, including the attribute list right
+		// before the declaration.
+		bool DeclaredDeprecated(const ParseTree& tree, std::size_t node)
+		{
+			const std::size_t name_token = tree.NodesSoA().FirstToken(node);
+			std::size_t top              = node;
+			std::size_t current          = tree.NodesSoA().Parent(node);
+			for (std::size_t depth = 0;
+				depth < kMaxScopeWalkDepth && current < tree.NodesSoA().size(); ++depth)
+			{
+				if (!IsTransparentForMembership(tree.NodesSoA().Kind(current)))
+				{
+					break;
+				}
+
+				top     = current;
+				current = tree.NodesSoA().Parent(current);
+			}
+
+			const auto& tokens                          = tree.Tokens();
+			std::size_t first                           = tree.NodesSoA().FirstToken(top);
+			constexpr std::size_t kMaxAttributeLookback = 32;
+			for (std::size_t back = 0; back < kMaxAttributeLookback && first > 0; ++back)
+			{
+				const Token& token = tokens[first - 1];
+				const bool trivia = token.kind == TokenKind::Whitespace ||
+					token.kind == TokenKind::LineComment || token.kind == TokenKind::BlockComment;
+				const std::string_view text = tree.Text(token);
+				if (!trivia && text != "]" && text != "]]" && text != "[" && text != "[[" &&
+					text != "(" && text != ")" && text != "," &&
+					token.kind != TokenKind::Identifier && token.kind != TokenKind::StringLiteral)
+				{
+					break;
+				}
+
+				if (!trivia && token.kind == TokenKind::Identifier && text != "deprecated" &&
+					text != "nodiscard" && text != "maybe_unused" && text != "noreturn" &&
+					text != "__attribute__" && text != "gnu")
+				{
+					break;
+				}
+
+				--first;
+			}
+
+			for (std::size_t t = first; t < name_token && t < tokens.size(); ++t)
+			{
+				if (tokens[t].kind == TokenKind::Identifier && tree.Text(tokens[t]) == "deprecated")
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		CompletionItem DescribeDeclared(
 			const ParseTree& tree,
 			std::string_view source,
@@ -2927,8 +3736,11 @@ namespace heimdall
 						}
 					}
 				}
+
+				ApplyFunctionQualifiers(item);
 			}
 
+			item.deprecated = DeclaredDeprecated(tree, node);
 			return item;
 		}
 
@@ -3267,7 +4079,8 @@ namespace heimdall
 			FlatHashMap<CompletionItem>& best,
 			std::string_view prefix,
 			std::size_t range_start,
-			std::size_t range_end)
+			std::size_t range_end,
+			const HiddenBodies* hidden = nullptr)
 		{
 			std::vector<TagName> tags;
 			ScanTagNames(source, tokens, tags);
@@ -3283,7 +4096,12 @@ namespace heimdall
 					continue;
 				}
 
-				if (!prefix.empty() && !StartsWith(tag.text, prefix))
+				if (hidden != nullptr && hidden->Contains(tag.offset))
+				{
+					continue;
+				}
+
+				if (!MatchesPrefix(tag.text, prefix))
 				{
 					continue;
 				}
@@ -3297,9 +4115,10 @@ namespace heimdall
 			const std::vector<Token>& tokens,
 			StringInterner& interner,
 			FlatHashMap<CompletionItem>& best,
-			std::string_view prefix)
+			std::string_view prefix,
+			const HiddenBodies* hidden = nullptr)
 		{
-			CollectTagNamesIn(source, tokens, interner, best, prefix, 0, source.size());
+			CollectTagNamesIn(source, tokens, interner, best, prefix, 0, source.size(), hidden);
 		}
 
 		// Nested scope names below a qualifier: for `ns::`, a scope with path
@@ -3356,7 +4175,7 @@ namespace heimdall
 					continue;
 				}
 
-				if (!prefix.empty() && !StartsWith(name, prefix))
+				if (!MatchesPrefix(name, prefix))
 				{
 					continue;
 				}
@@ -3365,6 +4184,282 @@ namespace heimdall
 					path.begin(), path.begin() + qualifier.size() + 1);
 				InsertItem(interner, best, MakeNamespaceItem(tree, source, tokens, n, full_path));
 			}
+		}
+
+		// Access sections of a record body: the key's default (`class` private,
+		// `struct`/`union` public) and each `public:`/`protected:`/`private:` label.
+		struct AccessTable
+		{
+			MemberAccess initial = MemberAccess::Public;
+			std::vector<std::pair<std::size_t, MemberAccess>> changes; // (offset, access)
+
+			[[nodiscard]] MemberAccess At(std::size_t offset) const
+			{
+				MemberAccess access = initial;
+				for (const auto& [at, change] : changes)
+				{
+					if (at >= offset)
+					{
+						break;
+					}
+
+					access = change;
+				}
+
+				return access;
+			}
+		};
+
+		AccessTable BuildAccessTable(const ParseTree& tree, std::size_t record)
+		{
+			AccessTable table;
+			const auto grammar = tree.NodesSoA()[record];
+			const auto& tokens = tree.Tokens();
+			const std::size_t end =
+				std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+				tokens.size());
+			const auto significant_after =[&](std::size_t t)
+			{
+				std::size_t next = t + 1;
+				while (next < end && (tokens[next].kind == TokenKind::Whitespace ||
+					tokens[next].kind == TokenKind::LineComment ||
+					tokens[next].kind == TokenKind::BlockComment))
+				{
+					++next;
+				}
+
+				return next;
+			};
+			std::size_t t = grammar.GetFirstToken();
+			int angle     = 0;
+			for (; t < end; ++t)
+			{
+				const std::string_view text = tree.Text(tokens[t]);
+				if (tokens[t].kind == TokenKind::Punctuation)
+				{
+					if (text == "{")
+					{
+						break;
+					}
+
+					angle += text == "<" ? 1 : text == ">" ? -1 : text == ">>" ? -2 : 0;
+					continue;
+				}
+
+				if (angle <= 0 && tokens[t].kind == TokenKind::Identifier)
+				{
+					if (text == "class")
+					{
+						table.initial = MemberAccess::Private;
+					}
+					else if (text == "struct" || text == "union")
+					{
+						table.initial = MemberAccess::Public;
+					}
+				}
+			}
+
+			int depth = 0;
+			for (; t < end; ++t)
+			{
+				const std::string_view text = tree.Text(tokens[t]);
+				if (tokens[t].kind == TokenKind::Punctuation)
+				{
+					depth += text == "{" ? 1 : text == "}" ? -1 : 0;
+					continue;
+				}
+
+				if (depth != 1 || tokens[t].kind != TokenKind::Identifier)
+				{
+					continue;
+				}
+
+				const std::size_t next = significant_after(t);
+				if (next >= end || tree.Text(tokens[next]) != ":")
+				{
+					continue;
+				}
+
+				if (text == "public")
+				{
+					table.changes.emplace_back(tokens[t].offset, MemberAccess::Public);
+				}
+				else if (text == "protected")
+				{
+					table.changes.emplace_back(tokens[t].offset, MemberAccess::Protected);
+				}
+				else if (text == "private")
+				{
+					table.changes.emplace_back(tokens[t].offset, MemberAccess::Private);
+				}
+			}
+
+			return table;
+		}
+
+		// `union { int a; float b; };` as a member: an unnamed class that declares no
+		// object, whose members are members of the enclosing class.
+		bool IsAnonymousMemberRecord(const ParseTree& tree, std::size_t node)
+		{
+			const auto elements = ScopeNameElements(tree, node);
+			if (elements.size() != 1 ||!elements.front().empty() ||
+				HiddenBodies::IsUnscopedEnum(tree, node))
+			{
+				return false;
+			}
+
+			const auto grammar = tree.NodesSoA()[node];
+			const auto& tokens = tree.Tokens();
+			bool keyword       = false;
+			for (std::uint32_t k = 0; k < grammar.GetTokenCount(); ++k)
+			{
+				const std::string_view text = tree.Text(tokens[grammar.GetFirstToken() + k]);
+				if (text == "enum")
+				{
+					return false;
+				}
+
+				if (text == "struct" || text == "union" || text == "class")
+				{
+					keyword = true;
+					break;
+				}
+			}
+
+			std::size_t next = grammar.GetFirstToken() + grammar.GetTokenCount();
+			while (next < tokens.size() && (tokens[next].kind == TokenKind::Whitespace ||
+				tokens[next].kind == TokenKind::LineComment ||
+				tokens[next].kind == TokenKind::BlockComment))
+			{
+				++next;
+			}
+
+			return keyword && next < tokens.size() && tree.Text(tokens[next]) == ";";
+		}
+
+		// Scope whose qualified lookup lists the name: unscoped enumerators and
+		// members of anonymous unions belong to the enclosing scope.
+		std::size_t LookupScope(const ParseTree& tree, std::size_t node)
+		{
+			std::size_t scope = MemberScope(tree, node);
+			while (scope < tree.NodesSoA().size() &&
+				tree.NodesSoA().Kind(scope) == GrammarKind::RecordDefinition &&
+				(HiddenBodies::IsUnscopedEnum(tree, scope) || IsAnonymousMemberRecord(tree, scope)))
+			{
+				scope = MemberScope(tree, scope);
+			}
+
+			return scope;
+		}
+
+		// Innermost function definition (not lambda) containing offset, or NoIndex.
+		std::size_t EnclosingFunction(const ParseTree& tree, std::size_t offset)
+		{
+			std::size_t best = NoIndex;
+			auto best_span   = static_cast<std::size_t>(-1);
+			for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
+			{
+				if (tree.NodesSoA().Kind(n) != GrammarKind::FunctionDefinition)
+				{
+					continue;
+				}
+
+				const auto[start, end] = NodeRange(tree, n);
+				if (start <= offset && offset <= end && end - start < best_span)
+				{
+					best      = n;
+					best_span = end - start;
+				}
+			}
+
+			return best;
+		}
+
+		// `void f(this Self& self)`: the first parameter starts with `this`.
+		bool HasExplicitObjectParameter(const ParseTree& tree, std::size_t function)
+		{
+			if (function == NoIndex)
+			{
+				return false;
+			}
+
+			const std::size_t declarator = FindChild(tree, function, GrammarKind::Declarator);
+			const std::size_t suffix =
+				declarator == NoIndex ? NoIndex
+			: FindInSubtree(tree, declarator, GrammarKind::FunctionSuffix);
+			if (suffix == NoIndex)
+			{
+				return false;
+			}
+
+			for (const std::size_t child : tree.DirectChildren(suffix))
+			{
+				if (tree.NodesSoA().Kind(child) != GrammarKind::ParameterDeclaration)
+				{
+					continue;
+				}
+
+				const auto grammar = tree.NodesSoA()[child];
+				for (std::uint32_t k = 0; k < grammar.GetTokenCount(); ++k)
+				{
+					const Token& token = tree.Tokens()[grammar.GetFirstToken() + k];
+					if (token.kind == TokenKind::Whitespace ||
+						token.kind == TokenKind::LineComment ||
+						token.kind == TokenKind::BlockComment)
+					{
+						continue;
+					}
+
+					return tree.Text(token) == "this";
+				}
+
+				return false;
+			}
+
+			return false;
+		}
+
+		// Innermost function definition and class body around the cursor.
+		struct CursorScopes
+		{
+			std::size_t function = NoIndex;
+			// Class/struct/union (or scoped enum) whose body contains the cursor.
+			std::size_t record = NoIndex;
+			// The function takes an explicit object parameter: no implicit `this`.
+			bool explicit_object = false;
+		};
+
+		CursorScopes FindCursorScopes(const ParseTree& tree, std::size_t offset)
+		{
+			CursorScopes scopes;
+			auto function_span = static_cast<std::size_t>(-1);
+			auto record_span   = static_cast<std::size_t>(-1);
+			for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
+			{
+				const GrammarKind kind = tree.NodesSoA().Kind(n);
+				if (kind == GrammarKind::FunctionDefinition)
+				{
+					const auto[start, end] = NodeRange(tree, n);
+					if (start <= offset && offset <= end && end - start < function_span)
+					{
+						scopes.function = n;
+						function_span   = end - start;
+					}
+				}
+				else if (kind == GrammarKind::RecordDefinition)
+				{
+					const auto[start, end] = HiddenBodies::RecordBodyRange(tree, n);
+					if (start < offset && offset < end && end - start < record_span &&
+						!HiddenBodies::IsUnscopedEnum(tree, n))
+					{
+						scopes.record = n;
+						record_span   = end - start;
+					}
+				}
+			}
+
+			scopes.explicit_object = HasExplicitObjectParameter(tree, scopes.function);
+			return scopes;
 		}
 
 	} // namespace
@@ -3452,6 +4547,7 @@ namespace heimdall
 
 		// Declared names bucketed by owning scope; function locals land on body
 		// blocks (no entry) and are skipped: they are not qualifier-addressable.
+		std::unordered_map<std::size_t, AccessTable> access_tables;
 		for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
 		{
 			if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName)
@@ -3499,10 +4595,46 @@ namespace heimdall
 				continue;
 			}
 
+			CompletionItem member = DescribeDeclared(tree, source, tokens, n, name, kind);
+			if (scope_kind == GrammarKind::RecordDefinition)
+			{
+				auto table = access_tables.find(scope);
+				if (table == access_tables.end())
+				{
+					table = access_tables.emplace(scope, BuildAccessTable(tree, scope)).first;
+				}
+
+				member.access = table->second.At(tree.Tokens()[token_index].offset);
+			}
+
 			IndexedScope& entry =
 				entry_for(scope < scope_paths.size() ? scope_paths[scope] : ScopePath(tree, scope),
 				CompletionKind::Type);
-			entry.members.push_back(DescribeDeclared(tree, source, tokens, n, name, kind));
+			entry.members.push_back(std::move(member));
+
+			// Unscoped enumerators are also members of the scope enclosing the enum.
+			const std::size_t lookup = LookupScope(tree, n);
+			if (lookup != scope && lookup < tree.NodesSoA().size() &&
+				(tree.NodesSoA().Kind(lookup) == GrammarKind::NamespaceDefinition ||
+				tree.NodesSoA().Kind(lookup) == GrammarKind::RecordDefinition ||
+				lookup == ParseTree::RootNode))
+			{
+				CompletionItem hoisted = DescribeDeclared(tree, source, tokens, n, name, kind);
+				if (tree.NodesSoA().Kind(lookup) == GrammarKind::RecordDefinition)
+				{
+					auto table = access_tables.find(lookup);
+					if (table == access_tables.end())
+					{
+						table = access_tables.emplace(lookup, BuildAccessTable(tree, lookup)).first;
+					}
+
+					hoisted.access = table->second.At(tree.Tokens()[token_index].offset);
+				}
+
+				entry_for(lookup < scope_paths.size() ? scope_paths[lookup] : ScopePath(tree, lookup),
+					CompletionKind::Type)
+				.members.push_back(std::move(hoisted));
+			}
 		}
 
 		// Records whose layout the indexed members cannot explain.
@@ -3839,12 +4971,13 @@ namespace heimdall
 			std::size_t offset,
 			std::string_view prefix,
 			const ScopeIndex* external,
+			const CursorScopes& cursor,
 			StringInterner& interner,
 			FlatHashMap<CompletionItem>& best)
 		{
 			for (const auto keyword : kKeywords)
 			{
-				if (!prefix.empty() && !StartsWith(keyword, prefix))
+				if (!MatchesPrefix(keyword, prefix))
 				{
 					continue;
 				}
@@ -3863,11 +4996,21 @@ namespace heimdall
 			// scan per token), and repeat identifiers are deduped by view before any
 			// std::string allocation (was: one CompletionItem per occurrence).
 			const std::size_t cursor_callable = FindCallable(callables, offset);
+			const HiddenBodies hidden(tree, offset, cursor.explicit_object);
 			std::unordered_set<std::string_view> seen_lexical;
 			seen_lexical.reserve(tokens.size());
+			std::size_t directive_end = 0;
 			for (const auto& token : tokens)
 			{
-				if (token.kind != TokenKind::Identifier)
+				// Directive lines name macros (completed from the `#define` scan with
+				// their own filtering) and headers, not program identifiers.
+				if (token.kind == TokenKind::Punctuation && TokenText(source, token) == "#" &&
+					StartsLine(source, token.offset))
+				{
+					directive_end = DirectiveLineEnd(source, token.offset);
+				}
+
+				if (token.kind != TokenKind::Identifier || token.offset < directive_end)
 				{
 					continue;
 				}
@@ -3878,7 +5021,7 @@ namespace heimdall
 					continue;
 				} // don't echo the word being typed
 
-				if (!prefix.empty() && !StartsWith(text, prefix))
+				if (seen_lexical.contains(text) ||!MatchesPrefix(text, prefix))
 				{
 					continue;
 				}
@@ -3888,17 +5031,18 @@ namespace heimdall
 					continue;
 				} // keyword entry already added
 
-				if (!seen_lexical.insert(text).second)
-				{
-					continue;
-				}
-
 				const std::size_t owner = FindCallable(callables, token.offset);
 				if (owner != NoIndex && (owner != cursor_callable || token.offset >= offset))
 				{
 					continue;
 				}
 
+				if (owner == NoIndex && hidden.Contains(token.offset))
+				{
+					continue;
+				}
+
+				seen_lexical.insert(text);
 				InsertItem(interner, best,
 					{std::string(text), CompletionKind::Variable, "variable", {}});
 			}
@@ -3909,7 +5053,7 @@ namespace heimdall
 			// Visible locals go first: unqualified lookup finds the innermost
 			// scope, so a local shadows same-named members and globals in the
 			// same-label merge below (hover and completion follow lookup).
-			CollectTagNames(source, tokens, interner, best, prefix);
+			CollectTagNames(source, tokens, interner, best, prefix, &hidden);
 			for (std::size_t pass = 0; pass < 2; ++pass)
 			{
 				for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
@@ -3931,7 +5075,7 @@ namespace heimdall
 						continue;
 					}
 
-					if (!prefix.empty() && !StartsWith(name, prefix))
+					if (!MatchesPrefix(name, prefix))
 					{
 						continue;
 					}
@@ -3961,7 +5105,7 @@ namespace heimdall
 						continue;
 					}
 
-					if (pass != 1)
+					if (pass != 1 || hidden.Contains(tree.Tokens()[token_index].offset))
 					{
 						continue;
 					}
@@ -3997,7 +5141,7 @@ namespace heimdall
 					continue;
 				}
 
-				if (!prefix.empty() && !StartsWith(path.front(), prefix))
+				if (!MatchesPrefix(path.front(), prefix))
 				{
 					continue;
 				}
@@ -4055,7 +5199,7 @@ namespace heimdall
 
 					for (const auto& member : scope.members)
 					{
-						if (!prefix.empty() && !StartsWith(member.label, prefix))
+						if (!MatchesItem(member, prefix))
 						{
 							continue;
 						}
@@ -4066,9 +5210,230 @@ namespace heimdall
 			}
 		}
 
-		bool MatchesPrefix(std::string_view name, std::string_view prefix)
+		// Absolute path a name written in `scope` refers to, trying enclosing scopes
+		// from the innermost out; the written path itself when nothing matches.
+		std::vector<std::string> ResolveWrittenScope(
+			const std::vector<std::vector<std::string>>& scope_paths,
+			const ScopeIndex* external,
+			const std::vector<std::string>& scope,
+			const std::vector<std::string>& written)
 		{
-			return !name.empty() && (prefix.empty() || StartsWith(name, prefix));
+			for (std::size_t keep = scope.size() + 1; keep > 0; --keep)
+			{
+				std::vector<std::string> candidate(scope.begin(), scope.begin() +(keep - 1));
+				candidate.insert(candidate.end(), written.begin(), written.end());
+				if (!ResolveScope(scope_paths, candidate).empty())
+				{
+					return candidate;
+				}
+
+				if (external != nullptr)
+				{
+					for (const auto& indexed : *external)
+					{
+						if (indexed.path == candidate)
+						{
+							return candidate;
+						}
+					}
+				}
+			}
+
+			return written;
+		}
+
+		struct UsingDeclarationName
+		{
+			std::vector<std::string> scope;     // containing namespace
+			std::vector<std::string> qualifier; // as written, before the name
+			std::string name;
+			bool global = false; // `using ::name;`
+		};
+
+		// `using a::b::name;` declarations (not directives or aliases).
+		std::vector<UsingDeclarationName> UsingDeclarationsOf(
+			const ParseTree& tree, const std::vector<std::vector<std::string>>& scope_paths)
+		{
+			std::vector<UsingDeclarationName> result;
+			const auto& tokens = tree.Tokens();
+			for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
+			{
+				if (tree.NodesSoA().Kind(n) != GrammarKind::UsingDeclaration)
+				{
+					continue;
+				}
+
+				const std::size_t owner = MemberScope(tree, n);
+				if (owner != ParseTree::RootNode &&
+					(owner >= tree.NodesSoA().size() ||
+					tree.NodesSoA().Kind(owner) != GrammarKind::NamespaceDefinition))
+				{
+					continue;
+				}
+
+				const auto grammar = tree.NodesSoA()[n];
+				UsingDeclarationName entry;
+				entry.scope =
+					owner == ParseTree::RootNode ? std::vector<std::string> {}: scope_paths[owner];
+				std::vector<std::string> names;
+				bool valid       = true;
+				bool started     = false;
+				bool expect_name = true;
+				for (std::uint32_t k = 0; k < grammar.GetTokenCount() && valid; ++k)
+				{
+					const Token& token = tokens[grammar.GetFirstToken() + k];
+					if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
+						token.kind == TokenKind::BlockComment)
+					{
+						continue;
+					}
+
+					const std::string_view text = tree.Text(token);
+					if (!started)
+					{
+						started = true;
+						valid   = text == "using";
+						continue;
+					}
+
+					if (text == ";")
+					{
+						break;
+					}
+
+					if (text == "::")
+					{
+						entry.global = entry.global || names.empty();
+						expect_name  = true;
+						continue;
+					}
+
+					if (token.kind != TokenKind::Identifier ||!expect_name || text == "namespace" ||
+						text == "typename" || text == "enum")
+					{
+						valid = text == "typename" && names.empty();
+						continue;
+					}
+
+					names.emplace_back(text);
+					expect_name = false;
+				}
+
+				if (!valid || names.empty() ||(names.size() == 1 && !entry.global))
+				{
+					continue;
+				}
+
+				entry.name = names.back();
+				names.pop_back();
+				entry.qualifier = std::move(names);
+				result.push_back(std::move(entry));
+			}
+
+			return result;
+		}
+
+		bool CollectQualifiedMembers(
+			const ParseTree& tree,
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			const std::vector<std::vector<std::string>>& scope_paths,
+			const std::vector<std::string>& path,
+			std::string_view prefix,
+			const ScopeIndex* external,
+			StringInterner& interner,
+			FlatHashMap<CompletionItem>& best);
+
+		// Names a namespace exposes through `using namespace x;` and `using x::y;`.
+		void CollectUsingMembers(
+			const ParseTree& tree,
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			const std::vector<std::vector<std::string>>& scope_paths,
+			const std::vector<std::string>& path,
+			std::string_view prefix,
+			const ScopeIndex* external,
+			StringInterner& interner,
+			FlatHashMap<CompletionItem>& best,
+			int depth)
+		{
+			constexpr int kMaxUsingDepth = 4;
+			if (depth > kMaxUsingDepth)
+			{
+				return;
+			}
+
+			for (const auto& directive : Navigation::UsingDirectives(tree))
+			{
+				if (directive.scope != path || directive.target.empty())
+				{
+					continue;
+				}
+
+				const auto target =
+					ResolveWrittenScope(scope_paths, external, directive.scope, directive.target);
+				if (target == path)
+				{
+					continue;
+				}
+
+				FlatHashMap<CompletionItem> nominated;
+				nominated.Reserve(64);
+				CollectQualifiedMembers(tree, source, tokens, scope_paths, target, prefix, external,
+					interner, nominated);
+				nominated.ForEach([&](std::uint32_t, const CompletionItem& item)
+					{
+						InsertItem(interner, best, item);
+				});
+				CollectUsingMembers(tree, source, tokens, scope_paths, target, prefix, external,
+					interner, best, depth + 1);
+			}
+
+			for (const auto& declaration : UsingDeclarationsOf(tree, scope_paths))
+			{
+				if (declaration.scope != path ||!MatchesPrefix(declaration.name, prefix))
+				{
+					continue;
+				}
+
+				const auto target =
+					declaration.global
+				? declaration.qualifier
+				: ResolveWrittenScope(scope_paths, external, declaration.scope,
+					declaration.qualifier);
+				FlatHashMap<CompletionItem> named;
+				named.Reserve(16);
+				if (target.empty())
+				{
+					for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
+					{
+						if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName ||
+							LookupScope(tree, n) != ParseTree::RootNode ||
+							tree.Text(tree.Tokens()[tree.NodesSoA().FirstToken(n)]) !=
+							declaration.name)
+						{
+							continue;
+						}
+
+						InsertItem(interner, named,
+							DescribeDeclared(tree, source, tokens, n, declaration.name,
+							ClassifyDeclaredName(tree, n)));
+					}
+				}
+				else
+				{
+					CollectQualifiedMembers(tree, source, tokens, scope_paths, target,
+						declaration.name, external, interner, named);
+				}
+
+				named.ForEach([&](std::uint32_t, const CompletionItem& item)
+					{
+						if (item.label == declaration.name)
+						{
+							InsertItem(interner, best, item);
+					}
+				});
+			}
 		}
 
 		void CompleteQualified(
@@ -4177,7 +5542,7 @@ namespace heimdall
 						{
 							for (const auto& member : scope.members)
 							{
-								if (!MatchesPrefix(member.label, prefix))
+								if (!MatchesItem(member, prefix))
 								{
 									continue;
 								}
@@ -4202,7 +5567,32 @@ namespace heimdall
 				return;
 			}
 
-			const std::vector<std::size_t> targets = ResolveScope(scope_paths, qualifier.path);
+			// `ns::` lists the members of ns, plus what its using-directives nominate
+			// and what its using-declarations bring in.
+			if (!CollectQualifiedMembers(tree, source, tokens, scope_paths, qualifier.path, prefix,
+				external, interner, best))
+			{
+				return;
+			}
+
+			CollectUsingMembers(tree, source, tokens, scope_paths, qualifier.path, prefix, external,
+				interner, best, 0);
+		}
+
+		// Members of the scope named by `path` (namespace or record), from the tree
+		// and the header index. False when nothing knows the scope.
+		bool CollectQualifiedMembers(
+			const ParseTree& tree,
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			const std::vector<std::vector<std::string>>& scope_paths,
+			const std::vector<std::string>& path,
+			std::string_view prefix,
+			const ScopeIndex* external,
+			StringInterner& interner,
+			FlatHashMap<CompletionItem>& best)
+		{
+			const std::vector<std::size_t> targets = ResolveScope(scope_paths, path);
 			// External (header) scopes matching the qualifier union with local ones.
 			// An empty target set with no external match means an unknown qualifier.
 			bool saw_external = false;
@@ -4210,7 +5600,7 @@ namespace heimdall
 			{
 				for (const auto& scope : *external)
 				{
-					if (scope.path != qualifier.path)
+					if (scope.path != path)
 					{
 						continue;
 					}
@@ -4218,7 +5608,7 @@ namespace heimdall
 					saw_external = true;
 					for (const auto& member : scope.members)
 					{
-						if (!MatchesPrefix(member.label, prefix))
+						if (!MatchesItem(member, prefix))
 						{
 							continue;
 						}
@@ -4231,15 +5621,15 @@ namespace heimdall
 				// from a `std::chrono` header scope).
 				for (const auto& scope : *external)
 				{
-					if (scope.path.size() <= qualifier.path.size())
+					if (scope.path.size() <= path.size())
 					{
 						continue;
 					}
 
 					bool matches = true;
-					for (std::size_t i = 0; i < qualifier.path.size(); ++i)
+					for (std::size_t i = 0; i < path.size(); ++i)
 					{
-						if (scope.path[i] != qualifier.path[i])
+						if (scope.path[i] != path[i])
 						{
 							matches = false;
 							break;
@@ -4252,7 +5642,7 @@ namespace heimdall
 					}
 
 					saw_external            = true;
-					const std::string& name = scope.path[qualifier.path.size()];
+					const std::string& name = scope.path[path.size()];
 					if (!MatchesPrefix(name, prefix))
 					{
 						continue;
@@ -4264,7 +5654,7 @@ namespace heimdall
 
 			if (targets.empty() && !saw_external)
 			{
-				return;
+				return false;
 			} // unknown qualifier (`std::`): no guesses
 
 			auto is_target =[&](std::size_t node)
@@ -4286,7 +5676,7 @@ namespace heimdall
 					continue;
 				}
 
-				if (!is_target(MemberScope(tree, n)))
+				if (!is_target(LookupScope(tree, n)))
 				{
 					continue;
 				}
@@ -4350,8 +5740,9 @@ namespace heimdall
 
 			// Members introduced by deeper compound definitions (`ns::a::b` makes `a`
 			// visible under `ns::` even without an intermediate node).
-			CollectChildScopes(tree, source, tokens, scope_paths, qualifier.path, interner, best,
+			CollectChildScopes(tree, source, tokens, scope_paths, path, interner, best,
 				prefix);
+			return true;
 		}
 
 		// --- Member access (`obj.` / `ptr->`) -----------------------------------
@@ -4374,7 +5765,7 @@ namespace heimdall
 				"const", "volatile", "static", "constexpr", "consteval", "constinit",
 				"inline", "extern", "mutable", "register", "thread_local", "typename",
 				"struct", "class", "union", "enum", "virtual", "friend",
-				"explicit", "typedef", "signed", "unsigned"
+				"explicit", "typedef", "signed", "unsigned", "this"
 			};
 			return std::find(std::begin(words), std::end(words), word) != std::end(words);
 		}
@@ -4566,6 +5957,16 @@ namespace heimdall
 			bool ok = false;
 			// Initializer was `new T...`: the variable holds a `T*` (hover only).
 			bool from_new = false;
+		};
+
+		struct MemberFilter
+		{
+			// The object is const: only const member functions are callable.
+			bool const_receiver = false;
+			// Unqualified lookup inside a class also finds its nested types.
+			bool include_types = false;
+			// Hover names a member that exists, accessible or not.
+			bool ignore_access = false;
 		};
 
 		class MemberResolver
@@ -4866,10 +6267,71 @@ namespace heimdall
 				const std::vector<std::string>& path,
 				std::string_view prefix,
 				StringInterner& interner,
-				FlatHashMap<CompletionItem>& best) const
+				FlatHashMap<CompletionItem>& best,
+				MemberFilter filter = {}) const
 			{
 				std::unordered_set<std::string> visited;
-				CollectInto(path, prefix, interner, best, visited, 0);
+				CollectInto(path, prefix, interner, best, visited, 0, filter);
+			}
+
+			// Virtual member functions inherited by `path` that it does not override
+			// yet, nearest declaration first (`B::f() override` hides `A::f()`).
+			[[nodiscard]] std::vector<CompletionItem> Overridable(
+				const std::vector<std::string>& path) const
+			{
+				std::vector<std::string> keys;
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind == CompletionKind::Function)
+						{
+							keys.push_back(OverrideKey(member));
+						}
+					}
+				}
+
+				std::vector<CompletionItem> found;
+				std::unordered_set<std::string> visited {PathKey(path)};
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& written : scope->bases)
+					{
+						const Resolved base = ResolveType(ParseTypeName(written), Parent(path), 0);
+						if (base.ok)
+						{
+							CollectVirtuals(base.path, keys, found, visited, 0);
+						}
+					}
+				}
+
+				return found;
+			}
+
+			// Private members are reachable from their own class, protected ones also
+			// from classes deriving from it (friendship is not modeled).
+			[[nodiscard]] bool CanAccess(const CompletionItem& member,
+				const std::vector<std::string>& owner) const
+			{
+				if (member.access == MemberAccess::Public)
+				{
+					return true;
+				}
+
+				for (const auto& record : m_records)
+				{
+					if (record == owner)
+					{
+						return true;
+					}
+
+					if (member.access == MemberAccess::Protected && DerivesFrom(record, owner, 0))
+					{
+						return true;
+					}
+				}
+
+				return false;
 			}
 
 			// Class initialized by the brace list opened at token `open`: `T{`,
@@ -4921,7 +6383,7 @@ namespace heimdall
 					for (const auto& member : scope->members)
 					{
 						if (member.kind == CompletionKind::Variable &&
-							!used.contains(member.label) && MatchesPrefix(member.label, prefix))
+							!used.contains(member.label) && MatchesItem(member, prefix))
 						{
 							InsertItem(interner, best, WithFieldDetail(member));
 						}
@@ -5211,13 +6673,109 @@ namespace heimdall
 				return path.empty() ? path : std::vector<std::string>(path.begin(), path.end() - 1);
 			}
 
+			static std::string OverrideKey(const CompletionItem& function)
+			{
+				std::string key = function.label + "(";
+				for (const auto& parameter : DetailParameters(function.detail, function.label))
+				{
+					for (const char c : parameter.type)
+					{
+						if (c != ' ' && c != '\t')
+						{
+							key += c;
+						}
+					}
+
+					key += ',';
+				}
+
+				key += function.is_const ? ")c" : ")";
+				return key;
+			}
+
+			void CollectVirtuals(
+				const std::vector<std::string>& path,
+				std::vector<std::string>& keys,
+				std::vector<CompletionItem>& found,
+				std::unordered_set<std::string>& visited,
+				int depth) const
+			{
+				constexpr int kMaxVirtualDepth = 16;
+				if (depth > kMaxVirtualDepth ||!visited.insert(PathKey(path)).second)
+				{
+					return;
+				}
+
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind != CompletionKind::Function)
+						{
+							continue;
+						}
+
+						std::string key = OverrideKey(member);
+						if (std::find(keys.begin(), keys.end(), key) != keys.end())
+						{
+							continue;
+						}
+
+						keys.push_back(std::move(key));
+						if (member.is_virtual)
+						{
+							found.push_back(member);
+						}
+					}
+				}
+
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& written : scope->bases)
+					{
+						const Resolved base = ResolveType(ParseTypeName(written), Parent(path), 0);
+						if (base.ok)
+						{
+							CollectVirtuals(base.path, keys, found, visited, depth + 1);
+						}
+					}
+				}
+			}
+
+			bool DerivesFrom(const std::vector<std::string>& path,
+				const std::vector<std::string>& base, int depth) const
+			{
+				constexpr int kMaxDeriveDepth = 16;
+				if (depth > kMaxDeriveDepth)
+				{
+					return false;
+				}
+
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& written : scope->bases)
+					{
+						const Resolved resolved =
+							ResolveType(ParseTypeName(written), Parent(path), 0);
+						if (resolved.ok &&
+							(resolved.path == base || DerivesFrom(resolved.path, base, depth + 1)))
+						{
+							return true;
+						}
+					}
+				}
+
+				return false;
+			}
+
 			void CollectInto(
 				const std::vector<std::string>& path,
 				std::string_view prefix,
 				StringInterner& interner,
 				FlatHashMap<CompletionItem>& best,
 				std::unordered_set<std::string>& visited,
-				int depth) const
+				int depth,
+				MemberFilter filter) const
 			{
 				constexpr int kMaxCollectDepth = 16;
 				if (depth > kMaxCollectDepth ||!visited.insert(PathKey(path)).second)
@@ -5229,8 +6787,12 @@ namespace heimdall
 				{
 					for (const auto& member : scope->members)
 					{
-						if (member.kind != CompletionKind::Function &&
-							member.kind != CompletionKind::Variable)
+						const bool value = member.kind == CompletionKind::Function ||
+							member.kind == CompletionKind::Variable;
+						const bool type = member.kind == CompletionKind::Type ||
+							(member.kind == CompletionKind::Namespace &&
+							!member.detail.starts_with("namespace"));
+						if (!value && !(filter.include_types && type))
 						{
 							continue;
 						}
@@ -5240,7 +6802,14 @@ namespace heimdall
 							continue; // constructor
 						}
 
-						if (!MatchesPrefix(member.label, prefix))
+						if (!MatchesItem(member, prefix) ||
+							(!filter.ignore_access && !CanAccess(member, path)))
+						{
+							continue;
+						}
+
+						if (filter.const_receiver && member.kind == CompletionKind::Function &&
+							!member.is_const)
 						{
 							continue;
 						}
@@ -5257,7 +6826,8 @@ namespace heimdall
 						const Resolved resolved = ResolveType(ParseTypeName(base), Parent(path), 0);
 						if (resolved.ok)
 						{
-							CollectInto(resolved.path, prefix, interner, best, visited, depth + 1);
+							CollectInto(resolved.path, prefix, interner, best, visited, depth + 1,
+								filter);
 						}
 					}
 				}
@@ -5427,7 +6997,9 @@ namespace heimdall
 				const TypeName type    = ParseTypeName(text);
 				if (type.ok && (type.path.size() != 1 || type.path.front() != "auto"))
 				{
-					return ResolveType(type, m_hint, 0);
+					Resolved resolved = ResolveType(type, m_hint, 0);
+					resolved.text     = text;
+					return resolved;
 				}
 
 				return ResolveInitializerAfter(m_tree.NodesSoA().FirstToken(node), depth);
@@ -5829,11 +7401,96 @@ namespace heimdall
 			return i;
 		}
 
+		// `void S::f() const`: the definition's qualifiers between its parameter
+		// list and its body.
+		bool IsConstMemberFunction(const ParseTree& tree, std::size_t function)
+		{
+			if (function == NoIndex)
+			{
+				return false;
+			}
+
+			const auto grammar = tree.NodesSoA()[function];
+			const auto& tokens = tree.Tokens();
+			const std::size_t end =
+				std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+				tokens.size());
+			int depth            = 0;
+			bool after_params    = false;
+			bool const_qualified = false;
+			for (std::size_t t = grammar.GetFirstToken(); t < end; ++t)
+			{
+				const std::string_view text = tree.Text(tokens[t]);
+				if (tokens[t].kind == TokenKind::Punctuation)
+				{
+					if (text == "(")
+					{
+						++depth;
+						const_qualified = false;
+					}
+					else if (text == ")" && --depth == 0)
+					{
+						after_params = true;
+					}
+					else if (depth == 0 && (text == "{" || text == ":" || text == "->"))
+					{
+						break;
+					}
+
+					continue;
+				}
+
+				if (after_params && depth == 0 && text == "const")
+				{
+					const_qualified = true;
+				}
+			}
+
+			return const_qualified;
+		}
+
+		// The object named by the receiver is const: a `const T` variable or
+		// reference, a pointer to const through `->`, or `this` in a const member.
+		bool ReceiverIsConst(
+			const ParseTree& tree,
+			std::size_t offset,
+			const Chain& chain,
+			const Resolved& type,
+			std::string_view op)
+		{
+			if (chain.segments.size() == 1 && chain.segments.front().name == "this" &&
+				chain.segments.front().post.empty())
+			{
+				return IsConstMemberFunction(tree, EnclosingFunction(tree, offset));
+			}
+
+			if (chain.segments.size() != 1 ||!chain.segments.front().post.empty())
+			{
+				return false;
+			}
+
+			std::string_view text  = type.text;
+			const std::size_t star = text.rfind('*');
+			if (op == "->")
+			{
+				// `const S* p` keeps the `*` in its declarator: the text is the pointee;
+				// smart pointers were already dereferenced to their template argument.
+				text = text.substr(0, star);
+			}
+			else if (star != std::string_view::npos)
+			{
+				return false;
+			}
+
+			return HasWord(text, "const");
+		}
+
 		void CompleteMember(
 			const ParseTree& tree,
 			std::size_t offset,
 			std::string_view prefix,
 			const ScopeIndex* external,
+			bool for_hover,
 			StringInterner& interner,
 			FlatHashMap<CompletionItem>& best)
 		{
@@ -5966,7 +7623,153 @@ namespace heimdall
 				return;
 			}
 
-			resolver.CollectMembers(type.path, prefix, interner, best);
+			MemberFilter filter;
+			filter.const_receiver = !for_hover && ReceiverIsConst(tree, offset, chain, type, op_text);
+			filter.ignore_access  = for_hover;
+			resolver.CollectMembers(type.path, prefix, interner, best, filter);
+		}
+
+		// Unqualified names inside a class body or an out-of-line member definition
+		// also find the class's members and its bases' accessible members. An
+		// explicit-object member function (`this Self& self`) has no implicit `this`.
+		void CompleteImplicitMembers(
+			const ParseTree& tree,
+			const CursorScopes& cursor,
+			std::size_t offset,
+			std::string_view prefix,
+			const ScopeIndex* external,
+			bool for_hover,
+			StringInterner& interner,
+			FlatHashMap<CompletionItem>& best)
+		{
+			if (cursor.explicit_object)
+			{
+				return;
+			}
+
+			bool member_context = cursor.record != NoIndex;
+			if (!member_context && cursor.function != NoIndex)
+			{
+				const std::size_t declarator =
+					FindChild(tree, cursor.function, GrammarKind::Declarator);
+				member_context = declarator != NoIndex &&
+					FindChild(tree, declarator, GrammarKind::NestedNameSpecifier) != NoIndex;
+			}
+
+			if (!member_context)
+			{
+				return;
+			}
+
+			const MemberResolver resolver(tree, external, offset);
+			if (resolver.EnclosingRecords().empty())
+			{
+				return;
+			}
+
+			MemberFilter filter;
+			filter.include_types = true;
+			filter.ignore_access = for_hover;
+			resolver.CollectMembers(resolver.EnclosingRecords().front(), prefix, interner, best,
+				filter);
+		}
+
+		// `virtual void f(int) const = 0` as an override declaration:
+		// `void f(int) const override`.
+		std::string OverrideLabel(std::string_view detail)
+		{
+			std::string label(detail);
+			if (label.starts_with("virtual "))
+			{
+				label.erase(0, std::string_view("virtual ").size());
+			}
+
+			constexpr std::string_view kTrailers[] = {" override", " final", " = 0", "=0"};
+			for (bool trimmed = true; trimmed;)
+			{
+				trimmed = false;
+				while (!label.empty() && label.back() == ' ')
+				{
+					label.pop_back();
+				}
+
+				for (const auto trailer : kTrailers)
+				{
+					if (label.ends_with(trailer))
+					{
+						label.resize(label.size() - trailer.size());
+						trimmed = true;
+					}
+				}
+			}
+
+			return label + " override";
+		}
+
+		// At the start of a member declaration in a class body, suggest overriding
+		// the virtual functions the class inherits.
+		void CompleteOverrides(
+			const ParseTree& tree,
+			const CursorScopes& cursor,
+			std::size_t offset,
+			std::string_view prefix,
+			const ScopeIndex* external,
+			StringInterner& interner,
+			FlatHashMap<CompletionItem>& best)
+		{
+			const std::size_t record = cursor.record;
+			if (record == NoIndex)
+			{
+				return;
+			}
+
+			if (cursor.function != NoIndex &&
+				NodeRange(tree, cursor.function).first > NodeRange(tree, record).first)
+			{
+				return; // inside a member function
+			}
+
+			const auto& tokens   = tree.Tokens();
+			const std::size_t at = offset - std::min(offset, prefix.size());
+			std::size_t before   = TokenBefore(tokens, at);
+			if (before < tokens.size() && (tokens[before].kind == TokenKind::Whitespace ||
+				tokens[before].kind == TokenKind::LineComment ||
+				tokens[before].kind == TokenKind::BlockComment))
+			{
+				before = PreviousSignificant(tokens, before, tree.Source());
+			}
+
+			if (before >= tokens.size())
+			{
+				return;
+			}
+
+			const std::string_view lead = tree.Text(tokens[before]);
+			bool declaration_start      = lead == "{" || lead == ";" || lead == "}";
+			if (lead == ":")
+			{
+				const std::size_t label = PreviousSignificant(tokens, before, tree.Source());
+				const std::string_view word =
+					label < tokens.size() ? tree.Text(tokens[label]) : std::string_view {};
+				declaration_start = word == "public" || word == "protected" || word == "private";
+			}
+
+			if (!declaration_start)
+			{
+				return;
+			}
+
+			const MemberResolver resolver(tree, external, offset);
+			for (const auto& function_item : resolver.Overridable(ScopePath(tree, record)))
+			{
+				CompletionItem item {OverrideLabel(function_item.detail), CompletionKind::Function,
+					"override", function_item.documentation};
+				item.filter_text = function_item.label;
+				if (MatchesItem(item, prefix))
+				{
+					InsertItem(interner, best, std::move(item));
+				}
+			}
 		}
 
 		// `auto x = f();` hovers as the type `f` returns instead of `auto`. Only the
@@ -6145,6 +7948,179 @@ namespace heimdall
 		return std::string(source.substr(start, offset - start));
 	}
 
+	namespace
+	{
+		// `call(a, /*na|`: a block comment opened right after `(` or `,` of a call,
+		// holding at most the start of one word. Names the callee and the argument.
+		struct ParameterComment
+		{
+			std::string_view callee;
+			std::size_t argument = 0;
+			std::string_view typed;
+			bool ok = false;
+		};
+
+		ParameterComment ParameterCommentAt(std::string_view source,
+			const std::vector<Token>& tokens, std::size_t offset)
+		{
+			ParameterComment result;
+			const std::size_t comment = TokenBefore(tokens, offset);
+			if (comment >= tokens.size() || tokens[comment].kind != TokenKind::BlockComment)
+			{
+				return result;
+			}
+
+			constexpr std::size_t kOpenerLen = 2;
+			const Token& token               = tokens[comment];
+			if (offset < token.offset + kOpenerLen)
+			{
+				return result;
+			}
+
+			std::string_view inside =
+				source.substr(token.offset + kOpenerLen, offset - token.offset - kOpenerLen);
+			while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t'))
+			{
+				inside.remove_prefix(1);
+			}
+
+			if (!std::all_of(inside.begin(), inside.end(),[](char c)
+				{
+					return IsIdentChar(c);
+			}))
+			{
+				return result;
+			}
+
+			std::size_t open     = PreviousSignificant(tokens, comment, source);
+			std::size_t argument = 0;
+			int depth            = 0;
+			while (open < tokens.size())
+			{
+				if (tokens[open].kind == TokenKind::Punctuation)
+				{
+					const std::string_view text = TokenText(source, tokens[open]);
+					if (text == ")" || text == "]" || text == "}")
+					{
+						++depth;
+					}
+					else if (text == "(" || text == "[" || text == "{")
+					{
+						if (depth == 0)
+						{
+							break;
+						}
+
+						--depth;
+					}
+					else if (text == "," && depth == 0)
+					{
+						++argument;
+					}
+					else if (text == ";" && depth == 0)
+					{
+						return result;
+					}
+				}
+
+				open = open == 0 ? tokens.size() : PreviousSignificant(tokens, open, source);
+			}
+
+			const std::size_t lead = PreviousSignificant(tokens, comment, source);
+			if (open >= tokens.size() || TokenText(source, tokens[open]) != "(" ||
+				lead >= tokens.size() ||
+				(TokenText(source, tokens[lead]) != "(" && TokenText(source, tokens[lead]) != ","))
+			{
+				return result;
+			}
+
+			const std::size_t callee = PreviousSignificant(tokens, open, source);
+			if (callee >= tokens.size() || tokens[callee].kind != TokenKind::Identifier)
+			{
+				return result;
+			}
+
+			result.callee   = TokenText(source, tokens[callee]);
+			result.argument = argument;
+			result.typed    = inside;
+			result.ok       = true;
+			return result;
+		}
+
+		// `name=*/` for the parameter at the comment's argument position, from every
+		// declaration of the callee (overloads are merged by name).
+		std::vector<CompletionItem> CompleteParameterComment(
+			const ParseTree& tree,
+			const ParameterComment& comment,
+			const ScopeIndex* external)
+		{
+			std::vector<CompletionItem> signatures;
+			for (std::size_t n = 0; n < tree.NodesSoA().size(); ++n)
+			{
+				if (tree.NodesSoA().Kind(n) != GrammarKind::DeclaredName ||
+					tree.Text(tree.Tokens()[tree.NodesSoA().FirstToken(n)]) != comment.callee ||
+					ClassifyDeclaredName(tree, n) != CompletionKind::Function)
+				{
+					continue;
+				}
+
+				signatures.push_back(DescribeDeclared(tree, tree.Source(), tree.Tokens(), n,
+					comment.callee, CompletionKind::Function));
+			}
+
+			if (external != nullptr)
+			{
+				for (const auto& scope : *external)
+				{
+					for (const auto& member : scope.members)
+					{
+						if (member.kind == CompletionKind::Function && member.label == comment.callee)
+						{
+							signatures.push_back(member);
+						}
+					}
+				}
+			}
+
+			std::vector<CompletionItem> items;
+			for (const auto& signature : signatures)
+			{
+				const auto parameters = DetailParameters(signature.detail, signature.label);
+				if (comment.argument >= parameters.size())
+				{
+					continue;
+				}
+
+				const std::string_view name = parameters[comment.argument].name;
+				if (name.empty() ||!MatchesPrefix(name, comment.typed))
+				{
+					continue;
+				}
+
+				std::string label = std::string(name) + "=*/";
+				const bool seen = std::any_of(items.begin(), items.end(),
+					[&](const CompletionItem& item)
+					{
+						return item.label == label;
+				});
+				if (seen)
+				{
+					continue;
+				}
+
+				CompletionItem item {std::move(label), CompletionKind::Variable, signature.detail, {}};
+				item.filter_text = std::string(name);
+				items.push_back(std::move(item));
+			}
+
+			std::sort(items.begin(), items.end(),[](const auto& left, const auto& right)
+				{
+					return left.label < right.label;
+			});
+			return items;
+		}
+	} // namespace
+
 	std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source,
 		std::size_t offset)
 	{
@@ -6173,7 +8149,7 @@ namespace heimdall
 		const std::vector<Token> tokens = Lexer(source).Lex();
 		const CursorContext context     = ClassifyContext(source, tokens, offset, prefix);
 
-		if (context == CursorContext::Suppressed)
+		if (context == CursorContext::Suppressed && !ParameterCommentAt(source, tokens, offset).ok)
 			return {};
 
 		// Use flat hash map with interned strings for better cache behavior
@@ -6226,14 +8202,33 @@ namespace heimdall
 			return Complete(tree, options, offset, external);
 		}
 
-		return CollectAndSort(best);
+		return RankItems(CollectAndSort(best), prefix);
 	}
+
+	static std::vector<CompletionItem> CompleteTree(
+		const ParseTree& tree,
+		const ParserOptions& options,
+		std::size_t offset,
+		const ScopeIndex* external,
+		bool for_hover);
 
 	std::vector<CompletionItem> CompletionEngine::Complete(
 		const ParseTree& tree,
 		const ParserOptions& options,
 		std::size_t offset,
 		const ScopeIndex* external)
+	{
+		return CompleteTree(tree, options, offset, external, false);
+	}
+
+	// Hover looks the hovered word up through completion: it skips the filters
+	// that only make sense while typing (new names, access, constness).
+	static std::vector<CompletionItem> CompleteTree(
+		const ParseTree& tree,
+		const ParserOptions& options,
+		std::size_t offset,
+		const ScopeIndex* external,
+		bool for_hover)
 	{
 		const std::string_view source    = tree.Source();
 		const std::vector<Token>& tokens = tree.Tokens();
@@ -6242,8 +8237,16 @@ namespace heimdall
 			offset = source.size();
 		}
 
-		const std::string prefix    = PrefixAt(source, offset);
+		const std::string prefix    = CompletionEngine::PrefixAt(source, offset);
 		const CursorContext context = ClassifyContext(source, tokens, offset, prefix);
+
+		if (!for_hover)
+		{
+			if (const ParameterComment comment = ParameterCommentAt(source, tokens, offset); comment.ok)
+			{
+				return CompleteParameterComment(tree, comment, external);
+			}
+		}
 
 		if (context == CursorContext::Suppressed)
 			return {};
@@ -6296,7 +8299,7 @@ namespace heimdall
 			const std::vector<std::vector<std::string>> scope_paths = BuildScopePaths(tree);
 			if (context == CursorContext::MemberAccess)
 			{
-				CompleteMember(tree, offset, prefix, external, interner, best);
+				CompleteMember(tree, offset, prefix, external, for_hover, interner, best);
 			}
 			else if (context == CursorContext::ScopeAccess)
 			{
@@ -6306,12 +8309,26 @@ namespace heimdall
 			}
 			else
 			{
+				// `int na|` inside a function body names a new variable.
+				if (!for_hover && FindCallable(callables, offset) != NoIndex &&
+					NamesNewDeclarator(source, tokens, offset, prefix))
+				{
+					return {};
+				}
+
+				const CursorScopes cursor = FindCursorScopes(tree, offset);
 				CompleteExpression(tree, source, tokens, options, callables, scope_paths, offset,
-					prefix, external, interner, best);
+					prefix, external, cursor, interner, best);
+				CompleteImplicitMembers(tree, cursor, offset, prefix, external, for_hover, interner,
+					best);
+				if (!for_hover)
+				{
+					CompleteOverrides(tree, cursor, offset, prefix, external, interner, best);
+				}
 			}
 		}
 
-		return CollectAndSort(best, interner);
+		return RankItems(CollectAndSort(best, interner), prefix);
 	}
 
 	namespace
@@ -6651,7 +8668,7 @@ namespace heimdall
 			}
 		}
 
-		const auto items = Complete(tree, options, end, external);
+		const auto items = CompleteTree(tree, options, end, external, true);
 		for (const auto& item : items)
 		{
 			if (item.label == word)

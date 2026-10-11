@@ -17,6 +17,12 @@ namespace heimdall
 			return {code, std::move(message)};
 		}
 
+		bool TemplateParameterNamed(
+			const ParseTree& tree,
+			const GrammarNodeSoA& soa,
+			NodeId node,
+			std::string_view name);
+
 		void AppendDocumentationEdits(
 			const ParseTree& tree,
 			DocumentEdits& edits,
@@ -302,6 +308,21 @@ namespace heimdall
 			const auto& tree        = model.Tree();
 			const auto& tokens      = tree.Tokens();
 			const auto& significant = model.Significant();
+			const auto& soa         = tree.NodesSoA();
+			ScopeId function        = scope;
+			while (function < model.Scopes().Size() &&
+				model.Scopes().kind[function] == ScopeKind::Block)
+			{
+				function = model.Scopes().parent[function];
+			}
+
+			if (function < model.Scopes().Size() &&
+				model.Scopes().kind[function] == ScopeKind::Function &&
+				TemplateParameterNamed(tree, soa, model.Scopes().node[function], name))
+			{
+				return std::unexpected(Error(RefactoringErrorCode::NameCollision,
+					"The new name collides with a template parameter"));
+			}
 
 			// Uses outside the renamed function's token range resolve in scopes
 			// that can never sit inside the target's scope, so they cannot be
@@ -527,6 +548,56 @@ namespace heimdall
 			return found;
 		}
 
+		bool TemplateParameterNamed(
+			const ParseTree& tree,
+			const GrammarNodeSoA& soa,
+			NodeId node,
+			std::string_view name)
+		{
+			const auto& tokens = tree.Tokens();
+			for (auto ancestor = node; ancestor < soa.size(); ancestor = soa.Parent(ancestor))
+			{
+				if (soa.Kind(ancestor) == GrammarKind::TemplateDeclaration)
+				{
+					const auto begin = soa.FirstToken(ancestor);
+					const auto end = std::min<std::uint32_t>(begin + soa.TokenCount(ancestor),
+						static_cast<std::uint32_t>(tokens.size()));
+					std::uint32_t depth = 0;
+					for (auto i = begin; i < end; ++i)
+					{
+						if (tokens[i].tok == Tok::Lt)
+						{
+							++depth;
+							continue;
+						}
+
+						if (tokens[i].tok == Tok::Gt && depth != 0)
+						{
+							if (--depth == 0)
+							{
+								break;
+							}
+
+							continue;
+						}
+
+						if (depth != 0 && tokens[i].kind == TokenKind::Identifier &&
+							tokens[i].tok == Tok::None && tree.Text(tokens[i]) == name)
+						{
+							return true;
+						}
+					}
+				}
+
+				if (ancestor == 0 || soa.Parent(ancestor) == ancestor)
+				{
+					break;
+				}
+			}
+
+			return false;
+		}
+
 		// Member name token -> resolved field (kNone when unresolvable) for
 		// every member access in the unit. Shared by reference collection and
 		// new-name capture analysis so both see the same attribution.
@@ -746,6 +817,13 @@ namespace heimdall
 				return {};
 			}
 
+			if (TemplateParameterNamed(tree, tree.NodesSoA(),
+				scopes.node[class_scope], name))
+			{
+				return std::unexpected(Error(RefactoringErrorCode::NameCollision,
+					"The new name collides with a template parameter"));
+			}
+
 			if (owner != kNone)
 			{
 				// The class or a base already declares the name; any kind collides.
@@ -911,6 +989,12 @@ namespace heimdall
 				return std::unexpected(
 					Error(RefactoringErrorCode::NameCollision,
 					"The new name changes lookup in an affected scope"));
+			}
+
+			if (after.Refs().state != model.Refs().state)
+			{
+				return std::unexpected(Error(RefactoringErrorCode::SemanticChange,
+					"Rename changes reference dependency states"));
 			}
 
 			for (SymbolId i = 0; i < before_symbols.Size(); ++i)
@@ -1139,6 +1223,7 @@ namespace heimdall
 			: node;
 			const auto scan_node =
 				scope_node < soa.size() ? scope_node : node;
+
 			const auto scan_begin = soa.FirstToken(scan_node);
 			const auto scan_end   = scan_begin + soa.TokenCount(scan_node);
 			// Lambdas, templates and requires-expressions have uses the binder
@@ -1232,8 +1317,12 @@ namespace heimdall
 						std::ranges::find(symbols.decl_token, i) != symbols.decl_token.end();
 					if (!declaration)
 					{
+						const auto state = model->ReferenceState(i);
+						const auto message = state == RefState::Dependent
+						? "A dependent template reference cannot be resolved safely"
+						: "An occurrence of this name is not resolved";
 						return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
-							"An occurrence of this name is not resolved"));
+							message));
 					}
 				}
 			}

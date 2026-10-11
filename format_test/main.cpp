@@ -86,5 +86,10 @@ int main()
 
 	list.Push(2);
 
+	auto node = new Node<float>();
+	auto test = node;
+
+	test.value = 2.0f;
+
 	return 0;
 }

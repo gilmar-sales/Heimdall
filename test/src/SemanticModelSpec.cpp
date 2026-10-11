@@ -14,17 +14,15 @@ namespace
     {
         explicit Bound(std::string source) :
             text(std::make_shared<const std::string>(std::move(source))),
-            tree(heimdall::ParseTree::Parse(*text)), model(heimdall::Binder::Bind(tree))
-        {
-        }
+            tree(heimdall::ParseTree::Parse(*text)), model(heimdall::Binder::Bind(tree)) {}
 
         Bound(const Bound&) = delete;
 
-        Bound& operator=(const Bound&) = delete;
+        Bound& operator= (const Bound&) = delete;
 
         std::shared_ptr<const std::string> text;
-        heimdall::ParseTree                tree;
-        heimdall::SemanticModel            model;
+        heimdall::ParseTree tree;
+        heimdall::SemanticModel model;
 
         // First symbol with this spelling (optionally of a kind), or kNone.
         heimdall::SymbolId Find(std::string_view name, heimdall::SymbolKind kind) const
@@ -48,7 +46,7 @@ namespace
             for (std::uint32_t i = 0; i < tokens.size(); ++i)
             {
                 if (tokens[i].kind == heimdall::TokenKind::Identifier &&
-                    tree.Text(tokens[i]) == name && occurrence-- == 0)
+                    tree.Text(tokens[i]) == name && occurrence--== 0)
                 {
                     return i;
                 }
@@ -67,12 +65,12 @@ namespace
 
 TEST(InternPool, EqualTextsShareAnIdAndUnknownTextsAreNotFound)
 {
-    heimdall::Arena      arena;
+    heimdall::Arena arena;
     heimdall::InternPool pool(arena.Resource());
-    const std::string    source = "alpha beta alpha";
-    const auto           a      = pool.Intern(std::string_view(source).substr(0, 5));
-    const auto           b      = pool.Intern(std::string_view(source).substr(6, 4));
-    const auto           again  = pool.Intern(std::string_view(source).substr(11, 5));
+    const std::string source = "alpha beta alpha";
+    const auto a = pool.Intern(std::string_view(source).substr(0, 5));
+    const auto b = pool.Intern(std::string_view(source).substr(6, 4));
+    const auto again = pool.Intern(std::string_view(source).substr(11, 5));
     EXPECT_EQ(a, again);
     EXPECT_NE(a, b);
     EXPECT_EQ(pool.Text(b), "beta");
@@ -83,12 +81,12 @@ TEST(InternPool, EqualTextsShareAnIdAndUnknownTextsAreNotFound)
 
 TEST(InternPool, CopiedTextOutlivesItsSource)
 {
-    heimdall::Arena      arena;
+    heimdall::Arena arena;
     heimdall::InternPool pool(arena.Resource());
-    heimdall::NameId     id;
+    heimdall::NameId id;
     {
         std::string temporary = "operator==";
-        id                    = pool.InternCopy(temporary);
+        id = pool.InternCopy(temporary);
         temporary.assign(temporary.size(), 'x');
     }
 
@@ -98,8 +96,8 @@ TEST(InternPool, CopiedTextOutlivesItsSource)
 
 TEST(Arena, ResourceAllocationsAreAccountedFor)
 {
-    heimdall::Arena       arena;
-    const auto            before = arena.Used();
+    heimdall::Arena arena;
+    const auto before = arena.Used();
     std::pmr::vector<int> values(arena.Resource());
     values.assign(1000, 7);
     EXPECT_GE(arena.Used(), before + 1000 * sizeof(int));
@@ -113,12 +111,12 @@ TEST(SemanticModel, ModelAllocatesFromItsArena)
 
 TEST(Binder, BuildsNamespaceAndClassScopes)
 {
-    Bound       bound("namespace outer { namespace inner { class Widget { int size; }; } }\n");
+    Bound bound("namespace outer { namespace inner { class Widget { int size; }; } }\n");
     const auto& scopes = bound.model.Scopes();
-    const auto  outer  = bound.Find("outer", heimdall::SymbolKind::Namespace);
-    const auto  inner  = bound.Find("inner", heimdall::SymbolKind::Namespace);
-    const auto  widget = bound.Find("Widget", heimdall::SymbolKind::Class);
-    const auto  size   = bound.Find("size", heimdall::SymbolKind::Variable);
+    const auto outer = bound.Find("outer", heimdall::SymbolKind::Namespace);
+    const auto inner = bound.Find("inner", heimdall::SymbolKind::Namespace);
+    const auto widget = bound.Find("Widget", heimdall::SymbolKind::Class);
+    const auto size = bound.Find("size", heimdall::SymbolKind::Variable);
     ASSERT_NE(outer, heimdall::kNone);
     ASSERT_NE(inner, heimdall::kNone);
     ASSERT_NE(widget, heimdall::kNone);
@@ -134,9 +132,26 @@ TEST(Binder, BuildsNamespaceAndClassScopes)
     EXPECT_EQ(bound.model.LookupMember(inner, bound.model.Names().Find("Widget")), widget);
 }
 
+TEST(Binder, ModelsTemplateParameterScopeAndDependentReferenceState)
+{
+    Bound bound("template<class T, int N> int f(int value, T object) "
+        "{ return object.member + value + N; }");
+    const auto typeParameter = bound.Find("T", heimdall::SymbolKind::TemplateParameter);
+    const auto valueParameter = bound.Find("N", heimdall::SymbolKind::TemplateParameter);
+    ASSERT_NE(typeParameter, heimdall::kNone);
+    ASSERT_NE(valueParameter, heimdall::kNone);
+    const auto& symbols = bound.model.Symbols();
+    const auto value = bound.Find("value", heimdall::SymbolKind::Parameter);
+    ASSERT_NE(value, heimdall::kNone);
+    EXPECT_EQ(bound.tree.NodesSoA().Kind(symbols.decl_node[typeParameter]),
+              heimdall::GrammarKind::TemplateDeclaration);
+    EXPECT_EQ(bound.model.ResolveToken(bound.Token("N", 1)), valueParameter);
+    EXPECT_EQ(bound.model.ReferenceState(bound.Token("member")), heimdall::RefState::Dependent);
+}
+
 TEST(Binder, ReopenedNamespaceSharesItsScope)
 {
-    Bound      bound("namespace n { int a; }\nnamespace n { int b; }\n");
+    Bound bound("namespace n { int a; }\nnamespace n { int b; }\n");
     const auto n = bound.Find("n", heimdall::SymbolKind::Namespace);
     ASSERT_NE(n, heimdall::kNone);
     const auto& names = bound.model.Names();
@@ -166,12 +181,12 @@ TEST(Binder, RecordsMemberFunctionFlags)
         "    void f() {}\n"
         "};\n");
     const auto kind = heimdall::SymbolKind::Function;
-    const auto a    = bound.Find("a", kind);
-    const auto b    = bound.Find("b", kind);
-    const auto c    = bound.Find("c", kind);
-    const auto d    = bound.Find("d", kind);
-    const auto e    = bound.Find("e", kind);
-    const auto f    = bound.Find("f", kind);
+    const auto a = bound.Find("a", kind);
+    const auto b = bound.Find("b", kind);
+    const auto c = bound.Find("c", kind);
+    const auto d = bound.Find("d", kind);
+    const auto e = bound.Find("e", kind);
+    const auto f = bound.Find("f", kind);
     ASSERT_NE(a, heimdall::kNone);
     ASSERT_NE(b, heimdall::kNone);
     ASSERT_NE(c, heimdall::kNone);
@@ -193,10 +208,10 @@ TEST(Binder, RecordsMemberFunctionFlags)
 
 TEST(Binder, ConstructorsAndDestructorsAreFlagged)
 {
-    Bound       bound("struct S { S(); S(int x); ~S(); };\n");
+    Bound bound("struct S { S(); S(int x); ~S(); };\n");
     std::size_t constructors = 0;
-    std::size_t destructors  = 0;
-    const auto& symbols      = bound.model.Symbols();
+    std::size_t destructors = 0;
+    const auto& symbols = bound.model.Symbols();
     for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
     {
         if (symbols.kind[i] != heimdall::SymbolKind::Function)
@@ -215,20 +230,21 @@ TEST(Binder, ConstructorsAndDestructorsAreFlagged)
 TEST(Binder, SignatureIgnoresParameterNamesAndDefaults)
 {
     Bound bound("struct B { virtual void f(int a, const char* s); virtual void g(int a = 1); };\n"
-                "struct D : B { void f(int renamed, const char* text); void g(int); };\n");
-    const auto& symbols   = bound.model.Symbols();
-    const auto& names     = bound.model.Names();
-    const auto  signature = [&](std::string_view name, std::size_t occurrence) {
+        "struct D : B { void f(int renamed, const char* text); void g(int); };\n");
+    const auto& symbols = bound.model.Symbols();
+    const auto& names = bound.model.Names();
+    const auto signature =[&](std::string_view name, std::size_t occurrence)
+    {
         for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
         {
             if (symbols.kind[i] == heimdall::SymbolKind::Function &&
-                names.Text(symbols.name[i]) == name && occurrence-- == 0)
+                names.Text(symbols.name[i]) == name && occurrence--== 0)
             {
                 return symbols.signature[i];
             }
         }
 
-        return std::uint64_t { 0 };
+        return std::uint64_t {0};
     };
 
     EXPECT_NE(signature("f", 0), 0u);
@@ -239,8 +255,8 @@ TEST(Binder, SignatureIgnoresParameterNamesAndDefaults)
 
 TEST(Binder, SignatureSeparatesTypesAndQualifiers)
 {
-    Bound       bound("struct S { void f(int); void f(long); void f(int) const; void f(int&); void "
-                "h(void); void h(); };\n");
+    Bound bound("struct S { void f(int); void f(long); void f(int) const; void f(int&); void "
+        "h(void); void h(); };\n");
     const auto& symbols = bound.model.Symbols();
     std::vector<std::uint64_t> f;
     std::vector<std::uint64_t> h;
@@ -277,7 +293,7 @@ TEST(Binder, ResolvesBasesIncludingQualifiedOnes)
     const auto derived = bound.Find("Derived", heimdall::SymbolKind::Class);
     ASSERT_NE(derived, heimdall::kNone);
     const auto& symbols = bound.model.Symbols();
-    const auto& bases   = bound.model.Bases();
+    const auto& bases = bound.model.Bases();
     ASSERT_EQ(symbols.base_count[derived], 3u);
     const auto first = symbols.first_base[derived];
     EXPECT_EQ(bases.target[first], bound.Find("Base", heimdall::SymbolKind::Class));
@@ -288,7 +304,7 @@ TEST(Binder, ResolvesBasesIncludingQualifiedOnes)
 
 TEST(Binder, TemplateIdBasesStayUnresolved)
 {
-    Bound      bound("template <class T> struct Box {};\nstruct D : Box<int> {};\n");
+    Bound bound("template <class T> struct Box {};\nstruct D : Box<int> {};\n");
     const auto derived = bound.Find("D", heimdall::SymbolKind::Class);
     ASSERT_NE(derived, heimdall::kNone);
     ASSERT_EQ(bound.model.Symbols().base_count[derived], 1u);
@@ -298,7 +314,7 @@ TEST(Binder, TemplateIdBasesStayUnresolved)
 
 TEST(Binder, ClassNamedLikeItselfIsNotItsOwnBase)
 {
-    Bound      bound("struct A : A {};\n");
+    Bound bound("struct A : A {};\n");
     const auto a = bound.Find("A", heimdall::SymbolKind::Class);
     ASSERT_NE(a, heimdall::kNone);
     ASSERT_EQ(bound.model.Symbols().base_count[a], 1u);
@@ -307,9 +323,9 @@ TEST(Binder, ClassNamedLikeItselfIsNotItsOwnBase)
 
 TEST(Binder, MemberLookupSearchesBases)
 {
-    Bound       bound("struct B { int inherited; };\nstruct D : B { int own; };\n");
-    const auto  d     = bound.Find("D", heimdall::SymbolKind::Class);
-    const auto  b     = bound.Find("B", heimdall::SymbolKind::Class);
+    Bound bound("struct B { int inherited; };\nstruct D : B { int own; };\n");
+    const auto d = bound.Find("D", heimdall::SymbolKind::Class);
+    const auto b = bound.Find("B", heimdall::SymbolKind::Class);
     const auto& names = bound.model.Names();
     EXPECT_EQ(bound.model.LookupMember(d, names.Find("inherited")),
               bound.Find("inherited", heimdall::SymbolKind::Variable));
@@ -318,7 +334,7 @@ TEST(Binder, MemberLookupSearchesBases)
 
 TEST(Binder, CyclicInheritanceDoesNotHang)
 {
-    Bound      bound("struct A : B {};\nstruct B : A {};\n");
+    Bound bound("struct A : B {};\nstruct B : A {};\n");
     const auto a = bound.Find("A", heimdall::SymbolKind::Class);
     ASSERT_NE(a, heimdall::kNone);
     EXPECT_EQ(bound.model.LookupMember(a, bound.model.Names().Find("A")), heimdall::kNone);
@@ -326,11 +342,11 @@ TEST(Binder, CyclicInheritanceDoesNotHang)
 
 TEST(Binder, ResolvesLocalsParametersAndGlobals)
 {
-    Bound      bound("int g;\n"
-                     "int f(int p) {\n"
-                     "    int a = p;\n"
-                     "    return a + g;\n"
-                     "}\n");
+    Bound bound("int g;\n"
+        "int f(int p) {\n"
+        "    int a = p;\n"
+        "    return a + g;\n"
+        "}\n");
     const auto p = bound.Find("p", heimdall::SymbolKind::Parameter);
     const auto a = bound.Find("a", heimdall::SymbolKind::Variable);
     const auto g = bound.Find("g", heimdall::SymbolKind::Variable);
@@ -345,17 +361,17 @@ TEST(Binder, ResolvesLocalsParametersAndGlobals)
 
 TEST(Binder, InnerBlockShadowsOuterDeclaration)
 {
-    Bound              bound("void f() {\n"
-                             "    int x = 1;\n"
-                             "    {\n"
-                             "        int x = 2;\n"
-                             "        x = 3;\n"
-                             "    }\n"
-                             "    x = 4;\n"
-                             "}\n");
-    const auto&        symbols = bound.model.Symbols();
-    heimdall::SymbolId outer   = heimdall::kNone;
-    heimdall::SymbolId inner   = heimdall::kNone;
+    Bound bound("void f() {\n"
+        "    int x = 1;\n"
+        "    {\n"
+        "        int x = 2;\n"
+        "        x = 3;\n"
+        "    }\n"
+        "    x = 4;\n"
+        "}\n");
+    const auto& symbols = bound.model.Symbols();
+    heimdall::SymbolId outer = heimdall::kNone;
+    heimdall::SymbolId inner = heimdall::kNone;
     for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
     {
         if (symbols.kind[i] == heimdall::SymbolKind::Variable)
@@ -371,13 +387,13 @@ TEST(Binder, InnerBlockShadowsOuterDeclaration)
 
 TEST(Binder, LocalIsNotVisibleBeforeItsDeclaration)
 {
-    Bound              bound("int later;\n"
-                             "void f() {\n"
-                             "    later = 1;\n"
-                             "    int later = 2;\n"
-                             "}\n");
-    const auto&        symbols = bound.model.Symbols();
-    heimdall::SymbolId global  = heimdall::kNone;
+    Bound bound("int later;\n"
+        "void f() {\n"
+        "    later = 1;\n"
+        "    int later = 2;\n"
+        "}\n");
+    const auto& symbols = bound.model.Symbols();
+    heimdall::SymbolId global = heimdall::kNone;
     for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
     {
         if (symbols.kind[i] == heimdall::SymbolKind::Variable)
@@ -394,10 +410,10 @@ TEST(Binder, LocalIsNotVisibleBeforeItsDeclaration)
 
 TEST(Binder, OutOfClassDefinitionSeesClassMembers)
 {
-    Bound      bound("struct S { int m; void h(int p); };\n"
-                     "void S::h(int p) {\n"
-                     "    int a = p + m;\n"
-                     "}\n");
+    Bound bound("struct S { int m; void h(int p); };\n"
+        "void S::h(int p) {\n"
+        "    int a = p + m;\n"
+        "}\n");
     const auto m = bound.Find("m", heimdall::SymbolKind::Variable);
     ASSERT_NE(m, heimdall::kNone);
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("m", 1)), m);
@@ -405,9 +421,9 @@ TEST(Binder, OutOfClassDefinitionSeesClassMembers)
 
 TEST(Binder, QualifiedDefinitionIsNotFoundByUnqualifiedLookup)
 {
-    Bound       bound("struct S { void h(); };\n"
-                      "void S::h() {}\n");
-    const auto& symbols   = bound.model.Symbols();
+    Bound bound("struct S { void h(); };\n"
+        "void S::h() {}\n");
+    const auto& symbols = bound.model.Symbols();
     std::size_t qualified = 0;
     for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
     {
@@ -424,16 +440,16 @@ TEST(Binder, QualifiedDefinitionIsNotFoundByUnqualifiedLookup)
     // through the class, never to the qualified definition.
     EXPECT_EQ(bound.model.Lookup(heimdall::SemanticModel::TranslationUnitScope,
                                  bound.model.Names().Find("h")),
-              heimdall::kNone);
+        heimdall::kNone);
 }
 
 TEST(Binder, QualifiedNamesResolveThroughNamespaces)
 {
     Bound bound("namespace n { int v; namespace deep { int w; } }\n"
-                "void f() {\n"
-                "    n::v = 1;\n"
-                "    n::deep::w = 2;\n"
-                "}\n");
+        "void f() {\n"
+        "    n::v = 1;\n"
+        "    n::deep::w = 2;\n"
+        "}\n");
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("v", 1)),
               bound.Find("v", heimdall::SymbolKind::Variable));
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("w", 1)),
@@ -445,10 +461,10 @@ TEST(Binder, QualifiedNamesResolveThroughNamespaces)
 TEST(Binder, MemberAccessThroughObjectsStaysUnresolved)
 {
     Bound bound("struct S { int m; };\n"
-                "int m;\n"
-                "void f(S obj) {\n"
-                "    obj.m = 1;\n"
-                "}\n");
+        "int m;\n"
+        "void f(S obj) {\n"
+        "    obj.m = 1;\n"
+        "}\n");
     // `obj.m` needs the type of `obj`: it must not fall back to the global `m`.
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("m", 2)), heimdall::kNone);
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("obj", 1)),
@@ -463,9 +479,9 @@ TEST(Binder, UnknownNamesStayUnresolved)
 
 TEST(Binder, EnumeratorsLiveInTheEnclosingScopeUnlessScoped)
 {
-    Bound       bound("enum Plain { A, B };\n"
-                      "enum class Strong { C, D };\n"
-                      "int f() { return A + C; }\n");
+    Bound bound("enum Plain { A, B };\n"
+        "enum class Strong { C, D };\n"
+        "int f() { return A + C; }\n");
     const auto& names = bound.model.Names();
     EXPECT_NE(
         bound.model.LookupLocal(heimdall::SemanticModel::TranslationUnitScope, names.Find("A")),
@@ -488,8 +504,10 @@ TEST(Binder, TypeAliasesAreSymbols)
 TEST(Binder, ToleratesBrokenInput)
 {
     for (const char* source :
-         { "", "struct", "struct S : {", "namespace {", "void f(", "class A { virtual void",
-           "void S::", "enum class", "} } }", "int f() { { { {" })
+        {
+            "", "struct", "struct S : {", "namespace {", "void f(", "class A { virtual void",
+            "void S::", "enum class", "} } }", "int f() { { { {"
+    })
     {
         Bound bound(source);
         EXPECT_GE(bound.model.Scopes().Size(), 1u) << source;

@@ -8,11 +8,26 @@ uri = "file:///tmp/heimdall-inlay-hints.cpp"
 source = (
     "struct Box { int value; };\n"
     "Box makeBox();\n"
+    "using BoxAlias = Box;\n"
+    "namespace qualified { struct Item { int value; }; }\n"
+    "struct Pair { int first; int second; };\n"
+    "Pair makePair();\n"
+    "int values[2] = {1, 2};\n"
+    "struct Local { int member; };\n"
     "void f() {\n"
     "    auto scalar = 42;\n"
+    "    int explicitValue = 3;\n"
     "    auto object = makeBox();\n"
-    "    struct Local { int member; };\n"
     "    auto local = Local{};\n"
+    "    auto alias = BoxAlias{};\n"
+    "    auto qualified = qualified::Item{};\n"
+    "    auto* pointer = new Box;\n"
+    "    auto& reference = scalar;\n"
+    "    auto [first, second] = makePair();\n"
+    "    auto [arrayFirst, arraySecond] = values;\n"
+    "    auto [invalidFirst, invalidSecond];\n"
+    "    auto invalid = unknown_type{};\n"
+    "    auto invalidPointer = (unknown_ptr*)nullptr;\n"
     "}\n"
 )
 
@@ -27,8 +42,8 @@ def run(disabled=False):
                              "text": source}}},
         {"jsonrpc": "2.0", "id": 2, "method": "textDocument/inlayHint", "params": {
             "textDocument": {"uri": uri},
-            "range": {"start": {"line": 0, "character": 0},
-                      "end": {"line": 7, "character": 0}}}},
+            "range": {"start": {"line": 7, "character": 0},
+                      "end": {"line": 22, "character": 0}}}},
         {"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": {}},
         {"jsonrpc": "2.0", "method": "exit"},
     ]
@@ -52,9 +67,19 @@ def run(disabled=False):
 
 
 hints = run()
-assert [hint["label"] for hint in hints] == [
-    ": int", ": Box", ": Local"
+actual = [(hint["position"]["line"], hint["label"]) for hint in hints]
+assert actual == [
+    (9, ": int"),
+    (11, ": Box"),
+    (12, ": Local"),
+    (13, ": Box"),
+    (14, ": Item"),
+    (15, ": Box*"),
+    (16, ": int&"),
+    (17, ": int"),
+    (17, ": int"),
+    (18, ": int"),
+    (18, ": int"),
 ], hints
-assert [hint["position"]["line"] for hint in hints] == [3, 4, 6], hints
 assert all(hint["kind"] == 1 and hint["paddingLeft"] for hint in hints), hints
 assert run(disabled=True) == []

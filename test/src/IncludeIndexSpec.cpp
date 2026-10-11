@@ -470,7 +470,7 @@ TEST(IncludeIndexSpec, MemberAccessResolvesGuardedDecoratedHeaderTypes)
     const auto items =
         heimdall::CompletionEngine::Complete(source, options, source.size(), &index.Scopes());
     EXPECT_TRUE(Contains(items, "area"));
-    EXPECT_TRUE(Contains(items, "cached"));
+    EXPECT_FALSE(Contains(items, "cached")); // private
     EXPECT_TRUE(Contains(items, "base_value")); // inherited
     EXPECT_TRUE(Contains(items, "base_run"));
 }

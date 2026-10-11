@@ -29,6 +29,7 @@ add_library(heimdall_semantic STATIC
   src/UndeclaredType.cpp
   src/ControlFlowRules.cpp
   src/Documentation.cpp
+  src/TypeHierarchy.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
 

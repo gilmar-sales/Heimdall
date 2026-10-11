@@ -26,6 +26,14 @@ namespace heimdall
 		Directive
 	};
 
+	// Access level of a class member; namespace-scope names are Public.
+	enum class MemberAccess : std::uint8_t
+	{
+		Public,
+		Protected,
+		Private
+	};
+
 	struct CompletionItem
 	{
 		std::string label;
@@ -62,6 +70,19 @@ namespace heimdall
 		std::uint64_t field_offset = 0;
 		// Hover on an alias: resolved underlying type, displayed as <type>.
 		std::string type_origin;
+		// Declared `[[deprecated]]` (LSP completion tag).
+		bool deprecated = false;
+		// Text the typed word is matched against when it differs from the label
+		// (override suggestions are labeled with the whole signature).
+		std::string filter_text;
+		MemberAccess access = MemberAccess::Public;
+		// Member functions callable on a const object (`const`, `static`, or an
+		// explicit object taken by value or const reference).
+		bool is_const = false;
+		// Member functions declared `virtual` or overriding a virtual (`override`/`final`).
+		bool is_virtual = false;
+		// Member functions taking an explicit object parameter (`this Self& self`).
+		bool explicit_object = false;
 	};
 
 	// One named scope and its direct members. `path` is the qualified path from

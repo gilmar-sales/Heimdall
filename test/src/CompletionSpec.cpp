@@ -688,9 +688,9 @@ TEST(CompletionSpec, MemberAccessListsMembersOfLocalAndParameterTypes)
                      "void f() { P p; p.| }\n");
     EXPECT_TRUE(Has(dot, "x"));
     EXPECT_TRUE(Has(dot, "run"));
-    EXPECT_TRUE(Has(dot, "y"));
-    EXPECT_TRUE(Has(dot, "hid"));
-    EXPECT_FALSE(Has(dot, "P")); // constructors are not members you can name
+    EXPECT_FALSE(Has(dot, "y"));   // private
+    EXPECT_FALSE(Has(dot, "hid")); // private
+    EXPECT_FALSE(Has(dot, "P"));   // constructors are not members you can name
 
     const auto arrow = MemberLabels("struct P { int x; void run(); };\nvoid f(P* p) { p->r| }\n");
     EXPECT_EQ(arrow, std::vector<std::string> { "run" });
