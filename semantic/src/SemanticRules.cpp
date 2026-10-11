@@ -1336,11 +1336,56 @@ namespace heimdall
 			}
 
 			const auto offset = view.Offset(begin);
-			reporter.ReportNoFix(
+			const auto length = view.End(end - 1) - offset;
+			// A pointer (or array) whose element type the local model cannot see
+			// still converts; spell it without the `<unknown>` marker.
+			const bool is_pointer = table.IsPointer(type) || table.IsArray(type);
+			std::string subject;
+			if (is_pointer && table.Element(type) == TypeTable::Unknown)
+			{
+				subject = table.IsArray(type) ? "an array of unknown type"
+					: "a pointer of unknown type";
+			}
+			else
+			{
+				subject = "'" + types.Spell(type) + "'";
+			}
+
+			if (!is_pointer)
+			{
+				reporter.ReportNoFix(
+					RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion",
+					"implicit conversion of " + subject + " to bool in " +
+					std::string(context) + "; " + advice,
+					offset, length);
+				return;
+			}
+
+			// Quick fix only: `p` becomes `p != nullptr`. Under `!`, the whole
+			// `!p` becomes `p == nullptr` so the negation is preserved.
+			const std::string text(model.Tree().Source().substr(offset, length));
+			auto              fix_offset  = offset;
+			auto              fix_length  = length;
+			auto              replacement = text + " != nullptr";
+			const auto        parent      = nodes.Parent(operand);
+			if (parent < nodes.size() && nodes.Kind(parent) == GrammarKind::UnaryExpression)
+			{
+				const auto[parent_begin, parent_end] = view.Range(parent);
+				if (view.At(parent_begin) == Tok::Bang && parent_begin + 1 == begin &&
+					parent_end == end)
+				{
+					fix_offset  = view.Offset(parent_begin);
+					fix_length  = view.End(parent_end - 1) - fix_offset;
+					replacement = text + " == nullptr";
+				}
+			}
+
+			reporter.Report(
 				RuleId::NoImplicitBoolConversion, "cpp/no-implicit-bool-conversion",
-				"implicit conversion of '" + types.Spell(type) + "' to bool in " +
+				"implicit conversion of " + subject + " to bool in " +
 				std::string(context) + "; " + advice,
-				offset, view.End(end - 1) - offset);
+				offset, length, fix_offset, fix_length, std::move(replacement), false,
+				"Compare with nullptr explicitly");
 		};
 
 		for (std::uint32_t node = 1; node < nodes.size(); ++node)

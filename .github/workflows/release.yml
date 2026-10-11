@@ -230,8 +230,43 @@ jobs:
         path: heimdall-linux-x64.zip
         if-no-files-found: error
 
+  vsix:
+    needs: check-version
+    # Same gate as `build`: check-version is skipped on workflow_dispatch, so
+    # allow that while still requiring success on tagged releases.
+    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+        cache-dependency-path: vscode-extension/package-lock.json
+
+    - name: Install extension dependencies
+      working-directory: vscode-extension
+      run: npm ci
+
+    # `vsce package` runs the vscode:prepublish script (npm run compile) first.
+    # vsce names the output heimdall-vscode-<version>.vsix from package.json.
+    - name: Package VSIX
+      working-directory: vscode-extension
+      run: npm run package
+
+    # Only staged on tags; on other refs this job just validates packaging.
+    - name: Stage VSIX artifact
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/upload-artifact@v4
+      with:
+        name: heimdall-vsix
+        path: vscode-extension/*.vsix
+        if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, vsix]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -250,6 +285,7 @@ jobs:
         files: |
           dist/heimdall-win32-x64.zip
           dist/heimdall-linux-x64.zip
+          dist/*.vsix
           SHA256SUMS.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

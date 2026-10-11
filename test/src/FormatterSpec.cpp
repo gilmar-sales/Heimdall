@@ -630,6 +630,36 @@ TEST(FormatterSpec, SplitsBracesAfterFunctionSuffixes)
           "void f() try\n{\n    x();\n}\ncatch (...)\n{\n    y();\n}\n");
 }
 
+TEST(FormatterSpec, IndentsConstructorInitializerListAfterTrailingColon)
+{
+    // Regression: the member init following a trailing ctor-initializer `:`
+    // used to dedent to column 0 instead of continuing one level deeper.
+    const heimdall::Formatter formatter;
+    const auto                check = [&](std::string_view source, std::string_view expected) {
+        const std::string formatted = formatter.Format(source);
+        EXPECT_EQ(formatted, expected);
+        EXPECT_EQ(formatter.Format(formatted), formatted);
+    };
+    check("Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+          "mComponentManager(componentManager) {}\n",
+          "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+          "    mComponentManager(componentManager) {}\n");
+    check("Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+          "    mComponentManager(componentManager) {}\n",
+          "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+          "    mComponentManager(componentManager) {}\n");
+    check("C::C() noexcept :\n"
+          "x(1) {}\n",
+          "C::C() noexcept:\n"
+          "    x(1) {}\n");
+    check("C::C() :\n"
+          "x(1),\n"
+          "y(2) {}\n",
+          "C::C() :\n"
+          "    x(1),\n"
+          "    y(2) {}\n");
+}
+
 TEST(FormatterSpec, SplitsBracesOfNamedScopes)
 {
     const heimdall::Formatter allman({ .brace_style       = heimdall::BraceStyle::Allman,

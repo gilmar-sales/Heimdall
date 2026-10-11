@@ -70,8 +70,11 @@ namespace heimdall
 		// cpp/no-implicit-bool-conversion: an integer, floating-point or pointer
 		// expression whose type the Typer knows used where a bool is expected: the
 		// condition of `if`/`while`/`for`/`?:`, operands of `!`, `&&` and `||`.
-		// Literals (`while (1)`) and `!!x` are intentional and left alone. No fix:
-		// the comparison to write depends on the intent.
+		// Literals (`while (1)`) and `!!x` are intentional and left alone. Pointers
+		// (even with an unknown pointee type) offer a quick fix only: `p` becomes
+		// `p != nullptr`, or `p == nullptr` for the whole `!p`. Integers and
+		// floating-point values have no fix: the comparison to write depends on
+		// the intent.
 		static std::vector<Diagnostic> AnalyzeImplicitBool(const TypeModel& types);
 
 		// cpp/modernize-range-loop: `for (int i = 0; i < c.size(); ++i)` over a local

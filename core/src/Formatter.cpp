@@ -165,6 +165,7 @@ namespace heimdall
 			2;                                                // trailing-comment runs align from two lines up
 		constexpr std::size_t kIncludeKeywordLength = 7;   // bytes in "include"
 		constexpr int kInheritanceScanLimit         = 32;  // backward scan for a record/enum keyword
+		constexpr int kCtorInitScanLimit              = 32;  // backward scan for a ctor parameter list
 		constexpr int kSingleLineMaxPasses          = 32;  // single-line-style fixpoint iterations
 		constexpr int kEntryCommaScanLimit          = 8;   // backward scan for an `enum` keyword
 		constexpr int kColumnSplitMaxAttempts       = 8;   // column-limit splits per line
@@ -622,6 +623,79 @@ namespace heimdall
 				{
 					return true;
 				}
+			}
+
+			return false;
+		}
+
+		// True when the `:` at sigs[colon] introduces a constructor initializer
+		// list (`C() : x(1)`, `C() noexcept : x(1)`): a `)`-closed parameter
+		// list (with optional declarator suffixes) precedes it at bracket
+		// level 0. Ternary, range-for and inheritance colons are excluded by
+		// their own detectors; a `)` closing a condition (`if (x)` before a
+		// label body) is not a declarator.
+		bool IsCtorInitializerColon(const std::vector<Sig>& sigs, std::size_t colon)
+		{
+			if (colon >= sigs.size() || sigs[colon].text != ":" ||
+				sigs[colon].kind != TokenKind::Punctuation)
+			{
+				return false;
+			}
+
+			if (sigs[colon].paren_depth != 0 || sigs[colon].bracket_depth != 0)
+			{
+				return false;
+			}
+
+			if (IsTernaryColon(sigs, colon) || IsRangeForColon(sigs, colon) ||
+				IsInheritanceColon(sigs, colon))
+			{
+				return false;
+			}
+
+			int steps = 0;
+			for (auto k = colon; k > 0 && steps++ < kCtorInitScanLimit;)
+			{
+				--k;
+				const Sig& s = sigs[k];
+				if (s.kind != TokenKind::Punctuation)
+				{
+					continue; // declarator names and suffix words (`const`, `noexcept`)
+				}
+
+				if (s.text == ")")
+				{
+					if (s.match == kNoSig || s.match == 0 || s.match >= sigs.size())
+					{
+						return false;
+					}
+
+					const Sig& before = sigs[s.match - 1];
+					if (before.kind == TokenKind::Identifier &&
+						(before.text == "noexcept" || before.text == "throw" ||
+						before.text == "requires"))
+					{
+						k = s.match - 1; // suffix group (`noexcept(...)`): skip it whole
+						continue;
+					}
+
+					// A condition is not a declarator (`if (x)` before a label).
+					if (before.kind == TokenKind::Identifier &&
+						(IsControlKeyword(before.text) || before.text == "catch"))
+					{
+						return false;
+					}
+
+					return true;
+				}
+
+				if (s.text == "&" || s.text == "&&" || s.text == "->" || s.text == "<" ||
+					s.text == ">" || s.text == ">>" || s.text == "::")
+				{
+					continue; // ref-qualifiers, trailing returns, template tails
+				}
+
+				return false; // `;`/`{`/`}`/`=`/`(`/`[`/`,`/operators: no declarator
 			}
 
 			return false;
@@ -3212,6 +3286,10 @@ namespace heimdall
 				const std::string_view last = sigs[chunk.end - 1].text;
 				pending =
 					IsContinuationEnd(last) && !(last == "," && IsEntryComma(sigs, chunk.end - 1));
+				if (last == ":" && IsCtorInitializerColon(sigs, chunk.end - 1))
+				{
+					pending = true; // constructor initializer list starts on the next line
+				}
 				if (chunk_index + 1 < chunks.size())
 				{
 					const auto& next = chunks[chunk_index + 1];

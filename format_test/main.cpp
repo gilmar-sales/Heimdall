@@ -28,7 +28,7 @@ int test_method(std::uint32_t first, int b, const std::string& desc)
 {
 	auto value = first + b;
 
-	if (value > 10)
+	if (value)
 	{
 		return 100;
 	}

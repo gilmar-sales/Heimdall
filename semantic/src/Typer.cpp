@@ -277,6 +277,89 @@ namespace heimdall
 				head == "std::u16string" || head == "std::u32string";
 		}
 
+		// Fixed-width integer aliases from <cstdint>/<stdint.h>, resolved exactly
+		// like `std::size_t` below. Widths follow LP64 (the primary toolchain): only
+		// the spelling differs elsewhere, and every entry keeps its signedness so
+		// conversions and diagnostics stay correct.
+		std::optional<BuiltinType> FixedWidthInteger(std::string_view text)
+		{
+			if (text.starts_with("std::"))
+			{
+				text.remove_prefix(std::string_view("std::").size());
+			}
+
+			if (text == "int8_t" ||
+				text == "int_least8_t" ||
+				text == "int_fast8_t")
+			{
+				return BuiltinType::SChar;
+			}
+
+			if (text == "uint8_t" ||
+				text == "uint_least8_t" ||
+				text == "uint_fast8_t")
+			{
+				return BuiltinType::UChar;
+			}
+
+			if (text == "int16_t" ||
+				text == "int_least16_t")
+			{
+				return BuiltinType::Short;
+			}
+
+			if (text == "uint16_t" ||
+				text == "uint_least16_t")
+			{
+				return BuiltinType::UShort;
+			}
+
+			if (text == "int32_t" ||
+				text == "int_least32_t")
+			{
+				return BuiltinType::Int;
+			}
+
+			if (text == "uint32_t" ||
+				text == "uint_least32_t")
+			{
+				return BuiltinType::UInt;
+			}
+
+			if (text == "int64_t" ||
+				text == "int_least64_t" ||
+				text == "int_fast64_t" ||
+				text == "intmax_t")
+			{
+				return BuiltinType::LongLong;
+			}
+
+			if (text == "uint64_t" ||
+				text == "uint_least64_t" ||
+				text == "uint_fast64_t" ||
+				text == "uintmax_t")
+			{
+				return BuiltinType::ULongLong;
+			}
+
+			if (text == "int_fast16_t" ||
+				text == "int_fast32_t" ||
+				text == "intptr_t" ||
+				text == "ptrdiff_t" ||
+				text == "ssize_t")
+			{
+				return BuiltinType::Long;
+			}
+
+			if (text == "uint_fast16_t" ||
+				text == "uint_fast32_t" ||
+				text == "uintptr_t")
+			{
+				return BuiltinType::ULong;
+			}
+			return std::nullopt;
+		}
+
 	} // namespace
 
 	bool IsStdContainerHead(std::string_view head)
@@ -961,6 +1044,7 @@ namespace heimdall
 		}
 
 		std::string text;
+		std::string_view last_component;
 		SymbolId current   = kNone;
 		bool first         = true;
 		bool is_std        = false;
@@ -971,6 +1055,7 @@ namespace heimdall
 		{
 			const auto spelled = TextAt(pos);
 			Append(text, spelled);
+			last_component = spelled;
 			const auto name = m_model.Names().Find(spelled);
 			SymbolId found  = kNone;
 			if (first)
@@ -1044,6 +1129,11 @@ namespace heimdall
 				return m_types.Builtin(BuiltinType::SizeT);
 			}
 
+			if (const auto fixed = FixedWidthInteger(text))
+			{
+				return m_types.Builtin(*fixed);
+			}
+
 			return m_types.External(m_out.m_externals.InternCopy(text));
 		}
 
@@ -1052,6 +1142,26 @@ namespace heimdall
 			if (unresolved && text == "size_t")
 			{
 				return m_types.Builtin(BuiltinType::SizeT);
+			}
+
+			if (unresolved)
+			{
+				if (const auto fixed = FixedWidthInteger(text))
+				{
+					return m_types.Builtin(*fixed);
+				}
+
+				// Names from headers the file includes: the local model never binds
+				// them, but the parse-time oracle knows they are types. Like the
+				// `std::` names above, they model as external types so diagnostics can
+				// spell them instead of reporting `<unknown>`.
+				if (const auto header = m_model.Tree().TypeNames())
+				{
+					if (!last_component.empty() && header->IsType(last_component))
+					{
+						return m_types.External(m_out.m_externals.InternCopy(text));
+					}
+				}
 			}
 
 			return TypeTable::Unknown;

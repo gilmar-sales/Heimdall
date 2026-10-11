@@ -363,6 +363,13 @@ namespace heimdall
             return mPreprocessing.directives;
         }
 
+		// Header type oracle the file was parsed with (may be null): later layers
+		// consult it for names declared in headers, which the local model never binds.
+		std::shared_ptr<const TypeNameOracle> TypeNames() const noexcept
+		{
+            return m_type_names;
+        }
+
         const std::vector<TopLevelItem>& Items() const noexcept
 		{
 			return m_items;
@@ -538,6 +545,7 @@ namespace heimdall
         void EnsureNodesAoS() const;
 
         std::shared_ptr<const std::string> m_owned_source;
+        std::shared_ptr<const TypeNameOracle> m_type_names;
 		std::string_view m_source;
 		CppStandard m_standard = CppStandard::Cpp20;
 		std::vector<Token> m_tokens;

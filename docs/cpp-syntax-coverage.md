@@ -76,7 +76,7 @@ Nos 32 cenários com templates testados não houve falso positivo; os problemas 
 - [ ] **S7. Typer**: função template, alias template e instâncias de classe template (`Box<int>`) são `Unknown`; faltam `T::value_type` e `decltype`.
 - [ ] **S8. Avaliador constante**: qualquer função template é inelegível para `modernize-constexpr`; variable templates e `if constexpr` não são modelados.
 - [ ] **S9. Navegação e completion** (ver `completion-limitations.md`): tipos dependentes, iteradores, lambdas, structured bindings, range-for, `using namespace` (3a) e alias como qualificador (3b).
-- [ ] **S10. Mensagem do `no-implicit-bool-conversion`** imprime `'<unknown>*'` para `T* q`; deveria dizer algo como `T*` ou omitir o tipo.
+- [x] **S10. Mensagem do `no-implicit-bool-conversion`** imprimia `'<unknown>*'` para `T* q`; agora diz "a pointer of unknown type" (ou "an array of unknown type") e ponteiros oferecem quick fix (`p != nullptr`, `p == nullptr` para `!p`).
 
 ## 4. Infraestrutura
 

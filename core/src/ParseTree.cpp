@@ -94,14 +94,15 @@ namespace heimdall
 	void ParseTree::Build(const ParserOptions& options, std::stop_token stop,
 		const ParseReuse* reuse)
 	{
-		auto& tree = *this;
+		auto& tree        = *this;
+		tree.m_type_names = options.type_names;
 		if (stop.stop_requested())
 		{
 			m_cancelled = true;
 			return;
 		}
 
-		if (reuse && reuse->previous)
+		if (reuse != nullptr && reuse->previous)
 		{
 			// Reusing a similarly sized document avoids five independent growth
 			// chains. Cap the hint when a large portion of the source was deleted.
@@ -111,7 +112,7 @@ namespace heimdall
 
 		const auto preprocessingStart = ParseClock::now();
 		PreprocessorResult preprocessing;
-		if (reuse && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
+		if (reuse != nullptr && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
 		{
 			preprocessing     = reuse->previous->mPreprocessing;
 			const auto oldEnd = reuse->offset + reuse->old_length;
@@ -221,6 +222,7 @@ namespace heimdall
 			sizeof(std::uint32_t) *
 			(m_identifier_tokens.capacity() + m_directive_tokens.capacity()) +
 			(m_decoration.capacity() + 7) / 8;
+
 		for (const auto& diagnostic : m_diagnostics)
 		{
 			bytes += diagnostic.message.capacity();
@@ -321,7 +323,7 @@ namespace heimdall
 
 			if (kind == TokenKind::Identifier)
 			{
-				m_identifier_tokens.push_back(static_cast<std::uint32_t>(i));
+				m_identifier_tokens.emplace_back(i);
 			}
 		}
 

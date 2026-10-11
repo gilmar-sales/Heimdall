@@ -2,7 +2,7 @@
   "name": "heimdall-vscode",
   "displayName": "Heimdall - C++ Lint and Format",
   "description": "C++ diagnostics, quick fixes, formatting, and code completion powered by Heimdall.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "gilmar-sales",
   "license": "MIT",
   "engines": {
@@ -23,19 +23,29 @@
   "main": "./out/extension.js",
   "configurationDefaults": {
     "[c]": {
-      "editor.rulers": [100]
+      "editor.rulers": [
+        100
+      ]
     },
     "[cpp]": {
-      "editor.rulers": [100]
+      "editor.rulers": [
+        100
+      ]
     },
     "[cuda]": {
-      "editor.rulers": [100]
+      "editor.rulers": [
+        100
+      ]
     },
     "[objective-c]": {
-      "editor.rulers": [100]
+      "editor.rulers": [
+        100
+      ]
     },
     "[objective-cpp]": {
-      "editor.rulers": [100]
+      "editor.rulers": [
+        100
+      ]
     }
   },
   "contributes": {

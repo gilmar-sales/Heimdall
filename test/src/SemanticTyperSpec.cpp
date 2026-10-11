@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
+#include <unordered_set>
 
 namespace
 {
@@ -56,6 +58,35 @@ namespace
     {
         const Typed typed(source);
         return heimdall::SemanticRules::AnalyzeImplicitBool(typed.types);
+    }
+
+    // Header names the local model cannot bind, answered by a test oracle.
+    struct FakeHeaderTypes : heimdall::TypeNameOracle
+    {
+        explicit FakeHeaderTypes(std::unordered_set<std::string> names) :
+            m_names(std::move(names))
+        {
+        }
+
+        bool IsType(std::string_view name) const noexcept override
+        {
+            return m_names.contains(std::string(name));
+        }
+
+        std::uint64_t Fingerprint() const noexcept override { return 1; }
+
+      private:
+        std::unordered_set<std::string> m_names;
+    };
+
+    std::vector<heimdall::Diagnostic> ImplicitBoolWith(
+        const std::string& source, std::shared_ptr<const heimdall::TypeNameOracle> oracle)
+    {
+        heimdall::ParserOptions options;
+        options.type_names = std::move(oracle);
+        const auto tree    = heimdall::ParseTree::Parse(source, options);
+        const auto model   = heimdall::Binder::Bind(tree);
+        return heimdall::SemanticRules::AnalyzeImplicitBool(heimdall::Typer::Type(model));
     }
 
     std::vector<heimdall::Diagnostic> RangeLoop(const std::string& source)
@@ -855,10 +886,16 @@ TEST(ImplicitBool, ReportsIntegersFloatsAndPointersInConditions)
     EXPECT_NE(diagnostics[4].message.find("'size_t'"), std::string::npos);
     EXPECT_NE(diagnostics[4].message.find("a 'for' condition"), std::string::npos);
     EXPECT_NE(diagnostics[5].message.find("'?:'"), std::string::npos);
-    for (const auto& diagnostic : diagnostics)
+    for (std::size_t i = 0; i < diagnostics.size(); ++i)
     {
-        EXPECT_FALSE(diagnostic.has_fix);
+        // Only the pointer operand offers a quick fix (`!= nullptr`).
+        EXPECT_EQ(diagnostics[i].has_fix, i == 2u) << i;
+        if (diagnostics[i].has_fix)
+        {
+            EXPECT_FALSE(diagnostics[i].fix_is_safe);
+        }
     }
+    EXPECT_EQ(diagnostics[2].fix.replacement, "p != nullptr");
 }
 
 TEST(ImplicitBool, ReportsOperandsOfLogicalOperators)
@@ -1010,6 +1047,138 @@ TEST(ImplicitBool, ToleratesBrokenInput)
     })
     {
         EXPECT_NO_FATAL_FAILURE(ImplicitBool(source)) << source;
+    }
+}
+
+TEST(Typer, MapsFixedWidthIntegerAliasesToBuiltins)
+{
+    const Typed typed("void f(std::uint32_t a, uint32_t b, std::int64_t c, "
+                      "std::size_t d, intptr_t e, std::int16_t g) {}");
+    EXPECT_EQ(typed.Of("a"), "unsigned int");
+    EXPECT_EQ(typed.Of("b"), "unsigned int");
+    EXPECT_EQ(typed.Of("c"), "long long");
+    EXPECT_EQ(typed.Of("d"), "size_t");
+    EXPECT_EQ(typed.Of("e"), "long");
+    EXPECT_EQ(typed.Of("g"), "short");
+}
+
+TEST(ImplicitBool, ReportsAutoDeducedFromFixedWidthIntegerArithmetic)
+{
+    const std::string source =
+        "int test_method(std::uint32_t first, int b, const std::string& desc)\n"
+        "{\n"
+        "    auto value = first + b;\n"
+        "    if (value)\n"
+        "    {\n"
+        "        return 100;\n"
+        "    }\n"
+        "    return 1;\n"
+        "}\n";
+    const auto diagnostics = ImplicitBool(source);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "value");
+    EXPECT_NE(diagnostics[0].message.find("'unsigned int'"), std::string::npos);
+    EXPECT_NE(diagnostics[0].message.find("an 'if' condition"), std::string::npos);
+    EXPECT_FALSE(diagnostics[0].has_fix);
+}
+
+TEST(ImplicitBool, OffersNullptrComparisonQuickFixForPointers)
+{
+    const std::string source = Body(
+        "int* p = 0;\n"
+        "if (p) {}\n"
+        "if (p && p) {}\n"
+        "bool b = !p;");
+    const auto diagnostics = ImplicitBool(source);
+    ASSERT_EQ(diagnostics.size(), 4u);
+    for (const auto& diagnostic : diagnostics)
+    {
+        EXPECT_TRUE(diagnostic.has_fix);
+        EXPECT_FALSE(diagnostic.fix_is_safe);
+    }
+    EXPECT_EQ(ApplyFix(source, diagnostics[0]),
+              Body("int* p = 0;\n"
+                   "if (p != nullptr) {}\n"
+                   "if (p && p) {}\n"
+                   "bool b = !p;"));
+    EXPECT_EQ(ApplyFix(source, diagnostics[1]),
+              Body("int* p = 0;\n"
+                   "if (p) {}\n"
+                   "if (p != nullptr && p) {}\n"
+                   "bool b = !p;"));
+    EXPECT_EQ(ApplyFix(source, diagnostics[2]),
+              Body("int* p = 0;\n"
+                   "if (p) {}\n"
+                   "if (p && p != nullptr) {}\n"
+                   "bool b = !p;"));
+    EXPECT_EQ(source.substr(diagnostics[3].offset, diagnostics[3].length), "p");
+    EXPECT_EQ(ApplyFix(source, diagnostics[3]),
+              Body("int* p = 0;\n"
+                   "if (p) {}\n"
+                   "if (p && p) {}\n"
+                   "bool b = p == nullptr;"));
+}
+
+TEST(ImplicitBool, SpellsHeaderKnownPointeeFromTheOracle)
+{
+    const std::string source =
+        "void Build(const ParseReuse* reuse)\n"
+        "{\n"
+        "    if (reuse && reuse)\n"
+        "    {\n"
+        "    }\n"
+        "}\n";
+    auto oracle =
+        std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> { "ParseReuse" });
+    const auto diagnostics = ImplicitBoolWith(source, oracle);
+    ASSERT_EQ(diagnostics.size(), 2u);
+    for (const auto& diagnostic : diagnostics)
+    {
+        EXPECT_EQ(source.substr(diagnostic.offset, diagnostic.length), "reuse");
+        EXPECT_NE(diagnostic.message.find("'const ParseReuse*'"), std::string::npos);
+        EXPECT_EQ(diagnostic.message.find("<unknown>"), std::string::npos);
+        EXPECT_TRUE(diagnostic.has_fix);
+        EXPECT_FALSE(diagnostic.fix_is_safe);
+        EXPECT_EQ(diagnostic.fix.replacement, "reuse != nullptr");
+    }
+}
+
+TEST(ImplicitBool, IgnoresOracleNamesItDoesNotContain)
+{
+    const std::string source =
+        "void Build(const ParseReuse* reuse)\n"
+        "{\n"
+        "    if (reuse)\n"
+        "    {\n"
+        "    }\n"
+        "}\n";
+    auto oracle = std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> { "Other" });
+    const auto diagnostics = ImplicitBoolWith(source, oracle);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_NE(diagnostics[0].message.find("a pointer of unknown type"), std::string::npos);
+    EXPECT_EQ(diagnostics[0].message.find("<unknown>"), std::string::npos);
+    EXPECT_EQ(diagnostics[0].fix.replacement, "reuse != nullptr");
+}
+
+TEST(ImplicitBool, SpellsUnknownPointeeWithoutUnknownMarker)
+{
+    const std::string source =
+        "void Build(const ParseReuse* reuse)\n"
+        "{\n"
+        "    if (reuse && reuse)\n"
+        "    {\n"
+        "    }\n"
+        "}\n";
+    const auto diagnostics = ImplicitBool(source);
+    ASSERT_EQ(diagnostics.size(), 2u);
+    for (const auto& diagnostic : diagnostics)
+    {
+        EXPECT_EQ(source.substr(diagnostic.offset, diagnostic.length), "reuse");
+        EXPECT_EQ(diagnostic.message.find("<unknown>"), std::string::npos);
+        EXPECT_NE(diagnostic.message.find("nullptr"), std::string::npos);
+        EXPECT_TRUE(diagnostic.has_fix);
+        EXPECT_FALSE(diagnostic.fix_is_safe);
+        EXPECT_EQ(diagnostic.fix.replacement, "reuse != nullptr");
     }
 }
 

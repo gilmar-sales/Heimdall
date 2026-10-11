@@ -389,10 +389,15 @@ namespace heimdall
 			bool variadic       = false;
 			std::size_t minimum = view.Size();
 			std::size_t maximum = 0;
+			// Member function bodies see the whole class, including members
+			// declared later; free functions need a prior declaration.
+			const auto overloadScope = symbols.scope[target];
+			const bool allowForward = overloadScope < model.Scopes().kind.size() &&
+				model.Scopes().kind[overloadScope] == ScopeKind::Class;
 			for (auto overload = model.LookupLocal(symbols.scope[target], symbols.name[target]);
 				overload != kNone; overload = symbols.next_same_name[overload])
 			{
-				if (symbols.decl_token[overload] > view.TokenAt(begin))
+				if (!allowForward && symbols.decl_token[overload] > view.TokenAt(begin))
 				{
 					continue;
 				}
@@ -511,10 +516,13 @@ namespace heimdall
 			bool unknown             = false;
 			std::size_t invalidIndex = 0;
 			TypeId expected          = TypeTable::Unknown;
+			const auto overloadScope = symbols.scope[target];
+			const bool allowForward = overloadScope < model.Scopes().kind.size() &&
+				model.Scopes().kind[overloadScope] == ScopeKind::Class;
 			for (auto overload = model.LookupLocal(symbols.scope[target], symbols.name[target]);
 				overload != kNone; overload = symbols.next_same_name[overload])
 			{
-				if (symbols.decl_token[overload] > view.TokenAt(begin))
+				if (!allowForward && symbols.decl_token[overload] > view.TokenAt(begin))
 				{
 					continue;
 				}

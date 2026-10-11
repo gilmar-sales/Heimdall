@@ -92,6 +92,23 @@ TEST(CallArgumentsSpec, DoesNotUseOverloadsOrDefaultsDeclaredAfterTheCall)
                            "void f(int, int = 2);").size(), 1u);
 }
 
+TEST(CallArgumentsSpec, SeesClassMemberOverloadsDeclaredAfterTheCall)
+{
+    EXPECT_TRUE(AnalyzeCalls("class S { void Apply(int, int); void Run() { Apply(1, 2, 3); } "
+                             "void Apply(int, int, int); };")
+                    .empty());
+    EXPECT_TRUE(AnalyzeCalls("class S { public: void Apply(int, int); void Run() "
+                             "{ Apply(1, 2, 3); } private: void Apply(int, int, int); };")
+                    .empty());
+    EXPECT_TRUE(AnalyzeCalls("class S { void Apply(int, std::string); void Run() "
+                             "{ Apply(1, 2); } void Apply(int, int); };")
+                    .empty());
+    EXPECT_EQ(AnalyzeCalls("class S { void Apply(int, int); void Run() { Apply(1); } "
+                           "void Apply(int, int, int); };")
+                  .size(),
+              1u);
+}
+
 TEST(CallArgumentsSpec, CountsFunctionPointerAndTemplateParametersCorrectly)
 {
     EXPECT_TRUE(AnalyzeCalls("void f(void (*p)(int, int), std::pair<int, int> v); "
