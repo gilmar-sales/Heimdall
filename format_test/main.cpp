@@ -42,11 +42,15 @@ class LinkedList
 {
 
 public:
+	LinkedList() = default;
+
+	~LinkedList() = default;
+
 	void Push(const TValue& value)
 	{
 		const auto node = new Node<TValue>
 		{
-			.value = value;
+			.value = value
 		};
 
 		if (mRoot == nullptr)

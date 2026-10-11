@@ -281,6 +281,43 @@ namespace heimdall
                     }
                 }
             }
+
+            for (std::uint32_t open = 0; open < m_sig.size(); ++open)
+            {
+                if (m_sig_tok[open] != Tok::LBrace || m_match[open] == Invalid)
+                {
+                    continue;
+                }
+
+                const auto close = m_match[open];
+                bool has_designator = false;
+                for (auto position = open + 1; position < close; ++position)
+                {
+                    const Tok current = m_sig_tok[position];
+                    if ((current == Tok::LParen || current == Tok::LBracket ||
+                        current == Tok::LBrace) && m_match[position] != Invalid)
+                    {
+                        position = m_match[position];
+                        continue;
+                    }
+
+                    const bool designator_start = position == open + 1 ||
+                        m_sig_tok[position - 1] == Tok::Comma;
+                    if (current == Tok::Dot && designator_start && position + 2 < close &&
+                        tree.Tokens()[m_sig[position + 1]].kind == TokenKind::Identifier &&
+                        m_sig_tok[position + 2] == Tok::Eq)
+                    {
+                        has_designator = true;
+                    }
+                    else if (current == Tok::Semi && has_designator)
+                    {
+                        tree.m_diagnostics.push_back({
+                            tree.Tokens()[m_sig[position]].offset,
+                            "expected '}' before ';' token [-Wtemplate-body]" });
+                        break;
+                    }
+                }
+            }
         }
 
         void Run()

@@ -51,7 +51,7 @@ messages = [
                "template<class TValue> class LinkedList {\n"
                "public:\n"
                "void Push(const TValue& value) {\n"
-               "const node = new Node<TValue>{.value = value};\n"
+               "const node = new Node<TValue>{.value = value;};\n"
                "}\n};\n"}}},
     {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
         "uri": member_inlay_uri, "languageId": "cpp", "version": 1,
@@ -165,6 +165,10 @@ type_error = next(item for item in wrong_type["params"]["diagnostics"]
                   if item["code"] == "cpp/undeclared-type")
 assert type_error["severity"] == 1, type_error
 assert "'node' does not name a type" in type_error["message"] and "'Node'" in type_error["message"], type_error
+initializer_error = next(item for item in wrong_type["params"]["diagnostics"]
+                         if item["code"] == "syntax/parse-error"
+                         and "expected '}' before ';'" in item["message"])
+assert initializer_error["severity"] == 1, initializer_error
 member_hints = next(item for item in responses if item.get("id") == 14)["result"]
 assert [hint["label"] for hint in member_hints] == [": Node<TValue>*", ": Node<TValue>*"], member_hints
 formatted = next(item for item in responses if item.get("id") == 2)["result"]

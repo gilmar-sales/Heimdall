@@ -405,6 +405,21 @@ TEST(ParseTreeSpec, ReportsUndeclaredNameInMalformedTemplateHead)
     EXPECT_EQ(declaration.Diagnostics()[0].message, "'TValue' has not been declared");
 }
 
+TEST(ParseTreeSpec, ReportsSemicolonInsteadOfCommaInDesignatedInitializer)
+{
+    constexpr std::string_view source =
+        "template<class T> struct Node { T value; };\n"
+        "template<class T> void f(T value) { auto node = Node<T>{.value = value;}; }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto error = std::ranges::find_if(tree.Diagnostics(), [](const auto& diagnostic)
+        {
+            return diagnostic.message == "expected '}' before ';' token [-Wtemplate-body]";
+    });
+    ASSERT_NE(error, tree.Diagnostics().end());
+    EXPECT_EQ(error->offset, source.find("value;}" ) + std::string_view("value").size());
+}
+
 TEST(ParseTreeSpec, ParsesFoldExpressionsWithoutDiagnostics)
 {
     using heimdall::GrammarKind;
