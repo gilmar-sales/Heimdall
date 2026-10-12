@@ -109,6 +109,31 @@ TEST(SyntaxHighlightSpec, DoesNotTreatVariableDeclarationAsCall)
     EXPECT_TRUE(IsKind(source, spans, "Make", HighlightKind::Function));
 }
 
+TEST(SyntaxHighlightSpec, ClassifiesTemplateMethodCallsWithoutDeclarations)
+{
+    constexpr std::string_view source =
+        "void F() {\n"
+        "services.AddSingleton<FreyrOptions>(mFreyrOptionsBuilder.Build());\n"
+        "const auto systemManager = serviceProvider.GetService<SystemManager>();\n"
+        "services->AddSingleton<std::vector<FreyrOptions>>();\n"
+        "services.template AddTransient</* type */ Query> ();\n"
+        "Make<std::vector<Query>>();\n"
+        "services.value < limit;\n"
+        "services.Callback<Query>;\n"
+        "}\n";
+
+    const auto spans = Highlight(source);
+
+    EXPECT_TRUE(IsKind(source, spans, "AddSingleton", HighlightKind::Method));
+    EXPECT_TRUE(IsKind(source, spans, "AddSingleton", HighlightKind::Method, 1));
+    EXPECT_TRUE(IsKind(source, spans, "Build", HighlightKind::Method));
+    EXPECT_TRUE(IsKind(source, spans, "GetService", HighlightKind::Method));
+    EXPECT_TRUE(IsKind(source, spans, "AddTransient", HighlightKind::Method));
+    EXPECT_TRUE(IsKind(source, spans, "Make", HighlightKind::Function));
+    EXPECT_TRUE(IsKind(source, spans, "value", HighlightKind::Property));
+    EXPECT_TRUE(IsKind(source, spans, "Callback", HighlightKind::Property));
+}
+
 TEST(SyntaxHighlightSpec, LeavesAmbiguousNamesUnclassified)
 {
     constexpr std::string_view source = "class Thing {};\nint Thing2;\nstruct Thing {};\nThing t;\n";

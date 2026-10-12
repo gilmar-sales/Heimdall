@@ -252,6 +252,60 @@ namespace heimdall
 				return next < mTokens.size() && Text(next) == text;
 			}
 
+			bool IsCall(std::size_t index) const noexcept
+			{
+				const auto next = NextSignificant(index);
+				if (next >= mTokens.size() || Text(next) != "<")
+				{
+					return NextIs(index, "(");
+				}
+
+				std::size_t depth           = 1;
+				std::size_t expressionDepth = 0;
+				for (auto i = NextSignificant(next); i < mTokens.size(); i = NextSignificant(i))
+				{
+					const auto text = Text(i);
+					if (text == ";")
+					{
+						return false;
+					}
+
+					if (text == "(" || text == "[" || text == "{")
+					{
+						++expressionDepth;
+					}
+					else if (text == ")" || text == "]" || text == "}")
+					{
+						if (expressionDepth == 0)
+						{
+							return false;
+						}
+
+						--expressionDepth;
+					}
+					else if (expressionDepth == 0 && text == "<")
+					{
+						++depth;
+					}
+					else if (expressionDepth == 0 && (text == ">" || text == ">>"))
+					{
+						const std::size_t closing = text.size();
+						if (closing > depth)
+						{
+							return false;
+						}
+
+						depth -= closing;
+						if (depth == 0)
+						{
+							return NextIs(i, "(");
+						}
+					}
+				}
+
+				return false;
+			}
+
 			std::optional<HighlightKind> ClassifyIdentifier(std::size_t index) const
 			{
 				const std::string_view text = Text(index);
@@ -260,9 +314,21 @@ namespace heimdall
 					return HighlightKind::Macro;
 				}
 
-				const bool call = NextIs(index, "(");
-				if (mPrevSignificant && (Text(*mPrevSignificant) == "." ||
-					Text(*mPrevSignificant) == "->"))
+				const bool call = IsCall(index);
+				auto previous   = mPrevSignificant;
+				if (previous && Text(*previous) == "template")
+				{
+					while (*previous > 0)
+					{
+						-- * previous;
+						if (!IsTrivia(mTokens[*previous].kind))
+						{
+							break;
+						}
+					}
+				}
+
+				if (previous && (Text(*previous) == "." || Text(*previous) == "->"))
 				{
 					return call ? HighlightKind::Method : HighlightKind::Property;
 				}
