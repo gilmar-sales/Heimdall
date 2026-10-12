@@ -186,6 +186,7 @@ namespace heimdall::lsp
 
 		// mode: 0 = references, 1 = prepareRename, 2 = rename.
 		void RenameDocument(simdjson::dom::element request, std::string_view id, int mode);
+
 		[[nodiscard]] heimdall::IndexRenameContext RenameContext();
 
 		void CompleteDocument(simdjson::dom::element request, std::string_view id);
@@ -229,7 +230,9 @@ namespace heimdall::lsp
 			Prepare,
 			Supertypes,
 			Subtypes
-		};
+		}
+
+		;
 
 		void TypeHierarchyRequest(
 			simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode);
@@ -249,11 +252,13 @@ namespace heimdall::lsp
 		// Re-reads `file` from disk and replaces its disk entry (or drops it when the file
 		// is gone, unreadable or too large). An open buffer keeps shadowing the entry.
 		void IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop);
+
 		[[nodiscard]] std::shared_ptr<const heimdall::index::FileShard> IndexShard(
 			const heimdall::ParseTree& tree, const std::filesystem::path& file,
 			const heimdall::CompileCommand* command);
 
 		void SymbolIndexMain(std::stop_token stop);
+
 		void RefreshIndexCompleteness(std::stop_token stop);
 
 		void WatchedFilesChanged(simdjson::dom::element request);
@@ -508,55 +513,48 @@ namespace heimdall::lsp
 			bool baseDirectivesUnchanged = false;
 		};
 
-		std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;
-		// Type names of the headers each open document includes, as last indexed (guarded
-		// by m_parse_mu). The parser reads them without ever waiting for an index build; a
-		// new set invalidates the cached parse, so the next request re-reads the file with it.
+		std::unordered_map<std::string, ParseCacheEntry> mParseCache;
 		std::unordered_map<std::string, std::shared_ptr<const heimdall::TypeNameOracle>>
 		m_type_names;
 
 		std::unordered_map<const heimdall::CompileCommand*,
 			std::shared_ptr<const heimdall::Preprocessor::MacroMap>>
-		m_macro_cache;
+		mMacroCache;
 
-		std::atomic<bool> m_enable_semantic      = false;
-		heimdall::index::IndexStore m_index_store;
-		// True once the disk scan finished, was not truncated and indexed every file it found.
-		std::atomic<bool> m_index_complete {false};
+		std::atomic<bool> mEnableSemantic = false;
+		heimdall::index::IndexStore mIndexStore;
+		std::atomic<bool> mIndexComplete {false};
 		std::atomic<bool> mIndexScanFinished {false};
 		std::atomic<std::size_t> mIndexPendingJobs {0};
 		std::string mIndexIssue;
-		std::atomic<bool> m_workspace_scan       = true;
-		std::atomic<bool> m_workspace_symbols    = true;
-		std::atomic<bool> m_inlay_hints          = true;
-		std::atomic<bool> m_hierarchical_symbols = false;
-		// The client can show `$/progress` for tokens the server creates.
-		std::atomic<bool> m_work_done_progress = false;
-		// Opt-in (initializationOptions.indexStatus): `heimdall/indexStatus` notifications
-		// for the extension's status-bar item.
-		std::atomic<bool> m_index_status = false;
-		WorkspaceSymbolIndex m_symbol_index;
+		std::atomic<bool> mWorkspaceScan       = true;
+		std::atomic<bool> mWorkspaceSymbols    = true;
+		std::atomic<bool> mInlayHints          = true;
+		std::atomic<bool> mHierarchicalSymbols = false;
+		std::atomic<bool> mWorkDoneProgress    = false;
+		std::atomic<bool> mIndexStatus         = false;
+		WorkspaceSymbolIndex mSymbolIndex;
 		// Orders "buffer indexed" against "buffer closed" so a late index pass cannot
 		// resurrect the entry of a document that was closed meanwhile.
-		std::mutex m_symbol_mu;
-		std::jthread m_symbol_worker;
-		std::filesystem::path m_workspace_root; // guarded by m_init_mu
-		std::jthread m_scan_worker;
-		std::string m_initialization_error;
-		std::condition_variable_any m_index_cv;
-		std::mutex m_index_mu;
-		std::mutex m_diag_mu;
-		std::condition_variable_any m_diag_cv;
-		std::deque<DiagJob> m_diag_queue;
-		bool m_diag_busy = false;
-		std::string m_diag_running_uri;
-		std::stop_source m_diag_stop;
-		std::jthread m_index_worker;
-		std::jthread m_diag_worker;
+		std::mutex mSymbolMutex;
+		std::jthread mSymbolWorker;
+		std::filesystem::path mWorkspaceRoot; // guarded by m_init_mu
+		std::jthread mScanWorker;
+		std::string mInitializationError;
+		std::condition_variable_any mIndexCv;
+		std::mutex mIndexMutex;
+		std::mutex mDiagMutex;
+		std::condition_variable_any mDiagCv;
+		std::deque<DiagJob> mDiaQueue;
+		bool mDiagBusy = false;
+		std::string mDiagRunningUri;
+		std::stop_source mDiagStop;
+		std::jthread mIndexWorker;
+		std::jthread mDiagWorker;
 		// Shutdown drains document jobs, parse jobs/continuations, then handlers.
-		ThreadPool m_pool;
-		ThreadPool m_parse_pool;
-		ThreadPool m_document_pool;
+		ThreadPool mPool;
+		ThreadPool mParsePool;
+		ThreadPool mDocumentPool;
 	};
 
 } // namespace heimdall::lsp

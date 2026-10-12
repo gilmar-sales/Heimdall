@@ -83,60 +83,60 @@ namespace heimdall::lsp
 	thread_local const LanguageServer::RequestContext* LanguageServer::t_context = nullptr;
 
 	LanguageServer::LanguageServer()
-	: m_pool(PoolSize()), m_parse_pool(kParseWorkers), m_document_pool(kDocumentWorkers) {}
+	: mPool(PoolSize()), mParsePool(kParseWorkers), mDocumentPool(kDocumentWorkers) {}
 
 	LanguageServer::~LanguageServer()
 	{
 		// Producers must finish before the pools they submit continuations to.
-		m_document_pool.WaitIdle();
-		m_document_pool.Shutdown();
-		m_index_worker.request_stop();
-		m_scan_worker.request_stop();
-		m_symbol_worker.request_stop();
-		m_index_cv.notify_all();
-		m_diag_worker.request_stop();
+		mDocumentPool.WaitIdle();
+		mDocumentPool.Shutdown();
+		mIndexWorker.request_stop();
+		mScanWorker.request_stop();
+		mSymbolWorker.request_stop();
+		mIndexCv.notify_all();
+		mDiagWorker.request_stop();
 		{
-			const std::lock_guard<std::mutex> lock(m_diag_mu);
-			m_diag_stop.request_stop();
+			const std::lock_guard<std::mutex> lock(mDiagMutex);
+			mDiagStop.request_stop();
 		}
-		m_diag_cv.notify_all();
-		if (m_diag_worker.joinable())
+		mDiagCv.notify_all();
+		if (mDiagWorker.joinable())
 		{
-			m_diag_worker.join();
-		}
-
-		if (m_index_worker.joinable())
-		{
-			m_index_worker.join();
+			mDiagWorker.join();
 		}
 
-		if (m_scan_worker.joinable())
+		if (mIndexWorker.joinable())
 		{
-			m_scan_worker.join();
+			mIndexWorker.join();
 		}
 
-		if (m_symbol_worker.joinable())
+		if (mScanWorker.joinable())
 		{
-			m_symbol_worker.join();
+			mScanWorker.join();
+		}
+
+		if (mSymbolWorker.joinable())
+		{
+			mSymbolWorker.join();
 		}
 
 		DrainRequests();
-		m_parse_pool.Shutdown();
-		m_pool.Shutdown();
+		mParsePool.Shutdown();
+		mPool.Shutdown();
 	}
 
 	bool LanguageServer::Run()
 	{
-		m_index_worker = std::jthread([this](std::stop_token stop)
+		mIndexWorker = std::jthread([this](std::stop_token stop)
 			{
 				IndexWorkerMain(stop);
 		});
-		m_diag_worker = std::jthread([this](std::stop_token stop)
+		mDiagWorker = std::jthread([this](std::stop_token stop)
 			{
 				DiagWorkerMain(stop);
 		});
 
-		m_pool.Submit([]
+		mPool.Submit([]
 			{
 				heimdall::IncludeIndex::SystemIncludes("c++");
 		},
@@ -158,41 +158,41 @@ namespace heimdall::lsp
 				source.request_stop();
 			}
 
-			m_document_pool.WaitIdle();
-			m_document_pool.Shutdown();
-			m_index_worker.request_stop();
-			m_diag_worker.request_stop();
+			mDocumentPool.WaitIdle();
+			mDocumentPool.Shutdown();
+			mIndexWorker.request_stop();
+			mDiagWorker.request_stop();
 			{
-				const std::lock_guard<std::mutex> lock(m_diag_mu);
-				m_diag_stop.request_stop();
+				const std::lock_guard<std::mutex> lock(mDiagMutex);
+				mDiagStop.request_stop();
 			}
-			m_scan_worker.request_stop();
-			m_symbol_worker.request_stop();
-			m_index_cv.notify_all();
-			m_diag_cv.notify_all();
-			if (m_diag_worker.joinable())
+			mScanWorker.request_stop();
+			mSymbolWorker.request_stop();
+			mIndexCv.notify_all();
+			mDiagCv.notify_all();
+			if (mDiagWorker.joinable())
 			{
-				m_diag_worker.join();
-			}
-
-			if (m_index_worker.joinable())
-			{
-				m_index_worker.join();
+				mDiagWorker.join();
 			}
 
-			if (m_scan_worker.joinable())
+			if (mIndexWorker.joinable())
 			{
-				m_scan_worker.join();
+				mIndexWorker.join();
 			}
 
-			if (m_symbol_worker.joinable())
+			if (mScanWorker.joinable())
 			{
-				m_symbol_worker.join();
+				mScanWorker.join();
+			}
+
+			if (mSymbolWorker.joinable())
+			{
+				mSymbolWorker.join();
 			}
 
 			DrainRequests();
-			m_parse_pool.Shutdown();
-			m_pool.Shutdown();
+			mParsePool.Shutdown();
+			mPool.Shutdown();
 		};
 
 		std::string body;
@@ -232,7 +232,7 @@ namespace heimdall::lsp
 					const std::string rename_capability =
 						m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
 					const std::string workspace_symbol_capability =
-						m_workspace_symbols.load(std::memory_order_relaxed) ? "true" : "false";
+						mWorkspaceSymbols.load(std::memory_order_relaxed) ? "true" : "false";
 					Respond(id_json,
 						"{\"capabilities\":{\"textDocumentSync\":2,"
 						"\"documentFormattingProvider\":true,"
@@ -258,25 +258,25 @@ namespace heimdall::lsp
 				}
 				else if (method == "initialized")
 				{
-					if (m_workspace_scan.load(std::memory_order_relaxed))
+					if (mWorkspaceScan.load(std::memory_order_relaxed))
 					{
-						m_scan_worker =
+						mScanWorker =
 							std::jthread([this](std::stop_token stop)
 							{
 								WorkspaceScanMain(stop);
 						});
 					}
 
-						m_symbol_worker =
-							std::jthread([this](std::stop_token stop)
-							{
-								SymbolIndexMain(stop);
-						});
+					mSymbolWorker =
+						std::jthread([this](std::stop_token stop)
+						{
+							SymbolIndexMain(stop);
+					});
 				}
 				else if (method == "shutdown")
 				{
 					// Answer every request received so far before acknowledging.
-					m_document_pool.WaitIdle();
+					mDocumentPool.WaitIdle();
 					FlushDiagnostics();
 					DrainRequests();
 					Respond(id_json, "null");
@@ -484,9 +484,9 @@ namespace heimdall::lsp
 		// A single pool-idle observation cannot cover both directions.
 		for (;;)
 		{
-			m_pool.WaitIdle();
-			m_parse_pool.WaitIdle();
-			m_pool.WaitIdle();
+			mPool.WaitIdle();
+			mParsePool.WaitIdle();
+			mPool.WaitIdle();
 			const std::lock_guard<std::mutex> lock(m_inflight_mu);
 			if (m_inflight.empty())
 			{
@@ -506,7 +506,7 @@ namespace heimdall::lsp
 			return;
 		}
 
-		m_document_pool.SubmitSerial(std::string(uri),
+		mDocumentPool.SubmitSerial(std::string(uri),
 			[this, body = std::string(body)]
 			{
 				simdjson::dom::parser parser;
@@ -586,7 +586,7 @@ namespace heimdall::lsp
 		{
 			if (job->context.stop.stop_requested())
 			{
-				m_pool.SubmitCancellable([this, job]
+				mPool.SubmitCancellable([this, job]
 					{
 						ExecuteRequest(job);
 					}, job->context.stop,
@@ -620,7 +620,7 @@ namespace heimdall::lsp
 			}
 
 			job->context.analysis = m_workspace.Snapshot();
-			m_pool.SubmitCancellable([this, job]
+			mPool.SubmitCancellable([this, job]
 				{
 					ExecuteRequest(job);
 				}, job->context.stop,
@@ -644,11 +644,11 @@ namespace heimdall::lsp
 		if (method == "textDocument/rename" || method == "textDocument/prepareRename" ||
 			method == "textDocument/codeAction")
 		{
-			m_document_pool.SubmitBarrier(std::move(pin));
+			mDocumentPool.SubmitBarrier(std::move(pin));
 		}
 		else
 		{
-			m_document_pool.SubmitSerial(job->context.document_uri, std::move(pin));
+			mDocumentPool.SubmitSerial(job->context.document_uri, std::move(pin));
 		}
 	}
 
@@ -695,7 +695,7 @@ namespace heimdall::lsp
 			{
 				// Keep the finished result with this request even if didChange
 				// or another version has meanwhile evicted the document cache.
-				m_pool.Submit([this, job, slot]
+				mPool.Submit([this, job, slot]
 					{
 						{
 							const std::lock_guard<std::mutex> lock(slot->mu);
@@ -826,7 +826,7 @@ namespace heimdall::lsp
 			bool progress = false;
 			if (!window_capabilities["workDoneProgress"].get_bool().get(progress))
 			{
-				m_work_done_progress.store(progress, std::memory_order_relaxed);
+				mWorkDoneProgress.store(progress, std::memory_order_relaxed);
 			}
 		}
 
@@ -838,7 +838,7 @@ namespace heimdall::lsp
 			bool hierarchical = false;
 			if (!symbol_capabilities["hierarchicalDocumentSymbolSupport"].get_bool().get(hierarchical))
 			{
-				m_hierarchical_symbols.store(hierarchical, std::memory_order_relaxed);
+				mHierarchicalSymbols.store(hierarchical, std::memory_order_relaxed);
 			}
 		}
 
@@ -894,7 +894,7 @@ namespace heimdall::lsp
 		{
 			// Only an explicit workspace is scanned; the cwd fallback below is not.
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			m_workspace_root = workspace_root;
+			mWorkspaceRoot = workspace_root;
 		}
 		std::error_code cwd_error;
 		const auto cwd = std::filesystem::current_path(cwd_error);
@@ -909,7 +909,7 @@ namespace heimdall::lsp
 			if (!loaded_rules)
 			{
 				const std::lock_guard<std::mutex> lock(m_init_mu);
-				m_initialization_error = loaded_rules.error();
+				mInitializationError = loaded_rules.error();
 			}
 			else if (*loaded_rules)
 			{
@@ -923,7 +923,7 @@ namespace heimdall::lsp
 				if (!cwd_rules)
 				{
 					const std::lock_guard<std::mutex> lock(m_init_mu);
-					m_initialization_error = cwd_rules.error();
+					mInitializationError = cwd_rules.error();
 				}
 				else if (*cwd_rules)
 				{
@@ -936,25 +936,25 @@ namespace heimdall::lsp
 		bool scan = true;
 		if (has_options && !options["workspaceDiagnostics"].get_bool().get(scan))
 		{
-			m_workspace_scan.store(scan, std::memory_order_relaxed);
+			mWorkspaceScan.store(scan, std::memory_order_relaxed);
 		}
 
 		bool symbols = true;
 		if (has_options && !options["workspaceSymbols"].get_bool().get(symbols))
 		{
-			m_workspace_symbols.store(symbols, std::memory_order_relaxed);
+			mWorkspaceSymbols.store(symbols, std::memory_order_relaxed);
 		}
 
 		bool inlay_hints = true;
 		if (has_options && !options["inlayHints"].get_bool().get(inlay_hints))
 		{
-			m_inlay_hints.store(inlay_hints, std::memory_order_relaxed);
+			mInlayHints.store(inlay_hints, std::memory_order_relaxed);
 		}
 
 		bool index_status = false;
 		if (has_options && !options["indexStatus"].get_bool().get(index_status))
 		{
-			m_index_status.store(index_status, std::memory_order_relaxed);
+			mIndexStatus.store(index_status, std::memory_order_relaxed);
 		}
 
 		bool enabled = false;
@@ -963,7 +963,7 @@ namespace heimdall::lsp
 			enabled = false;
 		}
 
-		m_enable_semantic.store(enabled, std::memory_order_relaxed);
+		mEnableSemantic.store(enabled, std::memory_order_relaxed);
 
 		std::string_view path;
 		if (!has_options ||!GetString(options, "compileCommands", path) || path.empty())
@@ -975,7 +975,7 @@ namespace heimdall::lsp
 		if (!database)
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			m_initialization_error = database.error();
+			mInitializationError = database.error();
 			return;
 		}
 
@@ -994,7 +994,7 @@ namespace heimdall::lsp
 			}
 		}
 
-		m_pool.Submit(ThreadPool::Task([drivers = std::move(drivers)]()
+		mPool.Submit(ThreadPool::Task([drivers = std::move(drivers)]()
 			{
 				for (const auto& driver : drivers)
 				{
@@ -1031,7 +1031,7 @@ namespace heimdall::lsp
 		}
 
 		std::vector<heimdall::SemanticDiagnostic> semantic_diagnostics;
-		if (m_enable_semantic.load(std::memory_order_relaxed) && command != nullptr)
+		if (mEnableSemantic.load(std::memory_order_relaxed) && command != nullptr)
 		{
 			semantic_diagnostics = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(*tree, command);
 			if (!IsCurrentVersion(uri, version))
@@ -1164,8 +1164,8 @@ namespace heimdall::lsp
 		std::string init_error;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			init_error = m_initialization_error;
-			m_initialization_error.clear();
+			init_error = mInitializationError;
+			mInitializationError.clear();
 		}
 		if (!init_error.empty())
 		{
@@ -1255,7 +1255,7 @@ namespace heimdall::lsp
 		}
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
-			m_parse_cache.erase(uri_string);
+			mParseCache.erase(uri_string);
 		}
 		EnqueueDiagnostics(uri_string, version);
 	}
@@ -1415,7 +1415,7 @@ namespace heimdall::lsp
 		EditHull pending;
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
-			if (const auto found = m_parse_cache.find(uri_string); found != m_parse_cache.end())
+			if (const auto found = mParseCache.find(uri_string); found != mParseCache.end())
 			{
 				auto& entry = found->second;
 				if (entry.slot && entry.slot->ready.load(std::memory_order_acquire) &&
@@ -1433,7 +1433,7 @@ namespace heimdall::lsp
 					pending.directivesUnchanged = entry.baseDirectivesUnchanged;
 				}
 
-				m_parse_cache.erase(found);
+				mParseCache.erase(found);
 			}
 		}
 		if (base && base.use_count() == 1)
@@ -1501,7 +1501,7 @@ namespace heimdall::lsp
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
 			if (base)
 			{
-				ParseCacheEntry& entry = m_parse_cache[uri_string];
+				ParseCacheEntry& entry = mParseCache[uri_string];
 				entry.base             = std::move(base);
 				entry.base_options     = std::move(base_options);
 				entry.baseDirectivesUnchanged =
@@ -1558,33 +1558,33 @@ namespace heimdall::lsp
 		}
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
-			m_parse_cache.erase(std::string(uri));
+			mParseCache.erase(std::string(uri));
 			m_type_names.erase(std::string(uri));
 		}
 		{
 			// Nothing to publish for a closed document: abandon a running pass.
-			const std::lock_guard<std::mutex> lock(m_diag_mu);
-			if (m_diag_running_uri == uri)
+			const std::lock_guard<std::mutex> lock(mDiagMutex);
+			if (mDiagRunningUri == uri)
 			{
-				m_diag_stop.request_stop();
+				mDiagStop.request_stop();
 			}
 		}
 		const std::filesystem::path closed_path = PathFromUri(uri);
 		{
 			// The buffer stops shadowing its file: serve what is on disk if the workspace owns it.
 			{
-				const std::lock_guard<std::mutex> lock(m_symbol_mu);
-				m_symbol_index.ClearOpen(FileKey(closed_path));
+				const std::lock_guard<std::mutex> lock(mSymbolMutex);
+				mSymbolIndex.ClearOpen(FileKey(closed_path));
 			}
-			m_index_store.ClearOpen(closed_path.generic_string());
+			mIndexStore.ClearOpen(closed_path.generic_string());
 			std::filesystem::path root;
 			{
 				const std::lock_guard<std::mutex> lock(m_init_mu);
-				root = m_workspace_root;
+				root = mWorkspaceRoot;
 			}
 			if (IsWorkspaceSource(closed_path) && IsUnderRoot(closed_path, root))
 			{
-				m_pool.Submit(ThreadPool::Task([this, closed_path]()
+				mPool.Submit(ThreadPool::Task([this, closed_path]()
 					{
 						IndexDiskSymbols(closed_path, std::stop_token {});
 				}),
@@ -1592,10 +1592,10 @@ namespace heimdall::lsp
 			}
 		}
 
-		if (m_workspace_scan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
+		if (mWorkspaceScan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
 		{
 			// The file stays part of the workspace: show what is on disk instead of clearing.
-			m_pool.Submit(ThreadPool::Task([this, closed_path]()
+			mPool.Submit(ThreadPool::Task([this, closed_path]()
 				{
 					PublishWorkspaceFile(closed_path, std::stop_token {});
 			}),
@@ -1648,7 +1648,7 @@ namespace heimdall::lsp
 		}
 
 		std::vector<heimdall::SemanticDiagnostic> semantic;
-		if (m_enable_semantic.load(std::memory_order_relaxed) && command != nullptr)
+		if (mEnableSemantic.load(std::memory_order_relaxed) && command != nullptr)
 		{
 			semantic = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(*tree, command);
 		}
@@ -1711,7 +1711,7 @@ namespace heimdall::lsp
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			root = m_workspace_root;
+			root = mWorkspaceRoot;
 		}
 		std::error_code error;
 		if (root.empty() ||!std::filesystem::is_directory(root, error))
@@ -1889,7 +1889,7 @@ namespace heimdall::lsp
 		else
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			m_initialization_error = found.error();
+			mInitializationError = found.error();
 		}
 
 		const auto formatting = CachedFormatting(tree, format_options, CurrentStop());
@@ -1963,12 +1963,12 @@ namespace heimdall::lsp
 		else
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			m_initialization_error = per_file.error();
+			mInitializationError = per_file.error();
 		}
 
 		const heimdall::RuleEngine engine(rule_options);
 		std::vector<heimdall::Diagnostic> diagnostics;
-		if (!m_enable_semantic.load(std::memory_order_relaxed))
+		if (!mEnableSemantic.load(std::memory_order_relaxed))
 		{
 			return engine.Analyze(tree);
 		}
@@ -2036,34 +2036,36 @@ namespace heimdall::lsp
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			root = m_workspace_root;
+			root = mWorkspaceRoot;
 		}
 
 		heimdall::IndexRenameContext result;
-		result.complete = m_index_complete.load(std::memory_order_acquire);
+		result.complete = mIndexComplete.load(std::memory_order_acquire);
 		{
-			const std::lock_guard<std::mutex> lock(m_symbol_mu);
+			const std::lock_guard<std::mutex> lock(mSymbolMutex);
 			result.coverageIssue = mIndexIssue;
 		}
 		result.requireExactIncludes = true;
-		result.editable = [root](const std::string& path)
+		result.editable =[root](const std::string& path)
 		{
-			if (root.empty() || !IsUnderRoot(std::filesystem::path(path), root))
+			if (root.empty() ||!IsUnderRoot(std::filesystem::path(path), root))
 			{
 				return false;
 			}
 
 			const auto relative = std::filesystem::path(path).lexically_relative(root);
-			return std::ranges::none_of(relative.parent_path(), [](const std::filesystem::path& part)
-				{ return IsSkippedDirectory(part.string()); });
+			return std::ranges::none_of(relative.parent_path(),[](const std::filesystem::path& part)
+				{
+					return IsSkippedDirectory(part.string());
+			});
 		};
-		result.document = [this](const std::string& path) -> std::optional<heimdall::IndexedDocument>
+		result.document =[this](const std::string& path)->std::optional<heimdall::IndexedDocument>
 		{
 			const auto uri = UriFromPath(path);
 			heimdall::IndexedDocument indexed;
 			if (const auto open = GetDocument(uri))
 			{
-				indexed.text = open->text;
+				indexed.text    = open->text;
 				indexed.version = open->version;
 			}
 			else if (auto contents = ReadWorkspaceFile(path))
@@ -2076,8 +2078,8 @@ namespace heimdall::lsp
 			}
 
 			const auto* command = CommandFor(uri);
-			indexed.options = ParserOptionsFor(command);
-			indexed.configHash = heimdall::index::ShardBuilder::ConfigurationHash(*indexed.options, command);
+			indexed.options     = ParserOptionsFor(command);
+			indexed.configHash  = heimdall::index::ShardBuilder::ConfigurationHash(*indexed.options, command);
 			return indexed;
 		};
 		return result;
@@ -2153,15 +2155,16 @@ namespace heimdall::lsp
 			}
 		}
 
-		const auto index_snapshot = m_index_store.Snapshot();
-		const auto self_path = PathFromUri(uri_string).generic_string();
-		const auto self_shard = index_snapshot->ShardFor(self_path);
+		const auto index_snapshot = mIndexStore.Snapshot();
+		const auto self_path      = PathFromUri(uri_string).generic_string();
+		const auto self_shard     = index_snapshot->ShardFor(self_path);
 		const auto rename_context = RenameContext();
 		const bool indexed_target = mode != 0 && self_shard != heimdall::index::kInvalid &&
 			index_snapshot->Shards()[self_shard]->OccurrenceAt(static_cast<std::uint32_t>(offset)) != heimdall::index::kInvalid &&
 			rename_context.editable && rename_context.editable(self_path);
 		const auto refs =
-			mode == 2 || indexed_target ? std::expected<heimdall::SymbolOccurrences, heimdall::RefactoringError>(
+			mode == 2 || indexed_target ? std::expected<heimdall::SymbolOccurrences,
+			heimdall::RefactoringError>(
 			heimdall::SymbolOccurrences {})
 		: heimdall::RefactoringService::LocalReferences(
 			context.Snapshot(), context.Document(), offset, include_declaration,
@@ -2215,61 +2218,61 @@ namespace heimdall::lsp
 		std::set<std::pair<std::string, std::size_t>> emitted;
 		const auto appendIndexed =[&](std::string& response)
 		{
-				const auto snapshot  = m_index_store.Snapshot();
-				const auto selfPath  = PathFromUri(uri_string).generic_string();
-				const auto selfShard = snapshot->ShardFor(selfPath);
-				if (selfShard != heimdall::index::kInvalid &&
-					snapshot->Shards()[selfShard]->ContentHash() ==
-						heimdall::index::HashBytes(*document->text))
+			const auto snapshot  = mIndexStore.Snapshot();
+			const auto selfPath  = PathFromUri(uri_string).generic_string();
+			const auto selfShard = snapshot->ShardFor(selfPath);
+			if (selfShard != heimdall::index::kInvalid &&
+				snapshot->Shards()[selfShard]->ContentHash() ==
+				heimdall::index::HashBytes(*document->text))
+			{
+				auto anchor = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
+				if (anchor.Valid())
 				{
-					auto anchor = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
-					if (anchor.Valid())
+					std::unordered_map<std::uint32_t, std::shared_ptr<const LineIndex>> shardLines;
+					for (const auto& use : snapshot->References(snapshot->HashOf(anchor)))
 					{
-						std::unordered_map<std::uint32_t, std::shared_ptr<const LineIndex>> shardLines;
-						for (const auto& use : snapshot->References(snapshot->HashOf(anchor)))
+						const bool declaring = use.role != heimdall::index::Role::Reference;
+						const auto& shard    = *snapshot->Shards()[use.shard];
+						const auto otherUri  = UriFromPath(shard.Path());
+						if ((declaring && !include_declaration) ||
+							!emitted.emplace(otherUri, use.offset).second)
 						{
-							const bool declaring = use.role != heimdall::index::Role::Reference;
-							const auto& shard = *snapshot->Shards()[use.shard];
-							const auto otherUri = UriFromPath(shard.Path());
-							if ((declaring && !include_declaration) ||
-								!emitted.emplace(otherUri, use.offset).second)
-							{
-								continue;
-							}
-
-							auto& lines = shardLines[use.shard];
-							if (!lines)
-							{
-								if (auto open = GetDocument(otherUri))
-								{
-									lines = open->lines;
-								}
-								else if (auto contents = ReadWorkspaceFile(shard.Path()))
-								{
-									auto built = std::make_shared<LineIndex>();
-									built->Build(*contents);
-									lines = std::move(built);
-								}
-							}
-
-							if (!lines)
-							{
-								continue;
-							}
-
-							if (response.size() > 1)
-							{
-								response += ',';
-							}
-
-							response += "{\"uri\":";
-							QuoteJson(otherUri, response);
-							response += ",\"range\":";
-							range(lines, use.offset, use.length, response);
-							response += '}';
+							continue;
 						}
+
+						auto& lines = shardLines[use.shard];
+						if (!lines)
+						{
+							if (auto open = GetDocument(otherUri))
+							{
+								lines = open->lines;
+							}
+							else if (auto contents = ReadWorkspaceFile(shard.Path()))
+							{
+								auto built = std::make_shared<LineIndex>();
+								built->Build(*contents);
+								lines = std::move(built);
+							}
+						}
+
+						if (!lines)
+						{
+							continue;
+						}
+
+						if (response.size() > 1)
+						{
+							response += ',';
+						}
+
+						response += "{\"uri\":";
+						QuoteJson(otherUri, response);
+						response += ",\"range\":";
+						range(lines, use.offset, use.length, response);
+						response += '}';
 					}
 				}
+			}
 		};
 
 		if (mode == 0)
@@ -2290,8 +2293,8 @@ namespace heimdall::lsp
 
 				std::string response = "[";
 				for (const auto& document_refs : workspace_refs
-						? *workspace_refs
-						: std::vector<heimdall::DocumentOccurrences> {})
+					? *workspace_refs
+					: std::vector<heimdall::DocumentOccurrences> {})
 				{
 					const std::string item_uri =
 						UriFromPath(context.Snapshot().Path(document_refs.document));
@@ -2396,8 +2399,8 @@ namespace heimdall::lsp
 		}
 
 		const auto preview = indexed_target
-			? heimdall::IndexRename::Preview(*m_index_store.Snapshot(), *plan, RenameContext(), CurrentStop())
-			: heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
+		? heimdall::IndexRename::Preview(*mIndexStore.Snapshot(), *plan, RenameContext(), CurrentStop())
+		: heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
 		if (!preview ||!IsCurrentVersion(uri_string, document->version))
 		{
 			fail(preview
@@ -2473,8 +2476,8 @@ namespace heimdall::lsp
 		}
 
 		response += "]}";
-		if (indexed_target && (m_index_store.Snapshot()->Revision() != plan->revision ||
-			!m_index_complete.load(std::memory_order_acquire)))
+		if (indexed_target && (mIndexStore.Snapshot()->Revision() != plan->revision ||
+			!mIndexComplete.load(std::memory_order_acquire)))
 		{
 			fail({heimdall::RefactoringErrorCode::StaleSnapshot, "Project changed; request rename again"});
 			return;
@@ -3110,6 +3113,7 @@ namespace heimdall::lsp
 			{
 				response += ",\"tags\":[1]"; // CompletionItemTag.Deprecated
 			}
+
 			if (!item.documentation.empty())
 			{
 				response += ",\"documentation\":{\"kind\":\"markdown\",\"value\":";
@@ -3160,8 +3164,8 @@ namespace heimdall::lsp
 		}
 
 		constexpr std::size_t kIncludeCandidates = 100;
-		const std::string query = scope.empty() ? context.prefix : scope + "::" + context.prefix;
-		const auto hits = m_symbol_index.Query(query, kIncludeCandidates, CurrentStop());
+		const std::string query                  = scope.empty() ? context.prefix : scope + "::" + context.prefix;
+		const auto hits                          = mSymbolIndex.Query(query, kIncludeCandidates, CurrentStop());
 
 		const std::filesystem::path file = PathFromUri(uri).lexically_normal();
 		std::vector<std::filesystem::path> visible {file};
@@ -3186,7 +3190,7 @@ namespace heimdall::lsp
 				std::equal(prefix.begin(), prefix.end(), name.begin(),[](char a, char b)
 				{
 					return std::tolower(static_cast<unsigned char>(a)) ==
-						std::tolower(static_cast<unsigned char>(b));
+					std::tolower(static_cast<unsigned char>(b));
 			});
 		};
 
@@ -3260,7 +3264,7 @@ namespace heimdall::lsp
 			}
 
 			offered.push_back(qualified_name);
-			std::string sort_text = std::to_string(rank++);
+			std::string sort_text                = std::to_string(rank++);
 			constexpr std::size_t kSortTextWidth = 6;
 			sort_text.insert(0, kSortTextWidth - std::min(kSortTextWidth, sort_text.size()), '0');
 			if (!response.empty())
@@ -3438,10 +3442,10 @@ namespace heimdall::lsp
 					// Requested but neither built nor pending (evicted): rebuild.
 					m_index_pending.insert(requested_key);
 					{
-						const std::lock_guard<std::mutex> queue_lock(m_index_mu);
+						const std::lock_guard<std::mutex> queue_lock(mIndexMutex);
 						m_index_queue.push_back({requested_key, headers, command, overlay});
 					}
-					m_index_cv.notify_one();
+					mIndexCv.notify_one();
 				}
 
 				if (!served_key.empty())
@@ -3495,10 +3499,10 @@ namespace heimdall::lsp
 				{
 					m_index_pending.insert(requested_key);
 					{
-						const std::lock_guard<std::mutex> queue_lock(m_index_mu);
+						const std::lock_guard<std::mutex> queue_lock(mIndexMutex);
 						m_index_queue.push_back({requested_key, headers, command, overlay});
 					}
-					m_index_cv.notify_one();
+					mIndexCv.notify_one();
 				}
 			}
 			else
@@ -3533,7 +3537,7 @@ namespace heimdall::lsp
 
 		options.standard = command->standard;
 		const std::lock_guard<std::mutex> lock(m_macro_mu);
-		if (const auto found = m_macro_cache.find(command); found != m_macro_cache.end())
+		if (const auto found = mMacroCache.find(command); found != mMacroCache.end())
 		{
 			options.shared_macros = found->second;
 			return options;
@@ -3545,7 +3549,7 @@ namespace heimdall::lsp
 			macros->erase(name);
 		}
 
-		m_macro_cache.emplace(command, macros);
+		mMacroCache.emplace(command, macros);
 		options.shared_macros = std::move(macros);
 		return options;
 	}
@@ -3575,8 +3579,8 @@ namespace heimdall::lsp
 				options.type_names = names->second;
 			}
 
-			if (const auto found = m_parse_cache.find(uri);
-				found != m_parse_cache.end() && found->second.version == version &&
+			if (const auto found = mParseCache.find(uri);
+				found != mParseCache.end() && found->second.version == version &&
 				found->second.text.get() == text.get() && found->second.slot &&
 				found->second.options.type_names == options.type_names)
 			{
@@ -3585,7 +3589,7 @@ namespace heimdall::lsp
 			else
 			{
 				slot        = std::make_shared<ParseSlot>();
-				auto& entry = m_parse_cache[uri];
+				auto& entry = mParseCache[uri];
 				if (entry.base && entry.base_version == version &&
 					entry.base_options.standard == options.standard &&
 					entry.base_options.shared_macros == options.shared_macros &&
@@ -3628,7 +3632,7 @@ namespace heimdall::lsp
 		{
 			// The parse belongs to the version, not to whichever request won
 			// the race. Cancelling one consumer cannot invalidate other users.
-			m_parse_pool.SubmitCancellable(
+			mParsePool.SubmitCancellable(
 				[this, slot, uri, text, options = std::move(options), lexed, lifetime,
 				base = std::move(base), base_edit, baseDirectivesUnchanged]
 				{
@@ -3669,8 +3673,8 @@ namespace heimdall::lsp
 				}
 
 					const std::lock_guard<std::mutex> lock(m_parse_mu);
-					if (const auto found = m_parse_cache.find(uri);
-					found != m_parse_cache.end() && found->second.slot == slot)
+					if (const auto found = mParseCache.find(uri);
+					found != mParseCache.end() && found->second.slot == slot)
 					{
 						found->second.base.reset();
 				}
@@ -3755,7 +3759,7 @@ namespace heimdall::lsp
 		const heimdall::CompileCommand* command      = CommandFor(uri_string);
 		const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
 		const HeaderView headers                     = HeaderScopes(uri_string, text, command);
-		const auto tree = CachedParse(uri_string, text, document->version, command);
+		const auto tree                              = CachedParse(uri_string, text, document->version, command);
 		if (!tree || RequestCancelled())
 		{
 			RespondCancelled(id);
@@ -3792,7 +3796,7 @@ namespace heimdall::lsp
 			response += ",\"parameters\":[";
 			for (std::size_t p = 0; p < signature.parameters.size(); ++p)
 			{
-				const auto [begin, end] = signature.parameters[p];
+				const auto[begin, end] = signature.parameters[p];
 				response += p == 0 ? "{\"label\":[" : ",{\"label\":[";
 				response += utf16(signature.label, begin) + "," + utf16(signature.label, end);
 				response += "]}";
@@ -3914,7 +3918,7 @@ namespace heimdall::lsp
 
 	void LanguageServer::InlayHints(simdjson::dom::element request, std::string_view id)
 	{
-		if (!m_inlay_hints.load(std::memory_order_relaxed))
+		if (!mInlayHints.load(std::memory_order_relaxed))
 		{
 			Respond(id, "[]");
 			return;
@@ -4587,7 +4591,7 @@ namespace heimdall::lsp
 		else
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			m_initialization_error = found.error();
+			mInitializationError = found.error();
 		}
 
 		// Diff the fully formatted buffer, then keep only hunks overlapping
@@ -4654,8 +4658,8 @@ namespace heimdall::lsp
 		{
 			IndexJob job;
 			{
-				std::unique_lock<std::mutex> lock(m_index_mu);
-				m_index_cv.wait(lock, stop,[&]
+				std::unique_lock<std::mutex> lock(mIndexMutex);
+				mIndexCv.wait(lock, stop,[&]
 					{
 						return !m_index_queue.empty();
 				});
@@ -4713,23 +4717,23 @@ namespace heimdall::lsp
 	void LanguageServer::EnqueueDiagnostics(const std::string& uri, std::int64_t version)
 	{
 		{
-			const std::lock_guard<std::mutex> lock(m_diag_mu);
-			m_diag_queue.push_back({uri, version});
+			const std::lock_guard<std::mutex> lock(mDiagMutex);
+			mDiaQueue.push_back({uri, version});
 			// The running pass (if for this document) is now obsolete.
-			if (m_diag_running_uri == uri)
+			if (mDiagRunningUri == uri)
 			{
-				m_diag_stop.request_stop();
+				mDiagStop.request_stop();
 			}
 		}
-		m_diag_cv.notify_one();
+		mDiagCv.notify_one();
 	}
 
 	void LanguageServer::FlushDiagnostics()
 	{
-		std::unique_lock<std::mutex> lock(m_diag_mu);
-		m_diag_cv.wait(lock,[&]
+		std::unique_lock<std::mutex> lock(mDiagMutex);
+		mDiagCv.wait(lock,[&]
 			{
-				return m_diag_queue.empty() && !m_diag_busy;
+				return mDiaQueue.empty() && !mDiagBusy;
 		});
 	}
 
@@ -4741,21 +4745,21 @@ namespace heimdall::lsp
 			DiagJob job;
 			bool stale = false;
 			{
-				std::unique_lock<std::mutex> lock(m_diag_mu);
-				m_diag_cv.wait(lock, stop,[&]
+				std::unique_lock<std::mutex> lock(mDiagMutex);
+				mDiagCv.wait(lock, stop,[&]
 					{
-						return !m_diag_queue.empty();
+						return !mDiaQueue.empty();
 				});
 				if (stop.stop_requested())
 				{
 					return;
 				}
 
-				job = m_diag_queue.front();
-				m_diag_queue.pop_front();
+				job = mDiaQueue.front();
+				mDiaQueue.pop_front();
 				// Coalesce bursts: a newer queued job for the same uri makes
 				// this one stale before it even starts.
-				for (const auto& queued : m_diag_queue)
+				for (const auto& queued : mDiaQueue)
 				{
 					if (queued.uri == job.uri)
 					{
@@ -4766,11 +4770,11 @@ namespace heimdall::lsp
 
 				if (!stale)
 				{
-					m_diag_busy = true;
+					mDiagBusy = true;
 				}
 				else
 				{
-					m_diag_cv.notify_all();
+					mDiagCv.notify_all();
 				}
 			}
 			if (stale)
@@ -4782,15 +4786,15 @@ namespace heimdall::lsp
 			{
 				// Trailing-edge debounce: a keystroke arriving within the window
 				// supersedes this version instead of paying for a full publish.
-				std::unique_lock<std::mutex> lock(m_diag_mu);
-				m_diag_cv.wait_for(lock, 50ms,[&]
+				std::unique_lock<std::mutex> lock(mDiagMutex);
+				mDiagCv.wait_for(lock, 50ms,[&]
 					{
 						if (stop.stop_requested())
 						{
 							return true;
 					}
 
-						for (const auto& queued : m_diag_queue)
+						for (const auto& queued : mDiaQueue)
 						{
 							if (queued.uri == job.uri)
 							{
@@ -4802,13 +4806,13 @@ namespace heimdall::lsp
 				});
 				if (stop.stop_requested())
 				{
-					m_diag_busy = false;
-					m_diag_cv.notify_all();
+					mDiagBusy = false;
+					mDiagCv.notify_all();
 					return;
 				}
 
 				bool superseded = false;
-				for (const auto& queued : m_diag_queue)
+				for (const auto& queued : mDiaQueue)
 				{
 					if (queued.uri == job.uri)
 					{
@@ -4819,16 +4823,16 @@ namespace heimdall::lsp
 
 				if (superseded)
 				{
-					m_diag_busy = false;
-					m_diag_cv.notify_all();
+					mDiagBusy = false;
+					mDiagCv.notify_all();
 					continue;
 				}
 
 				// Registered under the same lock EnqueueDiagnostics takes, so a
 				// keystroke can never slip between "not superseded" and "running".
-				m_diag_stop        = std::stop_source();
-				m_diag_running_uri = job.uri;
-				job_stop           = m_diag_stop.get_token();
+				mDiagStop       = std::stop_source();
+				mDiagRunningUri = job.uri;
+				job_stop        = mDiagStop.get_token();
 			}
 			{
 				// Drop versions that are already obsolete (closed or re-edited).
@@ -4869,10 +4873,10 @@ namespace heimdall::lsp
 					}
 				}
 
-				const std::lock_guard<std::mutex> lock(m_diag_mu);
-				m_diag_running_uri.clear();
-				m_diag_busy = false;
-				m_diag_cv.notify_all();
+				const std::lock_guard<std::mutex> lock(mDiagMutex);
+				mDiagRunningUri.clear();
+				mDiagBusy = false;
+				mDiagCv.notify_all();
 			}
 		}
 	}
@@ -5255,7 +5259,7 @@ namespace heimdall::lsp
 		bool indexed                          = false;
 		if (!implementation)
 		{
-			const auto snapshot = m_index_store.Snapshot();
+			const auto snapshot  = mIndexStore.Snapshot();
 			const auto selfShard = snapshot->ShardFor(self_path.generic_string());
 			const auto here      = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
 			std::vector<heimdall::index::SymbolRef> anchors;
@@ -5452,7 +5456,7 @@ namespace heimdall::lsp
 
 		const auto symbols = heimdall::SymbolOutline::Extract(*tree);
 		std::string response;
-		if (m_hierarchical_symbols.load(std::memory_order_relaxed))
+		if (mHierarchicalSymbols.load(std::memory_order_relaxed))
 		{
 			AppendDocumentSymbols(symbols, *document->lines, response);
 		}
@@ -5481,7 +5485,7 @@ namespace heimdall::lsp
 			simdjson::dom::object textDocument;
 			simdjson::dom::object position;
 			if (!GetObject(params, "textDocument", textDocument) ||
-				!GetString(textDocument, "uri", uri) || !GetObject(params, "position", position))
+				!GetString(textDocument, "uri", uri) ||!GetObject(params, "position", position))
 			{
 				Respond(id, "null");
 				return;
@@ -5496,13 +5500,13 @@ namespace heimdall::lsp
 
 			offset = document->lines->OffsetFromPosition(
 				{static_cast<std::size_t>(PositionNumber(position, "line")),
-				static_cast<std::size_t>(PositionNumber(position, "character"))});
+					static_cast<std::size_t>(PositionNumber(position, "character"))});
 		}
 		else
 		{
 			simdjson::dom::object item;
 			simdjson::dom::object data;
-			if (!GetObject(params, "item", item) || !GetObject(item, "data", data) ||
+			if (!GetObject(params, "item", item) ||!GetObject(item, "data", data) ||
 				!GetString(data, "uri", uri))
 			{
 				Respond(id, "[]");
@@ -5532,10 +5536,10 @@ namespace heimdall::lsp
 		const auto analysis = AnalysisFor(uriString, tree, ParserOptionsFor(command));
 		const auto& model   = analysis.Semantic();
 		const auto token    = heimdall::TypeHierarchy::TokenAt(model, offset);
-		const auto klass    =
+		const auto klass =
 			token == heimdall::kNone
-			? heimdall::kNone
-			: heimdall::TypeHierarchy::FindClassAt(model, analysis.Types(), token);
+		? heimdall::kNone
+		: heimdall::TypeHierarchy::FindClassAt(model, analysis.Types(), token);
 		if (klass == heimdall::kNone)
 		{
 			Respond(id, empty);
@@ -5559,9 +5563,9 @@ namespace heimdall::lsp
 		const auto& symbols  = model.Symbols();
 		const auto& tokens   = model.Tree().Tokens();
 		std::string response = "[";
-		const auto append = [&](std::string_view name, const std::string& itemUri,
-								const LineIndex& lines, std::size_t rangeBegin, std::size_t rangeEnd,
-								std::size_t nameBegin, std::size_t nameEnd)
+		const auto append =[&](std::string_view name, const std::string& itemUri,
+			const LineIndex& lines, std::size_t rangeBegin, std::size_t rangeEnd,
+			std::size_t nameBegin, std::size_t nameEnd)
 		{
 			if (response.size() > 1)
 			{
@@ -5603,16 +5607,16 @@ namespace heimdall::lsp
 		// are already covered by the model above.
 		if (mode != TypeHierarchyMode::Prepare)
 		{
-			const auto snapshot     = m_index_store.Snapshot();
-			const auto selfPath     = PathFromUri(uriString).generic_string();
-			const auto here         = snapshot->SymbolAt(snapshot->ShardFor(selfPath),
+			const auto snapshot = mIndexStore.Snapshot();
+			const auto selfPath = PathFromUri(uriString).generic_string();
+			const auto here = snapshot->SymbolAt(snapshot->ShardFor(selfPath),
 				static_cast<std::uint32_t>(offset));
 			if (here.Valid())
 			{
-				const auto hash    = snapshot->HashOf(here);
+				const auto hash = snapshot->HashOf(here);
 				const auto related = mode == TypeHierarchyMode::Supertypes
-					? snapshot->Supertypes(hash)
-					: snapshot->Subtypes(hash);
+				? snapshot->Supertypes(hash)
+				: snapshot->Subtypes(hash);
 				for (const auto& item : related)
 				{
 					const auto& shard = *snapshot->Shards()[item.symbol.shard];
@@ -5653,11 +5657,12 @@ namespace heimdall::lsp
 
 	void LanguageServer::WorkspaceSymbols(simdjson::dom::element request, std::string_view id)
 	{
-		if (!m_workspace_symbols.load(std::memory_order_relaxed))
+		if (!mWorkspaceSymbols.load(std::memory_order_relaxed))
 		{
 			Respond(id, "[]");
 			return;
 		}
+
 		simdjson::dom::object params;
 		std::string_view query;
 		if (!GetObject(request, "params", params) ||!GetString(params, "query", query))
@@ -5667,7 +5672,7 @@ namespace heimdall::lsp
 		}
 
 		const auto hits =
-			m_symbol_index.Query(query, WorkspaceSymbolIndex::kDefaultLimit, CurrentStop());
+			mSymbolIndex.Query(query, WorkspaceSymbolIndex::kDefaultLimit, CurrentStop());
 		if (RequestCancelled())
 		{
 			RespondCancelled(id);
@@ -5684,14 +5689,15 @@ namespace heimdall::lsp
 		const heimdall::CompileCommand* command)
 	{
 		const auto model = heimdall::Binder::Bind(tree);
-		const auto configHash = heimdall::index::ShardBuilder::ConfigurationHash(ParserOptionsFor(command), command);
+		const auto configHash = heimdall::index::ShardBuilder::ConfigurationHash(ParserOptionsFor(command),
+			command);
 		return heimdall::index::ShardBuilder::Build(model, file.generic_string(), configHash,
-			[&tree, &file, command](std::string_view, bool, std::uint32_t offset) -> std::optional<std::string>
+			[&tree, &file, command](std::string_view, bool, std::uint32_t offset)->std::optional<std::string>
 			{
 				const auto target = heimdall::IncludeIndex::ResolveIncludeAt(file.parent_path(),
-					tree.Source(), offset, command);
+				tree.Source(), offset, command);
 				return target.empty() ? std::nullopt : std::optional(target.lexically_normal().generic_string());
-			});
+		});
 	}
 
 	void LanguageServer::IndexOpenSymbols(
@@ -5704,25 +5710,27 @@ namespace heimdall::lsp
 		lines.Build(*text);
 		const auto outline = heimdall::SymbolOutline::Extract(tree);
 		auto file          = BuildIndexedFile(uri, outline, lines);
-		auto shard = IndexShard(tree, PathFromUri(uri), CommandFor(uri));
-		bool updated = false;
+		auto shard         = IndexShard(tree, PathFromUri(uri), CommandFor(uri));
+		bool updated       = false;
 		{
-			const std::lock_guard<std::mutex> lock(m_symbol_mu);
+			const std::lock_guard<std::mutex> lock(mSymbolMutex);
 			if (IsCurrentVersion(uri, version))
-		{
-			if (m_workspace_symbols.load(std::memory_order_relaxed))
 			{
-				m_symbol_index.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+				if (mWorkspaceSymbols.load(std::memory_order_relaxed))
+				{
+					mSymbolIndex.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+				}
+
+				mIndexStore.SetOpen(PathFromUri(uri).generic_string(), std::move(shard));
+				if (!tree.Diagnostics().empty())
+				{
+					mIndexComplete.store(false, std::memory_order_release);
+				}
+
+				updated = true;
 			}
-			m_index_store.SetOpen(PathFromUri(uri).generic_string(), std::move(shard));
-			if (!tree.Diagnostics().empty())
-			{
-				m_index_complete.store(false, std::memory_order_release);
-			}
-			updated = true;
 		}
-		}
-		if (updated && !m_index_complete.load(std::memory_order_acquire) &&
+		if (updated && !mIndexComplete.load(std::memory_order_acquire) &&
 			mIndexScanFinished.load(std::memory_order_acquire) && mIndexPendingJobs.load(std::memory_order_acquire) == 0)
 		{
 			RefreshIndexCompleteness(std::stop_token {});
@@ -5749,8 +5757,8 @@ namespace heimdall::lsp
 
 			if (!contents)
 			{
-				m_symbol_index.RemoveDisk(key);
-				m_index_store.RemoveDisk(file.generic_string());
+				mSymbolIndex.RemoveDisk(key);
+				mIndexStore.RemoveDisk(file.generic_string());
 				return;
 			}
 
@@ -5765,12 +5773,13 @@ namespace heimdall::lsp
 
 			LineIndex lines;
 			lines.Build(*text);
-			if (m_workspace_symbols.load(std::memory_order_relaxed))
+			if (mWorkspaceSymbols.load(std::memory_order_relaxed))
 			{
-				m_symbol_index.SetDisk(
+				mSymbolIndex.SetDisk(
 					key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
 			}
-			m_index_store.SetDisk(file.generic_string(),
+
+			mIndexStore.SetDisk(file.generic_string(),
 				IndexShard(tree, file, CommandFor(uri)));
 		}
 		catch (...)
@@ -5785,7 +5794,7 @@ namespace heimdall::lsp
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			root = m_workspace_root;
+			root = mWorkspaceRoot;
 		}
 		if (root.empty())
 		{
@@ -5810,9 +5819,9 @@ namespace heimdall::lsp
 		std::atomic<std::size_t> done {0};
 		std::mutex report_mutex;
 		std::size_t reported = 0;
-		const bool show_progress = m_workspace_symbols.load(std::memory_order_relaxed) && m_work_done_progress.load(std::memory_order_relaxed) &&
+		const bool show_progress = mWorkspaceSymbols.load(std::memory_order_relaxed) && mWorkDoneProgress.load(std::memory_order_relaxed) &&
 			!files.empty();
-		const bool show_status = m_workspace_symbols.load(std::memory_order_relaxed) && m_index_status.load(std::memory_order_relaxed);
+		const bool show_status = mWorkspaceSymbols.load(std::memory_order_relaxed) && mIndexStatus.load(std::memory_order_relaxed);
 		if (show_status)
 		{
 			Send(IndexStatusNotification("indexing", 0, files.size(), elapsed_ms()));
@@ -5900,7 +5909,7 @@ namespace heimdall::lsp
 			FormatDuration(elapsed_ms()),
 			notification);
 		notification += "}}";
-		if (m_workspace_symbols.load(std::memory_order_relaxed))
+		if (mWorkspaceSymbols.load(std::memory_order_relaxed))
 		{
 			Send(notification);
 		}
@@ -5911,17 +5920,17 @@ namespace heimdall::lsp
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			root = m_workspace_root;
+			root = mWorkspaceRoot;
 		}
 		const auto discovery = DiscoverWorkspaceSourcesDetailed(root, stop);
-		const auto snapshot = m_index_store.Snapshot();
-		bool complete = discovery.complete && mIndexScanFinished.load(std::memory_order_acquire);
-		std::string issue = discovery.complete ? std::string {} : "Workspace discovery was cancelled, truncated or failed";
+		const auto snapshot  = mIndexStore.Snapshot();
+		bool complete        = discovery.complete && mIndexScanFinished.load(std::memory_order_acquire);
+		std::string issue    = discovery.complete ? std::string {}: "Workspace discovery was cancelled, truncated or failed";
 		for (const auto& path : discovery.files)
 		{
-			const auto shard = snapshot->ShardFor(path.generic_string());
+			const auto shard    = snapshot->ShardFor(path.generic_string());
 			const auto contents = ReadWorkspaceFile(path);
-			if (stop.stop_requested() || shard == heimdall::index::kInvalid || !contents ||
+			if (stop.stop_requested() || shard == heimdall::index::kInvalid ||!contents ||
 				snapshot->Shards()[shard]->ContentHash() != heimdall::index::HashBytes(*contents))
 			{
 				const auto open = GetDocument(UriFromPath(path));
@@ -5930,17 +5939,18 @@ namespace heimdall::lsp
 				{
 					continue;
 				}
+
 				complete = false;
-				issue = "File was skipped or changed before indexing: " + path.generic_string();
+				issue    = "File was skipped or changed before indexing: " + path.generic_string();
 				break;
 			}
 		}
 
-		const std::lock_guard<std::mutex> lock(m_symbol_mu);
+		const std::lock_guard<std::mutex> lock(mSymbolMutex);
 		complete &= mIndexPendingJobs.load(std::memory_order_acquire) == 0 &&
-			m_index_store.Snapshot()->Revision() == snapshot->Revision();
+			mIndexStore.Snapshot()->Revision() == snapshot->Revision();
 		mIndexIssue = std::move(issue);
-		m_index_complete.store(complete, std::memory_order_release);
+		mIndexComplete.store(complete, std::memory_order_release);
 	}
 
 	void LanguageServer::WatchedFilesChanged(simdjson::dom::element request)
@@ -5955,7 +5965,7 @@ namespace heimdall::lsp
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
-			root = m_workspace_root;
+			root = mWorkspaceRoot;
 		}
 		constexpr std::int64_t kDeleted = 3;
 		for (const auto change : changes)
@@ -5979,21 +5989,21 @@ namespace heimdall::lsp
 			{
 				// A removed folder is reported once, not once per file inside it.
 				{
-					const std::lock_guard<std::mutex> lock(m_symbol_mu);
-					m_index_complete.store(false, std::memory_order_release);
-					m_symbol_index.RemoveDiskUnder(FileKey(path));
-					m_index_store.RemoveDiskUnder(path.generic_string());
+					const std::lock_guard<std::mutex> lock(mSymbolMutex);
+					mIndexComplete.store(false, std::memory_order_release);
+					mSymbolIndex.RemoveDiskUnder(FileKey(path));
+					mIndexStore.RemoveDiskUnder(path.generic_string());
 				}
 				RefreshIndexCompleteness(std::stop_token {});
 			}
 			else if (IsWorkspaceSource(path))
 			{
 				{
-					const std::lock_guard<std::mutex> lock(m_symbol_mu);
+					const std::lock_guard<std::mutex> lock(mSymbolMutex);
 					mIndexPendingJobs.fetch_add(1, std::memory_order_acq_rel);
-					m_index_complete.store(false, std::memory_order_release);
+					mIndexComplete.store(false, std::memory_order_release);
 				}
-				m_pool.Submit(ThreadPool::Task([this, path]()
+				mPool.Submit(ThreadPool::Task([this, path]()
 					{
 						IndexDiskSymbols(path, std::stop_token {});
 						mIndexPendingJobs.fetch_sub(1, std::memory_order_acq_rel);
