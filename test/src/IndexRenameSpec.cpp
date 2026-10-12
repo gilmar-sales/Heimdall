@@ -939,3 +939,34 @@ TEST(IndexRename, RenamesFunctionCalledInNamespaceScopeVariableInitializer)
 	ASSERT_TRUE(plan.has_value()) << plan.error().message;
 	EXPECT_EQ(project.Apply(*plan).at("a.cpp"), "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
 }
+
+TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThis)
+{
+	Project project({
+		{"a.cpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n};\n\nstruct B\n{\n\tint m_x;\n};\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n"},
+	});
+
+	const auto plan = project.Rename("a.cpp", project.At("a.cpp", "m_x"), "x");
+
+	ASSERT_TRUE(plan.has_value()) << plan.error().message;
+	const auto text = project.Apply(*plan).at("a.cpp");
+	EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
+	EXPECT_NE(text.find("int x;\n\tvoid F"), std::string::npos) << text;
+	EXPECT_NE(text.find("int m_x;\n};\n\nvoid A::F"), std::string::npos) << text;
+}
+
+TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThisInOutOfLineDefinition)
+{
+	Project project({
+		{"a.hpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n\tvoid G();\n};\n"},
+		{"b.hpp", "struct B\n{\n\tint m_x;\n};\n"},
+		{"a.cpp", "#include \"a.hpp\"\n#include \"b.hpp\"\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n\nvoid A::G()\n{\n\tthis->m_x = 2;\n}\n"},
+	});
+
+	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "m_x"), "x");
+
+	ASSERT_TRUE(plan.has_value()) << plan.error().message;
+	const auto text = project.Apply(*plan).at("a.cpp");
+	EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
+	EXPECT_NE(text.find("this->x = 2"), std::string::npos) << text;
+}

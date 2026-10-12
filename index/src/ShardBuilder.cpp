@@ -1156,6 +1156,71 @@ namespace heimdall::index
 			}
 		}
 
+		// `this`, `*this`, or a variable declared `auto[&|*] name = [*]this;`.
+		bool ReceiverIsThis(std::uint32_t node) const
+		{
+			const auto& tree   = mModel.Tree();
+			const auto& soa    = tree.NodesSoA();
+			const auto& tokens = tree.Tokens();
+			if (soa.Kind(node) != GrammarKind::IdentifierExpression || soa.TokenCount(node) != 1)
+			{
+				return false;
+			}
+
+			const auto first = soa.FirstToken(node);
+			if (tokens[first].tok == Tok::KwThis)
+			{
+				return true;
+			}
+
+			const auto symbol = mModel.ResolveToken(first);
+			if (symbol == kNone || mModel.Symbols().kind[symbol] != heimdall::SymbolKind::Variable)
+			{
+				return false;
+			}
+
+			const auto declaration = mModel.Symbols().decl_node[symbol];
+			const auto declToken   = mModel.Symbols().decl_token[symbol];
+			if (declaration >= soa.size())
+			{
+				return false;
+			}
+
+			bool isAuto = false;
+			for (auto token = soa.FirstToken(declaration); token < declToken; ++token)
+			{
+				isAuto |= tokens[token].tok == Tok::KwAuto;
+			}
+
+			const auto& sig = mModel.Significant();
+			auto at         = std::ranges::upper_bound(sig, declToken);
+			if (!isAuto || at == sig.end() || tokens[*at].tok != Tok::Eq)
+			{
+				return false;
+			}
+
+			++at;
+			if (at != sig.end() && tokens[*at].tok == Tok::Star)
+			{
+				++at;
+			}
+
+			return at != sig.end() && tokens[*at].tok == Tok::KwThis;
+		}
+
+		// "::A" for the class whose member function contains `offset`; empty when unknown.
+		std::string EnclosingClassName(std::uint32_t offset) const
+		{
+			const auto scope = ScopeAtOffset(offset);
+			if (scope == kInvalid)
+			{
+				return {};
+			}
+
+			const auto qualified = mShard->mStrings.Text(mShard->mScopes.qualified[scope]);
+			return qualified.empty() ? std::string {} : "::" + std::string(qualified);
+		}
+
 		void CollectReceivers()
 		{
 			const auto& tree = mModel.Tree();
@@ -1226,6 +1291,10 @@ namespace heimdall::index
 				else if (type == TypeTable::Unknown)
 				{
 					name = WrittenReceiver(children[0], arrow);
+					if (name.empty() && ReceiverIsThis(children[0]))
+					{
+						name = EnclosingClassName(static_cast<std::uint32_t>(tree.Tokens()[token].offset));
+					}
 				}
 
 				if (!name.empty())

@@ -503,9 +503,6 @@ namespace heimdall::lsp
 			std::shared_ptr<const heimdall::SourceSnapshot> buffer;
 			heimdall::ParserOptions options;
 			std::shared_ptr<ParseSlot> slot;
-			// Tree of an earlier version of this document and the edit that turns
-			// its text into the one at `base_version`: the next parse copies the
-			// top-level items outside that edit instead of re-parsing them.
 			std::shared_ptr<const heimdall::ParseTree> base;
 			heimdall::ParserOptions base_options;
 			heimdall::Lexer::TextEdit base_edit;
@@ -515,7 +512,7 @@ namespace heimdall::lsp
 
 		std::unordered_map<std::string, ParseCacheEntry> mParseCache;
 		std::unordered_map<std::string, std::shared_ptr<const heimdall::TypeNameOracle>>
-		m_type_names;
+		mTypeNames;
 
 		std::unordered_map<const heimdall::CompileCommand*,
 			std::shared_ptr<const heimdall::Preprocessor::MacroMap>>

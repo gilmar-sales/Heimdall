@@ -1559,7 +1559,7 @@ namespace heimdall::lsp
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
 			mParseCache.erase(std::string(uri));
-			m_type_names.erase(std::string(uri));
+			mTypeNames.erase(std::string(uri));
 		}
 		{
 			// Nothing to publish for a closed document: abandon a running pass.
@@ -3330,7 +3330,7 @@ namespace heimdall::lsp
 		if (view.index && view.index->TypeNames())
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
-			auto& known = m_type_names[uri];
+			auto& known = mTypeNames[uri];
 			if (!known || known->Fingerprint() != view.index->TypeNames()->Fingerprint())
 			{
 				known = view.index->TypeNames();
@@ -3574,7 +3574,7 @@ namespace heimdall::lsp
 		bool baseDirectivesUnchanged = false;
 		{
 			const std::lock_guard<std::mutex> lock(m_parse_mu);
-			if (const auto names = m_type_names.find(uri); names != m_type_names.end())
+			if (const auto names = mTypeNames.find(uri); names != mTypeNames.end())
 			{
 				options.type_names = names->second;
 			}
