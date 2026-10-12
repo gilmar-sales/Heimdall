@@ -19,13 +19,18 @@ namespace heimdall
 	/// Marks `ExpandedToken::spelled` / `invocation` of a token with no source counterpart.
 	inline constexpr std::uint32_t kNoToken = std::numeric_limits<std::uint32_t>::max();
 
+	/// Default token budget of one expansion; a million tokens is far past any real source.
+	inline constexpr std::size_t kDefaultMaxExpandedTokens = 1000000;
+	/// Default nesting of argument pre-expansion.
+	inline constexpr std::size_t kDefaultMaxExpansionDepth = 256;
+
 	/// Bounds that keep pathological expansions (`#define A B B`) finite.
 	struct ExpansionLimits
 	{
 		/// Tokens produced by one `Expand` call.
-		std::size_t maxTokens = 1'000'000;
+		std::size_t maxTokens = kDefaultMaxExpandedTokens;
 		/// Nesting of argument pre-expansion.
-		std::size_t maxDepth = 256;
+		std::size_t maxDepth = kDefaultMaxExpansionDepth;
 	};
 
 	/// A token of the expansion with its provenance.

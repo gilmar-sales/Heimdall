@@ -363,3 +363,15 @@ TEST(ModernizeCxxSpec, NewCodesAreKnownAndConfigurable)
                        "cpp/modernize-emplace")
                     .empty());
 }
+
+TEST(ModernizeCxxSpec, DeletedFunctionsAreNotReportedByNoNewDelete)
+{
+    const std::string source =
+        "struct S\n{\n    S(const S&) = delete;\n    S& operator=(const S&) = delete;\n};\n"
+        "void f(int* p) { delete p; }\n";
+
+    const auto diagnostics = ByCode(Lint(source), "cpp/no-new-delete");
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].line, 6u);
+}

@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace heimdall
@@ -15,6 +16,10 @@ namespace heimdall
 	{
 
 		constexpr std::size_t kStopCheckInterval = 1024;
+		constexpr unsigned kHalfWord = 32;
+		constexpr unsigned kPointerAlignmentBits = 4;
+		constexpr std::size_t kParenthesizedDefinedTokens = 3; // `(`, name, `)`
+		constexpr std::size_t kVaOptOpen = 2; // `__VA_OPT__` and its `(`
 		constexpr std::string_view kVaOpt        = "__VA_OPT__";
 
 		struct Storage
@@ -132,6 +137,11 @@ namespace heimdall
 				return std::ranges::binary_search(mHideSets[id], macro);
 			}
 
+			static std::uint64_t PairKey(std::uint32_t a, std::uint32_t b) noexcept
+			{
+				return (static_cast<std::uint64_t>(a) << kHalfWord) | b;
+			}
+
 			std::uint32_t Union(std::uint32_t a, std::uint32_t b)
 			{
 				if (a == b || b == 0)
@@ -144,9 +154,16 @@ namespace heimdall
 					return b;
 				}
 
+				// The same few sets meet again and again; remember what they combine to.
+				const auto [slot, fresh] = mUnions.try_emplace(PairKey(a, b), 0);
+				if (!fresh)
+				{
+					return slot->second;
+				}
+
 				HideSet merged;
 				std::ranges::set_union(mHideSets[a], mHideSets[b], std::back_inserter(merged));
-				return HideSetId(std::move(merged));
+				return slot->second = HideSetId(std::move(merged));
 			}
 
 			std::uint32_t Intersect(std::uint32_t a, std::uint32_t b)
@@ -156,17 +173,32 @@ namespace heimdall
 					return a;
 				}
 
+				const auto [slot, fresh] = mIntersections.try_emplace(PairKey(a, b), 0);
+				if (!fresh)
+				{
+					return slot->second;
+				}
+
 				HideSet common;
 				std::ranges::set_intersection(mHideSets[a], mHideSets[b],
 					std::back_inserter(common));
-				return HideSetId(std::move(common));
+				return slot->second = HideSetId(std::move(common));
 			}
 
 			std::uint32_t Add(std::uint32_t id, const MacroDef* macro)
 			{
+				const auto key = PairKey(id, static_cast<std::uint32_t>(
+					reinterpret_cast<std::uintptr_t>(macro) >> kPointerAlignmentBits));
+				const auto [slot, fresh] = mAdditions.try_emplace(key, std::make_pair(macro, 0u));
+				if (!fresh && slot->second.first == macro)
+				{
+					return slot->second.second;
+				}
+
 				HideSet set = mHideSets[id];
 				set.insert(std::ranges::lower_bound(set, macro), macro);
-				return HideSetId(std::move(set));
+				slot->second = { macro, HideSetId(std::move(set)) };
+				return slot->second.second;
 			}
 
 			void Diagnose(const Item& at, std::string message)
@@ -245,12 +277,14 @@ namespace heimdall
 						continue;
 					}
 
-					const MacroPtr macro = mTable.Lookup(token.text);
-					if (!macro || Hidden(token.hideSet, macro.get()))
+					const MacroDef* found = mTable.Find(token.text);
+					if (found == nullptr || Hidden(token.hideSet, found))
 					{
 						out.push_back(std::move(token));
 						continue;
 					}
+
+					const MacroPtr macro = mTable.Lookup(token.text);
 
 					if (!macro->functionLike)
 					{
@@ -321,7 +355,7 @@ namespace heimdall
 				}
 
 				const bool parenthesized = IsPunct(stack.back(), "(");
-				const std::size_t count  = parenthesized ? 3 : 1;
+				const std::size_t count  = parenthesized ? kParenthesizedDefinedTokens : 1;
 				for (std::size_t i = 0; i < count && !stack.empty(); ++i)
 				{
 					out.push_back(std::move(stack.back()));
@@ -687,7 +721,7 @@ namespace heimdall
 							const Items& variadic = arguments.back();
 							if (!variadic.empty())
 							{
-								Process(macro, arguments, cache, invocation, outermost, i + 2,
+								Process(macro, arguments, cache, invocation, outermost, i + kVaOptOpen,
 									close, depth, out);
 							}
 
@@ -725,6 +759,9 @@ namespace heimdall
 			std::shared_ptr<Storage> mStorage;
 			std::vector<HideSet> mHideSets;
 			std::map<HideSet, std::uint32_t> mHideSetIds;
+			std::unordered_map<std::uint64_t, std::uint32_t> mUnions;
+			std::unordered_map<std::uint64_t, std::uint32_t> mIntersections;
+			std::unordered_map<std::uint64_t, std::pair<const MacroDef*, std::uint32_t>> mAdditions;
 			std::unordered_set<const MacroDef*> mRemembered;
 			std::vector<PreprocessorDiagnostic> mDiagnostics;
 			std::size_t mSteps = 0;

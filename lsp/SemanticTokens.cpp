@@ -1,6 +1,8 @@
 #include "SemanticTokens.hpp"
 
+#include <charconv>
 #include <cstdint>
+#include <iterator>
 
 namespace heimdall::lsp
 {
@@ -10,9 +12,37 @@ namespace heimdall::lsp
 
 		constexpr std::string_view kModifierNames = "\"declaration\",\"inactive\"";
 
+		constexpr unsigned kContinuationMask = 0xC0;
+		constexpr unsigned kContinuationBits = 0x80;
+		constexpr unsigned kFourByteLead     = 0xF0;
+		constexpr std::size_t kSurrogatePair = 2;
+		constexpr std::size_t kMaxDigits     = 24;
+		constexpr std::size_t kCharsPerToken = 16;
+
+		// UTF-16 code units of UTF-8 text: continuation bytes add none, a four-byte sequence two.
+		std::size_t Utf16Units(std::string_view text) noexcept
+		{
+			std::size_t units = 0;
+			for (const char c : text)
+			{
+				const auto byte = static_cast<unsigned char>(c);
+				units += (byte & kContinuationMask) == kContinuationBits ? 0 : (byte >= kFourByteLead ? kSurrogatePair : 1);
+			}
+
+			return units;
+		}
+
+		void AppendNumber(std::string& out, std::size_t value)
+		{
+			char digits[kMaxDigits];
+			const auto [end, error] = std::to_chars(std::begin(digits), std::end(digits), value);
+			out.append(digits, end);
+		}
+
 		struct Encoder
 		{
 			const LineIndex& lines;
+			std::string_view text;
 			std::string& out;
 			std::size_t previousLine      = 0;
 			std::size_t previousCharacter = 0;
@@ -20,13 +50,13 @@ namespace heimdall::lsp
 
 			void Piece(std::size_t begin, std::size_t end, const heimdall::HighlightSpan& span)
 			{
-				const Position start = lines.ToPosition(begin);
-				const Position stop  = lines.ToPosition(end);
-				if (stop.character <= start.character)
+				const std::size_t length = Utf16Units(text.substr(begin, end - begin));
+				if (length == 0)
 				{
 					return;
 				}
 
+				const Position start        = lines.ToPosition(begin);
 				const std::size_t deltaLine = start.line - previousLine;
 				const std::size_t deltaChar =
 					deltaLine == 0 ? start.character - previousCharacter : start.character;
@@ -36,15 +66,15 @@ namespace heimdall::lsp
 				}
 
 				first = false;
-				out += std::to_string(deltaLine);
+				AppendNumber(out, deltaLine);
 				out += ',';
-				out += std::to_string(deltaChar);
+				AppendNumber(out, deltaChar);
 				out += ',';
-				out += std::to_string(stop.character - start.character);
+				AppendNumber(out, length);
 				out += ',';
-				out += std::to_string(static_cast<unsigned>(span.kind));
+				AppendNumber(out, static_cast<std::size_t>(span.kind));
 				out += ',';
-				out += std::to_string(static_cast<unsigned>(span.modifiers));
+				AppendNumber(out, span.modifiers);
 				previousLine      = start.line;
 				previousCharacter = start.character;
 			}
@@ -81,7 +111,8 @@ namespace heimdall::lsp
 		std::string& out)
 	{
 		out += "{\"data\":[";
-		Encoder encoder {lines, out};
+		out.reserve(out.size() + spans.size() * kCharsPerToken);
+		Encoder encoder {lines, text, out};
 		for (const heimdall::HighlightSpan& span : spans)
 		{
 			const std::size_t end = span.offset + span.length;

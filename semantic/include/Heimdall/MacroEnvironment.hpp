@@ -17,10 +17,13 @@
 namespace heimdall
 {
 
+	inline constexpr std::size_t kBytesPerMebibyte = std::size_t {1} << 20;
 	/// Include nesting GCC and Clang accept before giving up.
 	inline constexpr std::size_t kDefaultMaxIncludeDepth = 200;
+	/// Macros defined over the whole translation unit by default (the standard's minimum).
+	inline constexpr std::size_t kDefaultMaxMacros = 65536;
 	/// Largest header read by default: 16 MiB.
-	inline constexpr std::size_t kDefaultMaxFileBytes = std::size_t {16} * 1024 * 1024;
+	inline constexpr std::size_t kDefaultMaxFileBytes = std::size_t { 16 } * kBytesPerMebibyte;
 
 	/// Bounds and sources of a `MacroEnvironment` build.
 	struct MacroEnvironmentOptions
@@ -28,6 +31,9 @@ namespace heimdall
 		/// Deepest `#include` nesting (GCC and Clang stop at 200).
 		std::size_t maxIncludeDepth = kDefaultMaxIncludeDepth;
 		/// Largest header read, in bytes; bigger ones count as unresolved.
+		/// Distinct macro names defined across the translation unit; past it no more headers
+		/// are entered and the environment is incomplete.
+		std::size_t maxMacros = kDefaultMaxMacros;
 		std::size_t maxFileBytes = kDefaultMaxFileBytes;
 		/// Run the compiler (`-dM -E`) for builtin macros; otherwise use the built-in table.
 		bool probeCompiler = true;

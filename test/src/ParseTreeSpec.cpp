@@ -1235,3 +1235,64 @@ TEST(ParseTreeSpec, ExplicitObjectParameterDeclaresItsName)
     EXPECT_EQ(DeclaredNames(tree),
               (std::vector<std::string> { "foo", "self", "arg", "bar", "self" }));
 }
+
+TEST(ParseTreeSpec, UnnamedTemplateParametersAreNotUndeclaredNames)
+{
+    constexpr std::string_view source =
+        "template <typename>\nstruct A;\ntemplate <class>\nclass B;\ntemplate <size_t>\nstruct C;\n"
+        "template <int>\nstruct D;\ntemplate <auto>\nstruct E;\ntemplate <typename, int N>\nstruct F {};\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, AliasWithParenthesesInTemplateArgumentsIsNotAFunctionDeclaration)
+{
+    constexpr std::string_view source =
+        "using A = typename std::conditional<sizeof(T) != 0, int, void>::type;\n"
+        "using B = X<(1 > 0), decltype(f())>::type;\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::UsingDeclaration), 2u);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 0u);
+}
+
+TEST(ParseTreeSpec, TrailingReturnTypeMayStartWithTypenameOrAnElaboratedSpecifier)
+{
+    constexpr std::string_view source =
+        "template <typename C>\nauto F(C*) -> typename std::is_same<int, decltype(g())>::type;\n"
+        "auto G() -> struct S;\nauto H() -> const struct S*;\n"
+        "struct K\n{\n    auto M() const -> typename std::vector<int>::value_type;\n};\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, ConditionalDirectivesBetweenConstructorInitializersAreSkipped)
+{
+    constexpr std::string_view source =
+        "struct T\n{\n    T() : a_(0),\n#ifdef FOO\n          b_(1),\n#endif\n          c_(2)\n"
+        "    {\n    }\n    int a_, b_, c_;\n};\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1u);
+}
+
+TEST(ParseTreeSpec, ParenthesesInsideTemplateArgumentsDoNotMakeAVariableAFunction)
+{
+    constexpr std::string_view source =
+        "constexpr std::array<int, static_cast<std::size_t>(E::Count)> kNames = {1, 2};\n"
+        "std::array<int, f(1)> k{1};\nint real(int a) { return a; }\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1u);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 0u);
+}

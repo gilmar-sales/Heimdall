@@ -11,6 +11,16 @@ namespace heimdall
 	{
 
 		constexpr std::size_t kMaxExpressionDepth = 128;
+		constexpr std::size_t kAttributeBracketLength = 2; // `[[`
+		constexpr long long kValueBits = 64;
+		constexpr unsigned kDecimal = 10;
+		constexpr unsigned kHexadecimal = 16;
+		constexpr unsigned kBinary = 2;
+		constexpr unsigned kOctal = 8;
+		constexpr unsigned kNotADigit = 99;
+		constexpr std::size_t kEscapeOffset = 2; // quote, backslash, then the escape letter
+		constexpr std::size_t kBasePrefixLength = 2; // `0x`, `0b`
+		constexpr std::size_t kDelimiterPair = 2; // opening and closing delimiter
 
 		bool IsBlank(char c) noexcept
 		{
@@ -163,6 +173,15 @@ namespace heimdall
 			bool sawElse      = false;
 		};
 
+		// Feature-test values of the standard attributes: the year and month the attribute
+		// reached the language.
+		constexpr long long kAttributeCpp11 = 200809;
+		constexpr long long kAttributeCpp14 = 201309;
+		constexpr long long kAttributeCpp17 = 201603;
+		constexpr long long kAttributeCpp20 = 201803;
+		constexpr long long kAttributeCpp23 = 202207;
+		constexpr long long kAttributeCpp26 = 202403;
+
 		std::optional<long long> BuiltinFeature(std::string_view feature, std::string_view operand)
 		{
 			if (feature == "__has_cpp_attribute")
@@ -175,18 +194,18 @@ namespace heimdall
 
 				constexpr Known kAttributes[] = {
 					{
-						"noreturn", 200809
-					}, {"carries_dependency", 200809},
-					{"deprecated", 201309}, {"fallthrough", 201603},
-					{"maybe_unused", 201603}, {"nodiscard", 201603},
-					{"likely", 201803}, {"unlikely", 201803},
-					{"no_unique_address", 201803}, {"assume", 202207},
-					{"indeterminate", 202403}
+						"noreturn", kAttributeCpp11
+					}, {"carries_dependency", kAttributeCpp11},
+					{"deprecated", kAttributeCpp14}, {"fallthrough", kAttributeCpp17},
+					{"maybe_unused", kAttributeCpp17}, {"nodiscard", kAttributeCpp17},
+					{"likely", kAttributeCpp20}, {"unlikely", kAttributeCpp20},
+					{"no_unique_address", kAttributeCpp20}, {"assume", kAttributeCpp23},
+					{"indeterminate", kAttributeCpp26}
 				};
 				std::string_view name = operand;
 				if (name.starts_with("[["))
 				{
-					name.remove_prefix(2);
+					name.remove_prefix(kAttributeBracketLength);
 				}
 
 				for (const Known& known : kAttributes)
@@ -405,7 +424,7 @@ namespace heimdall
 
 					++mPos;
 					const Value amount = Additive();
-					if (amount < 0 || amount > 63)
+					if (amount < 0 || amount >= kValueBits)
 					{
 						left = 0;
 					}
@@ -516,23 +535,23 @@ namespace heimdall
 					digits.pop_back();
 				}
 
-				unsigned base = 10;
+				unsigned base = kDecimal;
 				std::size_t i = 0;
 				if (digits.size() > 1 && digits[0] == '0')
 				{
 					if (digits[1] == 'x' || digits[1] == 'X')
 					{
-						base = 16;
-						i    = 2;
+						base = kHexadecimal;
+						i    = kBasePrefixLength;
 					}
 					else if (digits[1] == 'b' || digits[1] == 'B')
 					{
-						base = 2;
-						i    = 2;
+						base = kBinary;
+						i    = kBasePrefixLength;
 					}
 					else
 					{
-						base = 8;
+						base = kOctal;
 						i    = 1;
 					}
 				}
@@ -547,18 +566,18 @@ namespace heimdall
 				for (; i < digits.size(); ++i)
 				{
 					const char c   = digits[i];
-					unsigned digit = 99;
+					unsigned digit = kNotADigit;
 					if (c >= '0' && c <= '9')
 					{
 						digit = static_cast<unsigned>(c - '0');
 					}
 					else if (c >= 'a' && c <= 'f')
 					{
-						digit = static_cast<unsigned>(c - 'a') + 10;
+						digit = static_cast<unsigned>(c - 'a') + kDecimal;
 					}
 					else if (c >= 'A' && c <= 'F')
 					{
-						digit = static_cast<unsigned>(c - 'A') + 10;
+						digit = static_cast<unsigned>(c - 'A') + kDecimal;
 					}
 
 					if (digit >= base)
@@ -581,12 +600,12 @@ namespace heimdall
 				}
 
 				const char c = text[open + 1];
-				if (c != '\\' || open + 2 >= text.size())
+				if (c != '\\' || open + kEscapeOffset >= text.size())
 				{
 					return static_cast<unsigned char>(c);
 				}
 
-				switch (text[open + 2])
+				switch (text[open + kEscapeOffset])
 				{
 				case 'n':
 					return '\n';
@@ -605,7 +624,7 @@ namespace heimdall
 				case 'v':
 					return '\v';
 				default:
-					return static_cast<unsigned char>(text[open + 2]);
+					return static_cast<unsigned char>(text[open + kEscapeOffset]);
 				}
 			}
 
@@ -716,10 +735,10 @@ namespace heimdall
 					const std::string operand = Operand();
 					IncludeRequest request;
 					request.next = name == "__has_include_next";
-					if (operand.size() >= 2 && (operand.front() == '"' || operand.front() == '<'))
+					if (operand.size() >= kDelimiterPair && (operand.front() == '"' || operand.front() == '<'))
 					{
 						request.angled = operand.front() == '<';
-						request.header = operand.substr(1, operand.size() - 2);
+						request.header = operand.substr(1, operand.size() - kDelimiterPair);
 					}
 					else
 					{
@@ -788,7 +807,7 @@ namespace heimdall
 				rest = expandedText;
 			}
 
-			if (rest.size() < 2)
+			if (rest.size() < kDelimiterPair)
 			{
 				return std::nullopt;
 			}

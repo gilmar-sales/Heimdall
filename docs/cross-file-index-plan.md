@@ -161,7 +161,7 @@ Today a cross-file use is an `Unresolved` occurrence matched to declarations by 
 | E | Overloads and template specializations | call occurrences pick overload by arity then types; `Specializes` used by hierarchy/references |
 
 ### Risks and decisions
-- **Macros and conditional includes** change visibility; resolve per `config_hash` and report the gap rather than guess.
+- **Macros and conditional includes** change visibility; resolve per `config_hash` and report the gap rather than guess. Macros are now indexed (`SymbolKind::Macro`, uses flagged `kOccurrenceMacro`, resolved by name through the include closure; see `docs/macro-support-plan.md`). The shard's `config_hash` still ignores macros that come from headers.
 - **ADL, dependent names, complex overloads** stay `Unresolved`/`Ambiguous`; never promoted silently.
 - **Cost**: resolution is a hash lookup per occurrence over closure scope tables; benchmark before choosing eager vs lazy (phase 0 numbers needed).
 - **Alternative**: let the existing `SemanticModel` bind with the real include closure (`HeaderSummary`/`ScopeIndex`) and store its resolved targets in the shard. More exact, but re-binds every file on any header change and ties the index to the binder; keep as fallback if A-E proves too approximate.

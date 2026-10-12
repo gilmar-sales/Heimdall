@@ -162,6 +162,11 @@ namespace heimdall
 		std::vector<IncludeGroup> include_order = {IncludeGroup::Angle, IncludeGroup::Quote};
 		bool include_case_insensitive           = true;
 		DocScope doc_scope                      = DocScope::Public;
+		// Bounds of the macro environment of a translation unit (`macros` in .heimdall.json).
+		// The defaults are what GCC and Clang accept (include depth) and what the C++ standard
+		// asks implementations to support (macros defined at once).
+		std::size_t macro_max_include_depth = 200;
+		std::size_t macro_max_macros        = 65536;
 	};
 
 	// Stable metadata for every rule the engine can emit. The catalog is the

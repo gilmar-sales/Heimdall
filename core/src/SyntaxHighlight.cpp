@@ -19,9 +19,8 @@ namespace heimdall
 			"function", "method", "property", "variable"};
 
 		constexpr std::size_t kTypeKeywordCount = 15;
-		// Roughly one span per two tokens; `#` and its directive name are at most two apart.
-		constexpr std::size_t kTokensPerSpan  = 2;
-		constexpr std::size_t kMaxDirectiveGap = 2;
+		constexpr std::size_t kTokensPerSpan    = 2;
+		constexpr std::size_t kMaxDirectiveGap  = 2;
 		constexpr std::array<std::string_view, kTypeKeywordCount> kTypeKeywords = {
 			"auto", "bool", "char", "char8_t", "char16_t", "char32_t", "double", "float",
 			"int", "long", "short", "signed", "unsigned", "void", "wchar_t"

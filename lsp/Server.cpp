@@ -5866,7 +5866,13 @@ namespace heimdall::lsp
 		}
 
 		heimdall::MacroEnvironmentOptions options;
-		options.overlay            = overlay.get();
+		options.overlay = overlay.get();
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			options.maxIncludeDepth = m_rule_options.macro_max_include_depth;
+			options.maxMacros       = m_rule_options.macro_max_macros;
+		}
+
 		const std::stop_token stop = t_context ? t_context->stop : std::stop_token {};
 		auto environment = std::make_shared<const heimdall::MacroEnvironment>(
 			heimdall::MacroEnvironment::Build(file, *text, command, options, stop));

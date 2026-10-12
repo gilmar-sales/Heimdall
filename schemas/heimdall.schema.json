@@ -377,6 +377,27 @@
         "description": "Allows future rules while still validating the setting value."
       }
     },
+    "macros": {
+      "type": "object",
+      "description": "Bounds of the macro environment built for each translation unit (macro-aware parsing, highlighting, navigation and refactoring).",
+      "properties": {
+        "max-include-depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 200,
+          "description": "Deepest #include nesting followed. GCC and Clang stop at 200."
+        },
+        "max-macros": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 65536,
+          "description": "Distinct macro names defined across one translation unit before headers stop being entered. The C++ standard asks implementations to support 65536."
+        }
+      },
+      "additionalProperties": false
+    },
     "include-order": {
       "type": "object",
       "description": "Group order used by cpp/sort-includes. The rule only runs when enabled in 'rules'.",

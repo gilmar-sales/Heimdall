@@ -315,3 +315,26 @@ TEST(MacroEnvironmentSpec, ChangedNestedHeaderInvalidatesTheIncluder)
     EXPECT_FALSE(Defined(after.Final(), "INNER"));
     EXPECT_TRUE(Defined(after.Final(), "INNER_RENAMED"));
 }
+
+TEST(MacroEnvironmentSpec, StopsEnteringHeadersPastTheMacroLimit)
+{
+    Project project;
+    std::string many = "#pragma once\n";
+    for (int i = 0; i < 12; ++i)
+    {
+        many += "#define BULK_" + std::to_string(i) + " " + std::to_string(i) + "\n";
+    }
+
+    project.Write("bulk.h", many);
+    project.Write("late.h", "#pragma once\n#define LATE 1\n");
+    const std::string text = "#include \"bulk.h\"\n#include \"late.h\"\n";
+    const auto main        = project.Write("main.cpp", text);
+    auto options           = Offline();
+    options.maxMacros      = 8;
+
+    const auto env = MacroEnvironment::Build(main, text, nullptr, options);
+
+    EXPECT_FALSE(env.Complete());
+    EXPECT_TRUE(Defined(env.Final(), "BULK_0"));
+    EXPECT_FALSE(Defined(env.Final(), "LATE"));
+}

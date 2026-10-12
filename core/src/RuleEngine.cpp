@@ -1808,6 +1808,12 @@ namespace heimdall
 					continue;
 				}
 
+				// `= delete` removes a function; it frees nothing.
+				if (is_delete && previous < tokens.size() && IsPunct(source, tokens[previous], "="))
+				{
+					continue;
+				}
+
 				if (is_new)
 				{
 					// Placement-new is an allocator building block, and a

@@ -98,3 +98,10 @@ endif ()
 add_executable(IndexBench src/IndexBench.cpp)
 target_link_libraries(IndexBench PRIVATE heimdall::index heimdall::refactor benchmark::benchmark benchmark::benchmark_main)
 target_compile_features(IndexBench PRIVATE cxx_std_26)
+
+# Macro expansion, directive scanning, translation-unit macro environment (cold and with the
+# header effect cache), and what the resolver costs the parser and the highlighter.
+add_executable(MacroBench src/MacroBench.cpp)
+target_link_libraries(MacroBench PRIVATE heimdall::core heimdall::semantic benchmark::benchmark benchmark::benchmark_main)
+target_compile_definitions(MacroBench PRIVATE HEIMDALL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
+target_compile_features(MacroBench PRIVATE cxx_std_26)

@@ -6,6 +6,7 @@
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/MacroEnvironment.hpp>
 #include <Heimdall/MappedBuffer.hpp>
+#include <Heimdall/RuleConfig.hpp>
 #include <Heimdall/SemanticRules.hpp>
 
 #include <algorithm>
@@ -200,10 +201,23 @@ namespace heimdall::cli
             // the database and borrow the flags of the nearest entry.
             if (const auto* command = database->FindOrNearest(path); command != nullptr)
             {
+                heimdall::MacroEnvironmentOptions environmentOptions;
+                heimdall::RuleOptions limits = options.rule_options;
+                if (!options.rule_config_explicit)
+                {
+                    if (auto found = heimdall::FindRuleOptions(path); found && *found)
+                    {
+                        limits = std::move(**found);
+                    }
+                }
+
+                environmentOptions.maxIncludeDepth = limits.macro_max_include_depth;
+                environmentOptions.maxMacros       = limits.macro_max_macros;
                 parser_options.macro_resolver =
                     std::make_shared<heimdall::MacroEnvironmentResolver>(
                         std::make_shared<const heimdall::MacroEnvironment>(
-                            heimdall::MacroEnvironment::Build(path, source, command)));
+                            heimdall::MacroEnvironment::Build(path, source, command,
+                                                              environmentOptions)));
             }
         }
 

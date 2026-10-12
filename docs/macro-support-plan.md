@@ -8,12 +8,30 @@
 | F1 modelo e expansor | **Feita** | `core/.../MacroTable.hpp`, `MacroExpander.hpp`; testes `MacroExpanderSpec` (exemplos normativos de `#`, `##`, `__VA_OPT__`, hide-sets, limites, cancelamento) |
 | F2 ambiente por TU | **Feita**, com memoização por header | `core/.../MacroScanner.hpp` (diretivas e `#if` contra a tabela viva), `semantic/.../MacroEnvironment.hpp` (includes na ordem real, builtins via `-dM -E` com cache, `-D/-U`, `-include`, guardas, `#pragma once`, overlay de buffers abertos, snapshots por offset) |
 | F3 realce e navegação | **Feita** | realce `macro`/`inactive`, hover com expansão, definição, completion, `workspace/symbol` e outline com macros (`lsp/MacroProtocol.*`, `Server.cpp`); smoke `LspMacroSmoke.py` |
-| F4 parser consciente de expansão | **Feita nas camadas 1 a 3, sem filhos expandidos** | `MacroResolver` (core) + `MacroEnvironmentResolver` (semantic); `GrammarKind::MacroInvocation`; decoração por definição, inclusive function-like e aninhada; blocos `TEST(a, b) { }`; CLI com `--compile-commands` e LSP (`CachedParse`) usam o ambiente. 293 -> 12 erros de parse em GoogleTest/Benchmark |
+| F4 parser consciente de expansão | **Feita nas camadas 1 a 3, sem filhos expandidos** | `MacroResolver` (core) + `MacroEnvironmentResolver` (semantic); `GrammarKind::MacroInvocation`; decoração por definição, inclusive function-like e aninhada; blocos `TEST(a, b) { }`; CLI com `--compile-commands` e LSP (`CachedParse`) usam o ambiente. 293 -> 0 erros de parse em GoogleTest/Benchmark (os 12 últimos eram lacunas do parser, corrigidas depois) |
 | F5 índice e semântica | **Feita no índice; Binder/Typer ficam de fora** | `SymbolKind::Macro` no `ShardBuilder` (definição como símbolo, usos como ocorrências com `kOccurrenceMacro`, inclusive em `#if`/`#ifdef`/`defined` e no corpo de outras macros, só em código ativo); resolução entre arquivos pelo fecho de includes (macro só casa com macro, nome comum nunca casa com macro); referências a partir do uso ou da definição; `TEST(a, b) { }` aparece no outline e no `workspace/symbol` como `TEST(a, b)` |
 | F6 regras e refatoração | **Feita** (com a ressalva do rename comum abaixo) | Rename de macro em `IndexRename::RenameMacro`; ação `refactor.inline.macro` "Expand macro NAME" (`MacroExpansionForEdit`); "Mostrar expansão" é o hover da F3; `cpp/include-what-you-use` passa a reconhecer macros (`ExportKind::Macro` em `HeaderSummary`: macros ainda definidas no fim do header, sem guardas, `#undef`s nem nomes iniciados por `_`); `modernize-const` e demais regras do `Flow` leem o uso de cada argumento de macro na expansão (`MacroArgumentContext`) em vez de tratá-lo como escape |
-| F7 robustez | **Parcial**: limites e `stop_token` existem; faltam benchmarks e fuzz | |
+| F7 robustez | **Feita**, com um orçamento ainda não atingido (abaixo) | `bench/src/MacroBench.cpp` (expansor, varredura de diretivas, ambiente frio/quente, custo do resolvedor no parser e no realce, arquivo de 5 000 linhas); `bench/LspMacroLatency.py` (realce pelo `heimdall-lsp` real, com orçamento); `test/src/MacroFuzzSpec.cpp` (programas de macro aleatórios, cadeias exponenciais, recursão mútua, aninhamento de 5 000 níveis, listas de argumentos hostis, `ParseDefinition` e diretivas aleatórias, expressões de `#if` gigantes); limites configuráveis em `.heimdall.json` (`macros.max-include-depth`, `macros.max-macros`) e aplicados no ambiente |
 
 Medido no `heimdall-lsp` (TU com 8 headers da biblioteca padrão, GCC): primeira consulta 97–142 ms (inclui a sondagem do compilador); depois de uma edição, 4 ms (antes da memoização do efeito dos headers eram 87 ms). Não há benchmark em `bench/` ainda.
+
+### Medições da F7 (GCC 16, -O3, 28 CPUs, uma execução)
+
+| Caso | Resultado |
+|------|-----------|
+| Expandir 2 000 usos de macro object-like | 2,3 ms (30 MiB/s) |
+| Expandir 2 000 chamadas aninhadas `ADD(MUL(..), MUL(..))` | 8,6 ms (10 MiB/s) |
+| `#`, `##` e `__VA_ARGS__` em 2 000 linhas | 6,7 ms (20 MiB/s) |
+| Cadeia que dobra a cada nível (limite de 100 000 tokens) | 31 ms |
+| Varredura de diretivas de `preprocessor_sample.hpp` | 13,5 µs (88 MiB/s) |
+| Ambiente de 200 headers com guardas, frio / quente (efeitos em cache) | 25 ms / 2,3 ms |
+| Parse de `parser_sample.hpp` sem / com resolvedor | 36 µs / 39 µs |
+| Realce do mesmo arquivo sem / com macros | 19 µs / 21 µs |
+| Arquivo de 5 000 linhas com macros: ambiente, parse com resolvedor, realce | 1,5 ms, 8,1 ms, 6,2 ms |
+| LSP, 5 000 linhas (35 mil tokens), realce: 1ª consulta / documento inalterado | 173 ms / 17 ms |
+| LSP, 5 000 linhas, primeira consulta depois de uma edição (mediana de 20) | 31,6 ms |
+
+O orçamento do plano era 30 ms para esse último caso e a mediana medida é 31,6 ms; `bench/LspMacroLatency.py` sai com código 1 por isso. O caso é sintético e denso (uma chamada de macro function-like por linha). Onde o tempo vai, pelo `MacroBench`: parse com resolvedor ≈ 8 ms, realce ≈ 6 ms, ambiente ≈ 1,5 ms mais a leitura dos headers em cache, o restante é a codificação e a escrita de ~500 KB de JSON. O expansor ficou mais rápido com memoização das operações de hide-set e sem contagem de referência por identificador (cadeia que dobra: 59 → 31 ms), mas sua vazão em código denso em chamadas (10 MiB/s) ainda está longe de ser limitada por memória: cada `Item` ocupa 56 bytes e a entrada é copiada duas vezes.
 
 Limitações da F6:
 

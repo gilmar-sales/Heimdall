@@ -72,7 +72,9 @@ this file is the engineering record so the details are not lost.
   the header index; base classes are recorded per scope (`IndexedScope::bases`).
 - **Header fidelity:** headers are parsed one by one without expanding
   `#include`, so the index is built with the macros the compiler reports
-  (`c++ -dM -E`, include guards removed) and decoration-only macros
+  (`c++ -dM -E`, include guards removed; since the macro environment the probe runs once per
+  driver and flag set and is cached for the process, and function-like macros are kept) and
+  decoration-only macros
   (`_GLIBCXX_NOEXCEPT`, `EXPORT`) are invisible to the grammar.
 - **Not covered (no guesses are made, the list is just empty):** types that
   depend on template parameters (`T::value_type`, `typename C::iterator`),

@@ -255,6 +255,47 @@ namespace heimdall
             }
         }
 
+        simdjson::dom::element macros_element;
+        if (!root["macros"].get(macros_element))
+        {
+            simdjson::dom::object macros;
+            if (const auto error = macros_element.get_object().get(macros); error)
+            {
+                return std::unexpected(
+                    "'macros' in Heimdall config must be an object: " + path.string());
+            }
+
+            constexpr std::uint64_t kLargestLimit = 1'000'000;
+            for (const auto field : macros)
+            {
+                const std::string_view key = field.key;
+                std::uint64_t          value = 0;
+                if (key != "max-include-depth" && key != "max-macros")
+                {
+                    return std::unexpected("unknown setting '" + std::string(key) +
+                                           "' in 'macros': " + path.string());
+                }
+
+                if (field.value.get_uint64().get(value) || value == 0 || value > kLargestLimit)
+                {
+                    return std::unexpected("'" + std::string(key) +
+                                           "' in 'macros' must be an integer from 1 to 1000000: " +
+                                           path.string());
+                }
+
+                if (key == "max-include-depth")
+                {
+                    configuration.options.macro_max_include_depth = static_cast<std::size_t>(value);
+                    configuration.has_macro_include_depth         = true;
+                }
+                else
+                {
+                    configuration.options.macro_max_macros = static_cast<std::size_t>(value);
+                    configuration.has_macro_max_macros     = true;
+                }
+            }
+        }
+
         simdjson::dom::element format_element;
         if (!root["format"].get(format_element))
         {
@@ -644,6 +685,16 @@ namespace heimdall
             if (it->has_doc_scope)
             {
                 merged.doc_scope = it->options.doc_scope;
+            }
+
+            if (it->has_macro_include_depth)
+            {
+                merged.macro_max_include_depth = it->options.macro_max_include_depth;
+            }
+
+            if (it->has_macro_max_macros)
+            {
+                merged.macro_max_macros = it->options.macro_max_macros;
             }
         }
 

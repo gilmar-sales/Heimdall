@@ -9,6 +9,7 @@ namespace heimdall
 	namespace
 	{
 
+		constexpr std::uint64_t kFieldSeparator = 0xFF;
 		constexpr std::uint64_t kFnvBasis  = 14695981039346656037ull;
 		constexpr std::uint64_t kFnvPrime  = 1099511628211ull;
 		constexpr std::string_view kVaArgs = "__VA_ARGS__";
@@ -83,7 +84,7 @@ namespace heimdall
 					hash = (hash ^ static_cast<unsigned char>(c)) * kFnvPrime;
 				}
 
-				hash = (hash ^ 0xFFu) * kFnvPrime;
+				hash = (hash ^ kFieldSeparator) * kFnvPrime;
 			};
 			mix(def.name);
 			mix(def.functionLike ? "f" : "o");
@@ -355,30 +356,44 @@ namespace heimdall
 
 	const MacroDef* MacroTable::Peek(std::string_view name) const noexcept
 	{
-		return Raw(name).get();
+		const MacroPtr* found = RawRef(name);
+		return found == nullptr ? nullptr : found->get();
 	}
 
-	MacroPtr MacroTable::Raw(std::string_view name) const noexcept
+	const MacroPtr* MacroTable::RawRef(std::string_view name) const noexcept
 	{
 		if (const auto it = mLocal.find(name); it != mLocal.end())
 		{
-			return it->second;
+			return it->second ? &it->second : nullptr;
 		}
 
-		for (const Layer * layer = mBase.get(); layer != nullptr; layer = layer->parent.get())
+		for (const Layer* layer = mBase.get(); layer != nullptr; layer = layer->parent.get())
 		{
 			if (const auto it = layer->entries.find(name); it != layer->entries.end())
 			{
-				return it->second;
+				return it->second ? &it->second : nullptr;
 			}
 		}
 
 		return nullptr;
 	}
 
+	MacroPtr MacroTable::Raw(std::string_view name) const noexcept
+	{
+		const MacroPtr* found = RawRef(name);
+		return found == nullptr ? nullptr : *found;
+	}
+
 	const MacroDef* MacroTable::Find(std::string_view name) const noexcept
 	{
-		return Lookup(name).get();
+		const MacroPtr* found = RawRef(name);
+		const MacroDef* macro = found == nullptr ? nullptr : found->get();
+		if (mObserver != nullptr)
+		{
+			mObserver->Read(name, macro);
+		}
+
+		return macro;
 	}
 
 	MacroTable MacroTable::Freeze()

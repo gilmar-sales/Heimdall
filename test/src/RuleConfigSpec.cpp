@@ -445,3 +445,47 @@ TEST(RuleConfigSpec, StopsAtGitRootFileMarker)
     EXPECT_EQ((* *loaded).overrides[0].severity, heimdall::Severity::Error);
     std::filesystem::remove_all(outer);
 }
+
+TEST(RuleConfigSpec, LoadsMacroLimitsAndMergesThemFromTheNearestConfig)
+{
+    const auto directory = MakeConfigDir("macro_limits");
+    std::filesystem::create_directories(directory / "inner");
+    WriteConfig(directory, R"({"root":true,"macros":{"max-include-depth":64,"max-macros":1000}})");
+    WriteConfig(directory / "inner", R"({"macros":{"max-macros":50}})");
+
+    const auto outer = heimdall::FindRuleOptions(directory);
+    const auto inner = heimdall::FindRuleOptions(directory / "inner");
+
+    ASSERT_TRUE(outer && *outer);
+    EXPECT_EQ((*outer)->macro_max_include_depth, 64u);
+    EXPECT_EQ((*outer)->macro_max_macros, 1000u);
+    ASSERT_TRUE(inner && *inner);
+    EXPECT_EQ((*inner)->macro_max_macros, 50u);
+    EXPECT_EQ((*inner)->macro_max_include_depth, 64u);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, DefaultsFollowTheCompilersAndTheStandard)
+{
+    const heimdall::RuleOptions options;
+
+    EXPECT_EQ(options.macro_max_include_depth, 200u);
+    EXPECT_EQ(options.macro_max_macros, 65536u);
+}
+
+TEST(RuleConfigSpec, RejectsInvalidMacroLimits)
+{
+    const auto directory = MakeConfigDir("macro_limits_invalid");
+    for (const std::string_view contents :
+         { R"({"macros":{"max-macros":0}})", R"({"macros":{"max-macros":"many"}})",
+           R"({"macros":{"unknown":1}})", R"({"macros":[]})", R"({"macros":{"max-include-depth":2000000}})" })
+    {
+        WriteConfig(directory, contents);
+
+        const auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
+
+        EXPECT_FALSE(loaded) << contents;
+    }
+
+    std::filesystem::remove_all(directory);
+}

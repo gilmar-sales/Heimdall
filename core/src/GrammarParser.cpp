@@ -1994,9 +1994,12 @@ namespace heimdall
             if (tail < end && Is(tail, "->"))
             {
                 auto type_end = tail + 1;
+                // `-> typename X<T>::type`, `-> const struct S`: specifiers before the name.
                 while (type_end < end &&
                        (Is(type_end, "*") || Is(type_end, "&") || Is(type_end, "&&") ||
-                        Is(type_end, "const") || Is(type_end, "volatile")))
+                        Is(type_end, "const") || Is(type_end, "volatile") ||
+                        Is(type_end, "typename") || Is(type_end, "struct") ||
+                        Is(type_end, "class") || Is(type_end, "union") || Is(type_end, "enum")))
                 {
                     ++type_end;
                 }
@@ -2152,7 +2155,14 @@ namespace heimdall
                 {
                     auto        type_end = tail + 1;
                     std::size_t dummy    = Invalid;
-                    type_end             = ParseQualifiedName(type_end, end, declarator, dummy);
+                    while (type_end < end && (Is(type_end, "typename") || Is(type_end, "struct") ||
+                                              Is(type_end, "class") || Is(type_end, "union") ||
+                                              Is(type_end, "enum")))
+                    {
+                        ++type_end;
+                    }
+
+                    type_end = ParseQualifiedName(type_end, end, declarator, dummy);
                     Add(GrammarKind::TrailingReturnType, tail, type_end, declarator);
                     tail = type_end;
                     continue;
@@ -2837,6 +2847,13 @@ namespace heimdall
                 m_last_expression_node = Invalid;
                 return end;
             }
+            // A conditional-compilation line between operands (`a(0),\n#ifdef X\n b(1),`, as in a
+            // constructor initializer list) is not part of the expression.
+            while (pos < end && IsDirective(pos))
+            {
+                pos = SkipDirective(pos, end, parent);
+            }
+
             if (pos >= end)
             {
                 m_last_expression_node = Invalid;
@@ -4738,6 +4755,47 @@ namespace heimdall
             return Invalid;
         }
 
+        // Whether a declaration in [begin, limit) has a parameter list: a parenthesis that is not
+        // inside `<...>` (`std::array<int, f(1)> k = {1};`) and comes before the declarator's `=`
+        // (`T& operator=(...)` aside), where parentheses are initializer syntax.
+        bool HasParameterList(std::size_t begin, std::size_t limit)
+        {
+            for (auto i = begin; i < limit; ++i)
+            {
+                if (Is(i, "<") && i > begin && IsIdentifierToken(i - 1))
+                {
+                    const auto close = FindTemplateClose(i, limit);
+                    if (close != Invalid)
+                    {
+                        i = close;
+                        continue;
+                    }
+                }
+
+                if (Is(i, "=") && !(i > begin && Is(i - 1, "operator")))
+                {
+                    return false;
+                }
+
+                if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < limit)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // The only token of `template <X>` when it is a complete, unnamed parameter:
+        // `typename`, `class`, a built-in type (`template <int>`, `template <auto>`) or a C
+        // integer typedef (`size_t`, `uint32_t`), which are declared by headers this parse
+        // does not read. Any other name is a type parameter written without `typename`.
+        static bool IsUnnamedParameterHead(std::string_view text)
+        {
+            return text == "typename" || text == "class" || IsBuiltinType(text) ||
+                   text == "auto" || (text.size() > 2 && text.ends_with("_t"));
+        }
+
         void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
         {
             if (mGrammarDepth >= kMaxGrammarDepth && begin < end)
@@ -4895,7 +4953,8 @@ namespace heimdall
                     }
 
                     if (angle == open + 3 &&
-                        m_tree.Tokens()[m_sig[open + 1]].kind == TokenKind::Identifier)
+                        m_tree.Tokens()[m_sig[open + 1]].kind == TokenKind::Identifier &&
+                        !IsUnnamedParameterHead(Text(open + 1)))
                     {
                         undeclared_template_name = m_sig[open + 1];
                     }
@@ -5035,14 +5094,7 @@ namespace heimdall
                 {
                     const bool closed              = m_match[brace] != Invalid;
                     const auto close               = closed ? m_match[brace] : end;
-                    bool       has_function_parens = false;
-                    for (auto i = declaration_start; i < brace; ++i)
-                    {
-                        if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < brace)
-                        {
-                            has_function_parens = true;
-                        }
-                    }
+                    const bool has_function_parens = HasParameterList(declaration_start, brace);
 
                     const bool function_body =
                         has_function_parens && !namespace_decl && !record_decl;
@@ -5151,14 +5203,10 @@ namespace heimdall
                         ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
                     }
 
-                    bool function_declaration = false;
-                    for (auto i = declaration_start; i < semi; ++i)
-                    {
-                        if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < semi)
-                        {
-                            function_declaration = true;
-                        }
-                    }
+                    // A parenthesis inside an alias (`using A = X<sizeof(T)>::type;`) is part
+                    // of a type, never a parameter list.
+                    const bool function_declaration =
+                        !Is(declaration_start, "using") && HasParameterList(declaration_start, semi);
 
                     if (function_declaration)
                     {

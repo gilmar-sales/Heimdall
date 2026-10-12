@@ -143,6 +143,8 @@ namespace heimdall
 
 		void Flatten();
 
+		// The stored pointer itself (no reference count traffic); null when undefined.
+		[[nodiscard]] const MacroPtr* RawRef(std::string_view name) const noexcept;
 		[[nodiscard]] MacroPtr Raw(std::string_view name) const noexcept;
 
 		std::shared_ptr<const Layer> mBase;

@@ -25,6 +25,8 @@ cmake --build build --config Debug
 ctest --test-dir build --build-config Debug --output-on-failure
 ./build/test/Tests_run
 ./build/bench/CoreBench
+./build/bench/MacroBench                       # macro expansion, environment, resolver cost
+python3 bench/LspMacroLatency.py build/lsp/heimdall-lsp   # highlight latency through the LSP
 ```
 
 ## CLI
@@ -78,6 +80,18 @@ defaults. It refuses to overwrite an existing file unless `--force` (`-f`) is
 given and creates missing directories. The JSON Schema for editors lives in
 `schemas/heimdall.schema.json`; add `"$schema": "<path-to>/heimdall.schema.json"`
 to `.heimdall.json` for completion and validation.
+
+The macro environment built for each translation unit (see
+[macro support](docs/macro-support-plan.md)) can be bounded in `.heimdall.json`:
+
+```json
+{ "macros": { "max-include-depth": 200, "max-macros": 65536 } }
+```
+
+Both keys are optional and nearer configs override farther ones. The defaults are the
+include depth GCC and Clang accept and the number of macros the C++ standard asks
+implementations to support. Past either bound the environment is marked incomplete and
+no more headers are entered.
 
 Files are analyzed concurrently with a standard-library `std::jthread` worker
 set and an atomic work index; results are emitted in sorted path order. The
@@ -197,9 +211,15 @@ outside the extension) still needs to be closed before relinking.
   `#if` / `#ifdef` / `#ifndef` / `#elif` / `#else` / `#endif`, handles `#define` /
   `#undef` for object-like macros, and expands those macros outside comments/literals.
   Integer comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) are supported in `#if`.
-  `#include` is deliberately opaque: no headers are opened. Function-like macros,
-  token pasting/stringification and full C++ preprocessor expression semantics are
-  not implemented yet; they are left unexpanded rather than guessed.
+  `#include` is deliberately opaque here: no headers are opened. This standalone
+  preprocessor is used when no macro environment is available.
+- **Macro environment** (`MacroTable`, `MacroExpander`, `MacroScanner`, `MacroEnvironment`):
+  full macro replacement (function-like, `#`, `##`, `__VA_ARGS__`, `__VA_OPT__`,
+  hide-sets), conditions evaluated against the live macro table, and a translation-unit
+  walk that follows `#include` in order with compiler builtins (`-dM -E`, cached), `-D`/`-U`
+  and `-include`. With a compile command it drives parsing of macro-heavy code, macro
+  highlighting, hover with expansion, go to definition, completion, references, rename,
+  `Expand macro`, `workspace/symbol` and `cpp/include-what-you-use` for macros.
 - **CST foundation**: iterative delimiter grouping for `()`, `[]`, `{}` over lossless
   lexer tokens. Green nodes are flat immutable-style spans linked by parent index;
   unmatched/mismatched delimiters produce diagnostics and recovery continues. This

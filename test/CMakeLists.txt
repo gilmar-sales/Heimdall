@@ -62,6 +62,7 @@ add_executable(Tests_run
   src/MacroParseSpec.cpp
   src/IndexMacroSpec.cpp
   src/MacroFlowSpec.cpp
+  src/MacroFuzzSpec.cpp
   src/SymbolProtocolSpec.cpp
   src/WorkspaceSymbolIndexSpec.cpp
   src/WorkspaceFilesSpec.cpp

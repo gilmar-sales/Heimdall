@@ -623,6 +623,13 @@ namespace heimdall
 				return true;
 			}
 
+			if (mTracer.everDefined.size() > mOptions.maxMacros)
+			{
+				mComplete = false;
+				MarkUncacheable();
+				return true;
+			}
+
 			if (mDepth >= mOptions.maxIncludeDepth)
 			{
 				mComplete = false;
