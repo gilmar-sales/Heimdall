@@ -9,6 +9,7 @@
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeInsertion.hpp>
+#include <Heimdall/IndexRename.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -266,14 +267,11 @@ namespace heimdall::lsp
 						});
 					}
 
-					if (m_workspace_symbols.load(std::memory_order_relaxed))
-					{
 						m_symbol_worker =
 							std::jthread([this](std::stop_token stop)
 							{
 								SymbolIndexMain(stop);
 						});
-					}
 				}
 				else if (method == "shutdown")
 				{
@@ -1572,7 +1570,6 @@ namespace heimdall::lsp
 			}
 		}
 		const std::filesystem::path closed_path = PathFromUri(uri);
-		if (m_workspace_symbols.load(std::memory_order_relaxed))
 		{
 			// The buffer stops shadowing its file: serve what is on disk if the workspace owns it.
 			{
@@ -2034,6 +2031,58 @@ namespace heimdall::lsp
 		return diagnostics;
 	}
 
+	heimdall::IndexRenameContext LanguageServer::RenameContext()
+	{
+		std::filesystem::path root;
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			root = m_workspace_root;
+		}
+
+		heimdall::IndexRenameContext result;
+		result.complete = m_index_complete.load(std::memory_order_acquire);
+		{
+			const std::lock_guard<std::mutex> lock(m_symbol_mu);
+			result.coverageIssue = mIndexIssue;
+		}
+		result.requireExactIncludes = true;
+		result.editable = [root](const std::string& path)
+		{
+			if (root.empty() || !IsUnderRoot(std::filesystem::path(path), root))
+			{
+				return false;
+			}
+
+			const auto relative = std::filesystem::path(path).lexically_relative(root);
+			return std::ranges::none_of(relative.parent_path(), [](const std::filesystem::path& part)
+				{ return IsSkippedDirectory(part.string()); });
+		};
+		result.document = [this](const std::string& path) -> std::optional<heimdall::IndexedDocument>
+		{
+			const auto uri = UriFromPath(path);
+			heimdall::IndexedDocument indexed;
+			if (const auto open = GetDocument(uri))
+			{
+				indexed.text = open->text;
+				indexed.version = open->version;
+			}
+			else if (auto contents = ReadWorkspaceFile(path))
+			{
+				indexed.text = std::make_shared<const std::string>(std::move(*contents));
+			}
+			else
+			{
+				return std::nullopt;
+			}
+
+			const auto* command = CommandFor(uri);
+			indexed.options = ParserOptionsFor(command);
+			indexed.configHash = heimdall::index::ShardBuilder::ConfigurationHash(*indexed.options, command);
+			return indexed;
+		};
+		return result;
+	}
+
 	void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id,
 		int mode)
 	{
@@ -2104,8 +2153,15 @@ namespace heimdall::lsp
 			}
 		}
 
+		const auto index_snapshot = m_index_store.Snapshot();
+		const auto self_path = PathFromUri(uri_string).generic_string();
+		const auto self_shard = index_snapshot->ShardFor(self_path);
+		const auto rename_context = RenameContext();
+		const bool indexed_target = mode != 0 && self_shard != heimdall::index::kInvalid &&
+			index_snapshot->Shards()[self_shard]->OccurrenceAt(static_cast<std::uint32_t>(offset)) != heimdall::index::kInvalid &&
+			rename_context.editable && rename_context.editable(self_path);
 		const auto refs =
-			mode == 2 ? std::expected<heimdall::SymbolOccurrences, heimdall::RefactoringError>(
+			mode == 2 || indexed_target ? std::expected<heimdall::SymbolOccurrences, heimdall::RefactoringError>(
 			heimdall::SymbolOccurrences {})
 		: heimdall::RefactoringService::LocalReferences(
 			context.Snapshot(), context.Document(), offset, include_declaration,
@@ -2128,6 +2184,25 @@ namespace heimdall::lsp
 		};
 		if (mode == 1)
 		{
+			if (indexed_target)
+			{
+				const auto prepared = heimdall::IndexRename::Prepare(*index_snapshot, self_path, offset,
+					rename_context, CurrentStop());
+				if (!prepared)
+				{
+					fail(prepared.error());
+					return;
+				}
+
+				std::string response = "{\"range\":";
+				range(document->lines, prepared->offset, prepared->length, response);
+				response += ",\"placeholder\":";
+				QuoteJson(prepared->name, response);
+				response += '}';
+				Respond(id, response);
+				return;
+			}
+
 			std::string response = "{\"range\":";
 			range(document->lines, refs->offset, refs->length, response);
 			response += ",\"placeholder\":";
@@ -2301,16 +2376,28 @@ namespace heimdall::lsp
 			return;
 		}
 
-		const auto plan = heimdall::RefactoringService::RenameLocal(
-			context.Snapshot(), context.Document(), offset, new_name, CurrentStop());
+		std::expected<heimdall::RefactoringPlan, heimdall::RefactoringError> plan =
+			std::unexpected(heimdall::RefactoringError {});
+		if (indexed_target)
+		{
+			plan = heimdall::IndexRename::Rename(
+				*index_snapshot, self_path, offset, new_name, rename_context, CurrentStop());
+		}
+		else
+		{
+			plan = heimdall::RefactoringService::RenameLocal(
+				context.Snapshot(), context.Document(), offset, new_name, CurrentStop());
+		}
+
 		if (!plan)
 		{
 			fail(plan.error());
 			return;
 		}
 
-		const auto preview =
-			heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
+		const auto preview = indexed_target
+			? heimdall::IndexRename::Preview(*m_index_store.Snapshot(), *plan, RenameContext(), CurrentStop())
+			: heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop());
 		if (!preview ||!IsCurrentVersion(uri_string, document->version))
 		{
 			fail(preview
@@ -2337,7 +2424,8 @@ namespace heimdall::lsp
 			}
 			else if (auto other = GetDocument(doc_uri))
 			{
-				if (!IsCurrentVersion(doc_uri, other->version))
+				if (other->version != plan_document.version || *other->text != *plan_document.original ||
+					!IsCurrentVersion(doc_uri, plan_document.version))
 				{
 					fail(heimdall::RefactoringError {
 							heimdall::RefactoringErrorCode::StaleSnapshot,
@@ -2346,7 +2434,7 @@ namespace heimdall::lsp
 				}
 
 				lines   = other->lines;
-				version = other->version;
+				version = plan_document.version;
 			}
 			else
 			{
@@ -2385,6 +2473,13 @@ namespace heimdall::lsp
 		}
 
 		response += "]}";
+		if (indexed_target && (m_index_store.Snapshot()->Revision() != plan->revision ||
+			!m_index_complete.load(std::memory_order_acquire)))
+		{
+			fail({heimdall::RefactoringErrorCode::StaleSnapshot, "Project changed; request rename again"});
+			return;
+		}
+
 		Respond(id, response);
 	}
 
@@ -5558,6 +5653,11 @@ namespace heimdall::lsp
 
 	void LanguageServer::WorkspaceSymbols(simdjson::dom::element request, std::string_view id)
 	{
+		if (!m_workspace_symbols.load(std::memory_order_relaxed))
+		{
+			Respond(id, "[]");
+			return;
+		}
 		simdjson::dom::object params;
 		std::string_view query;
 		if (!GetObject(request, "params", params) ||!GetString(params, "query", query))
@@ -5579,28 +5679,53 @@ namespace heimdall::lsp
 		Respond(id, response);
 	}
 
+	std::shared_ptr<const heimdall::index::FileShard> LanguageServer::IndexShard(
+		const heimdall::ParseTree& tree, const std::filesystem::path& file,
+		const heimdall::CompileCommand* command)
+	{
+		const auto model = heimdall::Binder::Bind(tree);
+		const auto configHash = heimdall::index::ShardBuilder::ConfigurationHash(ParserOptionsFor(command), command);
+		return heimdall::index::ShardBuilder::Build(model, file.generic_string(), configHash,
+			[&tree, &file, command](std::string_view, bool, std::uint32_t offset) -> std::optional<std::string>
+			{
+				const auto target = heimdall::IncludeIndex::ResolveIncludeAt(file.parent_path(),
+					tree.Source(), offset, command);
+				return target.empty() ? std::nullopt : std::optional(target.lexically_normal().generic_string());
+			});
+	}
+
 	void LanguageServer::IndexOpenSymbols(
 		const std::string& uri,
 		const std::shared_ptr<const std::string>& text,
 		const heimdall::ParseTree& tree,
 		std::int64_t version)
 	{
-		if (!m_workspace_symbols.load(std::memory_order_relaxed))
-		{
-			return;
-		}
-
 		LineIndex lines;
 		lines.Build(*text);
 		const auto outline = heimdall::SymbolOutline::Extract(tree);
 		auto file          = BuildIndexedFile(uri, outline, lines);
-		const auto model   = heimdall::Binder::Bind(tree);
-		auto shard = heimdall::index::ShardBuilder::Build(model, PathFromUri(uri).generic_string());
-		const std::lock_guard<std::mutex> lock(m_symbol_mu);
-		if (IsCurrentVersion(uri, version))
+		auto shard = IndexShard(tree, PathFromUri(uri), CommandFor(uri));
+		bool updated = false;
 		{
-			m_symbol_index.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+			const std::lock_guard<std::mutex> lock(m_symbol_mu);
+			if (IsCurrentVersion(uri, version))
+		{
+			if (m_workspace_symbols.load(std::memory_order_relaxed))
+			{
+				m_symbol_index.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+			}
 			m_index_store.SetOpen(PathFromUri(uri).generic_string(), std::move(shard));
+			if (!tree.Diagnostics().empty())
+			{
+				m_index_complete.store(false, std::memory_order_release);
+			}
+			updated = true;
+		}
+		}
+		if (updated && !m_index_complete.load(std::memory_order_acquire) &&
+			mIndexScanFinished.load(std::memory_order_acquire) && mIndexPendingJobs.load(std::memory_order_acquire) == 0)
+		{
+			RefreshIndexCompleteness(std::stop_token {});
 		}
 	}
 
@@ -5640,11 +5765,13 @@ namespace heimdall::lsp
 
 			LineIndex lines;
 			lines.Build(*text);
-			m_symbol_index.SetDisk(
-				key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
-			const auto model = heimdall::Binder::Bind(tree);
+			if (m_workspace_symbols.load(std::memory_order_relaxed))
+			{
+				m_symbol_index.SetDisk(
+					key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
+			}
 			m_index_store.SetDisk(file.generic_string(),
-				heimdall::index::ShardBuilder::Build(model, file.generic_string()));
+				IndexShard(tree, file, CommandFor(uri)));
 		}
 		catch (...)
 		{
@@ -5683,9 +5810,9 @@ namespace heimdall::lsp
 		std::atomic<std::size_t> done {0};
 		std::mutex report_mutex;
 		std::size_t reported = 0;
-		const bool show_progress = m_work_done_progress.load(std::memory_order_relaxed) &&
+		const bool show_progress = m_workspace_symbols.load(std::memory_order_relaxed) && m_work_done_progress.load(std::memory_order_relaxed) &&
 			!files.empty();
-		const bool show_status = m_index_status.load(std::memory_order_relaxed);
+		const bool show_status = m_workspace_symbols.load(std::memory_order_relaxed) && m_index_status.load(std::memory_order_relaxed);
 		if (show_status)
 		{
 			Send(IndexStatusNotification("indexing", 0, files.size(), elapsed_ms()));
@@ -5762,22 +5889,62 @@ namespace heimdall::lsp
 			return;
 		}
 
+		{
+			mIndexScanFinished.store(true, std::memory_order_release);
+			RefreshIndexCompleteness(stop);
+		}
+
 		std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
 			"logMessage\",\"params\":{\"type\":3,\"message\":";
 		QuoteJson("Heimdall: symbol index ready: " + std::to_string(files.size()) + " files in " +
 			FormatDuration(elapsed_ms()),
 			notification);
 		notification += "}}";
-		Send(notification);
+		if (m_workspace_symbols.load(std::memory_order_relaxed))
+		{
+			Send(notification);
+		}
+	}
+
+	void LanguageServer::RefreshIndexCompleteness(std::stop_token stop)
+	{
+		std::filesystem::path root;
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			root = m_workspace_root;
+		}
+		const auto discovery = DiscoverWorkspaceSourcesDetailed(root, stop);
+		const auto snapshot = m_index_store.Snapshot();
+		bool complete = discovery.complete && mIndexScanFinished.load(std::memory_order_acquire);
+		std::string issue = discovery.complete ? std::string {} : "Workspace discovery was cancelled, truncated or failed";
+		for (const auto& path : discovery.files)
+		{
+			const auto shard = snapshot->ShardFor(path.generic_string());
+			const auto contents = ReadWorkspaceFile(path);
+			if (stop.stop_requested() || shard == heimdall::index::kInvalid || !contents ||
+				snapshot->Shards()[shard]->ContentHash() != heimdall::index::HashBytes(*contents))
+			{
+				const auto open = GetDocument(UriFromPath(path));
+				if (!stop.stop_requested() && shard != heimdall::index::kInvalid && open &&
+					snapshot->Shards()[shard]->ContentHash() == heimdall::index::HashBytes(*open->text))
+				{
+					continue;
+				}
+				complete = false;
+				issue = "File was skipped or changed before indexing: " + path.generic_string();
+				break;
+			}
+		}
+
+		const std::lock_guard<std::mutex> lock(m_symbol_mu);
+		complete &= mIndexPendingJobs.load(std::memory_order_acquire) == 0 &&
+			m_index_store.Snapshot()->Revision() == snapshot->Revision();
+		mIndexIssue = std::move(issue);
+		m_index_complete.store(complete, std::memory_order_release);
 	}
 
 	void LanguageServer::WatchedFilesChanged(simdjson::dom::element request)
 	{
-		if (!m_workspace_symbols.load(std::memory_order_relaxed))
-		{
-			return;
-		}
-
 		simdjson::dom::object params;
 		simdjson::dom::array changes;
 		if (!GetObject(request, "params", params) || params["changes"].get_array().get(changes))
@@ -5811,14 +5978,26 @@ namespace heimdall::lsp
 			if (type == kDeleted)
 			{
 				// A removed folder is reported once, not once per file inside it.
-				m_symbol_index.RemoveDiskUnder(FileKey(path));
-				m_index_store.RemoveDiskUnder(path.generic_string());
+				{
+					const std::lock_guard<std::mutex> lock(m_symbol_mu);
+					m_index_complete.store(false, std::memory_order_release);
+					m_symbol_index.RemoveDiskUnder(FileKey(path));
+					m_index_store.RemoveDiskUnder(path.generic_string());
+				}
+				RefreshIndexCompleteness(std::stop_token {});
 			}
 			else if (IsWorkspaceSource(path))
 			{
+				{
+					const std::lock_guard<std::mutex> lock(m_symbol_mu);
+					mIndexPendingJobs.fetch_add(1, std::memory_order_acq_rel);
+					m_index_complete.store(false, std::memory_order_release);
+				}
 				m_pool.Submit(ThreadPool::Task([this, path]()
 					{
 						IndexDiskSymbols(path, std::stop_token {});
+						mIndexPendingJobs.fetch_sub(1, std::memory_order_acq_rel);
+						RefreshIndexCompleteness(std::stop_token {});
 				}),
 					ThreadPool::Priority::Background);
 			}

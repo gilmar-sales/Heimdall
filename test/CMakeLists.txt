@@ -32,6 +32,7 @@ add_executable(Tests_run
   src/SemanticModelSpec.cpp
   src/TypeHierarchySpec.cpp
   src/IndexSpec.cpp
+  src/IndexRenameSpec.cpp
   src/SemanticRulesSpec.cpp
   src/ApiRulesSpec.cpp
   src/DesignatedInitSpec.cpp
@@ -166,6 +167,16 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspIndexDefinitionSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIndexDefinitionSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIndexRenameSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIndexRenameSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIndexForwardSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIndexForwardSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

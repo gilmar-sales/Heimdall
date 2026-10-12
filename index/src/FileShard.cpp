@@ -123,14 +123,23 @@ namespace heimdall::index
 
 	std::size_t FileShard::StorageBytes() const noexcept
 	{
-		const auto& s = mSymbols;
-		const auto& o = mOccurrences;
-		return mPath.size() + mStrings.Bytes() +
+		constexpr std::size_t kSymbolIndexColumns     = 10;
+		constexpr std::size_t kOccurrenceIndexColumns = 11;
+		constexpr std::size_t kScopeIndexColumns      = 4;
+		constexpr std::size_t kUsingIndexColumns      = 4;
+		constexpr std::size_t kRelationHashColumns    = 2;
+		const auto& s                                 = mSymbols;
+		const auto& o                                 = mOccurrences;
+		return mPath.size() + mStrings.Bytes() + mParameterTypes.size() + mArgumentTypes.size() +
 			s.Size() *
-			(sizeof(SymbolHash) + sizeof(std::uint64_t) + 6 * sizeof(std::uint32_t) + 2) +
-			o.Size() * (4 * sizeof(std::uint32_t) + 2) +
-			mRelations.Size() * (2 * sizeof(SymbolHash) + 1 + sizeof(std::uint32_t)) +
-			(mIncludes.size() + mSymbolOccurrenceBegin.size() + mSymbolOccurrenceList.size()) *
+			(sizeof(SymbolHash) + sizeof(std::uint64_t) + kSymbolIndexColumns * sizeof(std::uint32_t) +
+			sizeof(heimdall::SymbolKind) + sizeof(Role) + sizeof(std::uint8_t) + sizeof(std::uint8_t)) +
+			o.Size() * (kOccurrenceIndexColumns * sizeof(std::uint32_t) + sizeof(Role) +
+			sizeof(Resolution) + sizeof(std::uint8_t) + sizeof(std::uint8_t)) +
+			mScopes.Size() * kScopeIndexColumns * sizeof(std::uint32_t) +
+			mUsings.Size() * (kUsingIndexColumns * sizeof(std::uint32_t) + sizeof(UsingKind)) +
+			mRelations.Size() * (kRelationHashColumns * sizeof(SymbolHash) + sizeof(RelationKind) + sizeof(std::uint32_t)) +
+			(mIncludes.size() + mIncludeTargets.size() + mIncludeOffsets.size() + mSymbolOccurrenceBegin.size() + mSymbolOccurrenceList.size()) *
 			sizeof(std::uint32_t);
 	}
 
@@ -148,8 +157,10 @@ namespace heimdall::index
 		sorted.subject.reserve(order.size());
 		sorted.object.reserve(order.size());
 		sorted.kind.reserve(order.size());
+		sorted.offset.reserve(order.size());
 		for (const auto index : order)
 		{
+			sorted.offset.push_back(mRelations.offset[index]);
 			sorted.subject.push_back(mRelations.subject[index]);
 			sorted.object.push_back(mRelations.object[index]);
 			sorted.kind.push_back(mRelations.kind[index]);

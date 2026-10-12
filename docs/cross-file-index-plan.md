@@ -132,4 +132,116 @@ Benchmark every hot-path change against the Phase 0 numbers before claiming a sp
 - Cache lives outside the source tree (per-workspace cache directory).
 - LSP quality (phases 2-4) ships before whole-project lint rules (phase 7).
 
-Type names written in type positions are now recorded as uses (resolved in-file when the lookup succeeds, otherwise name-matched).
+Recorded as uses: type names in type specifiers, base-class names (resolved in-file), and type operands of `static_cast`/`dynamic_cast`/`const_cast`/`reinterpret_cast`. Forward declarations (`struct X;`, `class X;`, `enum [class] X [: T];`) are found by a syntactic scan in `ShardBuilder` (namespace/class nesting tracked from braces; none inside function bodies; `friend` skipped) and share the definition's identity. Not covered: forward declarations the binder would need to model (qualified `struct ns::X;`), specializations, friends, macro-generated types.
+
+## 9. Exact cross-file resolution (replacing name matching)
+
+Today a cross-file use is an `Unresolved` occurrence matched to declarations by spelling plus transitive `#include` reachability. Wrong when two reachable files declare the same unqualified name (different namespaces, overloads, shadowing).
+
+### Approach: resolve against the include closure, at index time
+1. **Visible-declaration view.** For a shard, build the set of declarations reachable through its include closure (`IndexSnapshot` already has the include graph): per namespace/class scope, name -> candidate symbols. Computed lazily per shard from the shards' own symbol columns, no parsing.
+2. **Scoped lookup.** For each `Unresolved` occurrence, replay C++ lookup over indexed data only: enclosing scopes (needs `scope`/`enclosing` per occurrence), `using namespace`, `using X::Y`, aliases, qualified paths (`a::b::T`), ADL not attempted. Result: `Resolved` (one candidate), `Ambiguous` (several; keep all), or stays `Unresolved`.
+3. **Persist the result in a second pass**, not in the shard (shards are per-file and immutable): a snapshot-level `ResolvedUse` table (occurrence -> symbol hash) built when the snapshot is built or lazily on first reference query, invalidated per includer when a header changes.
+4. **Consumers** switch from name matching to the table; `Unresolved` remains only for what cannot be resolved; rename requires `Resolved` and complete coverage.
+
+### Data the shard must add first (phase A, shard format v2)
+- Enclosing scope per occurrence (namespace/class symbol local id) and the written qualifier (`ns::T` parts).
+- `using` directives/declarations/aliases as relations (`UsingNamespace`, `UsingDecl`, `AliasOf`).
+- Overload signature for call occurrences (argument count; arg types where the typer knows them).
+- Base-class qualifier text, so `BaseOfByName` becomes `BaseOf` once resolved.
+- Template primary vs specialization link (`Specializes`).
+
+### Phases
+| Step | Deliverable | Exit criteria |
+|------|-------------|---------------|
+| A | Shard v2 columns above, builder + round-trip tests | no per-occurrence allocation; old queries unchanged |
+| B | Include-closure visibility + namespace/class scope tables in `IndexSnapshot` | unit tests: same name in two namespaces, shadowing, `using`, aliases |
+| C | `ResolvedUse` table and incremental invalidation | editing a header re-resolves only transitive includers; benchmark vs full rebuild |
+| D | Move references/definition/typeHierarchy/rename gates to resolved results; keep name match as a labelled fallback | tests that two same-named classes in different namespaces no longer conflate; ambiguity reported |
+| E | Overloads and template specializations | call occurrences pick overload by arity then types; `Specializes` used by hierarchy/references |
+
+### Risks and decisions
+- **Macros and conditional includes** change visibility; resolve per `config_hash` and report the gap rather than guess.
+- **ADL, dependent names, complex overloads** stay `Unresolved`/`Ambiguous`; never promoted silently.
+- **Cost**: resolution is a hash lookup per occurrence over closure scope tables; benchmark before choosing eager vs lazy (phase 0 numbers needed).
+- **Alternative**: let the existing `SemanticModel` bind with the real include closure (`HeaderSummary`/`ScopeIndex`) and store its resolved targets in the shard. More exact, but re-binds every file on any header change and ties the index to the binder; keep as fallback if A-E proves too approximate.
+
+### Status of section 9
+| Step | State |
+|------|-------|
+| A | Done: occurrences carry scope, written qualifier, member flag and call arity; shards carry scope extents (namespaces, classes, out-of-line member bodies), `using` directives/declarations/aliases and per-function required/maximum parameters; base relations carry the written-name offset. |
+| B | Done: `IndexSnapshot` keeps a forward include graph, a qualified-name directory and a member directory; lookup walks the enclosing scopes outward (innermost match hides outer ones), honours `using namespace`, `using a::B`, qualified paths and `::`-absolute names. |
+| C | Done, lazy: `IndexSnapshot::Resolved(shard)` computes one shard on first use (`std::call_once`) and is shared by all readers of that snapshot. Resolutions are not carried across snapshots: a new snapshot recomputes only the shards that are queried. |
+| D | Done for the index consumers: `References` (Resolved / Ambiguous / name-matched `Unresolved` only when nothing visible declares the name), `Candidates` (go to definition), `Subtypes`, `Supertypes` (exact once the base name resolves). Rename still uses the refactoring engine and is not index-based. |
+| E | Partial: overloads are filtered by call arity (declared minimum/maximum parameters, defaults and variadics); calls that still fit several overloads are `Ambiguous`. Argument types are not compared (needs the typer). Template specializations share the identity of their primary template, so references to `Box<int>` reach every declaration of `Box`; there is no separate `Specializes` relation. |
+
+Not resolved by design: inherited members looked up unqualified inside derived classes (fall back to name matching), namespace aliases, argument-dependent lookup, dependent names.
+
+Measured (`IndexBench`, synthetic: every source includes three headers, calls members and free functions): building a shard from a bound file about 4 µs; publishing a snapshot 0.40 ms for 250 shards and 2.4 ms for 1,250; resolving one includer adds about 0.02 ms and 0.1 ms; a references query 2 µs and 5.5 µs once resolved. These are first baselines, not budgets.
+
+## 10. Multi-file rename (`refactor/IndexRename`)
+
+`textDocument/rename` uses the index when the symbol is declared or used in more than one file (`IndexRename::SpansFiles`); otherwise the existing single-file engine runs. The rename either applies to every occurrence or is refused with the reason; it never edits on a guess.
+
+Gates, in order:
+1. The disk scan finished, was not truncated at `kMaxWorkspaceFiles` and indexed every file it found (`m_index_complete`); declaring files are inside the workspace root.
+2. New name is a single non-keyword identifier; the open file's text matches the indexed revision (content hash), as does every file that will be edited.
+3. The symbol resolves to exactly one declaration. Namespaces, virtual/override/pure functions, operators, constructors and destructors are refused; a member whose name is also declared by a derived class is refused.
+4. Every use returned for the entity is `Resolved` (no ambiguous or name-matched uses).
+5. Project-wide coverage: no occurrence of the same spelling in any file is unresolved/ambiguous/dependent; every identifier token of that spelling in a file that contains it is either an indexed occurrence or the declaration of a non-indexed local/parameter; none sits in a preprocessor directive other than `#include`.
+6. Classes also rename constructor/destructor names (in-class and `Widget::Widget`, `Widget::~Widget`).
+7. Verification: the edited files are parsed again (no new parse errors), re-indexed, and a new snapshot is built; every occurrence in every file must keep the same state and resolve to the same entity (modulo the renamed identities), no two entities may merge and the entity must keep its declaration count. This is what detects collisions, capture by inner declarations and hijacked uses.
+
+What this guarantees and what it cannot: the check covers everything the index sees (workspace files). A new name that clashes with a symbol from a header outside the workspace (system or third-party headers) is not detected, files under skipped directories (`.*`, `build*`, `out`, `node_modules`) are not part of the project, and code in inactive `#if` regions or generated by macros is refused rather than renamed. Occurrences the index does not yet record (for example in templates with dependent names) make the rename refuse instead of skip them.
+
+## 11. Rename hardening: implementation checkpoints
+
+The cross-file engine is not a general C++ semantic proof yet. Connecting it to the
+LSP does not close the remaining coverage, configuration and preprocessing gaps.
+The following checkpoints track the safety-first implementation order.
+
+| Phase | State | Remaining exit criteria |
+|-------|-------|-------------------------|
+| 0 Contract and regressions | Started: regression tests for unknown receivers, incompatible arity, local homonyms, using position, reserved names, new-name macros, cancellation and parse errors | Add regressions for real include search order, conditional variants and expansion provenance |
+| 1 Reliable index | Partial: receiver spelling plus declaration scope/position, using introduction offset, pinned store generation | Canonical identity verification, compiler-resolved includes, configuration/TU variants, per-file coverage reports and dependent invalidation |
+| 2 Shared service and LSP | Partial: `IndexRename::Preview` validates plans without requiring Workspace document IDs | Shared prepare/rename target resolution, routing by entity kind rather than `SpansFiles`, frontend adoption of indexed preview and configuration fingerprints, final version/generation checks |
+| 3 Targeted coverage | Partial: independently bound local homonyms no longer veto rename | Prove affected regions for both old and new names; avoid project-wide rejection and reparse only with dependency evidence |
+| 4 Nominal entities | Pending | Aliases, enums/enumerators, structured forwards/friends, constructor selection redirected to the class, namespace reopening and Doxygen parity |
+| 5 Members and overloads | Partial: simple declared receivers and locally typed classes separate homonymous members; incompatible arities are discarded | Inheritance lookup/hiding, argument types and conversion ranking, cv/ref, address-taking, ADL and hidden friends |
+| 6 Virtual families | Pending | Exact override relations, implicit overrides, complete family edits and external-base/derived coverage |
+| 7 Templates and lexical constructs | Pending | Primary/specialization identity, instance bindings/constraints, explicit captures, requires scopes, catch scopes and coroutine bindings |
+| 8 Preprocessing/configurations | Partial: old/new directive-name and predefined-new-name checks | Spelling/expansion provenance, all relevant configurations, unsaved-buffer/speculative overlays, GCC/Clang/MSVC verification and modules |
+| 9 Scale and delivery | Pending | Incremental resolution, cancellation throughout expensive work, rename end-to-end benchmarks, documentation/release parity and migration of remaining old-index consumers |
+
+Implemented safety details:
+
+- A member candidate found only by spelling stays `Unresolved`, even when only
+  one member is visible. `References` preserves that proof state instead of
+  deriving it from the number of targets.
+- Simple receiver declarations are looked up at their declaration scope and
+  position, not at the member-use scope. Unsupported receivers still fail closed.
+- Arity filtering applies to single candidates and to empty viable sets. It is
+  a necessary filter, not complete overload resolution.
+- Same-file `using` declarations/directives cannot resolve earlier occurrences.
+  Header include order and transitive using visibility still need exact edges.
+- Index rename uses the existing non-reserved ASCII identifier validator; it
+  checks new-name directive mentions and predefined macros as well as old-name
+  occurrences. This does not replace compiler preprocessing verification.
+- Edited files with existing parse errors are rejected, rather than comparing
+  only the number of diagnostics before and after.
+- `IndexStore` generations are pinned in snapshots and rename plans.
+  `IndexRename::Preview` checks the current generation, every proof shard's
+  content hash, supplied configuration fingerprints, edited document IDs/versions,
+  pinned parser options, edit ranges/expected bytes, duplicate paths and overlap.
+  It returns transformed sources without writing anything. Frontends must still
+  validate their current project/configuration discovery and apply versioned edits;
+  a standalone snapshot's default zero generation is not a project-change tracker.
+
+Tests live in `IndexSpec.cpp` and `IndexRenameSpec.cpp`; run the full CTest suite
+and LSP smoke tests after changing proof states or edit preconditions.
+
+Measured after receiver typing was added (`Release`, current selected build,
+`IndexBench --benchmark_min_time=0.05s`): shard construction about 8.45 microseconds,
+snapshot publication about 0.406/2.523 ms for 250/1,250 shards, warmed references
+about 1.81/5.35 microseconds. These are observations, not a speedup claim or a
+budget; typing cost must be included in future comparable baselines.

@@ -7,6 +7,7 @@
 #include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/IndexRename.hpp>
 #include <Heimdall/IndexStore.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
@@ -185,6 +186,7 @@ namespace heimdall::lsp
 
 		// mode: 0 = references, 1 = prepareRename, 2 = rename.
 		void RenameDocument(simdjson::dom::element request, std::string_view id, int mode);
+		[[nodiscard]] heimdall::IndexRenameContext RenameContext();
 
 		void CompleteDocument(simdjson::dom::element request, std::string_view id);
 
@@ -247,8 +249,12 @@ namespace heimdall::lsp
 		// Re-reads `file` from disk and replaces its disk entry (or drops it when the file
 		// is gone, unreadable or too large). An open buffer keeps shadowing the entry.
 		void IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop);
+		[[nodiscard]] std::shared_ptr<const heimdall::index::FileShard> IndexShard(
+			const heimdall::ParseTree& tree, const std::filesystem::path& file,
+			const heimdall::CompileCommand* command);
 
 		void SymbolIndexMain(std::stop_token stop);
+		void RefreshIndexCompleteness(std::stop_token stop);
 
 		void WatchedFilesChanged(simdjson::dom::element request);
 
@@ -515,6 +521,11 @@ namespace heimdall::lsp
 
 		std::atomic<bool> m_enable_semantic      = false;
 		heimdall::index::IndexStore m_index_store;
+		// True once the disk scan finished, was not truncated and indexed every file it found.
+		std::atomic<bool> m_index_complete {false};
+		std::atomic<bool> mIndexScanFinished {false};
+		std::atomic<std::size_t> mIndexPendingJobs {0};
+		std::string mIndexIssue;
 		std::atomic<bool> m_workspace_scan       = true;
 		std::atomic<bool> m_workspace_symbols    = true;
 		std::atomic<bool> m_inlay_hints          = true;

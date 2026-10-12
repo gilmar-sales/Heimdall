@@ -115,6 +115,8 @@ namespace heimdall
 		std::pmr::vector<std::uint32_t> decl_node;  // index into ParseTree::Nodes()
 		std::pmr::vector<ScopeId> member_scope;     // namespaces and classes: where members live
 		std::pmr::vector<std::uint64_t> signature;  // functions: parameter types + cv/ref qualifiers
+		/** Lossless normalized parameter spelling and cv/ref key; kNone for non-functions. */
+		std::pmr::vector<NameId> signatureText;
 		std::pmr::vector<std::uint32_t> first_base; // classes: range in BaseTable
 		std::pmr::vector<std::uint32_t> base_count;
 		std::pmr::vector<SymbolId> next_same_name; // chain of symbols sharing (scope, name)

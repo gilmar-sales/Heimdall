@@ -6,22 +6,12 @@
  * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1 otherwise.
  *
  * @param first Describe this parameter.
- * @param b Describe this parameter.
+ * @param second Describe this parameter.
  * @param desc Describe this parameter.
  *
  * @return void
  */
-int test_method(std::uint32_t first, int b, const std::string& desc)
-{
-	const auto value = first + b;
-
-	if (value != 0)
-	{
-		return 100;
-	}
-
-	return 1;
-}
+int MetodoTeste(std::uint32_t first, int second, const std::string& desc);
 
 /**
  *
@@ -38,13 +28,13 @@ struct Node
 };
 
 template <typename TValue>
-class LinkedList
+class List
 {
 
 public:
-	LinkedList() = default;
+	List() = default;
 
-	~LinkedList() = default;
+	~List() = default;
 
 	void Push(const TValue& value)
 	{
@@ -73,7 +63,7 @@ private:
 	Node<TValue>* mRoot;
 };
 
-LinkedList<int> CreateList()
+List<int> CreateList()
 {
 	return {};
 }
@@ -82,7 +72,7 @@ auto list = CreateList();
 
 int main()
 {
-	auto list = LinkedList<int>();
+	auto list = List<int>();
 
 	list.Push(2);
 
@@ -93,5 +83,19 @@ int main()
 	test->value = 2.0f;
 	auto test2v = test->value;
 
+	MetodoTeste(1, 2, "");
+
 	return 0;
+}
+
+int MetodoTeste(std::uint32_t first, int second, const std::string& desc)
+{
+	const auto value = first + second;
+
+	if (value != 0)
+	{
+		return 100;
+	}
+
+	return 1;
 }

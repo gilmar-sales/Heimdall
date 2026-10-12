@@ -1,6 +1,7 @@
 add_library(heimdall_refactor STATIC
   src/RefactoringPlan.cpp
   src/Rename.cpp
+  src/IndexRename.cpp
   src/ExtractVariable.cpp
   src/MacroSafety.cpp
 )
@@ -10,5 +11,5 @@ target_include_directories(heimdall_refactor PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_compile_features(heimdall_refactor PUBLIC cxx_std_26)
-target_link_libraries(heimdall_refactor PUBLIC heimdall::analysis)
+target_link_libraries(heimdall_refactor PUBLIC heimdall::analysis heimdall::index)
 target_precompile_headers(heimdall_refactor PRIVATE ${PROJECT_SOURCE_DIR}/cmake/pch.hpp)

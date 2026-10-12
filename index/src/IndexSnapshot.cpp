@@ -4,6 +4,7 @@
 #include <cctype>
 #include <numeric>
 #include <ranges>
+#include <tuple>
 #include <unordered_map>
 
 namespace heimdall::index
@@ -90,11 +91,12 @@ namespace heimdall::index
 	} // namespace
 
 	std::shared_ptr<const IndexSnapshot> IndexSnapshot::Build(
-		std::vector<std::shared_ptr<const FileShard>> shards)
+		std::vector<std::shared_ptr<const FileShard>> shards, std::uint64_t revision)
 	{
-		auto snapshot     = std::shared_ptr<IndexSnapshot>(new IndexSnapshot());
-		snapshot->mShards = std::move(shards);
-		auto& self        = *snapshot;
+		auto snapshot       = std::shared_ptr<IndexSnapshot>(new IndexSnapshot());
+		snapshot->mShards   = std::move(shards);
+		snapshot->mRevision = revision;
+		auto& self          = *snapshot;
 
 		std::vector<std::uint32_t> order;
 		for (std::uint32_t shard = 0; shard < self.mShards.size(); ++shard)
@@ -135,7 +137,7 @@ namespace heimdall::index
 			const auto& occ  = file.Occurrences();
 			for (std::uint32_t i = 0; i < occ.Size(); ++i)
 			{
-				if (occ.resolution[i] == Resolution::Unresolved)
+				if (occ.role[i] == Role::Reference)
 				{
 					self.mUnresolvedName.push_back(HashBytes(file.Strings().Text(occ.name[i])));
 					self.mUnresolvedShard.push_back(shard);
@@ -175,8 +177,19 @@ namespace heimdall::index
 		for (std::uint32_t shard = 0; shard < self.mShards.size(); ++shard)
 		{
 			const auto& file = *self.mShards[shard];
-			for (const auto spelling : file.Includes())
+			for (std::size_t include = 0; include < file.Includes().size(); ++include)
 			{
+				if (file.IncludeTargets()[include] != kInvalid)
+				{
+					const auto target = self.ShardFor(file.Strings().Text(file.IncludeTargets()[include]));
+					if (target != kInvalid && target != shard)
+					{
+						edges.emplace_back(target, shard);
+					}
+					continue;
+				}
+
+				const auto spelling = file.Includes()[include];
 				const auto text  = file.Strings().Text(spelling);
 				const auto found = byFileName.find(FileName(text));
 				if (found == byFileName.end())
@@ -204,6 +217,53 @@ namespace heimdall::index
 
 		std::partial_sum(self.mIncludersBegin.begin(), self.mIncludersBegin.end(),
 			self.mIncludersBegin.begin());
+
+		auto forward = edges;
+		for (auto& edge : forward)
+		{
+			std::swap(edge.first, edge.second);
+		}
+
+		std::ranges::sort(forward);
+		self.mIncludesBegin.assign(self.mShards.size() + 1, 0);
+		for (const auto& edge : forward)
+		{
+			++self.mIncludesBegin[edge.first + 1];
+			self.mIncluded.push_back(edge.second);
+		}
+
+		std::partial_sum(self.mIncludesBegin.begin(), self.mIncludesBegin.end(),
+			self.mIncludesBegin.begin());
+
+		std::vector<std::tuple<std::uint64_t, std::uint32_t, std::uint32_t>> qualified;
+		std::vector<std::tuple<std::uint64_t, std::uint32_t, std::uint32_t>> members;
+		for (std::uint32_t shard = 0; shard < self.mShards.size(); ++shard)
+		{
+			const auto& file = *self.mShards[shard];
+			for (std::uint32_t symbol = 0; symbol < file.Symbols().Size(); ++symbol)
+			{
+				qualified.emplace_back(HashBytes(file.Qualified(symbol)), shard, symbol);
+				if (file.Symbols().container[symbol] != kInvalid)
+				{
+					members.emplace_back(HashBytes(file.Name(symbol)), shard, symbol);
+				}
+			}
+		}
+
+		const auto store =[](auto& rows, auto& hash, auto& shard, auto& symbol)
+		{
+			std::ranges::sort(rows);
+			for (const auto& [key, s, y] : rows)
+			{
+				hash.push_back(key);
+				shard.push_back(s);
+				symbol.push_back(y);
+			}
+		};
+		store(qualified, self.mQualHash, self.mQualShard, self.mQualSymbol);
+		store(members, self.mMemberHash, self.mMemberShard, self.mMemberSymbol);
+		self.mResolution.resize(self.mShards.size());
+		self.mResolveOnce = std::make_unique<std::once_flag[] >(self.mShards.size());
 		return snapshot;
 	}
 
@@ -240,10 +300,33 @@ namespace heimdall::index
 	{
 		std::vector<SymbolRef> result;
 		const auto range = std::ranges::equal_range(mDirHash, hash);
+		std::string_view identity;
 		for (auto i = static_cast<std::size_t>(range.begin() - mDirHash.begin());
 			i < static_cast<std::size_t>(range.end() - mDirHash.begin()); ++i)
 		{
+			const auto key = mShards[mDirShard[i]]->Identity(mDirSymbol[i]);
+			if (!result.empty() && key != identity)
+			{
+				return {};
+			}
+
+			identity = key;
 			result.push_back({mDirShard[i], mDirSymbol[i]});
+		}
+
+		return result;
+	}
+
+	std::vector<SymbolRef> IndexSnapshot::Named(std::string_view qualified) const
+	{
+		std::vector<SymbolRef> result;
+		const auto range = std::ranges::equal_range(mQualHash, HashBytes(qualified));
+		for (auto i = range.begin() - mQualHash.begin(); i < range.end() - mQualHash.begin(); ++i)
+		{
+			if (mShards[mQualShard[i]]->Qualified(mQualSymbol[i]) == qualified)
+			{
+				result.emplace_back(mQualShard[i], mQualSymbol[i]);
+			}
 		}
 
 		return result;
@@ -274,6 +357,13 @@ namespace heimdall::index
 		const auto occurrence = file.OccurrenceAt(offset);
 		if (occurrence == kInvalid || occ.resolution[occurrence] == Resolution::Resolved)
 		{
+			return result;
+		}
+
+		const auto resolved = Resolved(shard).Targets(occurrence);
+		if (!resolved.empty())
+		{
+			result.assign(resolved.begin(), resolved.end());
 			return result;
 		}
 
@@ -329,6 +419,10 @@ namespace heimdall::index
 			for (const auto index : file.OccurrencesOf(ref.symbol))
 			{
 				const auto& occ = file.Occurrences();
+				if (occ.role[index] == Role::Reference)
+				{
+					continue;
+				}
 				result.push_back({ref.shard, occ.offset[index], occ.length[index], occ.role[index],
 						Resolution::Resolved});
 			}
@@ -372,10 +466,28 @@ namespace heimdall::index
 			const auto& file = *mShards[shard];
 			const auto& occ  = file.Occurrences();
 			const auto index = mUnresolvedOccurrence[i];
-			if (visible[shard] && file.Strings().Text(occ.name[index]) == spelling)
+			if (!visible[shard] || file.Strings().Text(occ.name[index]) != spelling)
+			{
+				continue;
+			}
+
+			const auto& resolved = Resolved(shard);
+			const auto targets   = resolved.Targets(index);
+			if (targets.empty())
 			{
 				result.push_back({shard, occ.offset[index], occ.length[index], occ.role[index],
-						Resolution::Unresolved});
+						resolved.state[index]});
+				continue;
+			}
+
+			if (std::ranges::any_of(targets,
+				[&](const SymbolRef& target)
+				{
+					return HashOf(target) == hash;
+			}))
+			{
+				result.push_back({shard, occ.offset[index], occ.length[index], occ.role[index],
+						resolved.state[index]});
 			}
 		}
 
@@ -405,12 +517,34 @@ namespace heimdall::index
 						continue;
 					}
 
+					bool exactHere = exact;
+					if (kind == RelationKind::BaseOfByName && rel.offset[i] != kInvalid)
+					{
+						const auto occurrence = file.OccurrenceAt(rel.offset[i]);
+						const auto targets =
+							occurrence == kInvalid ? std::span<const SymbolRef> {}
+						: Resolved(shard).Targets(occurrence);
+						if (!targets.empty())
+						{
+							if (std::ranges::none_of(targets,
+								[&](const SymbolRef& target)
+								{
+									return HashOf(target) == hash;
+							}))
+							{
+								continue;
+							}
+
+							exactHere = true;
+						}
+					}
+
 					for (const auto derived : Declarations(rel.object[i]))
 					{
 						if (mShards[derived.shard]->Symbols().role[derived.symbol] ==
 							Role::Definition)
 						{
-							result.push_back({derived, exact});
+							result.push_back({derived, exactHere});
 							seen.push_back(rel.object[i]);
 							break;
 						}
@@ -447,6 +581,19 @@ namespace heimdall::index
 					for (const auto base : Declarations(rel.subject[index]))
 					{
 						if (mShards[base.shard]->Symbols().role[base.symbol] == Role::Definition)
+						{
+							result.push_back({base, true});
+						}
+					}
+				}
+				else if (const auto occurrence = rel.offset[index] == kInvalid
+					? kInvalid
+					: file.OccurrenceAt(rel.offset[index]);
+					occurrence != kInvalid && !Resolved(declaration.shard).Targets(occurrence).empty())
+				{
+					for (const auto& target : Resolved(declaration.shard).Targets(occurrence))
+					{
+						for (const auto base : Definitions(HashOf(target)))
 						{
 							result.push_back({base, true});
 						}

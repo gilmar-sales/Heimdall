@@ -8,6 +8,11 @@ namespace heimdall::refactor_detail
 {
     bool ValidName(std::string_view name);
 
+	void CollectDocumentationEdits(const ParseTree& tree, DocumentEdits& edits,
+		const std::vector<std::size_t>& declarations, std::string_view oldName,
+		std::string_view newName, bool selfBrief, bool uniqueWorkspaceName,
+		std::string_view qualifiedName);
+
     // Verifies that preprocessing preserves the written tokens of the main
     // document. Header expansions are excluded using compiler line markers.
     std::expected<void, RefactoringError> VerifyPreprocessing(

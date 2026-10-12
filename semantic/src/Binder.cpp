@@ -206,9 +206,9 @@ namespace heimdall
 		FunctionHead ScanHead(std::uint32_t node) const;
 
 		std::uint32_t FlagsFromHead(std::uint32_t node, const FunctionHead& head,
-			std::uint64_t& signature) const;
+			std::uint64_t& signature, std::string& signatureText) const;
 
-		std::uint64_t ParameterSignature(std::uint32_t node, const FunctionHead& head) const;
+		std::uint64_t ParameterSignature(std::uint32_t node, const FunctionHead& head, std::string& signatureText) const;
 
 		NameId HeadName(const FunctionHead& head);
 
@@ -878,6 +878,7 @@ namespace heimdall
 		symbols.decl_node.push_back(node);
 		symbols.member_scope.push_back(member_scope);
 		symbols.signature.push_back(0);
+		symbols.signatureText.push_back(kNone);
 		symbols.first_base.push_back(0);
 		symbols.base_count.push_back(0);
 		symbols.next_same_name.push_back(kNone);
@@ -1067,7 +1068,7 @@ namespace heimdall
 		return m_model.m_names.Intern(Text(head.name_token));
 	}
 
-	std::uint64_t BinderImpl::ParameterSignature(std::uint32_t node, const FunctionHead& head) const
+	std::uint64_t BinderImpl::ParameterSignature(std::uint32_t node, const FunctionHead& head, std::string& signatureText) const
 	{
 		const auto declarator = FindChild(node, GrammarKind::Declarator);
 		std::uint32_t suffix =
@@ -1093,6 +1094,7 @@ namespace heimdall
 			std::uint64_t part = kFnvOffset;
 			std::size_t kept   = 0;
 			std::string_view only;
+			std::string spelling;
 			for (auto k = pb; k < pe; ++k)
 			{
 				const auto token = m_sig[k];
@@ -1107,6 +1109,9 @@ namespace heimdall
 				}
 
 				part = HashByte(HashBytes(part, Text(token)), 0x1F);
+				spelling += std::to_string(Text(token).size());
+				spelling += ':';
+				spelling += Text(token);
 				only = Text(token);
 				++kept;
 			}
@@ -1117,6 +1122,7 @@ namespace heimdall
 			}
 
 			++parameters;
+			signatureText += std::to_string(spelling.size()) + ':' + spelling;
 			hash = HashByte(HashU64(hash, part), 0x1E);
 		}
 
@@ -1124,7 +1130,7 @@ namespace heimdall
 	}
 
 	std::uint32_t BinderImpl::FlagsFromHead(std::uint32_t node, const FunctionHead& head,
-		std::uint64_t& signature) const
+		std::uint64_t& signature, std::string& signatureText) const
 	{
 		std::uint32_t flags = 0;
 		auto[begin, end]    = NodeSig(node);
@@ -1236,7 +1242,11 @@ namespace heimdall
 			}
 		}
 
-		const auto parameters = ParameterSignature(node, head);
+		const auto parameters = ParameterSignature(node, head, signatureText);
+		if (parameters != 0)
+		{
+			signatureText += '/' + std::to_string(qualifiers);
+		}
 		signature             = parameters == 0 ? 0 : HashU64(parameters, qualifiers);
 		return flags;
 	}
@@ -1322,7 +1332,8 @@ namespace heimdall
 
 		auto scope              = ParentScopeFor(node);
 		std::uint64_t signature = 0;
-		std::uint32_t flags     = FlagsFromHead(node, head, signature);
+		std::string signatureText;
+		std::uint32_t flags     = FlagsFromHead(node, head, signature, signatureText);
 		const auto parent       = m_tree.NodesSoA().Parent(node);
 		if (parent < m_tree.NodesSoA().size() && KindOf(parent) == GrammarKind::TemplateDeclaration)
 		{
@@ -1379,6 +1390,7 @@ namespace heimdall
 		const auto id = Declare(HeadName(head), SymbolKind::Function, scope, flags, head.name_token,
 			node, kNone, !qualified || rerouted);
 		m_model.m_symbols.signature[id] = signature;
+		m_model.m_symbols.signatureText[id] = m_model.m_names.InternCopy(signatureText);
 	}
 
 	void BinderImpl::DeclareParameter(std::uint32_t node)

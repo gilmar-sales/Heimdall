@@ -94,3 +94,7 @@ if (NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(ParserTruncationFuzz PRIVATE Threads::Threads)
 endif ()
+
+add_executable(IndexBench src/IndexBench.cpp)
+target_link_libraries(IndexBench PRIVATE heimdall::index heimdall::refactor benchmark::benchmark benchmark::benchmark_main)
+target_compile_features(IndexBench PRIVATE cxx_std_26)

@@ -138,6 +138,33 @@ TEST_F(WorkspaceFilesSpec, DiscoveryOfAMissingRootIsEmpty)
     EXPECT_TRUE(heimdall::lsp::DiscoverWorkspaceSources({}, std::stop_token {}).empty());
 }
 
+TEST_F(WorkspaceFilesSpec, DiscoveryEvidenceDistinguishesExactLimitFromTruncation)
+{
+	Write("first.cpp");
+	Write("second.cpp");
+
+	const auto exact = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 2);
+	const auto truncated = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 1);
+
+	EXPECT_TRUE(exact.complete);
+	EXPECT_FALSE(exact.truncated);
+	EXPECT_FALSE(truncated.complete);
+	EXPECT_TRUE(truncated.truncated);
+}
+
+TEST_F(WorkspaceFilesSpec, DiscoveryEvidenceDoesNotCertifyCancelledOrMissingRoots)
+{
+	std::stop_source stop;
+	stop.request_stop();
+
+	const auto cancelled = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, stop.get_token());
+	const auto missing = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot / "missing", {});
+
+	EXPECT_TRUE(cancelled.cancelled);
+	EXPECT_FALSE(cancelled.complete);
+	EXPECT_FALSE(missing.complete);
+}
+
 TEST_F(WorkspaceFilesSpec, ReadsWholeFilesAndRejectsOversizedOnes)
 {
     Write("small.cpp", "int small;\n");

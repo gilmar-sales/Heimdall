@@ -1570,6 +1570,15 @@ namespace heimdall
 		return Identifier(name);
 	}
 
+	void refactor_detail::CollectDocumentationEdits(const ParseTree& tree, DocumentEdits& edits,
+		const std::vector<std::size_t>& declarations, std::string_view oldName,
+		std::string_view newName, bool selfBrief, bool uniqueWorkspaceName,
+		std::string_view qualifiedName)
+	{
+		AppendDocumentationEdits(tree, edits, declarations, oldName, newName, selfBrief,
+			uniqueWorkspaceName, qualifiedName);
+	}
+
 	std::expected<RefactoringPlan, RefactoringError> RenameWorkspace(
 		const AnalysisSnapshot& snapshot,
 		DocumentId document,

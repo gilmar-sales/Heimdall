@@ -7,10 +7,22 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace heimdall::lsp
 {
+
+	/** Discovery evidence; an empty or limited result is not implicitly complete. */
+	struct WorkspaceDiscovery
+	{
+		std::vector<std::filesystem::path> files;
+		bool complete = false;
+		bool cancelled = false;
+		bool truncated = false;
+		std::error_code error;
+	};
+
 
     inline constexpr std::size_t kMaxWorkspaceFiles                = 20000;
     inline constexpr std::uintmax_t kBytesPerKibibyte              = 1024;
@@ -18,6 +30,10 @@ namespace heimdall::lsp
     inline constexpr std::uintmax_t kMaxWorkspaceFileMebibytes     = 2;
     inline constexpr std::uintmax_t kMaxWorkspaceFileBytes =
         kMaxWorkspaceFileMebibytes * kBytesPerMebibyte;
+
+	/** Discover files and preserve cancellation, truncation and traversal failures. */
+	[[nodiscard]] WorkspaceDiscovery DiscoverWorkspaceSourcesDetailed(
+		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles = kMaxWorkspaceFiles);
 
     /// C and C++ source or header extension that the workspace passes look at.
     [[nodiscard]] bool IsWorkspaceSource(const std::filesystem::path& file);

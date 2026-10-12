@@ -4,6 +4,7 @@ add_library(heimdall_index STATIC
   src/FileShard.cpp
   src/ShardBuilder.cpp
   src/IndexSnapshot.cpp
+  src/IndexResolution.cpp
   src/IndexStore.cpp
 )
 add_library(heimdall::index ALIAS heimdall_index)

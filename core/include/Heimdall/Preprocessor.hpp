@@ -34,6 +34,8 @@ namespace heimdall
         DirectiveKind kind;
         std::size_t   offset;
         std::size_t   length;
+        // False when the directive sits in a conditionally excluded region.
+        bool          active = true;
     };
 
     struct PreprocessorDiagnostic

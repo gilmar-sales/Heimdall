@@ -27,13 +27,29 @@ namespace heimdall::index
 	{
 		Resolved,   // bound to a symbol declared in this shard
 		Unresolved, // written name only; may match declarations in other files
-		Dependent
+		Dependent,
+		Ambiguous // several visible declarations fit; only produced by snapshot resolution
 	};
+
+	/** Arity bound meaning "unknown" for non-functions and "unbounded" for variadics. */
+	inline constexpr std::uint8_t kNoArity = 0xFF;
+	/** Unknown/non-scalar argument or parameter; never used to rank overloads. */
+	inline constexpr std::uint8_t kUnknownBuiltin = 0xFF;
+
+	/** Occurrence flag bits. */
+	inline constexpr std::uint8_t kOccurrenceMember = 1; // written after `.` or `->`
 
 	enum class RelationKind : std::uint8_t
 	{
 		BaseOf,       // subject = base symbol hash, object = derived symbol hash
 		BaseOfByName, // subject = hash of the written base name, object = derived hash
+	};
+
+	enum class UsingKind : std::uint8_t
+	{
+		Namespace,   // using namespace path;
+		Declaration, // using path::name;
+		Alias        // using name = path...;
 	};
 
 	/** Interned text of one shard; ids index a flat offset table. */
@@ -64,12 +80,19 @@ namespace heimdall::index
 		std::vector<std::uint64_t> nameMask; // characters present in the name, see CharacterMask
 		std::vector<StringId> name;
 		std::vector<StringId> qualified;
+		/** Full identity key verified on hash hits; signature spelling is stored separately. */
+		std::vector<StringId> identity;
+		std::vector<StringId> signature;
 		std::vector<std::uint32_t> container; // local index of the owning class/namespace
 		std::vector<std::uint32_t> flags;     // heimdall::SymbolFlag bits
 		std::vector<std::uint32_t> nameOffset;
 		std::vector<std::uint32_t> nameLength;
 		std::vector<heimdall::SymbolKind> kind;
 		std::vector<Role> role;
+		std::vector<std::uint8_t> paramMin; // functions: required parameters, else kNoArity
+		std::vector<std::uint8_t> paramMax; // functions: accepted parameters, kNoArity if variadic
+		std::vector<std::uint32_t> paramTypeBegin;
+		std::vector<std::uint32_t> paramTypeCount;
 
 		[[nodiscard]] std::size_t Size() const noexcept
 		{
@@ -86,10 +109,51 @@ namespace heimdall::index
 		std::vector<StringId> name; // written spelling; always set
 		std::vector<Role> role;
 		std::vector<Resolution> resolution;
+		std::vector<std::uint32_t> scope; // innermost ScopeColumns entry, or kInvalid
+		std::vector<StringId> qualifier;  // written `a::b` prefix, kInvalid when none
+		/** Receiver class/type spelling from typing or a simple declared type; kInvalid when unknown. */
+		std::vector<StringId> receiver;
+		/** Scope and position where the receiver's type name was declared. */
+		std::vector<std::uint32_t> receiverScope;
+		std::vector<std::uint32_t> receiverOffset;
+		std::vector<std::uint8_t> argCount; // arguments of a call, kNoArity when not a call
+		std::vector<std::uint8_t> flags;    // kOccurrence* bits
+		std::vector<std::uint32_t> argTypeBegin;
+		std::vector<std::uint32_t> argTypeCount;
 
 		[[nodiscard]] std::size_t Size() const noexcept
 		{
 			return offset.size();
+		}
+	};
+
+	/** Namespace and class extents (and out-of-line member bodies), sorted by `begin`. */
+	struct ScopeColumns
+	{
+		std::vector<std::uint32_t> begin;
+		std::vector<std::uint32_t> end;
+		std::vector<std::uint32_t> parent; // enclosing entry or kInvalid
+		std::vector<StringId> qualified;   // `a::B`; empty for none
+
+		[[nodiscard]] std::size_t Size() const noexcept
+		{
+			return begin.size();
+		}
+	};
+
+	/** `using` directives, declarations and aliases at namespace or class scope. */
+	struct UsingColumns
+	{
+		/** Source offset of the introducing using directive/declaration. */
+		std::vector<std::uint32_t> offset;
+		std::vector<std::uint32_t> scope; // ScopeColumns entry or kInvalid for the global scope
+		std::vector<UsingKind> kind;
+		std::vector<StringId> name; // alias name or the declared name
+		std::vector<StringId> path; // written target path
+
+		[[nodiscard]] std::size_t Size() const noexcept
+		{
+			return scope.size();
 		}
 	};
 
@@ -99,6 +163,7 @@ namespace heimdall::index
 		std::vector<SymbolHash> subject;
 		std::vector<SymbolHash> object;
 		std::vector<RelationKind> kind;
+		std::vector<std::uint32_t> offset; // written base name, kInvalid for exact relations
 
 		[[nodiscard]] std::size_t Size() const noexcept
 		{
@@ -150,6 +215,16 @@ namespace heimdall::index
 			return mOccurrences;
 		}
 
+		[[nodiscard]] const ScopeColumns& Scopes() const noexcept
+		{
+			return mScopes;
+		}
+
+		[[nodiscard]] const UsingColumns& Usings() const noexcept
+		{
+			return mUsings;
+		}
+
 		[[nodiscard]] const RelationColumns& Relations() const noexcept
 		{
 			return mRelations;
@@ -159,6 +234,42 @@ namespace heimdall::index
 		[[nodiscard]] std::span<const StringId> Includes() const noexcept
 		{
 			return mIncludes;
+		}
+
+		/** Exact resolved target for each include, or kInvalid when unavailable. */
+		[[nodiscard]] std::span<const StringId> IncludeTargets() const noexcept
+		{
+			return mIncludeTargets;
+		}
+
+		/** Source positions corresponding to Includes(). */
+		[[nodiscard]] std::span<const std::uint32_t> IncludeOffsets() const noexcept
+		{
+			return mIncludeOffsets;
+		}
+
+		/** False when include visibility still uses spelling heuristics or an opaque directive. */
+		[[nodiscard]] bool ExactIncludes() const noexcept
+		{
+			return mExactIncludes;
+		}
+
+		/** The parser finished without syntax diagnostics; not a complete C++ type-check claim. */
+		[[nodiscard]] bool SyntaxComplete() const noexcept
+		{
+			return mSyntaxComplete;
+		}
+
+		/** BuiltinType encodings, or kUnknownBuiltin, for a function's parameters. */
+		[[nodiscard]] std::span<const std::uint8_t> ParameterTypes(std::uint32_t symbol) const noexcept
+		{
+			return std::span(mParameterTypes).subspan(mSymbols.paramTypeBegin[symbol], mSymbols.paramTypeCount[symbol]);
+		}
+
+		/** BuiltinType encodings, or kUnknownBuiltin, for a call's supplied arguments. */
+		[[nodiscard]] std::span<const std::uint8_t> ArgumentTypes(std::uint32_t occurrence) const noexcept
+		{
+			return std::span(mArgumentTypes).subspan(mOccurrences.argTypeBegin[occurrence], mOccurrences.argTypeCount[occurrence]);
 		}
 
 		/** Occurrence indices of a local symbol, ascending by offset. */
@@ -188,6 +299,12 @@ namespace heimdall::index
 			return mStrings.Text(mSymbols.qualified[symbol]);
 		}
 
+		/** Exact identity spelling behind the hash accelerator. */
+		[[nodiscard]] std::string_view Identity(std::uint32_t symbol) const noexcept
+		{
+			return mStrings.Text(mSymbols.identity[symbol]);
+		}
+
 		/** Owned storage, for budgets and benchmarks. */
 		[[nodiscard]] std::size_t StorageBytes() const noexcept;
 
@@ -204,7 +321,15 @@ namespace heimdall::index
 		SymbolColumns mSymbols;
 		OccurrenceColumns mOccurrences;
 		RelationColumns mRelations;
+		ScopeColumns mScopes;
+		UsingColumns mUsings;
 		std::vector<StringId> mIncludes;
+		std::vector<StringId> mIncludeTargets;
+		std::vector<std::uint32_t> mIncludeOffsets;
+		bool mExactIncludes = true;
+		bool mSyntaxComplete = true;
+		std::vector<std::uint8_t> mParameterTypes;
+		std::vector<std::uint8_t> mArgumentTypes;
 		std::vector<std::uint32_t> mSymbolOccurrenceBegin; // CSR over mSymbolOccurrenceList
 		std::vector<std::uint32_t> mSymbolOccurrenceList;
 		std::vector<std::uint32_t> mRelationsByObject;

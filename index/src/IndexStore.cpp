@@ -8,6 +8,7 @@ namespace heimdall::index
 	{
 		const std::lock_guard lock(mMutex);
 		mOpen[path] = std::move(shard);
+		++mRevision;
 		mSnapshot.reset();
 	}
 
@@ -16,6 +17,7 @@ namespace heimdall::index
 		const std::lock_guard lock(mMutex);
 		if (mOpen.erase(path) != 0)
 		{
+			++mRevision;
 			mSnapshot.reset();
 		}
 	}
@@ -24,6 +26,7 @@ namespace heimdall::index
 	{
 		const std::lock_guard lock(mMutex);
 		mDisk[path] = std::move(shard);
+		++mRevision;
 		mSnapshot.reset();
 	}
 
@@ -32,6 +35,7 @@ namespace heimdall::index
 		const std::lock_guard lock(mMutex);
 		if (mDisk.erase(path) != 0)
 		{
+			++mRevision;
 			mSnapshot.reset();
 		}
 	}
@@ -48,6 +52,7 @@ namespace heimdall::index
 		});
 		if (removed != 0)
 		{
+			++mRevision;
 			mSnapshot.reset();
 		}
 	}
@@ -78,7 +83,7 @@ namespace heimdall::index
 				{
 					return a->Path() < b->Path();
 			});
-			mSnapshot = IndexSnapshot::Build(std::move(shards));
+			mSnapshot = IndexSnapshot::Build(std::move(shards), mRevision);
 		}
 
 		return mSnapshot;

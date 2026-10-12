@@ -27,25 +27,33 @@ namespace heimdall::lsp
                name == "out";
     }
 
-    std::vector<std::filesystem::path> DiscoverWorkspaceSources(
+	WorkspaceDiscovery DiscoverWorkspaceSourcesDetailed(
         const std::filesystem::path& root,
         std::stop_token stop,
         std::size_t maxFiles)
     {
-        std::vector<std::filesystem::path> files;
+		WorkspaceDiscovery result;
+		auto& files = result.files;
+		if (stop.stop_requested())
+		{
+			result.cancelled = true;
+			return result;
+		}
         std::error_code error;
         if (root.empty() || !std::filesystem::is_directory(root, error))
         {
-            return files;
+			result.error = error;
+			return result;
         }
 
         for (std::filesystem::recursive_directory_iterator
-                 it(root, std::filesystem::directory_options::skip_permission_denied, error),
+				 it(root, std::filesystem::directory_options::none, error),
              end;
-             !error && it != end && files.size() < maxFiles; it.increment(error))
+			 !error && it != end; it.increment(error))
         {
-            if (stop.stop_requested())
-            {
+			if (stop.stop_requested())
+			{
+				result.cancelled = true;
                 break;
             }
 
@@ -56,15 +64,28 @@ namespace heimdall::lsp
                     it.disable_recursion_pending();
                 }
             }
-            else if (IsWorkspaceSource(it->path()))
-            {
+			else if (IsWorkspaceSource(it->path()))
+			{
+				if (files.size() == maxFiles)
+				{
+					result.truncated = true;
+					break;
+				}
                 files.push_back(it->path());
             }
         }
 
         std::ranges::sort(files);
-        return files;
-    }
+		result.error = error;
+		result.complete = !error && !result.cancelled && !result.truncated;
+		return result;
+	}
+
+	std::vector<std::filesystem::path> DiscoverWorkspaceSources(
+		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+	{
+		return DiscoverWorkspaceSourcesDetailed(root, stop, maxFiles).files;
+	}
 
     std::optional<std::string> ReadWorkspaceFile(const std::filesystem::path& file)
     {

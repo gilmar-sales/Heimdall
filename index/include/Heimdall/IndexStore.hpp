@@ -2,6 +2,7 @@
 
 #include <Heimdall/IndexSnapshot.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -35,6 +36,7 @@ namespace heimdall::index
 		[[nodiscard]] std::size_t FileCount() const;
 
 	private:
+		std::uint64_t mRevision = 0;
 		mutable std::mutex mMutex;
 		std::unordered_map<std::string, std::shared_ptr<const FileShard>> mOpen;
 		std::unordered_map<std::string, std::shared_ptr<const FileShard>> mDisk;
