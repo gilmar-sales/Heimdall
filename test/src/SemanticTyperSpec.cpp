@@ -154,6 +154,27 @@ TEST(TypeModel, CanonicalizesConcreteClassTemplateIdsAndSubstitutesFields)
     EXPECT_EQ(typed.types.SymbolType(typed.Find("a")), typed.types.SymbolType(typed.Find("b")));
 }
 
+TEST(TypeModel, BoundsIncompleteRecursiveTemplateBaseInstantiation)
+{
+    constexpr std::size_t kMaxInstantiations = 16;
+    for (const char* source :
+        {
+            "template<int N> struct Recursive : Recursive<N> {}; Recursive<1> value;",
+            "template<int N> struct Recursive : Recursive<N - 1> {}; "
+            "template<> struct Recursive<0> {}; Recursive<1> value;"
+    })
+    {
+        const Typed typed(source);
+
+        EXPECT_LT(typed.types.Instantiations().primary.size(), kMaxInstantiations) << source;
+        EXPECT_TRUE(std::ranges::all_of(typed.types.Instantiations().baseCount,
+                                        [](auto count)
+            {
+                return count == 0;
+            })) << source;
+    }
+}
+
 TEST(TypeModel, SelectsExplicitSpecializationsWithoutConflatingTheirMembers)
 {
     const Typed typed("template<class T> struct Box { int value; }; template<> struct Box<int> { bool value; }; void f() { Box<int> a; Box<float> b; auto first = a.value; auto second = b.value; }");

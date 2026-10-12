@@ -1364,7 +1364,7 @@ namespace heimdall
 
 		std::vector<TypeId> baseTypes;
 		const auto selectedOwner = templates.owner[selected];
-		if (selectedOwner != kNone && mInstantiationDepth < kMaxTemplateDepth)
+		if (complete && selectedOwner != kNone && mInstantiationDepth < kMaxTemplateDepth)
 		{
 			++mInstantiationDepth;
 			const auto baseFirst = m_symbols.first_base[selectedOwner];
