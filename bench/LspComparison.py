@@ -30,11 +30,168 @@ def response_count(method, result):
     return int(result is not None)
 
 
+def locations(result):
+    entries = result if isinstance(result, list) else [result] if result else []
+    return [{"uri": entry.get("uri", entry.get("targetUri")),
+             "range": entry.get("range", entry.get("targetSelectionRange"))}
+            for entry in entries]
+
+
+def normalize_result(value, workspace):
+    if isinstance(value, str):
+        return value.replace(workspace.as_uri(), "workspace://").replace(str(workspace), "<workspace>")
+    if isinstance(value, list):
+        return [normalize_result(item, workspace) for item in value]
+    if isinstance(value, dict):
+        return {key: normalize_result(item, workspace) for key, item in value.items()}
+    return value
+
+
+def reflection_inventory(text):
+    return {"reflection_operators": text.count("^^"),
+            "splice_openers": text.count("[:"), "meta_mentions": text.count("std::meta::"),
+            "limitation": "lexical inventory, not semantic reflection evaluation"}
+
+
+def document_diagnostics(notifications, uri):
+    publications = [message["params"] for message in notifications
+                    if message.get("method") == "textDocument/publishDiagnostics"
+                    and message.get("params", {}).get("uri") == uri]
+    if not publications:
+        return {"status": "not_observed", "diagnostics": None}
+    latest = publications[-1]
+    return {"status": "observed", "version": latest.get("version"),
+            "diagnostics": latest["diagnostics"]}
+
+
+def quality_workspace(root, compiler):
+    source, _, _ = create_workspace(root, 1, compiler)
+    text = '''#include "Widget.hpp"
+int Select(int value) { return value; }
+double Select(double value) { return value; }
+template<class T> struct Box { T payload; };
+int main() {
+    Widget object;
+    int value = 1;
+    { int value = 2; value += 1; }
+    Box<Widget> box;
+    auto selected = Select(1);
+    return object.Value() + value + box.payload.Value();
+}
+'''
+    source.write_text(text)
+    rows = text.splitlines()
+
+    def position(line, token, offset=1):
+        return {"line": line, "character": rows[line].index(token) + offset}
+
+    document = {"textDocument": {"uri": source.as_uri()}}
+    cases = []
+
+    def add(label, capability, method, line, token, expectation, **extra):
+        cases.append({"name": label, "capability": capability, "method": method,
+                      "params": dict(document, position=position(line, token), **extra),
+                      "expectation": expectation})
+
+    add("dependency_definition", "definitionProvider", "textDocument/definition", 10,
+        "Value", {"kind": "definition", "file": "Widget.hpp", "line": 1})
+    add("overload_definition", "definitionProvider", "textDocument/definition", 9,
+        "Select", {"kind": "definition", "file": "Main.cpp", "line": 1})
+    add("shadowed_references", "referencesProvider", "textDocument/references", 6,
+        "value", {"kind": "references", "lines": [6, 10]}, context={"includeDeclaration": True})
+    add("shadowed_rename", "renameProvider", "textDocument/rename", 6,
+        "value", {"kind": "rename", "lines": [6, 10]}, newName="renamedValue")
+    add("template_member_hover", "hoverProvider", "textDocument/hover", 10,
+        "payload", {"kind": "hover", "contains": "Widget"})
+    cases.append({"name": "member_completion", "capability": "completionProvider",
+                  "method": "textDocument/completion",
+                  "params": dict(document, position=position(10, "Value", 0)),
+                  "expectation": {"kind": "completion", "contains": "Value"}})
+    cases.append({"name": "overload_signature", "capability": "signatureHelpProvider",
+                  "method": "textDocument/signatureHelp",
+                  "params": dict(document, position=position(9, "Select(", 7)),
+                  "expectation": {"kind": "signature", "minimum": 2}})
+    return source, text, cases
+
+
+def assess_result(result, expectation):
+    kind = expectation["kind"]
+    if kind == "definition":
+        found = locations(result)
+        return bool(found) and all(item["uri"].endswith("/" + expectation["file"])
+                                  and item["range"]["start"]["line"] == expectation["line"]
+                                  for item in found)
+    if kind in ("references", "rename"):
+        if kind == "references":
+            edits = locations(result)
+        else:
+            edits = [{"uri": uri, "range": edit["range"]}
+                     for uri, changes in (result or {}).get("changes", {}).items() for edit in changes]
+            edits += [{"uri": change["textDocument"]["uri"], "range": edit["range"]}
+                      for change in (result or {}).get("documentChanges", [])
+                      if "textDocument" in change for edit in change.get("edits", [])]
+        return (sorted(item["range"]["start"]["line"] for item in edits) == expectation["lines"]
+                and all(item["uri"].endswith("/Main.cpp") for item in edits))
+    if kind == "completion":
+        items = result if isinstance(result, list) else (result or {}).get("items", [])
+        return any(expectation["contains"] in item.get("label", "") for item in items)
+    if kind == "signature":
+        return len((result or {}).get("signatures", [])) >= expectation["minimum"]
+    return bool(result) and expectation["contains"] in json.dumps(result.get("contents"))
+
+
+def compare_quality(servers, args, compiler):
+    results = {}
+    for name, executable in servers.items():
+        with tempfile.TemporaryDirectory(prefix="lsp-quality-", dir="/tmp/opencode"
+                                         if Path("/tmp/opencode").is_dir() else None) as directory:
+            root = Path(directory).resolve()
+            source, text, cases = quality_workspace(root, compiler)
+            command = [executable]
+            if name == "clangd":
+                command += ["--log=error", "--background-index", "--clang-tidy=false",
+                            "--compile-commands-dir=" + str(root)]
+            client = Client(command, root, args.timeout, args.memory_limit_mib)
+            results[name] = {"cases": [], "command": command}
+            try:
+                _, initialization, _ = client.request("initialize", {
+                    "processId": os.getpid(), "rootUri": root.as_uri(),
+                    "capabilities": {"workspace": {"workspaceEdit": {"documentChanges": True}}},
+                    "initializationOptions": {"enableSemantic": True,
+                        "compileCommands": str(root / "compile_commands.json"),
+                        "workspaceSymbols": True, "workspaceDiagnostics": True}})
+                capabilities = initialization["capabilities"]
+                results[name]["capabilities"] = capabilities
+                results[name]["server_info"] = initialization.get("serverInfo")
+                client.notify("initialized", {})
+                client.notify("textDocument/didOpen", {"textDocument": {
+                    "uri": source.as_uri(), "languageId": "cpp", "version": 1, "text": text}})
+                for case in cases:
+                    record = {"name": case["name"], "method": case["method"],
+                              "expectation": case["expectation"]}
+                    if not capabilities.get(case["capability"]):
+                        record["status"] = "unsupported"
+                    else:
+                        try:
+                            elapsed, response, _ = client.request(case["method"], case["params"])
+                            record.update(status="pass" if assess_result(response, case["expectation"])
+                                          else "mismatch", elapsed_ms=elapsed,
+                                          response=normalize_result(response, root))
+                        except (RuntimeError, TimeoutError) as error:
+                            record.update(status="error", error=str(error))
+                    results[name]["cases"].append(record)
+            finally:
+                client.close()
+    return results
+
+
 class Client:
     def __init__(self, command, workspace, timeout, memory_limit):
         self.timeout = timeout
         self.memory_limit = memory_limit
         self.responses = queue.Queue()
+        self.notifications = []
+        self.write_lock = threading.Lock()
         self.identifier = 0
         self.peak_rss_mib = None
         self.current_rss_mib = None
@@ -66,6 +223,8 @@ class Client:
                 if len(body) != length:
                     raise RuntimeError("truncated LSP response")
                 message = json.loads(body)
+                if "id" not in message:
+                    self.notifications.append(message)
                 if "id" in message:
                     if "method" in message:
                         self.send({"id": message["id"], "result": None})
@@ -97,8 +256,9 @@ class Client:
     def send(self, message):
         message["jsonrpc"] = "2.0"
         body = json.dumps(message, separators=(",", ":")).encode("utf-8")
-        self.process.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
-        self.process.stdin.flush()
+        with self.write_lock:
+            self.process.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            self.process.stdin.flush()
 
     def notify(self, method, params):
         self.send({"method": method, "params": params})
@@ -128,7 +288,11 @@ class Client:
             if self.process.poll() is None:
                 self.request("shutdown", None)
                 self.notify("exit", None)
-                self.process.wait(timeout=3)
+                try:
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait()
         finally:
             if self.process.poll() is None:
                 self.process.kill()
@@ -161,10 +325,11 @@ def create_workspace(root, lines, compiler):
 
 
 def benchmark(name, executable, workspace, source, text, position, args):
+    compile_commands = args.compile_commands if args.project else workspace / "compile_commands.json"
     command = [executable]
     if name == "clangd":
         command += ["--log=error", "--background-index", "--clang-tidy=false",
-                    "--compile-commands-dir=" + str(workspace)]
+                    "--compile-commands-dir=" + str(compile_commands.parent)]
     started = time.perf_counter()
     client = Client(command, workspace, args.timeout, args.memory_limit_mib)
     result = {"command": command, "samples": {}, "response_counts": {}, "response_bytes": {}}
@@ -182,7 +347,7 @@ def benchmark(name, executable, workspace, source, text, position, args):
                             "deprecated", "abstract", "async", "modification", "documentation",
                             "defaultLibrary"], "formats": ["relative"]}}},
             "initializationOptions": {"enableSemantic": True,
-                                      "compileCommands": str(workspace / "compile_commands.json"),
+                                      "compileCommands": str(compile_commands),
                                       "workspaceDiagnostics": True, "workspaceSymbols": True}})
         result["initialize_ms"] = (time.perf_counter() - started) * 1000
         result["server_info"] = initialization.get("serverInfo")
@@ -217,7 +382,7 @@ def benchmark(name, executable, workspace, source, text, position, args):
             result["response_counts"][label] = counts
             result["response_bytes"][label] = sizes
         edits, counts = [], []
-        number_column = text.splitlines()[1].index("return ") + len("return ")
+        number_column = 0 if args.project else text.splitlines()[1].index("return ") + len("return ")
         for iteration in range(args.warmup + args.iterations):
             started = time.perf_counter()
             client.notify("textDocument/didChange", {
@@ -225,7 +390,8 @@ def benchmark(name, executable, workspace, source, text, position, args):
                 "contentChanges": [{"range": {
                     "start": {"line": 1, "character": number_column},
                     "end": {"line": 1, "character": number_column + 1}},
-                    "text": str((iteration + 1) % 10)}]})
+                    "text": str((iteration + 1) % 10)}] if not args.project else
+                    [{"text": text + f"\n// LSP comparison revision {iteration}\n"}]})
             elapsed, response, _ = client.request("textDocument/completion", cursor, started)
             if iteration >= args.warmup:
                 edits.append(elapsed)
@@ -234,8 +400,33 @@ def benchmark(name, executable, workspace, source, text, position, args):
         result["response_counts"]["edit_completion"] = counts
         result["rss_mib"] = client.current_rss_mib
         result["peak_rss_mib"] = client.peak_rss_mib
+        result["capabilities"] = capabilities
+        if args.project:
+            result["probes"] = {}
+            for label, capability, method, extra in [
+                    ("definition", "definitionProvider", "textDocument/definition", {}),
+                    ("references", "referencesProvider", "textDocument/references",
+                     {"context": {"includeDeclaration": True}}),
+                    ("hover", "hoverProvider", "textDocument/hover", {})]:
+                if not capabilities.get(capability):
+                    result["probes"][label] = {"status": "unsupported"}
+                    continue
+                try:
+                    elapsed, response, _ = client.request(method, dict(cursor, **extra))
+                    result["probes"][label] = {"status": "nonempty" if response_count(method, response)
+                                              else "empty", "elapsed_ms": elapsed,
+                                              "response": normalize_result(response, workspace)}
+                except (RuntimeError, TimeoutError) as error:
+                    result["probes"][label] = {"status": "error", "error": str(error)}
     finally:
-        client.close()
+        try:
+            client.stderr.seek(0)
+            result["stderr"] = client.stderr.read().decode("utf-8", errors="replace")
+            client.close()
+        finally:
+            result["notifications"] = normalize_result(client.notifications, workspace)
+            result["document_diagnostics"] = normalize_result(
+                document_diagnostics(client.notifications, source.as_uri()), workspace)
     return result
 
 
@@ -251,7 +442,26 @@ def main():
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--memory-limit-mib", type=float, default=1024)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--quality-only", action="store_true",
+                        help="run functional probes without the latency benchmark")
+    parser.add_argument("--project", type=Path, help="benchmark an existing project without disk edits")
+    parser.add_argument("--compile-commands", type=Path)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--line", type=int, default=1, help="one-based cursor line for --project")
+    parser.add_argument("--character", type=int, default=0, help="zero-based UTF-16 cursor column")
     args = parser.parse_args()
+    args.project = args.project.resolve() if args.project else None
+    if args.project:
+        if not args.source or args.quality_only:
+            parser.error("--project requires --source and cannot be combined with --quality-only")
+        args.source = (args.project / args.source).resolve()
+        args.compile_commands = (args.compile_commands or args.project / "build/compile_commands.json").resolve()
+        if not args.source.is_file() or not args.compile_commands.is_file():
+            parser.error("source and compile_commands.json must exist")
+        text = args.source.read_text()
+        if not 1 <= args.line <= len(text.splitlines()) or not 0 <= args.character <= len(
+                text.splitlines()[args.line - 1].encode("utf-16-le")) // 2:
+            parser.error("cursor is outside the source")
     if min(args.lines) < 1 or min(args.iterations, args.repeats) < 1 or args.warmup < 0:
         parser.error("lines, iterations and repeats must be positive; warmup must be nonnegative")
     if args.timeout <= 0 or args.memory_limit_mib <= 0:
@@ -266,14 +476,42 @@ def main():
     if compiler is None:
         parser.error(f"compiler not found: {args.compiler}")
     report = {"platform": platform.platform(), "compiler": compiler,
-              "settings": vars(args) | {"output": str(args.output) if args.output else None},
+              "settings": {key: str(value) if isinstance(value, Path) else value
+                           for key, value in vars(args).items()},
               "server_sha256": {name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
                                 for name, path in servers.items()}, "runs": []}
     temporary_root = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
-    for lines in args.lines:
+    report["quality"] = compare_quality(servers, args, compiler) if not args.project else {}
+    print("\nFunctional probes (pass means only the explicit expectation was met):")
+    for index, case in enumerate(report["quality"].get("heimdall", {}).get("cases", [])):
+        print(f"{case['name']:26} Heimdall: {case['status']:11} "
+              f"clangd: {report['quality']['clangd']['cases'][index]['status']}")
+    sizes = [len(text.splitlines())] if args.project else args.lines
+    if args.project:
+        report["project"] = {"root": str(args.project), "source": str(args.source),
+                             "compile_commands_sha256": hashlib.sha256(args.compile_commands.read_bytes()).hexdigest(),
+                             "source_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                             "reflection": reflection_inventory(text),
+                             "position": {"line": args.line - 1, "character": args.character}}
+    for lines in ([] if args.quality_only else sizes):
         for repeat in range(args.repeats):
             order = list(servers) if repeat % 2 == 0 else list(reversed(servers))
             for name in order:
+                if args.project:
+                    try:
+                        run = benchmark(name, servers[name], args.project, args.source, text,
+                                        report["project"]["position"], args)
+                    except (RuntimeError, TimeoutError, OSError) as error:
+                        report["runs"].append({"server": name, "lines": lines, "repeat": repeat,
+                                               "error": str(error), "samples": {}})
+                        if args.output:
+                            args.output.write_text(json.dumps(report, indent=2) + "\n")
+                        print(f"{name}: error: {error}", flush=True)
+                        continue
+                    report["runs"].append(dict(run, server=name, lines=lines, repeat=repeat))
+                    print(f"{name}: {args.source.name}; probes "
+                          f"{ {key: value['status'] for key, value in run['probes'].items()} }", flush=True)
+                    continue
                 with tempfile.TemporaryDirectory(prefix="lsp-comparison-", dir=temporary_root) as directory:
                     root = Path(directory).resolve()
                     source, text, position = create_workspace(root, lines, compiler)
@@ -282,10 +520,14 @@ def main():
                 print(f"{name:8} {lines:5} functions run {repeat + 1}: "
                       f"open {run['open_to_completion_ms']:.1f} ms; "
                       f"peak RSS {run['peak_rss_mib']} MiB", flush=True)
-    print("\nserver    functions operation           median ms    p95 ms   responses")
-    for lines in args.lines:
+    unit = "lines" if args.project else "functions"
+    print(f"\nserver    {unit:9} operation           median ms    p95 ms   responses")
+    for lines in ([] if args.quality_only else sizes):
         for name in servers:
             runs = [run for run in report["runs"] if run["server"] == name and run["lines"] == lines]
+            runs = [run for run in runs if "error" not in run]
+            if not runs:
+                continue
             for label in runs[0]["samples"]:
                 samples = [value for run in runs for value in (run["samples"][label] or [])]
                 if not samples:

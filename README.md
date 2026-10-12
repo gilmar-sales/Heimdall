@@ -54,6 +54,233 @@ this is a safety monitor, not a hard allocation cap. `--timeout` bounds response
 30 seconds). The comparison benchmark is manual-only: it is not registered with CTest or CI.
 Harness tests can also be run manually with `python3 test/LspComparisonSpec.py`.
 
+#### Functional differences and implementation priorities
+
+The comparison also runs seven explicit functional probes in a separate small workspace.
+Use `--quality-only` to skip performance measurements:
+
+```bash
+python3 bench/LspComparison.py --quality-only --output /tmp/opencode/lsp-quality.json
+```
+
+The JSON retains advertised capabilities, server versions, normalized full responses,
+expectations and per-case `pass`, `mismatch`, `unsupported` or `error` outcomes.
+Expectations are independent of clangd: a nonempty response or advertised capability is
+not automatically a pass. Rename is inspected without applying edits.
+
+Local functional run, 2026-10-12, using the existing Release executable and clangd 22.1.8:
+
+| Probe / explicit expectation | Heimdall | clangd |
+|---|---|---|
+| Definition of dependency member points to `Widget.hpp` | Empty on first run; pass on validation rerun | Pass |
+| Definition of `Select(1)` selects only the `int` overload | Returns both overloads | Pass |
+| Outer local references exclude the shadowing inner local | Pass | Pass |
+| Outer local rename edits only declaration and outer use | Pass | Pass |
+| Hover on `Box<Widget>::payload` includes substituted `Widget` type | Reports `T` | Pass |
+| Completion after `object.` includes `Value` | Pass | Pass |
+| Signature help exposes both `Select` overloads | Pass | Pass |
+
+**Honest assessment:** Heimdall already implements a substantial LSP surface:
+completion, hover, navigation, references/rename, signatures, symbols, semantic tokens,
+inlay hints, hierarchy, formatting and code actions. These handlers are not proof of
+compiler-level semantic parity. The probes demonstrate useful local scope handling and
+member completion, but clangd is more consistent in the observed cross-header navigation,
+and better at overload selection and template type substitution. The latency baseline below is an advantage on
+some narrow workloads, not evidence that Heimdall replaces clangd for arbitrary C++.
+Heimdall's configurable lint/format/refactoring integration is a distinct project focus;
+this comparison does not measure its superiority (clang-tidy is disabled).
+
+Priorities for future implementation, with concrete acceptance criteria:
+
+1. **Dependency member navigation/readiness:** make `dependency_definition` reliably pass
+   from a fresh process; distinguish unfinished indexing from missing bindings, then cover
+   unopened headers and separate translation units. This probe varied between local runs.
+2. **Overload resolution:** select by argument types rather than returning same-name candidates;
+   make `overload_definition` pass, then add conversions, qualifiers, defaults and ambiguity cases.
+3. **Template substitution:** propagate instantiated member types into hover and navigation;
+   make `template_member_hover` pass, then cover aliases, nested templates and dependent bases.
+4. **Expand evidence before claiming parity:** add diagnostics with expected ranges/severity,
+   cross-TU references/rename, macros and conditional compilation, completion ranking/include
+   insertion, edit invalidation, UTF-16 positions and cancellation. Also test real projects and
+   indexing readiness, not just generated functions.
+
+These seven probes are deliberately small, run once per server, and are not a comprehensive
+correctness score. Completion checks item presence, not ranking or edit validity; signature
+help checks overload count, not active-signature correctness; hover checks type text.
+Background indexing has no readiness barrier, so missing navigation may include readiness
+effects. No diagnostic, multi-TU, standard-library or refactoring parity claim is made.
+Preserve the JSON when updating this table and add a regression case before addressing each gap.
+
+#### Real-project check: Freyr and C++26 reflection — 2026-10-12
+
+`--project` uses an existing compilation database without rewriting its flags or source files.
+Cursor lines are one-based; columns are zero-based UTF-16. Edits are full-document LSP
+notifications appending a comment in memory only. Servers may write background-index caches.
+Project probes retain responses as `nonempty`/`empty`, **not** correctness passes, plus
+diagnostic publications, stderr, source/database hashes and a lexical reflection inventory.
+Missing diagnostic publications are explicitly `not_observed`, not assumed clean.
+
+Executed against `/home/gilmar/dev/Freyr`, using its `build/compile_commands.json`
+(119 entries), existing Heimdall Release executable and clangd 22.1.8. Each run used one
+warm-up, three measured requests, one process per server, 60-second request timeout and
+4,096 MiB sampled-RSS limit. These are exploratory runs, not a stable performance baseline:
+
+```bash
+python3 bench/LspComparison.py --project /home/gilmar/dev/Freyr \
+  --source src/Core/Registry.cpp --line 39 --character 47 \
+  --warmup 1 --iterations 3 --repeats 1 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/freyr-registry-lsp.json
+python3 bench/LspComparison.py --project /home/gilmar/dev/Freyr \
+  --source include/Freyr/Meta/CallableComponents.hpp --line 80 --character 56 \
+  --warmup 1 --iterations 3 --repeats 1 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/freyr-reflection-lsp.json
+python3 bench/LspComparison.py --project /home/gilmar/dev/Freyr \
+  --source include/Freyr/Meta/CallableComponents.hpp --line 131 --character 47 \
+  --warmup 1 --iterations 3 --repeats 1 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/freyr-splice-lsp.json
+```
+
+| Real-source probe | Heimdall observation | clangd observation |
+|---|---|---|
+| `Registry.cpp`: `IsRunning` member call | Nonempty definition; empty hover/references | Empty definition/hover/references |
+| `CallableComponents.hpp`: `^^Entity` | Hover resolves `using Entity = std::uint32_t`; definition/references empty | All three empty |
+| Same header: `ComponentsTupleInfo` inside `[: ... :]` | Definition points to the function at line 61; hover/references empty | Incorrect definition points to namespace `meta` at line 14; hover also describes that namespace |
+
+The reflection header contains eight `^^` operators, two splice openers and 35
+`std::meta::` mentions (lexical counts only). clangd published errors for unsupported
+`-freflection`, `-fmodules-ts`, module-mapper and dependency-format flags, missing
+`std::meta` members, and reflection syntax. Its compilation context is therefore degraded;
+this run does **not** establish how clangd performs on a compatible Freyr configuration.
+Do not silently remove those flags and call it equivalent C++26 analysis.
+
+Heimdall published two lint warnings for this header (indirect `Event.hpp` include and
+a magic number), with no published syntax errors in the observed final diagnostics.
+That absence is **not** proof of semantic reflection validation. It tolerates enough
+reflection syntax for useful editing/navigation in these cases, while this installed
+clangd cannot analyze them correctly. The remaining Heimdall work includes reflected-operand
+references/definitions, consistent hover inside splices, `std::meta` intrinsic typing,
+consteval reflection evaluation and validation of instantiated/generated types.
+Future probes should assert the resulting component tuple for an actual callable and
+reject invalid reflected operands, rather than merely checking that requests return data.
+
+For context only, Registry edit-to-completion medians were 16.37 ms / 237.14 ms
+(Heimdall / clangd), but completion counts after edits were 15 / 0. At the reflected
+`Entity` cursor, medians were 15.74 ms / 30.69 ms with 490 / 2 items. These responses
+are not equivalent in quality, and no speedup or full-project correctness claim follows.
+Workspace indexing readiness and OS/index caches were not controlled; the project was
+opened at selected locations, not exhaustively tested.
+
+#### Real-project check without reflection: Boost.Hana — 2026-10-12
+
+Repeated the project comparison against `/home/gilmar/dev/hana`, revision
+`bc49ee25638e59d977edff5737b4e6bf12c1e5ea`, with its existing compilation database
+(1,306 entries). The selected source files contain no reflection operators or splices.
+No source files or compiler flags were modified. Each cursor used two fresh processes per
+server (alternating order), two warm-ups and five measured requests per operation/process,
+with the same 60-second timeout and 4,096 MiB sampled-RSS limit. Existing index/OS caches
+were not cleared. All four locations gave the same qualitative outcomes in both repeats.
+
+Reproduce the four locations with:
+
+```bash
+python3 bench/LspComparison.py --project /home/gilmar/dev/hana \
+  --source example/at_c.cpp --line 12 --character 20 \
+  --warmup 2 --iterations 5 --repeats 2 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/hana-tuple-lsp.json
+python3 bench/LspComparison.py --project /home/gilmar/dev/hana \
+  --source example/at_c.cpp --line 10 --character 16 \
+  --warmup 2 --iterations 5 --repeats 2 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/hana-deduction-lsp.json
+python3 bench/LspComparison.py --project /home/gilmar/dev/hana \
+  --source example/accessors.cpp --line 41 --character 34 \
+  --warmup 2 --iterations 5 --repeats 2 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/hana-macro-lsp.json
+python3 bench/LspComparison.py --project /home/gilmar/dev/hana \
+  --source example/transform.cpp --line 27 --character 18 \
+  --warmup 2 --iterations 5 --repeats 2 --timeout 60 --memory-limit-mib 4096 \
+  --output /tmp/opencode/hana-transform-lsp.json
+```
+
+| Probe | Heimdall observation | clangd observation |
+|---|---|---|
+| `hana::at_c<0>(xs)` in `static_assert` | Empty definition, references and hover | Correct definition in `tuple.hpp:281`, three call references, hover with `const int&` return and value `0` |
+| Declaration of `xs = hana::make_tuple(...)` | Correct declaration location; hover only `constexpr auto`; no references | Correct location; deduced `const tuple<int, char, double>`; four references including declaration |
+| `get_age(john)` inside `BOOST_HANA_RUNTIME_CHECK` | Correct local definition; hover only `constexpr auto`; no references | Same correct local definition; empty hover and references |
+| `hana::transform(...)` inside `BOOST_HANA_RUNTIME_CHECK` | Empty definition, hover and references | Also empty definition, hover and references |
+
+clangd published empty final diagnostic lists for all three files, with none of the
+unsupported-reflection/module flags seen in Freyr. This is a more appropriate comparison
+of ordinary template-heavy C++ editing. It demonstrates a clear clangd advantage in the
+tested template instantiation, deduced types, constexpr hover information and namespace-scope
+references. It does **not** show that clangd resolves every macro-expanded expression:
+both servers missed the tested `transform` location, and clangd did not provide a hover for
+the tested `get_age` use. A generic `constexpr auto` hover is not equivalent to a deduced type.
+
+Heimdall also warned that `BOOST_HANA_DEFINE_STRUCT` requires
+`<boost/hana/detail/struct_macros.hpp>` even though `accessors.cpp` already includes
+`<boost/hana/define_struct.hpp>`. That public header explicitly exports the macro through
+the detail header. This is an observed include-what-you-use **false positive**, not a
+missing include in Hana. Magic-number warnings are configurable lint policy differences,
+not evidence of C++ compilation failures.
+
+Additional implementation priorities established by this run:
+
+1. **Template call binding and return deduction:** resolve the `at_c` overload in `tuple.hpp`
+   and expose its instantiated `const int&` return type. Resolve `xs` to the actual tuple type,
+   not just `auto`; test these separately from reflection support.
+2. **Namespace-scope references:** return the declaration and three uses of `xs` in
+   `static_assert`, with exact ranges. Local-scope success in the synthetic corpus is insufficient.
+3. **Macro source mapping:** preserve navigation/reference/hover positions through assertion
+   macros and generated accessors. Use independent expectations for the `transform` and `get_age`
+   cases rather than taking clangd's empty response as the desired behavior.
+4. **Public-header ownership in IWYU:** recognize public forwarding/export headers;
+   an existing `define_struct.hpp` include must not trigger advice to include private `detail/`.
+
+Performance still needs response-quality context. For the `at_c` call, pooled warm hover
+medians were 0.47 ms / 1.15 ms (Heimdall / clangd), but the former returned null and the
+latter provided an instantiated signature/value. Edit-to-completion was 3.66 ms / 20.14 ms,
+with 0 / 100 items. At the `xs` declaration it was 3.72 ms / 3.57 ms, and at `transform`
+13.42 ms / 9.62 ms: Heimdall is not uniformly faster. These cursors are not dedicated
+completion-quality tests, so item counts do not establish ranking or edit correctness.
+This is a focused real-library check, not an exhaustive 1,306-translation-unit correctness
+or indexing benchmark. Preserve both the Freyr and Hana evidence: reflection tolerance
+and mature template semantics are different capabilities, and both matter to the roadmap.
+
+#### Isolated regression tests for the comparison findings
+
+`test/LspComparisonRegressionSpec.py` contains 45 strict end-to-end regressions using
+small, self-owned C++ fixtures. Every test creates its own temporary workspace, headers,
+configuration and compilation database, and starts a fresh Heimdall LSP process.
+**No Hana/Freyr checkout, clangd, installed Boost/Skirnir, compiler invocation or network
+access is required.** The only requirements are Python and the built Heimdall LSP.
+The reduced fixtures model template tuples/factories, nested assertion macros, public
+forwarding headers, pointer wrappers and reflection syntax; they do not import those projects.
+
+```bash
+python3 test/LspComparisonRegressionSpec.py --heimdall build/lsp/heimdall-lsp
+python3 test/LspComparisonRegressionSpec.py --heimdall build/lsp/heimdall-lsp --filter tuple
+python3 test/LspComparisonSpec.py
+```
+
+The suite checks exact definition/reference ranges, duplicate definitions, shadow-safe
+versioned rename edits, instantiated hover types, dependency completion, overload signatures,
+macro source mapping, reflection operands/splices, IWYU public-header ownership and
+comment-only edit invalidation. Each test waits for its document's versioned diagnostics
+and completion-index readiness instead of assuming that a first response means analysis
+has finished. Failure to reach readiness is an error, not a passing empty response.
+
+Current isolated run: **26 passed, 19 failed**, with no skipped or expected-failure tests.
+Failures remain visible as acceptance criteria for future fixes: overload selection,
+template type deduction, macro-call hover/references, smart-pointer hover/references,
+cross-header reflected-operand navigation, public-header IWYU and duplicate header definitions.
+Some reduced cases already pass even though the original project probe failed; this narrows
+the missing behavior to combinations of features or readiness rather than pretending that
+all basic namespace-scope references or all reflection syntax are broken.
+The standalone strict suite returns a nonzero status while these gaps exist and is
+manual-only, not registered with the ordinary CTest/CI suite. Do not weaken assertions or
+add `skip`/`expectedFailure` to make it green. `LspComparisonSpec.py` separately tests the
+harness helpers (21 passing tests), including UTF-16 positions and stale diagnostic rejection.
+
 #### Baseline — 2026-10-12
 
 Local run on Linux x86-64 / Intel Xeon E5-2697 v3, comparing Heimdall's existing
