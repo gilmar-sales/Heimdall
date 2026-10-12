@@ -13,7 +13,8 @@ header = workspace / "config.h"
 header.write_text("#pragma once\n#define LIMIT 8\n#define SQUARE(x) ((x) * (x))\n#define FEATURE 1\n"
                   "#define TEST(a, b) void Test_##a##_##b()\n"
                   "#define LOCK_EXCLUDED(x)\n"
-                  "#define DECLARE_FLAG(name) extern bool name;\n")
+                  "#define DECLARE_FLAG(name) extern bool name;\n"
+                  "#define FREYR_NAMESPACE fr\n")
 main_cpp = workspace / "main.cpp"
 text = ('#include "config.h"\n'
         "int a = LIMIT;\n"
@@ -66,7 +67,8 @@ def check(condition, description):
         raise SystemExit(f"FAILED: {description}")
 
 
-initialize = request(1, "initialize", {"initializationOptions": {
+initialize = request(1, "initialize", {"capabilities": {
+    "workspace": {"workspaceEdit": {"documentChanges": True}}}, "initializationOptions": {
     "enableSemantic": True, "compileCommands": compile_commands.as_posix()}})
 provider = initialize["result"]["capabilities"].get("semanticTokensProvider")
 check(provider is not None, "semanticTokensProvider is advertised")
@@ -157,6 +159,20 @@ check(("main.cpp", 1) in lines and ("main.cpp", 2) in lines and ("config.h", 1) 
 outline = request(9, "textDocument/documentSymbol", {"textDocument": {"uri": tests_cpp.as_uri()}})["result"]
 names = [item["name"] for item in outline]
 check("TEST(Suite, Case)" in names, f"the TEST() macro is listed in the outline: {names}")
+
+namespace_cpp = workspace / "namespace.cpp"
+namespace_text = '#include "config.h"\nnamespace FREYR_NAMESPACE\n{\n} // namespace FREYR_NAMESPACE'
+namespace_cpp.write_text(namespace_text)
+send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+    "uri": namespace_cpp.as_uri(), "languageId": "cpp", "version": 1, "text": namespace_text}}})
+eof = {"line": 3, "character": len(namespace_text.splitlines()[-1])}
+actions = request(200, "textDocument/codeAction", {
+    "textDocument": {"uri": namespace_cpp.as_uri()},
+    "range": {"start": eof, "end": eof}, "context": {"diagnostics": []}})["result"]
+kinds = [action["kind"] for action in actions]
+check("refactor.inline.macro" in kinds, f"macro expansion is offered at EOF: {kinds}")
+check("source.fixAll" in kinds, f"final newline fix is offered alongside expansion: {kinds}")
+check("quickfix" in kinds, f"individual newline fix is offered: {kinds}")
 
 request(7, "shutdown", None)
 send({"jsonrpc": "2.0", "method": "exit"})

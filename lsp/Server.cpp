@@ -2852,6 +2852,11 @@ namespace heimdall::lsp
 						return a->fix.offset < b->fix.offset;
 				});
 
+				if (!first)
+				{
+					response += ',';
+				}
+
 				first = false;
 				response += "{\"title\":";
 				const std::string fix_all_title =
