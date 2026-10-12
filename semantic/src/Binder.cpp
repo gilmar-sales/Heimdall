@@ -226,6 +226,8 @@ namespace heimdall
 
 		void ResolveRefs();
 
+		bool IsInitializedVariable(std::uint32_t node);
+
 		SymbolId ResolvePath(
 			std::uint32_t first_token,
 			ScopeId from,
@@ -1322,6 +1324,37 @@ namespace heimdall
 		return current;
 	}
 
+	// `auto list = CreateList();` is grouped as a function declaration; the call
+	// parentheses follow a top-level `=`, so no function is declared.
+	bool BinderImpl::IsInitializedVariable(std::uint32_t node)
+	{
+		const auto head = ScanHead(node);
+		if (head.name_token == kNone)
+		{
+			return false;
+		}
+
+		const auto[begin, end] = NodeSig(node);
+		std::size_t depth      = 0;
+		for (auto i = begin; i < end && m_sig[i] < head.name_token; ++i)
+		{
+			if (Is(m_sig[i], Tok::LParen) || Is(m_sig[i], Tok::LBracket) || Is(m_sig[i], Tok::LBrace))
+			{
+				++depth;
+			}
+			else if (Is(m_sig[i], Tok::RParen) || Is(m_sig[i], Tok::RBracket) || Is(m_sig[i], Tok::RBrace))
+			{
+				depth -= depth > 0 ? 1 : 0;
+			}
+			else if (depth == 0 && Is(m_sig[i], Tok::Eq))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	void BinderImpl::DeclareFunction(std::uint32_t node)
 	{
 		const auto head = ScanHead(node);
@@ -1835,6 +1868,12 @@ namespace heimdall
 			break;
 		case GrammarKind::FunctionDeclaration:
 		case GrammarKind::FunctionDefinition:
+			if (IsInitializedVariable(node))
+			{
+				DeclareDeclaration(node);
+				break;
+			}
+
 			DeclareFunction(node);
 			break;
 		case GrammarKind::Declaration:

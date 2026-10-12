@@ -927,3 +927,15 @@ TEST(IndexRename, BuiltinArgumentTypesChooseAnExactSameArityOverload)
 	EXPECT_EQ(project.Apply(*plan).at("a.hpp"), "int Add(long);\nint Sum(int);\n");
 	EXPECT_EQ(project.Apply(*plan).at("use.cpp"), "#include \"a.hpp\"\nint f() { return Sum(1) + Add(1L); }\n");
 }
+
+TEST(IndexRename, RenamesFunctionCalledInNamespaceScopeVariableInitializer)
+{
+	Project project({
+		{"a.cpp", "int CreateList() { return 1; }\n\nauto list = CreateList();\n"},
+	});
+
+	const auto plan = project.Rename("a.cpp", project.At("a.cpp", "CreateList"), "MakeList");
+
+	ASSERT_TRUE(plan.has_value()) << plan.error().message;
+	EXPECT_EQ(project.Apply(*plan).at("a.cpp"), "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
+}
