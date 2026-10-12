@@ -17,7 +17,8 @@ files = {
 }
 for name, text in files.items():
     (root / name).parent.mkdir(parents=True, exist_ok=True)
-    (root / name).write_text(text)
+    (root / name).write_bytes(text.encode("utf-8"))
+    assert (root / name).read_bytes() == text.encode("utf-8")
 
 process = subprocess.Popen([sys.argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 condition = threading.Condition()
