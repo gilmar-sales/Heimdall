@@ -28,6 +28,370 @@ namespace
 
 } // namespace
 
+TEST(ParseTreeSpec, ExpansionStatementsPreserveTheirDeclarationAndBody)
+{
+    constexpr std::string_view source =
+        "template <typename T> void Each(T& value) {"
+        "template for (constexpr auto member : Members<T>()) { Visit(value, member); }"
+        "Done(); }";
+
+    const auto tree = heimdall::ParseTree::Parse(source, heimdall::CppStandard::Cpp26);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::LoopStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CompoundStatement), 2);
+}
+
+TEST(ParseTreeSpec, ExpansionStatementsRequireCpp26)
+{
+    for (const auto standard :
+        {
+            heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23
+    })
+    {
+        const auto tree = heimdall::ParseTree::Parse(
+            "void Each() { template for (constexpr auto member : Members()) {} }", standard);
+
+        EXPECT_FALSE(tree.Diagnostics().empty());
+    }
+}
+
+TEST(ParseTreeSpec, ExpansionStatementsRequireAConstexprDeclaration)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "void Each() { template for (auto member : Members()) {} }", heimdall::CppStandard::Cpp26);
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, ConstructorInitializersRequireADefinitionBody)
+{
+    const auto tree = heimdall::ParseTree::Parse("struct Test { Test() : value { 1 }; int value; };");
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+}
+
+TEST(ParseTreeSpec, CorpusSyntaxPrefixesKeepGrammarRangesBounded)
+{
+    constexpr std::string_view sources[] = {
+        "void Each() { template for (constexpr auto member : Members()) { Use(member); } }",
+        "struct Test { Test(int value) : first { value }, second { 0 } {} int first; int second; };",
+        "template <int... Values> struct Test { static constexpr int a[sizeof...(Values)] = {Values...}; };",
+        "template <typename T>\n#ifdef ATTRIBUTE\nstruct Test\n#else\nstruct Test\n#endif\n { int value; };",
+        "void Test() { Check<void(...), void (*)(...)>(); }",
+        "void Test() { static_assert(Equal<Types, Vector<char&, void*>>::value); }",
+        "auto Test() { return typename decltype(value)::type{}; }",
+        "template <char... Characters> constexpr auto operator \"\"_c();",
+        "void Test() { decltype(value) copy(value); }",
+        "void Test() { auto value = Make<(T::value < sizeof...(Ts)) ? sizeof...(Ts) : 0>{}; }",
+    };
+
+    for (const auto source : sources)
+    {
+        for (std::size_t length = 0; length <= source.size(); ++length)
+        {
+            SCOPED_TRACE(source.substr(0, length));
+
+            const auto tree = heimdall::ParseTree::Parse(source.substr(0, length),
+                heimdall::CppStandard::Cpp26);
+
+            const auto& soa = tree.NodesSoA();
+            for (std::size_t i = 0; i < soa.size(); ++i)
+            {
+                ASSERT_LE(soa.FirstToken(i), tree.Tokens().size());
+                EXPECT_LE(soa.TokenCount(i), tree.Tokens().size() - soa.FirstToken(i));
+                EXPECT_LT(soa.Parent(i), soa.size());
+            }
+
+            for (const auto& diagnostic : tree.Diagnostics())
+            {
+                EXPECT_LE(diagnostic.offset, length);
+            }
+        }
+    }
+}
+
+TEST(ParseTreeSpec, ConstructorBracedInitializersDoNotBecomeFunctionBodies)
+{
+    constexpr std::string_view source =
+        "struct Test { Test(int value) : first { value }, second { 0 } { Run(); }"
+        "Test() : Test { 1 } {} int first; int second; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CompoundStatement), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::BitfieldSuffix), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 2);
+}
+
+TEST(ParseTreeSpec, ArrayPackInitializersAreNotFunctionDefinitions)
+{
+    constexpr std::string_view source =
+        "template <int... Values> struct Test {"
+        "static constexpr int values[sizeof...(Values) + 1] = {Values..., 0}; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ArraySuffix), 1);
+}
+
+TEST(ParseTreeSpec, ConditionalTemplateHeadersPreserveClassScope)
+{
+    constexpr std::string_view source =
+        "template <typename T>\n#ifdef DECORATED\nstruct Test\n#else\nstruct Test\n#endif\n"
+        "{ public: template <typename U> Test(U value) : storage(value) {} int storage; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::AccessSpecifier), 1);
+    const auto& soa = tree.NodesSoA();
+    for (std::size_t i = 0; i < soa.size(); ++i)
+    {
+        if (soa.Kind(i) == heimdall::GrammarKind::AccessSpecifier)
+        {
+            EXPECT_EQ(soa.Kind(soa.Parent(i)), heimdall::GrammarKind::RecordDefinition);
+        }
+    }
+}
+
+TEST(ParseTreeSpec, DecltypeLocalCopiesRemainDeclarations)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "void Test() { auto value = Make(); decltype(value) copy(value); Use(copy); }");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 1);
+}
+
+TEST(ParseTreeSpec, VariadicFunctionTypeArgumentsHaveFunctionSuffixes)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "void Test() { Check<void(...), void (*)(...), void(int, ...)>(); }");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionSuffix), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateArgument), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 1);
+}
+
+TEST(ParseTreeSpec, SharedTemplateClosersPreserveNestedReferenceArguments)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "void Test() { static_assert(Equal<Types, Vector<char&, void*>>::value); }");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateIdExpression), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateArgument), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 0);
+}
+
+TEST(ParseTreeSpec, DependentDecltypeConstructionPreservesTheReturnExpression)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "auto Test() { return typename decltype(value)::type{}; }");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::MemberExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 0);
+}
+
+TEST(ParseTreeSpec, LiteralOperatorSuffixIsPartOfTheDeclarator)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "template <char... Characters> constexpr auto operator \"\"_c();"
+        "template <typename C, C... Characters> constexpr auto operator \"\" _s() {}"
+        "int after;");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 1);
+}
+
+TEST(ParseTreeSpec, ConditionalTemplateArgumentsAcceptSizeofPackExpressions)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "template <typename T, typename... Ts> void Test() {"
+        "auto value = MakeSequence<(T::value < sizeof...(Ts)) ? sizeof...(Ts) - T::value : 0>{}; }");
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ConditionalExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateArgument), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 0);
+}
+
+TEST(ParseTreeSpec, ParsesReferencePacksAndNestedTemplateExpansions)
+{
+    constexpr std::string_view source =
+        "template <typename... Ts> void Test() {"
+        "static_assert(Trait<Ts&...>::value);"
+        "static_assert(Trait<Ts&&...>::value);"
+        "Call<Wrapper<Ts>...>();"
+        "auto value = Tuple<Ts&...>();"
+        "}";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::StaticAssertDeclaration), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::TemplateArgument), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TypeSpecifier), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 2);
+}
+
+TEST(ParseTreeSpec, ParsesExplicitDestructorCallsAsMemberCalls)
+{
+    constexpr std::string_view source =
+        "template <typename T> void Destroy(T* value) {"
+        "value->~T(); value[0].~T(); reinterpret_cast<T*>(value)->~T();"
+        "}";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::MemberExpression), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 3);
+}
+
+TEST(ParseTreeSpec, TemplatePackExpansionRequiresAPattern)
+{
+    const auto tree = heimdall::ParseTree::Parse("void Test() { Call<...>(); }");
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 1);
+}
+
+TEST(ParseTreeSpec, TemplateReferenceArgumentsRequireAType)
+{
+    for (const auto source :
+        {
+            "void Test() { Call<&>(); }",
+            "void Test() { Call<&&>(); }",
+            "void Test() { Call<*>(); }"
+    })
+    {
+        SCOPED_TRACE(source);
+
+        const auto tree = heimdall::ParseTree::Parse(source);
+
+        EXPECT_FALSE(tree.Diagnostics().empty());
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::ErrorExpression), 1);
+    }
+}
+
+TEST(ParseTreeSpec, AlternativeLogicalOperatorsPreserveLeadingConstraints)
+{
+    constexpr std::string_view source =
+        "template <typename... Ts, typename F>"
+        "requires (Component<Ts> and ...) and (Invocable<F, Entity, Ts&...> or Invocable<F, Ts&...>)"
+        "void Add(Entity entity, Ts... components, F&& callback) {}";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 3);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::BinaryExpression), 2);
+}
+
+TEST(ParseTreeSpec, AlignedMemberInitializersAreNotFunctionBodies)
+{
+    constexpr std::string_view source =
+        "struct Test {"
+        "alignas(64) Atomic<int> first { 0 };"
+        "alignas(64) Atomic<int> second = { 0 };"
+        "[[maybe_unused]] alignas(int) int third { 0 };"
+        "};";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 0);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::AttributeSpecifier), 4);
+}
+
+TEST(ParseTreeSpec, ParsesConstrainedClassForwardDeclarations)
+{
+    constexpr std::string_view source =
+        "template <typename T> requires Concept<T> class Publisher;"
+        "template <typename T> requires Other<T>::value struct Subscriber;";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateDeclaration), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 2);
+}
+
+TEST(ParseTreeSpec, TrailingRequiresExpressionDoesNotBecomeFunctionBody)
+{
+    constexpr std::string_view source =
+        "template <typename T> void Test(T value)"
+        "requires requires(T entry) { { entry.Check() } -> Concept<bool>; }"
+        "{ value.Run(); }";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Requirement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
+}
+
+TEST(ParseTreeSpec, ParsesDependentTemplateMemberCalls)
+{
+    constexpr std::string_view source =
+        "template <typename T> void Test(T* value) {"
+        "if (!value->template Contains<int>()) value->template AddSingleton<int>();"
+        "auto result = Builder().With<T>().template Build<App>();"
+        "}";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateIdExpression), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::MemberExpression), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 5);
+}
+
+TEST(ParseTreeSpec, StatementAttributesPreserveBranchesAndFollowingDeclarations)
+{
+    constexpr std::string_view source =
+        "void Test() {"
+        "if (auto it = Find(); it != End()) [[likely]] { return; }"
+        "else [[unlikely]] { Run(); }"
+        "auto write = Lock();"
+        "}";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::IfStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CompoundStatement), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::AttributeSpecifier), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
+}
+
 TEST(ParseTreeSpec, ReflectionProbeStaticAssertionsAndTypeSpliceAreNotFunctions)
 {
     const auto path = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test/src/ReflectionProbe.cpp";
@@ -51,8 +415,7 @@ TEST(ParseTreeSpec, ConstructorParametersUseFunctionSuffixWithoutLosingPointerRe
     using heimdall::GrammarKind;
     const auto tree =
         heimdall::ParseTree::Parse("struct S { S(int a, int b, int c, int d); explicit S(int a, "
-                                   "int b, int c, int d, int e) {} };",
-                                   {});
+        "int b, int c, int d, int e) {} };", {});
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, GrammarKind::FunctionSuffix), 2);
     EXPECT_EQ(Count(tree, GrammarKind::ParameterDeclaration), 9);
@@ -61,8 +424,8 @@ TEST(ParseTreeSpec, ConstructorParametersUseFunctionSuffixWithoutLosingPointerRe
     EXPECT_TRUE(pointer.Diagnostics().empty());
     EXPECT_EQ(Count(pointer, GrammarKind::FunctionSuffix), 1);
     EXPECT_EQ(Count(pointer, GrammarKind::ParameterDeclaration), 2);
-    const auto& soa         = pointer.NodesSoA();
-    bool        widget_type = false;
+    const auto& soa = pointer.NodesSoA();
+    bool widget_type = false;
     for (std::size_t i = 0; i < soa.size(); ++i)
     {
         if (soa.Kind(i) == GrammarKind::TypeSpecifier &&
@@ -80,9 +443,9 @@ TEST(ParseTreeSpec, SnapshotRetainsAndSharesSourceAndTokensAcrossMoves)
     auto source = std::make_shared<const std::string>("int f() { return 2 + 3; }\n");
     auto tokens =
         std::make_shared<const std::vector<heimdall::Token>>(heimdall::Lexer(*source).Lex());
-    const auto* data   = tokens->data();
-    const auto* text   = source->data();
-    auto        parsed = heimdall::ParseTree::ParseSnapshot(source, {}, {}, tokens);
+    const auto* data = tokens->data();
+    const auto* text = source->data();
+    auto parsed = heimdall::ParseTree::ParseSnapshot(source, {}, {}, tokens);
     EXPECT_EQ(parsed.Tokens().data(), data);
     EXPECT_EQ(parsed.Source().data(), text);
     source.reset();
@@ -109,8 +472,8 @@ TEST(ParseTreeSpec, DirectChildRangeMatchesParentRelationshipsForEveryNode)
     };
     for (const auto source : cases)
     {
-        const auto  tree = heimdall::ParseTree::Parse(source);
-        const auto& soa  = tree.NodesSoA();
+        const auto tree = heimdall::ParseTree::Parse(source);
+        const auto& soa = tree.NodesSoA();
         for (std::size_t node = 0; node < soa.size(); ++node)
         {
             std::vector<std::size_t> expected;
@@ -176,7 +539,7 @@ TEST(ParseTreeSpec, SelectsConditionalBranchesUsingPredefinedCompileMacros)
 TEST(ParseTreeSpec, RecoversAtSemicolonAndContinuesParsing)
 {
     constexpr std::string_view source = "int f() { int broken return 1; return 2; } int g;";
-    const auto                 tree   = heimdall::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     EXPECT_FALSE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 1);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 2);
@@ -205,7 +568,7 @@ TEST(ParseTreeSpec, BuildsExpressionNodesForPrecedenceAndPostfixForms)
 TEST(ParseTreeSpec, ParsesParametersAndDeclaratorsWithInitializers)
 {
     const auto tree = heimdall::ParseTree::Parse("int sum(int left, int right = 2) { int first = "
-                                                 "left, second{right}; return first + second; }");
+        "left, second{right}; return first + second; }");
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
     EXPECT_GE(Count(tree, heimdall::GrammarKind::InitDeclarator), 2);
@@ -412,12 +775,12 @@ TEST(ParseTreeSpec, ReportsSemicolonInsteadOfCommaInDesignatedInitializer)
         "template<class T> void f(T value) { auto node = Node<T>{.value = value;}; }\n";
     const auto tree = heimdall::ParseTree::Parse(source);
 
-    const auto error = std::ranges::find_if(tree.Diagnostics(), [](const auto& diagnostic)
+    const auto error = std::ranges::find_if(tree.Diagnostics(),[](const auto& diagnostic)
         {
             return diagnostic.message == "expected '}' before ';' token [-Wtemplate-body]";
     });
     ASSERT_NE(error, tree.Diagnostics().end());
-    EXPECT_EQ(error->offset, source.find("value;}" ) + std::string_view("value").size());
+    EXPECT_EQ(error->offset, source.find("value;}") + std::string_view("value").size());
 }
 
 TEST(ParseTreeSpec, ParsesFoldExpressionsWithoutDiagnostics)
@@ -589,7 +952,7 @@ TEST(ParseTreeSpec, ReportsMissingSemicolonBetweenStructMembers)
     // Shrunk declaration nodes must still be contained in their parents.
     for (std::size_t i = 1; i < tree.Nodes().size(); ++i)
     {
-        const auto& node   = tree.Nodes()[i];
+        const auto& node = tree.Nodes()[i];
         const auto& parent = tree.Nodes()[node.parent];
         EXPECT_LE(parent.first_token, node.first_token);
         EXPECT_LE(node.first_token + node.token_count, parent.first_token + parent.token_count);
@@ -662,7 +1025,7 @@ TEST(ParseTreeSpec, AcceptsLocalStructWithBaseClauseAndDeclarator)
 TEST(ParseTreeSpec, ReportsMissingCommaBetweenParameters)
 {
     constexpr std::string_view source = "int sum(int left int right);\n";
-    const auto                 tree   = heimdall::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ',' before 'int'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int right"));
@@ -780,14 +1143,15 @@ TEST(ParseTreeSpec, UnnamedConstQualifiedPointerParametersAreNotMissingCommas)
 {
     // `const A::B *` without a parameter name used to parse `const` as the
     // declared name and report "expected ',' before 'A'".
-    for (const std::string_view source : {
-             "void f(int, const A::B *);\n",
-             "void f(ParseTree &, const A &, std::stop_token, const B::C *);\n",
-             "void f(const A::B &, volatile ns::T *, const C * const *);\n",
-             "class P { friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult "
-             "&,\n"
-             "    std::stop_token, const Preprocessor::MacroMap *); };\n",
-         })
+    for (const std::string_view source :
+        {
+            "void f(int, const A::B *);\n",
+            "void f(ParseTree &, const A &, std::stop_token, const B::C *);\n",
+            "void f(const A::B &, volatile ns::T *, const C * const *);\n",
+            "class P { friend void detail::ParseWithGrammar(ParseTree &, const PreprocessorResult "
+            "&,\n"
+            "    std::stop_token, const Preprocessor::MacroMap *); };\n",
+    })
     {
         const auto tree = heimdall::ParseTree::Parse(source);
         EXPECT_TRUE(tree.Diagnostics().empty()) << source << tree.Diagnostics().front().message;
@@ -911,25 +1275,26 @@ namespace
 
     class FakeTypeNames final : public heimdall::TypeNameOracle
     {
-      public:
+    public:
         FakeTypeNames(std::initializer_list<std::string_view> names,
-                      std::uint64_t fingerprint = 1) : m_names(names), m_fingerprint(fingerprint)
-        {
-        }
+                      std::uint64_t fingerprint = 1) : m_names(names), m_fingerprint(fingerprint) {}
 
         bool IsType(std::string_view name) const noexcept override
         {
             return std::find(m_names.begin(), m_names.end(), name) != m_names.end();
         }
 
-        std::uint64_t Fingerprint() const noexcept override { return m_fingerprint; }
+        std::uint64_t Fingerprint() const noexcept override
+        {
+            return m_fingerprint;
+        }
 
-      private:
+    private:
         std::vector<std::string_view> m_names;
-        std::uint64_t                 m_fingerprint;
+        std::uint64_t m_fingerprint;
     };
 
-    heimdall::ParseTree ParseWith(std::string_view                                source,
+    heimdall::ParseTree ParseWith(std::string_view source,
                                   std::shared_ptr<const heimdall::TypeNameOracle> names = {})
     {
         heimdall::ParserOptions options;
@@ -958,7 +1323,7 @@ TEST(ParseTreeSpec, UnknownOrTypeNamesKeepTheDeclarationReading)
         1);
     EXPECT_EQ(Count(ParseWith("struct Foo {};\nvoid f() { Foo * p; Foo & r = *p; }\n"),
                     heimdall::GrammarKind::DeclarationStatement),
-              2);
+        2);
 }
 
 TEST(ParseTreeSpec, ABlockScopedValueShadowsAType)
@@ -1014,7 +1379,7 @@ TEST(ParseTreeSpec, HeaderTypeNamesComeFromTheOracle)
 
     const auto known = ParseWith(
         source,
-        std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view> { "Widget" }));
+        std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view> {"Widget"}));
     EXPECT_EQ(Count(known, heimdall::GrammarKind::CastExpression), 1);
     // The cast holds its type and its operand.
     for (std::size_t n = 0; n < known.Nodes().size(); ++n)
@@ -1032,7 +1397,7 @@ TEST(ParseTreeSpec, HeaderTypeNamesComeFromTheOracle)
 TEST(ParseTreeSpec, AVariableOfTheFileHidesAHeaderType)
 {
     const auto names =
-        std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view> { "count" });
+        std::make_shared<FakeTypeNames>(std::initializer_list<std::string_view> {"count"});
     const auto tree =
         ParseWith("void f(int count, int n) { auto a = (count) - n; count * n; }\n", names);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::CastExpression), 0);
@@ -1041,8 +1406,8 @@ TEST(ParseTreeSpec, AVariableOfTheFileHidesAHeaderType)
 
 TEST(ParseTreeSpec, ReusedItemsAreReparsedWhenTheKnownNamesChange)
 {
-    const std::string   first    = "struct A {};\nvoid f(void *p) { auto x = (A*)p; }\n";
-    auto                owned    = std::make_shared<std::string>(first);
+    const std::string first = "struct A {};\nvoid f(void *p) { auto x = (A*)p; }\n";
+    auto owned = std::make_shared<std::string>(first);
     heimdall::ParseTree previous = heimdall::ParseTree::Parse(*owned, {});
     previous.HoldSource(owned);
     ASSERT_EQ(Count(previous, heimdall::GrammarKind::CastExpression), 1);
@@ -1050,7 +1415,10 @@ TEST(ParseTreeSpec, ReusedItemsAreReparsedWhenTheKnownNamesChange)
     // `A` stops being a type: the unchanged second item must not be copied as is.
     std::string edited = first;
     edited.replace(edited.find("A {}"), 1, "B");
-    const heimdall::ParseReuse reuse { &previous, edited.find("B {}"), 1, 1 };
+    const heimdall::ParseReuse reuse
+    {
+        &previous, edited.find("B {}"), 1, 1
+    };
     const auto incremental = heimdall::ParseTree::Parse(edited, {}, {}, nullptr, &reuse);
     EXPECT_EQ(Count(incremental, heimdall::GrammarKind::CastExpression), 0);
     EXPECT_EQ(Count(incremental, heimdall::GrammarKind::CastExpression),
@@ -1060,7 +1428,10 @@ TEST(ParseTreeSpec, ReusedItemsAreReparsedWhenTheKnownNamesChange)
     std::string touched = first;
     touched.replace(touched.find("auto x"), 4, "auto");
     touched.insert(touched.find("void f"), "int unrelated;\n");
-    const heimdall::ParseReuse reuse_unrelated { &previous, touched.find("int unrelated"), 0, 15 };
+    const heimdall::ParseReuse reuse_unrelated
+    {
+        &previous, touched.find("int unrelated"), 0, 15
+    };
     const auto kept = heimdall::ParseTree::Parse(touched, {}, {}, nullptr, &reuse_unrelated);
     EXPECT_EQ(Count(kept, heimdall::GrammarKind::CastExpression), 1);
 }
@@ -1069,8 +1440,8 @@ TEST(ParseTreeSpec, ConstructorDefinitionsDoNotHideTheirClassName)
 {
     // `Widget::Widget` names a function, but `Widget w(1);` still declares a Widget.
     const auto tree = ParseWith("struct Widget { Widget(int); };\n"
-                                "Widget::Widget(int) {}\n"
-                                "void use() { Widget w(1); Widget * p = nullptr; }\n");
+        "Widget::Widget(int) {}\n"
+        "void use() { Widget w(1); Widget * p = nullptr; }\n");
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclarationStatement), 2);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 0);
 }
@@ -1133,7 +1504,7 @@ TEST(ParseTreeSpec, IfConstexprAndIfConstevalParseWithoutDiagnostics)
 TEST(ParseTreeSpec, InlineNamespaceIsANamespaceDefinition)
 {
     constexpr std::string_view source = "inline namespace v1 { void Stable(); }\n"
-                                        "namespace outer { inline namespace v2 { int Value; } }\n";
+        "namespace outer { inline namespace v2 { int Value; } }\n";
 
     const auto tree = heimdall::ParseTree::Parse(source);
 
@@ -1160,7 +1531,10 @@ TEST(ParseTreeSpec, ConcurrentCompatibilityReadersSeeTheSameCompleteNodes)
 
     for (int i = 0; i < 16; ++i)
     {
-        readers.push_back(std::async(std::launch::async, [&] { return tree.Nodes().size(); }));
+        readers.push_back(std::async(std::launch::async,[&]
+            {
+                return tree.Nodes().size();
+        }));
     }
 
     for (auto& reader : readers)
@@ -1172,21 +1546,23 @@ TEST(ParseTreeSpec, ConcurrentCompatibilityReadersSeeTheSameCompleteNodes)
 TEST(ParseTreeSpec, DeepExpressionProducesAnErrorInsteadOfExhaustingTheStack)
 {
     constexpr std::size_t kDepth = 2000;
-    const auto            source = "int Deep() { return " + std::string(kDepth, '(') + "1" +
-                                   std::string(kDepth, ')') + "; } int Tail;";
+    const auto source = "int Deep() { return " + std::string(kDepth, '(') + "1" +
+        std::string(kDepth, ')') + "; } int Tail;";
 
     const auto tree = heimdall::ParseTree::Parse(source);
 
     EXPECT_FALSE(tree.Cancelled());
     EXPECT_TRUE(std::any_of(tree.Diagnostics().begin(), tree.Diagnostics().end(),
                             [](const auto& diagnostic)
-                            { return diagnostic.message == "maximum grammar nesting exceeded"; }));
+        {
+            return diagnostic.message == "maximum grammar nesting exceeded";
+    }));
     EXPECT_FALSE(tree.NodesSoA().empty());
 }
 
 TEST(ParseTreeSpec, StorageAccountingIncludesTheMaterializedCompatibilityAdapter)
 {
-    const auto tree   = heimdall::ParseTree::Parse("int One() { return 1; } int Two;");
+    const auto tree = heimdall::ParseTree::Parse("int One() { return 1; } int Two;");
     const auto before = tree.StorageBytes();
 
     const auto& nodes = tree.Nodes();
@@ -1218,7 +1594,7 @@ TEST(ParseTreeSpec, EveryDeclaratorAfterASharedSpecifierDeclaresAName)
     const auto tree = heimdall::ParseTree::Parse(source);
 
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(DeclaredNames(tree), (std::vector<std::string> { "a", "b", "c", "d" }));
+    EXPECT_EQ(DeclaredNames(tree), (std::vector<std::string> {"a", "b", "c", "d"}));
 }
 
 TEST(ParseTreeSpec, ExplicitObjectParameterDeclaresItsName)
@@ -1233,7 +1609,7 @@ TEST(ParseTreeSpec, ExplicitObjectParameterDeclaresItsName)
 
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(DeclaredNames(tree),
-              (std::vector<std::string> { "foo", "self", "arg", "bar", "self" }));
+              (std::vector<std::string> {"foo", "self", "arg", "bar", "self"}));
 }
 
 TEST(ParseTreeSpec, UnnamedTemplateParametersAreNotUndeclaredNames)

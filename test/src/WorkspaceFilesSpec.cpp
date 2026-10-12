@@ -15,15 +15,15 @@ namespace
 
     namespace fs = std::filesystem;
 
-    class WorkspaceFilesSpec : public ::testing::Test
+    class WorkspaceFilesSpec : public::testing::Test
     {
     protected:
         void SetUp() override
         {
             static std::atomic<int> counter {0};
             const std::string unique = std::to_string(counter.fetch_add(1)) + "_" +
-                                       testing::UnitTest::GetInstance()->current_test_info()->name();
-            mRoot = fs::temp_directory_path() / ("heimdall_workspace_files_" + unique);
+                testing::UnitTest::GetInstance()->current_test_info()->name();
+            mRoot = fs::temp_directory_path() /("heimdall_workspace_files_" + unique);
             fs::remove_all(mRoot);
             fs::create_directories(mRoot);
         }
@@ -57,17 +57,36 @@ namespace
 
 } // namespace
 
+TEST_F(WorkspaceFilesSpec, UnrenderedErbTemplatesDoNotEnterTheWorkspaceIndex)
+{
+    Write("src/generated.erb.cpp", "<%= input_size %>\n");
+    Write("include/generated.erb.hpp", "<%= input_size %>\n");
+    Write("src/generated.cpp");
+
+    const auto files = heimdall::lsp::DiscoverWorkspaceSources(mRoot, {});
+
+    EXPECT_EQ(Relative(files), (std::vector<std::string> {"src/generated.cpp"}));
+    EXPECT_FALSE(heimdall::lsp::IsWorkspaceSource("generated.erb.cpp"));
+    EXPECT_TRUE(heimdall::lsp::IsWorkspaceSource("erb.cpp"));
+}
+
 TEST_F(WorkspaceFilesSpec, RecognizesCppSourcesAndHeaders)
 {
     using heimdall::lsp::IsWorkspaceSource;
 
-    for (const char* name : {"a.cpp", "a.cc", "a.cxx", "a.c++", "a.hpp", "a.hh", "a.hxx", "a.h",
-                             "a.ipp", "a.tpp", "a.inl", "a.cppm", "a.ixx"})
+    for (const char* name :
+        {
+            "a.cpp", "a.cc", "a.cxx", "a.c++", "a.hpp", "a.hh", "a.hxx", "a.h",
+            "a.ipp", "a.tpp", "a.inl", "a.cppm", "a.ixx"
+    })
     {
         EXPECT_TRUE(IsWorkspaceSource(name)) << name;
     }
 
-    for (const char* name : {"a.txt", "a.py", "Makefile", "a.cpp.bak", "a", "a.hpp.in"})
+    for (const char* name :
+        {
+            "a.txt", "a.py", "Makefile", "a.cpp.bak", "a", "a.hpp.in"
+    })
     {
         EXPECT_FALSE(IsWorkspaceSource(name)) << name;
     }
@@ -77,13 +96,19 @@ TEST_F(WorkspaceFilesSpec, SkipsBuildAndToolDirectories)
 {
     using heimdall::lsp::IsSkippedDirectory;
 
-    for (const char* name : {".git", ".vscode", "build", "build-release", "cmake-build-debug",
-                             "node_modules", "_deps", "vcpkg_installed", "out"})
+    for (const char* name :
+        {
+            ".git", ".vscode", "build", "build-release", "cmake-build-debug",
+            "node_modules", "_deps", "vcpkg_installed", "out"
+    })
     {
         EXPECT_TRUE(IsSkippedDirectory(name)) << name;
     }
 
-    for (const char* name : {"src", "include", "rebuild", "output", "lib"})
+    for (const char* name :
+        {
+            "src", "include", "rebuild", "output", "lib"
+    })
     {
         EXPECT_FALSE(IsSkippedDirectory(name)) << name;
     }
@@ -104,7 +129,7 @@ TEST_F(WorkspaceFilesSpec, DiscoversSortedSourcesAndSkipsIgnoredDirectories)
     const auto files = heimdall::lsp::DiscoverWorkspaceSources(mRoot, std::stop_token {});
 
     EXPECT_EQ(Relative(files), (std::vector<std::string> {"src/a.hpp", "src/b.cpp",
-                                                          "src/deep/er/c.h", "top.cc"}));
+                                "src/deep/er/c.h", "top.cc"}));
 }
 
 TEST_F(WorkspaceFilesSpec, DiscoveryHonorsTheFileLimit)
@@ -140,29 +165,29 @@ TEST_F(WorkspaceFilesSpec, DiscoveryOfAMissingRootIsEmpty)
 
 TEST_F(WorkspaceFilesSpec, DiscoveryEvidenceDistinguishesExactLimitFromTruncation)
 {
-	Write("first.cpp");
-	Write("second.cpp");
+    Write("first.cpp");
+    Write("second.cpp");
 
-	const auto exact = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 2);
-	const auto truncated = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 1);
+    const auto exact = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 2);
+    const auto truncated = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 1);
 
-	EXPECT_TRUE(exact.complete);
-	EXPECT_FALSE(exact.truncated);
-	EXPECT_FALSE(truncated.complete);
-	EXPECT_TRUE(truncated.truncated);
+    EXPECT_TRUE(exact.complete);
+    EXPECT_FALSE(exact.truncated);
+    EXPECT_FALSE(truncated.complete);
+    EXPECT_TRUE(truncated.truncated);
 }
 
 TEST_F(WorkspaceFilesSpec, DiscoveryEvidenceDoesNotCertifyCancelledOrMissingRoots)
 {
-	std::stop_source stop;
-	stop.request_stop();
+    std::stop_source stop;
+    stop.request_stop();
 
-	const auto cancelled = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, stop.get_token());
-	const auto missing = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot / "missing", {});
+    const auto cancelled = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, stop.get_token());
+    const auto missing = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot / "missing", {});
 
-	EXPECT_TRUE(cancelled.cancelled);
-	EXPECT_FALSE(cancelled.complete);
-	EXPECT_FALSE(missing.complete);
+    EXPECT_TRUE(cancelled.cancelled);
+    EXPECT_FALSE(cancelled.complete);
+    EXPECT_FALSE(missing.complete);
 }
 
 TEST_F(WorkspaceFilesSpec, ReadsWholeFilesAndRejectsOversizedOnes)

@@ -339,6 +339,11 @@ namespace heimdall::cli
 
 	bool IsSourceFile(const std::filesystem::path& path)
 	{
+		if (path.stem().extension() == ".erb")
+		{
+			return false;
+		}
+
 		const auto extension = path.extension().string();
 		return extension == ".c" || extension == ".cc" || extension == ".cpp" ||
 			extension == ".cxx" || extension == ".h" || extension == ".hh" ||

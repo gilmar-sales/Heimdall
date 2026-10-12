@@ -1269,7 +1269,7 @@ namespace heimdall::lsp
 			m_documents[uri_string] = std::move(snapshot);
 		}
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			mParseCache.erase(uri_string);
 		}
 		EnqueueDiagnostics(uri_string, version);
@@ -1429,7 +1429,7 @@ namespace heimdall::lsp
 		heimdall::ParserOptions base_options;
 		EditHull pending;
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			if (const auto found = mParseCache.find(uri_string); found != mParseCache.end())
 			{
 				auto& entry = found->second;
@@ -1513,7 +1513,7 @@ namespace heimdall::lsp
 		}
 		const std::int64_t version = new_version;
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			if (base)
 			{
 				ParseCacheEntry& entry = mParseCache[uri_string];
@@ -1576,7 +1576,7 @@ namespace heimdall::lsp
 			m_include_profiles.erase(std::string(uri));
 		}
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			mParseCache.erase(std::string(uri));
 			mTypeNames.erase(std::string(uri));
 		}
@@ -3505,7 +3505,7 @@ namespace heimdall::lsp
 		HeaderView view = HeaderScopes(uri, text, command);
 		if (view.index && view.index->TypeNames())
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			auto& known = mTypeNames[uri];
 			if (!known || known->Fingerprint() != view.index->TypeNames()->Fingerprint())
 			{
@@ -3769,7 +3769,7 @@ namespace heimdall::lsp
 		heimdall::Lexer::TextEdit base_edit;
 		bool baseDirectivesUnchanged = false;
 		{
-			const std::lock_guard<std::mutex> lock(m_parse_mu);
+			const std::lock_guard<std::mutex> lock(mParseMutex);
 			if (const auto names = mTypeNames.find(uri); names != mTypeNames.end())
 			{
 				options.type_names = names->second;
@@ -3874,7 +3874,7 @@ namespace heimdall::lsp
 						waiter->Wake();
 				}
 
-					const std::lock_guard<std::mutex> lock(m_parse_mu);
+					const std::lock_guard<std::mutex> lock(mParseMutex);
 					if (const auto found = mParseCache.find(uri);
 					found != mParseCache.end() && found->second.slot == slot)
 					{

@@ -431,7 +431,7 @@ namespace heimdall::lsp
 		// - m_init_mu guards m_compile_database + m_rule_options +
 		//   m_initialization_error.
 		// The previous single m_mu serialized all of these against each other.
-		std::mutex m_parse_mu;
+		std::mutex mParseMutex;
 		std::mutex m_index_cache_mu;
 		std::mutex m_macro_mu;
 		std::mutex m_profile_mu;

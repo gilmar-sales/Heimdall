@@ -7,6 +7,7 @@
 
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,6 +41,11 @@ namespace
         std::uint64_t Fingerprint() const noexcept override
         {
             return mTable.Size();
+        }
+
+        std::optional<heimdall::MacroTable> TableAt(std::size_t) const override
+        {
+            return mTable;
         }
 
     private:
@@ -77,6 +83,58 @@ namespace
     }
 
 } // namespace
+
+TEST(MacroParseSpec, WholeStatementMacrosPreserveFollowingStatements)
+{
+    const auto tree = Parse("void Test() { CHECK_OP(+, 1, 2) CHECK_OP(/, 3, 1) int after; }",
+        {"CHECK_OP(op, x, y) static_assert((x op y) == (x op y));"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 2);
+    EXPECT_EQ(Count(tree, GrammarKind::DeclarationStatement), 1);
+}
+
+TEST(MacroParseSpec, ForwardingWarningMacrosPreserveNamespaceScope)
+{
+    const auto tree = Parse("SUPPRESS_WARNINGS namespace Engine { struct Body {}; void Update() {} }",
+        {"IF_ENABLED(x) x", "WARNING(x) _Pragma(#x)",
+            "SUPPRESS_WARNINGS IF_ENABLED(WARNING(GCC diagnostic push))"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::NamespaceDefinition), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 1);
+    const auto& soa = tree.NodesSoA();
+    for (std::size_t i = 0; i < soa.size(); ++i)
+    {
+        if (soa.Kind(i) == GrammarKind::FunctionDefinition)
+        {
+            EXPECT_EQ(soa.Kind(soa.Parent(i)), GrammarKind::NamespaceDefinition);
+        }
+    }
+}
+
+TEST(MacroParseSpec, ExpressionMacroDoesNotHideAMissingSemicolon)
+{
+    const auto tree = Parse("void Test() { VALUE(1) int after; }", {"VALUE(x) (x)"});
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 0);
+}
+
+TEST(MacroParseSpec, ForwardedExpressionsAreNotWarningDecorations)
+{
+    const auto tree = Parse("int Test() { return VALUE; }",
+        {"FORWARD(x) x", "VALUE FORWARD(1)"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
+    {
+        if (tree.Text(tree.Tokens()[i]) == "VALUE")
+        {
+            EXPECT_FALSE(tree.IsDecorationToken(i));
+        }
+    }
+}
 
 TEST(MacroParseSpec, GlobalScopeQualifiedNamesParseAsStatementsExpressionsAndTemplateArguments)
 {
@@ -197,8 +255,8 @@ TEST(MacroParseSpec, TestStyleMacrosAreListedInTheOutlineUnderTheirSpelling)
     constexpr std::string_view source =
         "struct Fixture\n{\n    FRIEND_TEST(Suite, Case);\n};\n"
         "TEST(Suite, Case)\n{\n    int value = 1;\n}\nint after;\n";
-    const auto tree = Parse(source, { "TEST(a, b) void Test_##a##_##b()",
-                                      "FRIEND_TEST(a, b) friend class a##_##b##_Test" });
+    const auto tree = Parse(source, {"TEST(a, b) void Test_##a##_##b()",
+            "FRIEND_TEST(a, b) friend class a##_##b##_Test"});
 
     const auto symbols = heimdall::SymbolOutline::Extract(tree);
 
@@ -208,7 +266,7 @@ TEST(MacroParseSpec, TestStyleMacrosAreListedInTheOutlineUnderTheirSpelling)
         names.push_back(symbol.name);
     }
 
-    EXPECT_EQ(names, (std::vector<std::string> { "Fixture", "TEST(Suite, Case)", "after" }));
+    EXPECT_EQ(names, (std::vector<std::string> {"Fixture", "TEST(Suite, Case)", "after"}));
     EXPECT_EQ(symbols[1].kind, heimdall::OutlineKind::Function);
     EXPECT_EQ(source.substr(symbols[1].nameOffset, symbols[1].nameLength), "TEST");
 }
