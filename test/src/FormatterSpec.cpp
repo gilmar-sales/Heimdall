@@ -1831,3 +1831,14 @@ TEST(FormatterSpec, IncrementalCheckpointInvalidatesOptionsDialectAndCancelledWo
     EXPECT_TRUE(stopped.Formatted().empty());
     EXPECT_GT(original.StorageBytes(), original.Formatted().size());
 }
+
+TEST(FormatterSpec, KeepsSemicolonAttachedToNestedRecordBeforeMethod)
+{
+    const std::string source = "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n";
+    const heimdall::Formatter formatter;
+
+    const auto formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n");
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}

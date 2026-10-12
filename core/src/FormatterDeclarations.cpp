@@ -281,6 +281,10 @@ namespace heimdall
 									break;
 								}
 							}
+							else if (tokens[t].tok == Tok::Semi && t == previous_end)
+							{
+								from = token_end(t); // the `;` ending a record or declaration
+							}
 							else
 							{
 								to = from;

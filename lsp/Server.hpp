@@ -158,9 +158,7 @@ namespace heimdall::lsp
 		{
 			std::string uri;
 			std::int64_t version = 0;
-		}
-
-		;
+		};
 
 		void LoadInitializationOptions(simdjson::dom::element request);
 
@@ -230,9 +228,7 @@ namespace heimdall::lsp
 			Prepare,
 			Supertypes,
 			Subtypes
-		}
-
-		;
+		};
 
 		void TypeHierarchyRequest(
 			simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode);
@@ -329,9 +325,7 @@ namespace heimdall::lsp
 				edit  = valid ? heimdall::Lexer::Compose(edit, next) : next;
 				valid = true;
 			}
-		}
-
-		;
+		};
 
 		static bool ApplyContentChange(
 			std::shared_ptr<const heimdall::SourceSnapshot>& current,
@@ -447,9 +441,7 @@ namespace heimdall::lsp
 			heimdall::FormatOptions options;
 			std::shared_ptr<const FormattingResult> result;
 			std::string documentUri;
-		}
-
-		;
+		};
 
 		std::shared_ptr<const FormattingResult> CachedFormatting(
 			const std::shared_ptr<const heimdall::ParseTree>& tree, heimdall::FormatOptions options,
