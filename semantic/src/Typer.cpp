@@ -13,7 +13,7 @@ namespace heimdall
 
 	// ---- TypeTable ----------------------------------------------------------
 	TypeTable::TypeTable(std::pmr::memory_resource* resource) :
-	m_kind(resource), m_arg(resource), m_extent(resource), m_index(resource)
+		m_kind(resource), m_arg(resource), m_extent(resource), m_index(resource)
 	{
 		// Id 0 is Unknown.
 		m_kind.push_back(TypeKind::Unknown);
@@ -48,6 +48,11 @@ namespace heimdall
 	TypeId TypeTable::Class(SymbolId symbol)
 	{
 		return symbol == kNone ? Unknown : Intern(TypeKind::Class, symbol);
+	}
+
+	TypeId TypeTable::InjectedClass(SymbolId symbol)
+	{
+		return symbol == kNone ? Unknown : Intern(TypeKind::InjectedClass, symbol);
 	}
 
 	TypeId TypeTable::Enum(SymbolId symbol)
@@ -102,6 +107,48 @@ namespace heimdall
 	TypeId TypeTable::Array(TypeId element, std::uint32_t extent)
 	{
 		return Intern(TypeKind::Array, element, extent);
+	}
+
+	TypeId TypeTable::Parameter(TemplateParameterId parameter)
+	{
+		return parameter == kNone ? Unknown : Intern(TypeKind::TemplateParameter, parameter);
+	}
+
+	TypeId TypeTable::TemplateInstance(std::uint32_t instance, bool dependent)
+	{
+		return instance == kNone ? Unknown : Intern(TypeKind::TemplateId, instance, dependent);
+	}
+
+	TypeId TypeTable::DependentName(NameId spelling, ScopeId definitionScope)
+	{
+		return spelling == kNone ? Unknown : Intern(TypeKind::DependentName, spelling, definitionScope);
+	}
+
+	bool TypeTable::IsDependent(TypeId type) const noexcept
+	{
+		for (std::size_t steps = 0; steps < Size(); ++steps)
+		{
+			switch (Kind(type))
+			{
+			case TypeKind::TemplateParameter:
+			case TypeKind::DependentName:
+			case TypeKind::InjectedClass:
+				return true;
+			case TypeKind::TemplateId:
+				return Extent(type) != 0;
+			case TypeKind::Pointer:
+			case TypeKind::LRef:
+			case TypeKind::RRef:
+			case TypeKind::Const:
+			case TypeKind::Array:
+				type = Arg(type);
+				break;
+			default:
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	TypeId TypeTable::Value(TypeId type) const noexcept
@@ -177,8 +224,10 @@ namespace heimdall
 
 	// ---- TypeModel ----------------------------------------------------------
 	TypeModel::TypeModel(const SemanticModel& model, std::size_t arena_hint) :
-	m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model),
+		m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model),
 		m_externals(m_arena->Resource()), m_types(m_arena->Resource()),
+		mTemplateArguments(m_arena->Resource()), mInstantiations(m_arena->Resource()),
+		mDependentReferences(m_arena->Resource()),
 		m_symbol_type(m_arena->Resource()), m_node_type(m_arena->Resource()),
 		m_member_symbol(m_arena->Resource()), mLambdaNodes(m_arena->Resource()),
 		mLambdaReturns(m_arena->Resource()) {}
@@ -195,11 +244,38 @@ namespace heimdall
 		};
 		switch (m_types.Kind(type))
 		{
+		case TypeKind::TemplateParameter:
+		{
+			const auto parameter = m_types.Arg(type);
+			const auto symbol    = m_model->TemplateParameters().symbol[parameter];
+			return symbol == kNone ? "<dependent>" : std::string(m_model->Names().Text(m_model->Symbols().name[symbol]));
+		}
+		case TypeKind::DependentName:
+			return std::string(m_externals.Text(m_types.Arg(type)));
+		case TypeKind::TemplateId:
+		{
+			const auto instance = m_types.Arg(type);
+			const auto owner    = m_model->Templates().owner[mInstantiations.primary[instance]];
+			std::string spelling(m_model->Names().Text(m_model->Symbols().name[owner]));
+			spelling += '<';
+			for (std::uint32_t i = 0; i < mInstantiations.argumentCount[instance]; ++i)
+			{
+				if (i != 0)
+				{
+					spelling += ", ";
+				}
+
+				spelling += Spell(mTemplateArguments.type[mInstantiations.firstArgument[instance] + i]);
+			}
+
+			return spelling + '>';
+		}
 		case TypeKind::Builtin:
 			return std::string(
 				kBuiltin[std::min<std::size_t>(m_types.Arg(type), kBuiltin.size() - 1)]);
 		case TypeKind::Class:
 		case TypeKind::Enum:
+		case TypeKind::InjectedClass:
 			return std::string(
 				m_model->Names().Text(m_model->Symbols().name[m_types.Arg(type)]));
 		case TypeKind::External:
@@ -268,6 +344,8 @@ namespace heimdall
 	// ---- Typer --------------------------------------------------------------
 	namespace
 	{
+		constexpr std::uint32_t kMaxTemplateDepth = 32;
+		constexpr std::uint64_t kTemplateKeyPrime = 1099511628211ull;
 
 		bool IsStringHead(std::string_view head)
 		{
@@ -357,6 +435,7 @@ namespace heimdall
 			{
 				return BuiltinType::ULong;
 			}
+
 			return std::nullopt;
 		}
 
@@ -552,7 +631,8 @@ namespace heimdall
 	public:
 		TyperImpl(TypeModel& out, const SemanticModel& model) :
 		m_out(out), m_model(model), m_tree(model.Tree()), m_types(out.m_types),
-			m_sig(model.Significant()), m_symbols(model.Symbols()), m_nodes(model.Tree().NodesSoA()) {}
+			m_sig(model.Significant()), m_symbols(model.Symbols()), m_nodes(model.Tree().NodesSoA()),
+			mInstanceCache(out.m_arena->Resource()) {}
 
 		void Run();
 
@@ -668,6 +748,22 @@ namespace heimdall
 			ScopeId scope,
 			std::uint32_t before);
 
+		std::vector<TypeId> ParseTemplateArguments(
+			std::size_t begin,
+			std::size_t end,
+			ScopeId scope,
+			std::uint32_t before,
+			std::vector<std::pair<std::uint32_t, std::uint32_t>>* syntax = nullptr);
+
+		TypeId Instantiate(TemplateId declaration, std::vector<TypeId> arguments,
+			std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax = {});
+
+		void BuildDependentReferences();
+
+		std::uint32_t mInstantiationDepth = 0;
+
+		TypeId SubstituteArguments(TypeId type, TemplateId declaration, std::span<const TypeId> arguments);
+
 		TypeId ApplyOperators(TypeId type, std::size_t begin, std::size_t end);
 
 		TypeId ParseTypeTokens(
@@ -754,6 +850,7 @@ namespace heimdall
 		const SymbolTable& m_symbols;
 		const GrammarNodeSoA& m_nodes;
 		std::size_t m_depth = 0;
+		std::pmr::unordered_multimap<std::uint64_t, std::uint32_t> mInstanceCache;
 	};
 
 	// ---- token helpers --------------------------------------------------------
@@ -1035,6 +1132,279 @@ namespace heimdall
 		}
 	}
 
+	std::vector<TypeId> TyperImpl::ParseTemplateArguments(
+		std::size_t begin,
+		std::size_t end,
+		ScopeId scope,
+		std::uint32_t before,
+		std::vector<std::pair<std::uint32_t, std::uint32_t>>* syntax)
+	{
+		std::vector<TypeId> arguments;
+		for (auto first = begin; first < end;)
+		{
+			auto last           = first;
+			std::uint32_t depth = 0;
+			for (; last < end; ++last)
+			{
+				if (At(last) == Tok::Lt)
+				{
+					++depth;
+				}
+				else if (At(last) == Tok::Gt && depth != 0)
+				{
+					--depth;
+				}
+				else if (At(last) == Tok::Shr || At(last) == Tok::Ellipsis || At(last) == Tok::LParen)
+				{
+					if (syntax != nullptr)
+					{
+						syntax->assign(1, {m_sig[begin], m_sig[end]});
+					}
+
+					return {TypeTable::Unknown};
+				}
+				else if (At(last) == Tok::Comma && depth == 0)
+				{
+					break;
+				}
+			}
+
+			arguments.push_back(ParseTypeTokens(first, last, scope, before));
+			if (syntax != nullptr)
+			{
+				syntax->emplace_back(m_sig[first], m_sig[last]);
+			}
+
+			first = last + 1;
+		}
+
+		return arguments;
+	}
+
+	TypeId TyperImpl::SubstituteArguments(TypeId type, TemplateId declaration,
+		std::span<const TypeId> arguments)
+	{
+		if (m_types.Kind(type) == TypeKind::TemplateParameter)
+		{
+			const auto parameter   = m_types.Arg(type);
+			const auto& parameters = m_model.TemplateParameters();
+			return parameters.owner[parameter] == declaration && parameters.position[parameter] < arguments.size()
+			? arguments[parameters.position[parameter]] : type;
+		}
+
+		switch (m_types.Kind(type))
+		{
+		case TypeKind::Pointer:
+			return m_types.Pointer(SubstituteArguments(m_types.Arg(type), declaration, arguments));
+		case TypeKind::LRef:
+			return m_types.LRef(SubstituteArguments(m_types.Arg(type), declaration, arguments));
+		case TypeKind::RRef:
+			return m_types.RRef(SubstituteArguments(m_types.Arg(type), declaration, arguments));
+		case TypeKind::Const:
+			return m_types.Const(SubstituteArguments(m_types.Arg(type), declaration, arguments));
+		case TypeKind::Array:
+			return m_types.Array(SubstituteArguments(m_types.Arg(type), declaration, arguments),
+				m_types.Extent(type));
+		case TypeKind::TemplateId:
+		{
+			const auto instance = m_types.Arg(type);
+			const auto primary  = m_out.mInstantiations.primary[instance];
+			const auto first    = m_out.mInstantiations.firstArgument[instance];
+			const auto count    = m_out.mInstantiations.argumentCount[instance];
+			std::vector<TypeId> replaced;
+			replaced.reserve(count);
+			for (std::uint32_t i = 0; i < count; ++i)
+			{
+				replaced.push_back(SubstituteArguments(m_out.mTemplateArguments.type[first + i], declaration,
+					arguments));
+			}
+
+			return Instantiate(primary, std::move(replaced));
+		}
+		default:
+			return type;
+		}
+	}
+
+	TypeId TyperImpl::Instantiate(TemplateId declaration, std::vector<TypeId> arguments,
+		std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax)
+	{
+		const auto& templates  = m_model.Templates();
+		const auto& parameters = m_model.TemplateParameters();
+		if (declaration >= templates.owner.size() || mInstantiationDepth >= kMaxTemplateDepth)
+		{
+			return TypeTable::Unknown;
+		}
+
+		++mInstantiationDepth;
+		syntax.resize(arguments.size(), {kNone, kNone});
+		const auto firstParameter = templates.firstParameter[declaration];
+		const auto count          = templates.parameterCount[declaration];
+		bool complete             = templates.complete[declaration] && templates.kind[declaration] == TemplateDeclarationKind::Primary;
+		for (std::uint32_t i = 0; i < count; ++i)
+		{
+			const auto parameter = firstParameter + i;
+			complete             = complete && parameters.kind[parameter] == TemplateParameterKind::Type && !parameters.pack[parameter];
+			if (i >= arguments.size())
+			{
+				const auto begin = parameters.defaultBegin[parameter];
+				const auto end   = parameters.defaultEnd[parameter];
+				const auto defaultType = begin == kNone ? TypeTable::Unknown
+				: ParseTypeTokens(Pos(begin), Pos(end), templates.scope[declaration], begin);
+				arguments.push_back(SubstituteArguments(defaultType, declaration, arguments));
+				syntax.emplace_back(begin, end);
+			}
+		}
+
+		--mInstantiationDepth;
+		complete       = complete && arguments.size() == count;
+		bool dependent = false;
+		for (const auto argument : arguments)
+		{
+			dependent = dependent || m_types.IsDependent(argument);
+			complete  = complete && argument != TypeTable::Unknown;
+		}
+
+		TemplateId selected = declaration;
+		const auto owner    = templates.owner[declaration];
+		for (TemplateId candidate = 0; candidate < templates.owner.size(); ++candidate)
+		{
+			const auto symbol = templates.owner[candidate];
+			if (candidate == declaration || symbol == kNone || owner == kNone ||
+				m_symbols.name[symbol] != m_symbols.name[owner] || m_symbols.scope[symbol] != m_symbols.scope[owner])
+			{
+				continue;
+			}
+
+			if (templates.kind[candidate] == TemplateDeclarationKind::Partial ||
+				templates.kind[candidate] == TemplateDeclarationKind::Primary ||!templates.complete[candidate])
+			{
+				complete = false;
+				continue;
+			}
+
+			const auto namePos = Pos(m_symbols.decl_token[symbol]);
+			const auto end     = NodeSig(m_symbols.decl_node[symbol]).second;
+			const auto close   = MatchAngle(namePos + 1, end);
+			if (close >= end)
+			{
+				complete = false;
+				continue;
+			}
+
+			const auto pattern = ParseTemplateArguments(namePos + 2, close, templates.scope[candidate],
+				m_symbols.decl_token[symbol]);
+			if (std::ranges::find(pattern, TypeTable::Unknown) != pattern.end())
+			{
+				complete = false;
+				continue;
+			}
+
+			if (!dependent && pattern == arguments)
+			{
+				if (selected != declaration)
+				{
+					complete = false;
+				}
+
+				selected = candidate;
+			}
+		}
+
+		auto& instances = m_out.mInstantiations;
+		auto& table     = m_out.mTemplateArguments;
+		const auto state = !complete ? TemplateResolution::Incomplete
+		: dependent ? TemplateResolution::Dependent : TemplateResolution::Resolved;
+		std::uint64_t key = declaration;
+		for (const auto argument : arguments)
+		{
+			key = (key ^ argument) * kTemplateKeyPrime;
+		}
+
+		const auto[cacheBegin, cacheEnd] = mInstanceCache.equal_range(key);
+		for (auto cached = cacheBegin; complete && cached != cacheEnd; ++cached)
+		{
+			const auto instance = cached->second;
+			if (instances.primary[instance] != declaration || instances.argumentCount[instance] != arguments.size() || instances.state[instance] != state)
+			{
+				continue;
+			}
+
+			const auto first = instances.firstArgument[instance];
+			if (std::equal(arguments.begin(), arguments.end(), table.type.begin() + first))
+			{
+				return m_types.TemplateInstance(instance, dependent);
+			}
+		}
+
+		const auto instance = static_cast<std::uint32_t>(instances.primary.size());
+		instances.primary.push_back(declaration);
+		instances.selected.push_back(state == TemplateResolution::Resolved ? selected : kNone);
+		instances.firstArgument.push_back(static_cast<std::uint32_t>(table.type.size()));
+		instances.argumentCount.push_back(static_cast<std::uint32_t>(arguments.size()));
+		instances.state.push_back(state);
+		instances.firstBase.push_back(kNone);
+		instances.baseCount.push_back(0);
+		if (complete)
+		{
+			mInstanceCache.emplace(key, instance);
+		}
+
+		for (std::uint32_t i = 0; i < arguments.size(); ++i)
+		{
+			const auto parameter = i < count ? firstParameter + i : kNone;
+			table.parameter.push_back(parameter);
+			table.sourceBegin.push_back(syntax[i].first);
+			table.sourceEnd.push_back(syntax[i].second);
+			table.type.push_back(arguments[i]);
+			table.kind.push_back(parameter == kNone ? TemplateArgumentKind::Unknown
+				: parameters.kind[parameter] == TemplateParameterKind::Type ? TemplateArgumentKind::Type
+				: parameters.kind[parameter] == TemplateParameterKind::Value ? TemplateArgumentKind::Value : TemplateArgumentKind::Template);
+		}
+
+		std::vector<TypeId> baseTypes;
+		const auto selectedOwner = templates.owner[selected];
+		if (selectedOwner != kNone && mInstantiationDepth < kMaxTemplateDepth)
+		{
+			++mInstantiationDepth;
+			const auto baseFirst = m_symbols.first_base[selectedOwner];
+			const auto baseCount = m_symbols.base_count[selectedOwner];
+			const auto end       = NodeSig(m_symbols.decl_node[selectedOwner]).second;
+			for (std::uint32_t i = 0; i < baseCount; ++i)
+			{
+				const auto begin    = Pos(m_model.Bases().token[baseFirst + i]);
+				auto last           = begin;
+				std::uint32_t depth = 0;
+				for (; last < end; ++last)
+				{
+					if (At(last) == Tok::Lt)
+					{
+						++depth;
+					}
+					else if (At(last) == Tok::Gt && depth != 0)
+					{
+						--depth;
+					}
+					else if (depth == 0 && (At(last) == Tok::Comma || At(last) == Tok::LBrace))
+					{
+						break;
+					}
+				}
+
+				const auto baseType = ParseTypeTokens(begin, last, templates.scope[selected],
+					m_model.Bases().token[baseFirst + i]);
+				baseTypes.push_back(SubstituteArguments(baseType, declaration, arguments));
+			}
+
+			--mInstantiationDepth;
+		}
+
+		instances.firstBase[instance] = static_cast<std::uint32_t>(instances.baseType.size());
+		instances.baseCount[instance] = static_cast<std::uint32_t>(baseTypes.size());
+		instances.baseType.insert(instances.baseType.end(), baseTypes.begin(), baseTypes.end());
+		return m_types.TemplateInstance(instance, dependent ||!complete);
+	}
+
 	// `[::] a [<...>] [:: b [<...>]]...` at `pos`: a type name. Library (`std::`)
 	// names stay External; names declared in this file resolve to symbols.
 	TypeId TyperImpl::ParseName(
@@ -1051,17 +1421,18 @@ namespace heimdall
 
 		std::string text;
 		std::string_view last_component;
-		SymbolId current   = kNone;
-		bool first         = true;
-		bool is_std        = false;
-		bool template_args = false;
-		bool dependent     = false;
-		bool unresolved    = false;
+		SymbolId current    = kNone;
+		bool first          = true;
+		bool is_std         = false;
+		bool template_args  = false;
+		bool dependent      = false;
+		bool unresolved     = false;
+		TypeId templateType = TypeTable::Unknown;
 		for (; pos < end && WordAt(pos);)
 		{
 			const auto spelled = TextAt(pos);
 			Append(text, spelled);
-			last_component = spelled;
+			last_component  = spelled;
 			const auto name = m_model.Names().Find(spelled);
 			SymbolId found  = kNone;
 			if (first)
@@ -1084,7 +1455,12 @@ namespace heimdall
 			}
 
 			current = found;
-			first   = false;
+			if (found != kNone && m_symbols.kind[found] == SymbolKind::TemplateParameter)
+			{
+				dependent = true;
+			}
+
+			first = false;
 			++pos;
 			if (pos < end && At(pos) == Tok::Lt)
 			{
@@ -1096,6 +1472,33 @@ namespace heimdall
 				}
 
 				template_args = true;
+				for (auto argumentToken = pos + 1; argumentToken < close; ++argumentToken)
+				{
+					if (!WordAt(argumentToken))
+					{
+						continue;
+					}
+
+					const auto name   = m_model.Names().Find(TextAt(argumentToken));
+					const auto symbol = m_model.Lookup(scope, name, m_sig[argumentToken]);
+					dependent         = dependent ||(symbol != kNone && m_symbols.kind[symbol] == SymbolKind::TemplateParameter);
+				}
+
+				if (At(close) != Tok::Shr && mInstantiationDepth < kMaxTemplateDepth)
+				{
+					std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax;
+					auto arguments = ParseTemplateArguments(pos + 1, close, scope, before, &syntax);
+					for (const auto argument : arguments)
+					{
+						dependent = dependent || m_types.IsDependent(argument);
+					}
+
+					if (current != kNone && m_symbols.kind[current] == SymbolKind::Class)
+					{
+						templateType = Instantiate(m_model.TemplateOf(current), std::move(arguments), std::move(syntax));
+					}
+				}
+
 				text += '<';
 				for (std::size_t i = pos + 1; i < close; ++i)
 				{
@@ -1114,6 +1517,7 @@ namespace heimdall
 
 			if (pos + 1 < end && At(pos) == Tok::ColonColon && WordAt(pos + 1))
 			{
+				templateType = TypeTable::Unknown;
 				text += "::";
 				++pos;
 				continue;
@@ -1122,7 +1526,20 @@ namespace heimdall
 			break;
 		}
 
-		if (text.empty() || dependent)
+		if (dependent)
+		{
+			if (!template_args && current != kNone && m_symbols.kind[current] == SymbolKind::TemplateParameter)
+			{
+				const auto parameter = m_model.ParameterOf(current);
+				return parameter != kNone && m_model.TemplateParameters().kind[parameter] == TemplateParameterKind::Type
+				? m_types.Parameter(parameter) : TypeTable::Unknown;
+			}
+
+			return templateType != TypeTable::Unknown ? templateType
+			: m_types.DependentName(m_out.m_externals.InternCopy(text), scope);
+		}
+
+		if (text.empty())
 		{
 			return TypeTable::Unknown;
 		}
@@ -1176,7 +1593,12 @@ namespace heimdall
 		switch (m_symbols.kind[current])
 		{
 		case SymbolKind::Class:
-			return template_args ||(m_symbols.flags[current] & SymbolFlag::Template) != 0
+			if (template_args)
+			{
+				return templateType;
+			}
+
+			return (m_symbols.flags[current] & SymbolFlag::Template) != 0
 			? TypeTable::Unknown
 			: m_types.Class(current);
 		case SymbolKind::Enum:
@@ -1341,7 +1763,7 @@ namespace heimdall
 			}
 
 			type = ParseName(pos, end, scope, before);
-			if (dependent)
+			if (dependent && !m_types.IsDependent(type))
 			{
 				type = TypeTable::Unknown;
 			}
@@ -1555,6 +1977,24 @@ namespace heimdall
 				if (digits)
 				{
 					extent = static_cast<std::uint32_t>(value);
+				}
+			}
+
+			if (extent == kNone && kind != SymbolKind::Parameter)
+			{
+				for (auto pos = b + 1; pos + 1 < e; ++pos)
+				{
+					if (!WordAt(pos))
+					{
+						continue;
+					}
+
+					const auto symbol = m_model.Lookup(m_model.ScopeOfNode(declarator),
+						m_model.Names().Find(TextAt(pos)), m_sig[pos]);
+					if (symbol != kNone && m_symbols.kind[symbol] == SymbolKind::TemplateParameter)
+					{
+						return TypeTable::Unknown;
+					}
 				}
 			}
 
@@ -2485,7 +2925,10 @@ namespace heimdall
 				return TypeTable::Unknown;
 			}
 
-			return m_types.Pointer(m_types.Class(m_model.Scopes().owner[klass]));
+			const auto owner       = m_model.Scopes().owner[klass];
+			const auto declaration = m_model.TemplateOf(owner);
+			return m_types.Pointer(declaration != kNone && m_model.Templates().kind[declaration] != TemplateDeclarationKind::Explicit
+				? m_types.InjectedClass(owner) : m_types.Class(owner));
 		}
 
 		const auto symbol = m_model.ResolveToken(token);
@@ -2495,6 +2938,13 @@ namespace heimdall
 		}
 
 		const auto kind = m_symbols.kind[symbol];
+		if (kind == SymbolKind::TemplateParameter)
+		{
+			const auto parameter = m_model.ParameterOf(symbol);
+			return parameter != kNone && m_model.TemplateParameters().kind[parameter] == TemplateParameterKind::Type
+			? m_types.Parameter(parameter) : TypeTable::Unknown;
+		}
+
 		return kind == SymbolKind::Variable || kind == SymbolKind::Parameter
 		? SymbolType(symbol)
 		: TypeTable::Unknown;
@@ -2782,6 +3232,20 @@ namespace heimdall
 				const auto name = m_model.Names().Find(TextAt(name_begin));
 				member          = name == kNone ? kNone : m_model.LookupMember(m_types.Arg(object), name);
 			}
+			else if (m_types.Kind(object) == TypeKind::InjectedClass)
+			{
+				member = m_model.LookupLocal(m_symbols.member_scope[m_types.Arg(object)],
+					m_model.Names().Find(TextAt(name_begin)));
+			}
+			else if (m_types.Kind(object) == TypeKind::TemplateId)
+			{
+				const auto name    = m_model.Names().Find(TextAt(name_begin));
+				const auto binding = m_out.LookupInstantiatedMember(m_types.Arg(object), name);
+				if (binding.state == TemplateResolution::Resolved)
+				{
+					member = binding.symbol;
+				}
+			}
 			else if (m_types.Kind(object) == TypeKind::External && as_call && op == Tok::Dot)
 			{
 				return ExternalCall(object, TextAt(name_begin));
@@ -2797,6 +3261,10 @@ namespace heimdall
 		if (kind == SymbolKind::Variable || kind == SymbolKind::Parameter)
 		{
 			m_out.m_member_symbol[node] = member;
+			if (m_types.Kind(object) == TypeKind::TemplateId)
+			{
+				return m_types.Value(m_out.Substitute(SymbolType(member), m_types.Arg(object)));
+			}
 		}
 
 		if (as_call)
@@ -2890,12 +3358,111 @@ namespace heimdall
 				return CastType(callee);
 			}
 
-			return TypeTable::Unknown;
+			const auto[begin, end] = NodeSig(callee);
+			const auto constructed = ParseTypeTokens(begin, end, m_model.ScopeOfNode(callee), m_sig[begin]);
+			return m_types.Kind(constructed) == TypeKind::TemplateId ? constructed : TypeTable::Unknown;
 		}
 		case GrammarKind::MemberExpression:
 			return MemberType(callee, true);
 		default:
 			return TypeTable::Unknown;
+		}
+	}
+
+	void TyperImpl::BuildDependentReferences()
+	{
+		auto& references      = m_out.mDependentReferences;
+		const auto& instances = m_out.mInstantiations;
+		const auto& templates = m_model.Templates();
+		for (std::uint32_t node = 0; node < m_nodes.size(); ++node)
+		{
+			if (m_nodes.Kind(node) != GrammarKind::MemberExpression)
+			{
+				continue;
+			}
+
+			const auto children = m_model.ChildrenOf(node);
+			if (children.size() != 2)
+			{
+				continue;
+			}
+
+			const auto token = m_nodes.FirstToken(children[1]);
+			auto receiver    = m_types.Strip(NodeType(children[0]));
+			if (m_model.ReferenceState(token) != RefState::Dependent && !m_types.IsDependent(receiver))
+			{
+				continue;
+			}
+
+			const auto op = At(NodeSig(children[0]).second);
+			if (op == Tok::Arrow)
+			{
+				receiver = m_types.IsPointer(receiver) ? m_types.Strip(m_types.Element(receiver)) : TypeTable::Unknown;
+			}
+
+			const auto name    = m_model.Names().Find(Text(token));
+			TemplateId context = kNone;
+			for (auto ancestor = node; ancestor < m_nodes.size(); ancestor = m_nodes.Parent(ancestor))
+			{
+				for (TemplateId id = 0; id < templates.node.size(); ++id)
+				{
+					if (templates.node[id] == ancestor)
+					{
+						context = id;
+						break;
+					}
+				}
+
+				if (context != kNone || ancestor == 0)
+				{
+					break;
+				}
+			}
+
+			references.node.push_back(node);
+			references.token.push_back(token);
+			references.definitionScope.push_back(m_model.ScopeOfNode(node));
+			references.name.push_back(name);
+			references.receiver.push_back(receiver);
+			references.firstBinding.push_back(static_cast<std::uint32_t>(references.bindingInstance.size()));
+			references.bindingCount.push_back(0);
+			references.coverage.push_back(TemplateCoverage::None);
+			const auto append =[&](std::uint32_t instance, TemplateMemberBinding binding)
+			{
+				references.bindingInstance.push_back(instance);
+				references.bindingTarget.push_back(binding.symbol);
+				references.bindingState.push_back(binding.state);
+				++references.bindingCount.back();
+			};
+			if ((!m_types.IsDependent(receiver) || m_types.Kind(receiver) == TypeKind::InjectedClass) && m_out.MemberSymbol(node) != kNone)
+			{
+				references.coverage.back() = TemplateCoverage::Invariant;
+				append(kNone, {m_out.MemberSymbol(node), TemplateResolution::Resolved});
+				continue;
+			}
+
+			for (std::uint32_t instance = 0; instance < instances.primary.size(); ++instance)
+			{
+				if (instances.primary[instance] != context || instances.state[instance] == TemplateResolution::Dependent ||
+					(instances.selected[instance] != context && instances.selected[instance] != kNone))
+				{
+					continue;
+				}
+
+				references.coverage.back() = TemplateCoverage::Workspace;
+				const auto concrete        = m_types.Strip(m_out.Substitute(receiver, instance));
+				TemplateMemberBinding binding;
+				if (instances.state[instance] == TemplateResolution::Resolved && m_types.Kind(concrete) == TypeKind::Class)
+				{
+					binding = m_out.LookupTypeMember(concrete, name, 0);
+				}
+				else if (instances.state[instance] == TemplateResolution::Resolved && m_types.Kind(concrete) == TypeKind::TemplateId)
+				{
+					binding = m_out.LookupInstantiatedMember(m_types.Arg(concrete), name);
+				}
+
+				append(instance, binding);
+			}
 		}
 	}
 
@@ -2938,6 +3505,20 @@ namespace heimdall
 				break;
 			}
 		}
+
+		const auto instanceCount = m_out.mInstantiations.primary.size();
+		for (std::uint32_t instance = 0; instance < instanceCount; ++instance)
+		{
+			for (std::uint32_t node = 0; node < m_nodes.size(); ++node)
+			{
+				if (m_nodes.Kind(node) == GrammarKind::ParameterDeclaration)
+				{
+					m_out.Substitute(m_out.ParameterType(node), instance);
+				}
+			}
+		}
+
+		BuildDependentReferences();
 	}
 
 	TypeModel Typer::Type(const SemanticModel& model)

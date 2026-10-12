@@ -13,6 +13,7 @@ add_library(heimdall_semantic STATIC
   src/SemanticModel.cpp
   src/Binder.cpp
   src/Typer.cpp
+  src/TemplateModel.cpp
   src/SemanticRules.cpp
   src/HeaderSummary.cpp
   src/ProjectIndex.cpp

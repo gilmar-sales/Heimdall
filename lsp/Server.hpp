@@ -7,6 +7,7 @@
 #include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/IndexStore.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -513,6 +514,7 @@ namespace heimdall::lsp
 		m_macro_cache;
 
 		std::atomic<bool> m_enable_semantic      = false;
+		heimdall::index::IndexStore m_index_store;
 		std::atomic<bool> m_workspace_scan       = true;
 		std::atomic<bool> m_workspace_symbols    = true;
 		std::atomic<bool> m_inlay_hints          = true;

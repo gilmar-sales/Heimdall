@@ -187,12 +187,14 @@ namespace heimdall
 			const auto target     = table.Strip(parameter);
 			const auto sourceKind = table.Kind(source);
 			const auto targetKind = table.Kind(target);
-			if (sourceKind == TypeKind::Unknown || targetKind == TypeKind::Unknown)
+			if (sourceKind == TypeKind::Unknown || targetKind == TypeKind::Unknown ||
+				table.IsDependent(source) || table.IsDependent(target))
 			{
 				return Conversion::Unknown;
 			}
 
 			if (sourceKind == TypeKind::Class || targetKind == TypeKind::Class ||
+				sourceKind == TypeKind::TemplateId || targetKind == TypeKind::TemplateId ||
 				sourceKind == TypeKind::Enum || targetKind == TypeKind::Enum)
 			{
 				return Conversion::Unknown;
@@ -313,6 +315,7 @@ namespace heimdall
 		{
 			SymbolId symbol = kNone;
 			std::string spelling;
+			std::uint32_t instance = kNone;
 		};
 
 		[[nodiscard]] std::string_view Trim(std::string_view text)
@@ -347,6 +350,18 @@ namespace heimdall
 			if (table.Kind(type) == TypeKind::Class)
 			{
 				return {table.Arg(type), std::string(model.Names().Text(symbols.name[table.Arg(type)]))};
+			}
+
+			if (table.Kind(type) == TypeKind::TemplateId)
+			{
+				const auto instance = table.Arg(type);
+				if (types.Instantiations().state[instance] != TemplateResolution::Resolved)
+				{
+					return {};
+				}
+
+				const auto owner = model.Templates().owner[types.Instantiations().selected[instance]];
+				return {owner, types.Spell(type), instance};
 			}
 
 			if (expression >= nodes.size() || nodes.Kind(expression) != GrammarKind::IdentifierExpression)
@@ -841,11 +856,16 @@ namespace heimdall
 				for (std::size_t index = 0; index < std::min(supplied, count.total); ++index)
 				{
 					const auto parameterNode = parameters[range.first + index];
-					const auto parameter     = types.ParameterType(parameterNode);
+					auto parameter           = types.ParameterType(parameterNode);
+					if (memberCall && instance.instance != kNone)
+					{
+						parameter = types.SubstitutedType(parameter, instance.instance);
+					}
+
 					Conversion conversion = ImplicitConversion(
 						types, view, children[index + 1], parameter);
 					std::string spelling;
-					if (memberCall && parameter == TypeTable::Unknown)
+					if (memberCall && instance.instance == kNone && parameter == TypeTable::Unknown)
 					{
 						spelling = InstantiateParameterType(
 							model, instance.symbol, instance.spelling, parameterNode);

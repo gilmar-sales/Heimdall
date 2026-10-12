@@ -9,7 +9,7 @@ add_executable(heimdall-lsp
   WorkspaceSymbolIndex.cpp
 )
 
-target_link_libraries(heimdall-lsp PRIVATE heimdall::refactor heimdall::config simdjson::simdjson)
+target_link_libraries(heimdall-lsp PRIVATE heimdall::index heimdall::refactor heimdall::config simdjson::simdjson)
 target_compile_features(heimdall-lsp PRIVATE cxx_std_26)
 
 target_precompile_headers(heimdall-lsp PRIVATE

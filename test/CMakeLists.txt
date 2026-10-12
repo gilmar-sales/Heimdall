@@ -31,6 +31,7 @@ add_executable(Tests_run
   src/SemanticAnalyzerSpec.cpp
   src/SemanticModelSpec.cpp
   src/TypeHierarchySpec.cpp
+  src/IndexSpec.cpp
   src/SemanticRulesSpec.cpp
   src/ApiRulesSpec.cpp
   src/DesignatedInitSpec.cpp
@@ -75,7 +76,7 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::refactor heimdall::config simdjson::simdjson)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::index heimdall::refactor heimdall::config simdjson::simdjson)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_BUILD_DIR="${PROJECT_BINARY_DIR}")
@@ -160,6 +161,16 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspTypeHierarchySmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspTypeHierarchySmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIndexDefinitionSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIndexDefinitionSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIndexReferencesSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIndexReferencesSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

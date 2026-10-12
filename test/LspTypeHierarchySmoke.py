@@ -72,3 +72,69 @@ children = run([relation("typeHierarchy/subtypes", child)])[3]
 assert [item["name"] for item in children] == ["Grandchild"], children
 
 assert run([prepare(4, 2)])[2] is None
+
+
+# Cross-file: Derived lives in another open document that includes the base's header.
+base_uri = "file:///tmp/heimdall-th/base.hpp"
+derived_uri = "file:///tmp/heimdall-th/derived.hpp"
+base_text = "struct Base {};\n"
+derived_text = '#include "base.hpp"\nstruct Derived : Base {};\n'
+
+
+def read_message(stream):
+    length = None
+    while True:
+        line = stream.readline()
+        if not line:
+            raise AssertionError("server closed the stream")
+        line = line.strip()
+        if not line:
+            break
+        if line.lower().startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1])
+    return json.loads(stream.read(length))
+
+
+def interactive(queries):
+    process = subprocess.Popen([server], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        def send(message):
+            process.stdin.write(frame(message))
+            process.stdin.flush()
+
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+        for doc_uri, text in ((base_uri, base_text), (derived_uri, derived_text)):
+            send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+                "textDocument": {"uri": doc_uri, "languageId": "cpp", "version": 1,
+                                 "text": text}}})
+        pending = {base_uri, derived_uri}
+        while pending:  # indexing of an open document precedes its diagnostics
+            message = read_message(process.stdout)
+            if message.get("method") == "textDocument/publishDiagnostics":
+                pending.discard(message["params"]["uri"])
+        results = []
+        for number, (method, item) in enumerate(queries, start=10):
+            send({"jsonrpc": "2.0", "id": number, "method": method, "params": {"item": item}})
+            while True:
+                message = read_message(process.stdout)
+                if message.get("id") == number:
+                    results.append(message["result"])
+                    break
+        send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": {}})
+        send({"jsonrpc": "2.0", "method": "exit"})
+        return results
+    finally:
+        process.kill()
+
+
+def item_at(doc_uri, name, offset):
+    return {"name": name, "data": {"uri": doc_uri, "offset": offset}}
+
+
+subtypes, supertypes = interactive([
+    ("typeHierarchy/subtypes", item_at(base_uri, "Base", base_text.index("Base"))),
+    ("typeHierarchy/supertypes", item_at(derived_uri, "Derived", derived_text.index("Derived"))),
+])
+assert [(item["name"], item["uri"]) for item in subtypes] == [("Derived", derived_uri)], subtypes
+assert [(item["name"], item["uri"]) for item in supertypes] == [("Base", base_uri)], supertypes

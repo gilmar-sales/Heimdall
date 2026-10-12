@@ -21,6 +21,8 @@ namespace heimdall
 	using NameId                         = std::uint32_t;
 	using SymbolId                       = std::uint32_t;
 	using ScopeId                        = std::uint32_t;
+	using TemplateId                     = std::uint32_t;
+	using TemplateParameterId            = std::uint32_t;
 	inline constexpr std::uint32_t kNone = ~0u;
 
 	// Maps identifier text to dense ids so name comparison is integer comparison.
@@ -129,7 +131,8 @@ namespace heimdall
 		Namespace,
 		Class,
 		Function,
-		Block
+		Block,
+		Template
 	};
 
 	struct ScopeTable
@@ -178,6 +181,47 @@ namespace heimdall
 		std::pmr::vector<RefState> state;
 	};
 
+	/** Categories of declared template parameters. */
+	enum class TemplateParameterKind : std::uint8_t
+	{
+		Type, Value, Template
+	};
+
+	/** Selection rules associated with a template declaration. */
+	enum class TemplateDeclarationKind : std::uint8_t
+	{
+		Primary, Explicit, Partial
+	};
+
+	/** Arena-backed declarations and contiguous parameter ranges. */
+	struct TemplateTable
+	{
+		explicit TemplateTable(std::pmr::memory_resource* resource);
+
+		std::pmr::vector<SymbolId> owner;
+		std::pmr::vector<ScopeId> scope;
+		std::pmr::vector<std::uint32_t> node;
+		std::pmr::vector<std::uint32_t> firstParameter;
+		std::pmr::vector<std::uint32_t> parameterCount;
+		std::pmr::vector<TemplateDeclarationKind> kind;
+		std::pmr::vector<std::uint8_t> complete;
+	};
+
+	/** Parameter syntax retains defaults without pretending to evaluate them. */
+	struct TemplateParameterTable
+	{
+		explicit TemplateParameterTable(std::pmr::memory_resource* resource);
+
+		std::pmr::vector<TemplateId> owner;
+		std::pmr::vector<SymbolId> symbol;
+		std::pmr::vector<TemplateParameterKind> kind;
+		std::pmr::vector<std::uint32_t> position;
+		std::pmr::vector<std::uint8_t> pack;
+		std::pmr::vector<std::uint32_t> token;
+		std::pmr::vector<std::uint32_t> defaultBegin;
+		std::pmr::vector<std::uint32_t> defaultEnd;
+	};
+
 	// Result of binding one ParseTree. Immutable once built, so it can be shared
 	// across threads without locks. The tree (and its source buffer) must
 	// outlive the model: names are views into that buffer.
@@ -224,6 +268,24 @@ namespace heimdall
 		{
 			return m_arena->Used();
 		}
+
+		/** Declared templates, including specializations that cannot be selected yet. */
+		[[nodiscard]] const TemplateTable& Templates() const noexcept
+		{
+			return mTemplates;
+		}
+
+		/** Parameters indexed independently from symbols. */
+		[[nodiscard]] const TemplateParameterTable& TemplateParameters() const noexcept
+		{
+			return mTemplateParameters;
+		}
+
+		/** Returns the parameter identity of a symbol, or kNone. */
+		[[nodiscard]] TemplateParameterId ParameterOf(SymbolId symbol) const noexcept;
+
+		/** Returns the template declaration for a symbol, or kNone. */
+		[[nodiscard]] TemplateId TemplateOf(SymbolId symbol) const noexcept;
 
 		/** Includes allocator block slack in the semantic model's reservation. */
 		[[nodiscard]] std::size_t ArenaReservedBytes() const noexcept
@@ -296,6 +358,8 @@ namespace heimdall
 		ScopeTable m_scopes;
 		BaseTable m_bases;
 		RefTable m_refs;
+		TemplateTable mTemplates;
+		TemplateParameterTable mTemplateParameters;
 		// (scope << 32 | name) -> first symbol of the chain.
 		std::pmr::unordered_map<std::uint64_t, SymbolId> m_declared;
 		std::pmr::vector<std::uint32_t> m_sig;

@@ -15,7 +15,7 @@ namespace
     struct Typed
     {
         explicit Typed(std::string text) :
-        source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
+            source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
             model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model)) {}
 
         Typed(const Typed&) = delete;
@@ -64,18 +64,19 @@ namespace
     struct FakeHeaderTypes : heimdall::TypeNameOracle
     {
         explicit FakeHeaderTypes(std::unordered_set<std::string> names) :
-            m_names(std::move(names))
-        {
-        }
+            m_names(std::move(names)) {}
 
         bool IsType(std::string_view name) const noexcept override
         {
             return m_names.contains(std::string(name));
         }
 
-        std::uint64_t Fingerprint() const noexcept override { return 1; }
+        std::uint64_t Fingerprint() const noexcept override
+        {
+            return 1;
+        }
 
-      private:
+    private:
         std::unordered_set<std::string> m_names;
     };
 
@@ -84,8 +85,8 @@ namespace
     {
         heimdall::ParserOptions options;
         options.type_names = std::move(oracle);
-        const auto tree    = heimdall::ParseTree::Parse(source, options);
-        const auto model   = heimdall::Binder::Bind(tree);
+        const auto tree = heimdall::ParseTree::Parse(source, options);
+        const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeImplicitBool(heimdall::Typer::Type(model));
     }
 
@@ -126,6 +127,142 @@ TEST(Typer, TypesUnnamedPrototypeParametersAndPreservesReferences)
 
     EXPECT_EQ(spellings, (std::vector<std::string> {"int*", "const int&", "std::string"}));
     EXPECT_EQ(typed.types.ParameterType(heimdall::kNone), heimdall::TypeTable::Unknown);
+}
+
+TEST(TypeModel, PreservesSymbolicParametersPointersAndQualifiedNames)
+{
+    const Typed typed("template<class T> struct Box { T value; T* pointer; typename T::type nested; };");
+    const auto& table = typed.types.Types();
+
+    EXPECT_EQ(table.Kind(typed.types.SymbolType(typed.Find("value"))),
+              heimdall::TypeKind::TemplateParameter);
+    EXPECT_TRUE(table.IsDependent(typed.types.SymbolType(typed.Find("pointer"))));
+    EXPECT_FALSE(table.IsKnown(typed.types.SymbolType(typed.Find("pointer"))));
+    EXPECT_EQ(table.Kind(typed.types.SymbolType(typed.Find("nested"))),
+              heimdall::TypeKind::DependentName);
+}
+
+TEST(TypeModel, CanonicalizesConcreteClassTemplateIdsAndSubstitutesFields)
+{
+    const Typed typed("template<class T> struct Box { T value; }; void f() { Box<int> a; Box<int> b; auto result = a.value; }");
+    const auto& instances = typed.types.Instantiations();
+
+    ASSERT_EQ(instances.primary.size(), 1u);
+    EXPECT_EQ(instances.state[0], heimdall::TemplateResolution::Resolved);
+    EXPECT_EQ(typed.Of("a"), "Box<int>");
+    EXPECT_EQ(typed.Of("result"), "int");
+    EXPECT_EQ(typed.types.SymbolType(typed.Find("a")), typed.types.SymbolType(typed.Find("b")));
+}
+
+TEST(TypeModel, SelectsExplicitSpecializationsWithoutConflatingTheirMembers)
+{
+    const Typed typed("template<class T> struct Box { int value; }; template<> struct Box<int> { bool value; }; void f() { Box<int> a; Box<float> b; auto first = a.value; auto second = b.value; }");
+    const auto& instances = typed.types.Instantiations();
+
+    ASSERT_EQ(instances.primary.size(), 2u);
+    EXPECT_NE(instances.selected[0], instances.primary[0]);
+    EXPECT_EQ(instances.selected[1], instances.primary[1]);
+    EXPECT_EQ(typed.Of("first"), "bool");
+    EXPECT_EQ(typed.Of("second"), "int");
+}
+
+TEST(TypeModel, RefusesToGuessPartialSpecializationsPacksAndConstraints)
+{
+    for (const auto source :
+        {
+            "template<class T> struct Box { int value; }; template<class T> struct Box<T*> { int value; }; Box<int*> a;",
+            "template<class... T> struct Box { int value; }; Box<int> a;",
+            "template<class T> requires true struct Box { int value; }; Box<int> a;"
+    })
+    {
+        const Typed typed(source);
+        const auto& instances = typed.types.Instantiations();
+
+        ASSERT_FALSE(instances.state.empty()) << source;
+        EXPECT_EQ(instances.state.back(), heimdall::TemplateResolution::Incomplete) << source;
+        EXPECT_EQ(typed.types.LookupInstantiatedMember(static_cast<std::uint32_t>(instances.state.size() - 1),
+                                                       typed.model.Names().Find("value")).symbol,
+            heimdall::kNone);
+    }
+}
+
+TEST(TypeModel, KeepsDistinctDependentBindingsAndWorkspaceCoverage)
+{
+    for (const auto different :
+        {
+            false, true
+    })
+    {
+        const Typed typed(std::string("struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
+        const auto& references = typed.types.DependentReferences();
+
+        ASSERT_EQ(references.token.size(), 1u);
+        EXPECT_EQ(references.coverage[0], heimdall::TemplateCoverage::Workspace);
+        ASSERT_EQ(references.bindingCount[0], different ? 2u : 1u);
+        EXPECT_EQ(references.bindingTarget[0], typed.Find("value"));
+        EXPECT_EQ(typed.types.DependentBinding(references.token[0]).state,
+                  different ? heimdall::TemplateResolution::Ambiguous : heimdall::TemplateResolution::Incomplete);
+    }
+}
+
+TEST(TypeModel, SubstitutesEarlierTypeParametersInDefaults)
+{
+    const Typed typed("template<class T = int, class U = T*> struct Box { U value; }; void f() { Box<> a; auto result = a.value; }");
+
+    EXPECT_EQ(typed.Of("a"), "Box<int, int*>");
+    EXPECT_EQ(typed.Of("result"), "int*");
+}
+
+TEST(TypeModel, ComputesDependentBaseMemberViewsWithoutChangingDeclarationIdentity)
+{
+    for (const auto source :
+        {
+            "struct A { int value; }; template<class T> struct Box : T {}; void f() { Box<A> a; auto result = a.value; }",
+            "struct A { int value; }; template<class T> struct Base { int value; }; template<class T> struct Box : Base<T> {}; void f() { Box<A> a; auto result = a.value; }"
+    })
+    {
+        const Typed typed(source);
+
+        EXPECT_EQ(typed.Of("result"), "int") << source;
+        const auto type = typed.types.SymbolType(typed.Find("a"));
+        ASSERT_EQ(typed.types.Types().Kind(type), heimdall::TypeKind::TemplateId);
+        const auto binding = typed.types.LookupInstantiatedMember(typed.types.Types().Arg(type),
+            typed.model.Names().Find("value"));
+        EXPECT_EQ(binding.state, heimdall::TemplateResolution::Resolved);
+        EXPECT_NE(binding.symbol, heimdall::kNone);
+    }
+}
+
+TEST(TypeModel, DependentMethodOverloadsRetainAmbiguousProofStates)
+{
+    const Typed typed("struct A { int value(); int value(int); }; template<class T> struct Box { int get(T object) { return object.value(); } }; Box<A> a;");
+    const auto& references = typed.types.DependentReferences();
+
+    ASSERT_EQ(references.bindingCount.size(), 1u);
+    ASSERT_EQ(references.bindingCount[0], 1u);
+    EXPECT_EQ(references.bindingState[0], heimdall::TemplateResolution::Ambiguous);
+}
+
+TEST(TypeModel, OneDependentSourceCanBindTheSameInheritedMemberInDistinctInstances)
+{
+    const Typed typed("struct A { int value; }; struct B : A {}; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<B> b;");
+    const auto& references = typed.types.DependentReferences();
+
+    ASSERT_EQ(references.bindingCount.size(), 1u);
+    ASSERT_EQ(references.bindingCount[0], 2u);
+    EXPECT_EQ(references.bindingState[0], heimdall::TemplateResolution::Resolved);
+    EXPECT_EQ(references.bindingState[1], heimdall::TemplateResolution::Resolved);
+    EXPECT_EQ(references.bindingTarget[0], references.bindingTarget[1]);
+    EXPECT_EQ(typed.types.DependentBinding(references.token[0]).state,
+              heimdall::TemplateResolution::Incomplete);
+}
+
+TEST(TypeModel, UnevaluatedNonTypeArgumentsAndBoundsNeverBecomeConcrete)
+{
+    const Typed typed("template<int N> struct Box { int values[N]; std::array<int, N> data; };");
+
+    EXPECT_FALSE(typed.types.Types().IsKnown(typed.types.SymbolType(typed.Find("values"))));
+    EXPECT_TRUE(typed.types.Types().IsDependent(typed.types.SymbolType(typed.Find("data"))));
 }
 
 TEST(Typer, LambdaReturnTypeDoesNotBecomeTheClosureExpressionType)
@@ -293,25 +430,25 @@ TEST(Typer, KeepsLibraryTypesAsExternal)
     EXPECT_EQ(typed.types.ExternalHead(typed.types.SymbolType(typed.Find("m"))), "std::map");
 }
 
-TEST(Typer, UnknownWhenTheTypeIsNotDeclaredHere)
+TEST(Typer, SeparatesDependentParametersFromUndeclaredTypes)
 {
     const Typed typed("template <class T> void g(T a, T* b, T& c) {}\n"
         "void f() { Foo x; ns::Bar y; Box<int> z; typename T::type w; }\n");
-    EXPECT_EQ(typed.Of("a"), "<unknown>");
-    EXPECT_EQ(typed.Of("b"), "<unknown>*");
-    EXPECT_EQ(typed.Of("c"), "<unknown>");
+    EXPECT_EQ(typed.Of("a"), "T");
+    EXPECT_EQ(typed.Of("b"), "T*");
+    EXPECT_EQ(typed.Of("c"), "T&");
     EXPECT_EQ(typed.Of("x"), "<unknown>");
     EXPECT_EQ(typed.Of("y"), "<unknown>");
     EXPECT_EQ(typed.Of("z"), "<unknown>");
     EXPECT_EQ(typed.Of("w"), "<unknown>");
 }
 
-TEST(Typer, TemplateClassesAndTemplateAliasesAreUnknown)
+TEST(Typer, ConcreteTemplateClassesAreKnownAndUnsupportedAliasesStayUnknown)
 {
     const Typed typed("template <class T> struct Box {};\n"
         "template <class T> using Vec = std::vector<T>;\n"
         "void f() { Box<int> b; Vec<int> v; }\n");
-    EXPECT_EQ(typed.Of("b"), "<unknown>");
+    EXPECT_EQ(typed.Of("b"), "Box<int>");
     EXPECT_EQ(typed.Of("v"), "<unknown>");
 }
 
@@ -916,6 +1053,7 @@ TEST(ImplicitBool, ReportsIntegersFloatsAndPointersInConditions)
             EXPECT_FALSE(diagnostics[i].fix_is_safe);
         }
     }
+
     EXPECT_EQ(diagnostics[2].fix.replacement, "p != nullptr");
 }
 
@@ -1074,7 +1212,7 @@ TEST(ImplicitBool, ToleratesBrokenInput)
 TEST(Typer, MapsFixedWidthIntegerAliasesToBuiltins)
 {
     const Typed typed("void f(std::uint32_t a, uint32_t b, std::int64_t c, "
-                      "std::size_t d, intptr_t e, std::int16_t g) {}");
+        "std::size_t d, intptr_t e, std::int16_t g) {}");
     EXPECT_EQ(typed.Of("a"), "unsigned int");
     EXPECT_EQ(typed.Of("b"), "unsigned int");
     EXPECT_EQ(typed.Of("c"), "long long");
@@ -1117,27 +1255,28 @@ TEST(ImplicitBool, OffersNullptrComparisonQuickFixForPointers)
         EXPECT_TRUE(diagnostic.has_fix);
         EXPECT_FALSE(diagnostic.fix_is_safe);
     }
+
     EXPECT_EQ(ApplyFix(source, diagnostics[0]),
               Body("int* p = 0;\n"
-                   "if (p != nullptr) {}\n"
-                   "if (p && p) {}\n"
-                   "bool b = !p;"));
+        "if (p != nullptr) {}\n"
+        "if (p && p) {}\n"
+        "bool b = !p;"));
     EXPECT_EQ(ApplyFix(source, diagnostics[1]),
               Body("int* p = 0;\n"
-                   "if (p) {}\n"
-                   "if (p != nullptr && p) {}\n"
-                   "bool b = !p;"));
+        "if (p) {}\n"
+        "if (p != nullptr && p) {}\n"
+        "bool b = !p;"));
     EXPECT_EQ(ApplyFix(source, diagnostics[2]),
               Body("int* p = 0;\n"
-                   "if (p) {}\n"
-                   "if (p && p != nullptr) {}\n"
-                   "bool b = !p;"));
+        "if (p) {}\n"
+        "if (p && p != nullptr) {}\n"
+        "bool b = !p;"));
     EXPECT_EQ(source.substr(diagnostics[3].offset, diagnostics[3].length), "p");
     EXPECT_EQ(ApplyFix(source, diagnostics[3]),
               Body("int* p = 0;\n"
-                   "if (p) {}\n"
-                   "if (p && p) {}\n"
-                   "bool b = p == nullptr;"));
+        "if (p) {}\n"
+        "if (p && p) {}\n"
+        "bool b = p == nullptr;"));
 }
 
 TEST(ImplicitBool, SpellsHeaderKnownPointeeFromTheOracle)
@@ -1150,7 +1289,7 @@ TEST(ImplicitBool, SpellsHeaderKnownPointeeFromTheOracle)
         "    }\n"
         "}\n";
     auto oracle =
-        std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> { "ParseReuse" });
+        std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> {"ParseReuse"});
     const auto diagnostics = ImplicitBoolWith(source, oracle);
     ASSERT_EQ(diagnostics.size(), 2u);
     for (const auto& diagnostic : diagnostics)
@@ -1173,7 +1312,7 @@ TEST(ImplicitBool, IgnoresOracleNamesItDoesNotContain)
         "    {\n"
         "    }\n"
         "}\n";
-    auto oracle = std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> { "Other" });
+    auto oracle = std::make_shared<FakeHeaderTypes>(std::unordered_set<std::string> {"Other"});
     const auto diagnostics = ImplicitBoolWith(source, oracle);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_NE(diagnostics[0].message.find("a pointer of unknown type"), std::string::npos);

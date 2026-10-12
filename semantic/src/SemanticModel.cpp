@@ -61,10 +61,34 @@ namespace heimdall
 	RefTable::RefTable(std::pmr::memory_resource* resource) :
 		token(resource), target(resource), state(resource) {}
 
+	TemplateTable::TemplateTable(std::pmr::memory_resource* resource) :
+		owner(resource), scope(resource), node(resource), firstParameter(resource),
+		parameterCount(resource), kind(resource), complete(resource) {}
+
+	TemplateParameterTable::TemplateParameterTable(std::pmr::memory_resource* resource) :
+		owner(resource), symbol(resource), kind(resource), position(resource), pack(resource),
+		token(resource), defaultBegin(resource), defaultEnd(resource) {}
+
+	TemplateParameterId SemanticModel::ParameterOf(SymbolId symbol) const noexcept
+	{
+		const auto found = std::ranges::find(mTemplateParameters.symbol, symbol);
+		return symbol == kNone || found == mTemplateParameters.symbol.end() ? kNone
+		: static_cast<TemplateParameterId>(found - mTemplateParameters.symbol.begin());
+	}
+
+	TemplateId SemanticModel::TemplateOf(SymbolId symbol) const noexcept
+	{
+		const auto found = std::ranges::find(mTemplates.owner, symbol);
+		return symbol == kNone || found == mTemplates.owner.end() ? kNone
+		: static_cast<TemplateId>(found - mTemplates.owner.begin());
+	}
+
 	SemanticModel::SemanticModel(const ParseTree& tree, std::size_t arena_hint) :
 		m_arena(std::make_unique<Arena>(arena_hint)), m_tree(&tree), m_names(m_arena->Resource()),
 		m_symbols(m_arena->Resource()), m_scopes(m_arena->Resource()), m_bases(m_arena->Resource()),
-		m_refs(m_arena->Resource()), m_declared(m_arena->Resource()), m_sig(m_arena->Resource()),
+		m_refs(m_arena->Resource()), mTemplates(m_arena->Resource()),
+		mTemplateParameters(m_arena->Resource()), m_declared(m_arena->Resource()),
+		m_sig(m_arena->Resource()),
 		m_node_scope(m_arena->Resource()), m_code(m_arena->Resource()),
 		m_child_begin(m_arena->Resource()), m_child_list(m_arena->Resource()) {}
 
@@ -121,7 +145,7 @@ namespace heimdall
 			++steps)
 		{
 			const bool local = m_scopes.kind[scope] == ScopeKind::Function ||
-				m_scopes.kind[scope] == ScopeKind::Block;
+				m_scopes.kind[scope] == ScopeKind::Block || m_scopes.kind[scope] == ScopeKind::Template;
 			for (auto symbol = LookupLocal(scope, name); symbol != kNone;
 				symbol = m_symbols.next_same_name[symbol])
 			{

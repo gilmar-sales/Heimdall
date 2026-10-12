@@ -46,6 +46,7 @@ namespace heimdall
 			switch (kind)
 			{
 			case GrammarKind::NamespaceDefinition:
+			case GrammarKind::TemplateDeclaration:
 			case GrammarKind::RecordDefinition:
 			case GrammarKind::FunctionDefinition:
 			case GrammarKind::CompoundStatement:
@@ -190,7 +191,7 @@ namespace heimdall
 
 		void DeclareTemplateParameters(std::uint32_t node);
 
-		SymbolId LookupTemplateParameter(std::uint32_t node, NameId name) const;
+		void FinishTemplates();
 
 		void DeclareDeclaration(std::uint32_t node);
 
@@ -664,6 +665,8 @@ namespace heimdall
 	{
 		switch (KindOf(node))
 		{
+		case GrammarKind::TemplateDeclaration:
+			return AddScope(parent, ScopeKind::Template, kNone, node);
 		case GrammarKind::NamespaceDefinition:
 			return CreateNamespace(node, parent);
 		case GrammarKind::RecordDefinition:
@@ -805,12 +808,13 @@ namespace heimdall
 			? m_tree.NodesSoA().Parent(node)
 			: 0) == GrammarKind::TemplateDeclaration;
 		SymbolId symbol = kNone;
-		if (name_token != kNone && !specialization)
+		if (name_token != kNone)
 		{
 			symbol =
 				Declare(m_model.m_names.Intern(Text(name_token)),
-				is_enum ? SymbolKind::Enum : SymbolKind::Class, parent,
-				template_parent ? SymbolFlag::Template : 0, name_token, node, kNone, true);
+				is_enum ? SymbolKind::Enum : SymbolKind::Class,
+				m_model.m_scopes.kind[parent] == ScopeKind::Template ? m_model.m_scopes.parent[parent] : parent,
+				template_parent ? SymbolFlag::Template : 0, name_token, node, kNone, !specialization);
 		}
 
 		if (is_enum && !scoped)
@@ -1349,6 +1353,11 @@ namespace heimdall
 			}
 		}
 
+		if (m_model.m_scopes.kind[scope] == ScopeKind::Template)
+		{
+			scope = m_model.m_scopes.parent[scope];
+		}
+
 		// Constructors repeat the class name (the symbol of the owning scope).
 		if (!head.destructor && !head.is_operator && !qualified &&
 			m_model.m_scopes.kind[scope] == ScopeKind::Class)
@@ -1544,17 +1553,32 @@ namespace heimdall
 			return;
 		}
 
-		std::size_t close = open + 1;
-		std::size_t depth = 1;
+		std::size_t close           = open + 1;
+		std::size_t depth           = 1;
+		std::size_t expressionDepth = 0;
 		for (; close < end && depth != 0; ++close)
 		{
-			if (Is(m_sig[close], Tok::Lt))
+			if (Is(m_sig[close], Tok::LParen) || Is(m_sig[close], Tok::LBrace) || Is(m_sig[close],
+				Tok::LBracket))
+			{
+				++expressionDepth;
+			}
+			else if (expressionDepth != 0 && (Is(m_sig[close], Tok::RParen) || Is(m_sig[close],
+				Tok::RBrace) || Is(m_sig[close], Tok::RBracket)))
+			{
+				--expressionDepth;
+			}
+			else if (expressionDepth == 0 && Is(m_sig[close], Tok::Lt))
 			{
 				++depth;
 			}
-			else if (Is(m_sig[close], Tok::Gt))
+			else if (expressionDepth == 0 && Is(m_sig[close], Tok::Gt))
 			{
 				--depth;
+			}
+			else if (expressionDepth == 0 && depth >= 2 && Is(m_sig[close], Tok::Shr))
+			{
+				depth -= 2;
 			}
 		}
 
@@ -1563,14 +1587,33 @@ namespace heimdall
 			return;
 		}
 
-		const auto scope = ScopeFor(node);
+		const auto scope      = ScopeFor(node);
+		auto& templates       = m_model.mTemplates;
+		auto& parameters      = m_model.mTemplateParameters;
+		const auto templateId = static_cast<TemplateId>(templates.owner.size());
+		templates.owner.push_back(kNone);
+		templates.scope.push_back(scope);
+		templates.node.push_back(node);
+		templates.firstParameter.push_back(static_cast<std::uint32_t>(parameters.owner.size()));
+		templates.parameterCount.push_back(0);
+		templates.kind.push_back(TemplateDeclarationKind::Primary);
+		templates.complete.push_back(1);
+		if (Is(m_sig[close - 1], Tok::Shr))
+		{
+			templates.complete.back() = 0;
+		}
+
 		for (std::size_t first = open + 1; first + 1 < close;)
 		{
 			std::size_t last   = first;
 			std::size_t nested = 0;
 			for (; last + 1 < close; ++last)
 			{
-				if (Is(m_sig[last], Tok::Lt))
+				if (Is(m_sig[last], Tok::LParen) || Is(m_sig[last], Tok::LBracket) || Is(m_sig[last], Tok::LBrace))
+				{
+					last = MatchSig(last, close - 1);
+				}
+				else if (Is(m_sig[last], Tok::Lt))
 				{
 					++nested;
 				}
@@ -1617,13 +1660,28 @@ namespace heimdall
 						break;
 					}
 				}
+
+				if (name != kNone && SigAtOrAfter(name) + 1 != parameter_end)
+				{
+					templates.complete.back() = 0;
+					name                      = kNone;
+				}
 			}
 			else
 			{
 				std::uint32_t identifiers = 0;
+				std::size_t angleDepth    = 0;
 				for (auto i = first; i < parameter_end; ++i)
 				{
-					if (IsIdent(m_sig[i]))
+					if (Is(m_sig[i], Tok::Lt))
+					{
+						++angleDepth;
+					}
+					else if (Is(m_sig[i], Tok::Gt) && angleDepth != 0)
+					{
+						--angleDepth;
+					}
+					else if (angleDepth == 0 && IsIdent(m_sig[i]))
 					{
 						name = m_sig[i];
 						++identifiers;
@@ -1633,49 +1691,127 @@ namespace heimdall
 				// A non-type parameter needs a type and a name. Template-
 				// template parameters have nested parameter names, so select
 				// the final identifier (the declared template name).
-				const bool has_written_type = first < parameter_end &&
-					!IsIdent(m_sig[first]);
+				bool has_written_type = false;
+				for (auto i = first; i < parameter_end; ++i)
+				{
+					switch (TokOf(m_sig[i]))
+					{
+					case Tok::KwBool:
+					case Tok::KwChar:
+					case Tok::KwChar8:
+					case Tok::KwChar16:
+					case Tok::KwChar32:
+					case Tok::KwWchar:
+					case Tok::KwShort:
+					case Tok::KwInt:
+					case Tok::KwLong:
+					case Tok::KwSigned:
+					case Tok::KwUnsigned:
+					case Tok::KwFloat:
+					case Tok::KwDouble:
+					case Tok::KwAuto:
+						has_written_type = true;
+						break;
+					default:
+						break;
+					}
+				}
+
 				if (!template_parameter && identifiers < 2 && !has_written_type)
 				{
 					name = kNone;
 				}
+
+				if (name != kNone)
+				{
+					const auto namePos = SigAtOrAfter(name);
+					if (namePos + 1 != parameter_end ||(namePos > first && Is(m_sig[namePos - 1], Tok::ColonColon)))
+					{
+						name = kNone;
+					}
+				}
 			}
 
+			SymbolId parameterSymbol = kNone;
 			if (name != kNone)
 			{
-				Declare(m_model.m_names.Intern(Text(name)), SymbolKind::TemplateParameter,
-					scope, 0, name, node, kNone, false);
+				parameterSymbol = Declare(m_model.m_names.Intern(Text(name)), SymbolKind::TemplateParameter,
+					scope, 0, name, node, kNone, true);
+			}
+
+			parameters.owner.push_back(templateId);
+			parameters.symbol.push_back(parameterSymbol);
+			parameters.kind.push_back(template_parameter ? TemplateParameterKind::Template
+				: type_parameter ? TemplateParameterKind::Type : TemplateParameterKind::Value);
+			parameters.position.push_back(templates.parameterCount.back() ++);
+			bool isPack             = false;
+			std::uint32_t packDepth = 0;
+			for (auto pos = first; pos < parameter_end; ++pos)
+			{
+				if (Is(m_sig[pos], Tok::Lt))
+				{
+					++packDepth;
+				}
+				else if (Is(m_sig[pos], Tok::Gt) && packDepth != 0)
+				{
+					--packDepth;
+				}
+				else if (packDepth == 0 && Is(m_sig[pos], Tok::Ellipsis))
+				{
+					isPack = true;
+				}
+			}
+
+			parameters.pack.push_back(isPack);
+			parameters.token.push_back(name);
+			parameters.defaultBegin.push_back(parameter_end < last ? m_sig[parameter_end + 1] : kNone);
+			parameters.defaultEnd.push_back(parameter_end < last ? m_sig[last] : kNone);
+			if (std::any_of(m_sig.begin() + first, m_sig.begin() + parameter_end,
+				[&](auto token)
+				{
+					return Is(token, Tok::LParen) || Is(token, Tok::LBracket);
+			}))
+			{
+				templates.complete.back() = 0;
 			}
 
 			first = last + 1;
 		}
 	}
 
-	SymbolId BinderImpl::LookupTemplateParameter(std::uint32_t node, NameId name) const
+	void BinderImpl::FinishTemplates()
 	{
+		auto& templates     = m_model.mTemplates;
 		const auto& nodes   = m_tree.NodesSoA();
 		const auto& symbols = m_model.m_symbols;
-		for (auto ancestor = node; ancestor < nodes.size(); ancestor = nodes.Parent(ancestor))
+		for (TemplateId id = 0; id < templates.owner.size(); ++id)
 		{
-			if (nodes.Kind(ancestor) == GrammarKind::TemplateDeclaration)
+			for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 			{
-				for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+				if (symbols.kind[symbol] != SymbolKind::TemplateParameter &&
+					nodes.Parent(symbols.decl_node[symbol]) == templates.node[id])
 				{
-					if (symbols.kind[symbol] == SymbolKind::TemplateParameter &&
-						symbols.decl_node[symbol] == ancestor && symbols.name[symbol] == name)
+					templates.owner[id] = symbol;
+					const auto next     = NextSig(symbols.decl_token[symbol]);
+					if (next != kNone && Is(next, Tok::Lt))
 					{
-						return symbol;
+						templates.kind[id] = templates.parameterCount[id] == 0
+						? TemplateDeclarationKind::Explicit : TemplateDeclarationKind::Partial;
 					}
+
+					break;
 				}
 			}
 
-			if (ancestor == 0 || nodes.Parent(ancestor) == ancestor)
+			const auto[begin, end] = NodeSig(templates.node[id]);
+			for (auto pos = begin; pos < end; ++pos)
 			{
-				break;
+				if (Is(m_sig[pos], Tok::KwRequires))
+				{
+					templates.complete[id] = 0;
+				}
 			}
 		}
-
-		return kNone;
 	}
 
 	void BinderImpl::DeclareNode(std::uint32_t node)
@@ -1906,11 +2042,7 @@ namespace heimdall
 				}
 				else
 				{
-					target = LookupTemplateParameter(node, name);
-					if (target == kNone)
-					{
-						target = m_model.Lookup(ScopeFor(node), name, token);
-					}
+					target = m_model.Lookup(ScopeFor(node), name, token);
 				}
 			}
 
@@ -1931,7 +2063,7 @@ namespace heimdall
 
 			const bool member_access = previous != kNone &&
 				(Is(previous, Tok::Dot) || Is(previous, Tok::Arrow) ||
-				Is(previous, Tok::DotStar) || Is(previous, Tok::ArrowStar));
+				Is(previous, Tok::DotStar) || Is(previous, Tok::ArrowStar) || Is(previous, Tok::ColonColon));
 			const auto state = target != kNone ? RefState::Resolved
 			: template_context && member_access ? RefState::Dependent
 			: RefState::Unresolved;
@@ -1988,6 +2120,7 @@ namespace heimdall
 		}
 
 		FillNodeScopes();
+		FinishTemplates();
 		ResolveBases();
 		ResolveRefs();
 	}

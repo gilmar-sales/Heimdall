@@ -13,9 +13,9 @@
  */
 int test_method(std::uint32_t first, int b, const std::string& desc)
 {
-	auto value = first + b;
+	const auto value = first + b;
 
-	if (value)
+	if (value != 0)
 	{
 		return 100;
 	}
@@ -90,8 +90,8 @@ int main()
 	auto test  = node;
 	auto test2 = test;
 
-	test.value  = 2.0f;
-	auto test2v = test.value;
+	test->value = 2.0f;
+	auto test2v = test->value;
 
 	return 0;
 }

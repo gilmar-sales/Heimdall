@@ -79,6 +79,82 @@ TEST(InternPool, EqualTextsShareAnIdAndUnknownTextsAreNotFound)
     EXPECT_EQ(pool.Size(), 2u);
 }
 
+TEST(Binder, RecordsTemplateParameterCategoriesDefaultsAndPacks)
+{
+    const Bound bound("template<class T = int, int N = 3, template<class> class C, class... Ts> struct Box {};");
+    const auto& declarations = bound.model.Templates();
+    const auto& parameters = bound.model.TemplateParameters();
+
+    ASSERT_EQ(declarations.owner.size(), 1u);
+    EXPECT_EQ(declarations.parameterCount[0], 4u);
+    EXPECT_EQ(parameters.kind, (std::pmr::vector<heimdall::TemplateParameterKind> {
+            heimdall::TemplateParameterKind::Type, heimdall::TemplateParameterKind::Value,
+            heimdall::TemplateParameterKind::Template, heimdall::TemplateParameterKind::Type}));
+    EXPECT_NE(parameters.defaultBegin[0], heimdall::kNone);
+    EXPECT_NE(parameters.defaultBegin[1], heimdall::kNone);
+    EXPECT_EQ(parameters.defaultBegin[2], heimdall::kNone);
+    EXPECT_TRUE(parameters.pack[3]);
+    EXPECT_EQ(bound.model.Scopes().kind[declarations.scope[0]], heimdall::ScopeKind::Template);
+    EXPECT_EQ(bound.model.Lookup(0, bound.model.Names().Find("T")), heimdall::kNone);
+    EXPECT_EQ(bound.model.Lookup(0, bound.model.Names().Find("N")), heimdall::kNone);
+}
+
+TEST(Binder, NestedTemplateParametersUseLexicalScopesWithoutLeaking)
+{
+    const Bound bound("template<class T> struct Outer { template<class U> U f(U value) { return value; } T field; }; int f(int value) { return value; }");
+    const auto& declarations = bound.model.Templates();
+    const auto& parameters = bound.model.TemplateParameters();
+
+    ASSERT_EQ(declarations.owner.size(), 2u);
+    ASSERT_EQ(parameters.symbol.size(), 2u);
+    EXPECT_EQ(bound.model.Lookup(declarations.scope[1], bound.model.Names().Find("T")),
+              parameters.symbol[0]);
+    EXPECT_EQ(bound.model.Lookup(declarations.scope[0], bound.model.Names().Find("U")),
+              heimdall::kNone);
+    EXPECT_EQ(bound.model.Lookup(0, bound.model.Names().Find("U")), heimdall::kNone);
+}
+
+TEST(Binder, TemplateParameterShadowsOuterNamesAndQualifiedUsesStayDependent)
+{
+    const Bound bound("struct T {}; template<class T> int f() { return T::value; } int g() { T value; return 0; }");
+    const auto parameter = bound.Find("T", heimdall::SymbolKind::TemplateParameter);
+
+    EXPECT_EQ(bound.model.ResolveToken(bound.Token("T", 2)), parameter);
+    EXPECT_EQ(bound.model.ReferenceState(bound.Token("value")), heimdall::RefState::Dependent);
+    EXPECT_EQ(bound.model.Lookup(0, bound.model.Names().Find("T")),
+              bound.Find("T", heimdall::SymbolKind::Class));
+}
+
+TEST(Binder, ParenthesizedValueDefaultsDoNotCreateExtraParameters)
+{
+    const Bound bound("template<int N = (1 > 0, 2), class T = int> struct Box {};");
+
+    ASSERT_EQ(bound.model.Templates().parameterCount.size(), 1u);
+    EXPECT_EQ(bound.model.Templates().parameterCount[0], 2u);
+}
+
+TEST(Binder, LaterTemplateParametersAreNotVisibleInEarlierDefaults)
+{
+    const Bound bound("struct U {}; template<class T = U, class U = int> struct Box {};");
+    const auto defaultToken = bound.model.TemplateParameters().defaultBegin[0];
+    const auto scope = bound.model.Templates().scope[0];
+
+    EXPECT_EQ(bound.model.Lookup(scope, bound.model.Names().Find("U"), defaultToken),
+              bound.Find("U", heimdall::SymbolKind::Class));
+}
+
+TEST(Binder, UnnamedQualifiedValueTypesDoNotDeclareTheirTypeNamesAsParameters)
+{
+    const Bound bound("template<std::size_t, const Type, template<class...> class C> struct Box {};");
+    const auto& parameters = bound.model.TemplateParameters();
+
+    ASSERT_EQ(parameters.symbol.size(), 3u);
+    EXPECT_EQ(parameters.symbol[0], heimdall::kNone);
+    EXPECT_EQ(parameters.symbol[1], heimdall::kNone);
+    EXPECT_NE(parameters.symbol[2], heimdall::kNone);
+    EXPECT_FALSE(parameters.pack[2]);
+}
+
 TEST(InternPool, CopiedTextOutlivesItsSource)
 {
     heimdall::Arena arena;

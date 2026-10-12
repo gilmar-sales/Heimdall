@@ -263,6 +263,87 @@ namespace
         EXPECT_EQ(result.error().code, RefactoringErrorCode::IncompleteAnalysis);
     }
 
+    TEST(RenameSpec, RenamesPrimaryFieldsAcrossConcreteInstantiationsAndThis)
+    {
+        Fixture f("template<class T> struct Box { T value; T get() { return this->value; } }; void f() { Box<int> a; Box<float>* b; a.value; b->value; }");
+
+        const auto result = f.Rename("value", "renamed");
+
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(result->documents.front().edits.size(), 4u);
+    }
+
+    TEST(RenameSpec, LeavesExplicitSpecializationAndConcreteHomonymsUntouched)
+    {
+        Fixture f("template<class T> struct Box { int value; }; template<> struct Box<int> { int value; }; struct Other { int value; }; void f() { Box<float> a; Box<int> b; Other c; a.value; b.value; c.value; }");
+
+        const auto result = f.Rename("value", "renamed");
+
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(result->documents.front().edits.size(), 2u);
+    }
+
+    TEST(RenameSpec, RefusesWorkspaceOnlyProofForOpenDependentReceivers)
+    {
+        for (const auto different :
+            {
+                false, true
+        })
+        {
+            Fixture f(std::string("struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T* object) { return object->value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
+
+            const auto result = f.Rename("value", "renamed");
+
+            ASSERT_FALSE(result);
+            EXPECT_EQ(result.error().code, RefactoringErrorCode::IncompleteAnalysis);
+        }
+    }
+
+    TEST(RenameSpec, DefaultTypeSpellingIsNotADeclaredTemplateParameter)
+    {
+        Fixture f("struct Other {}; template<class T = Other> int f(int value) { return value; }");
+
+        const auto result = f.Rename("value", "Other");
+
+        ASSERT_TRUE(result) << result.error().message;
+    }
+
+    TEST(RenameSpec, RefusesUnknownBaseCollisionsAndTemplateConstraints)
+    {
+        for (const auto source :
+            {
+                "template<class T> struct Box : T { int value; int get() { return this->value; } };",
+                "template<class T> requires true struct Box { int value; };"
+        })
+        {
+            Fixture f(source);
+
+            const auto result = f.Rename("value", "renamed");
+
+            ASSERT_FALSE(result);
+            EXPECT_EQ(result.error().code, RefactoringErrorCode::IncompleteAnalysis);
+        }
+
+    }
+
+    TEST(RenameSpec, RefusesTemplateHeaderEditsWithoutCrossDocumentInstantiationCoverage)
+    {
+        CrossFile files("template<class T> struct Box { int value; };\n",
+                        "#include \"add.hpp\"\nBox<int> a;\n", "#include \"add.hpp\"\nBox<float> b;\n");
+        if (!files.Ready())
+        {
+            GTEST_SKIP();
+        }
+
+        const auto snapshot = files.workspace.Snapshot();
+        const auto offset = snapshot.Source(*files.header)->find("value");
+
+        const auto result = RefactoringService::RenameLocal(snapshot, *files.header, offset, "renamed");
+
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().code, RefactoringErrorCode::IncompleteAnalysis);
+    }
+
     TEST(RenameSpec, AllowsExistingNamesInIndependentScopes)
     {
         for (const auto source :

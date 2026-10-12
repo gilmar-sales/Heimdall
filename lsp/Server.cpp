@@ -19,6 +19,8 @@
 #include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/Doxygen.hpp>
 #include <Heimdall/SymbolOutline.hpp>
+#include <Heimdall/IndexStore.hpp>
+#include <Heimdall/ShardBuilder.hpp>
 #include <Heimdall/TypeHierarchy.hpp>
 
 #include <algorithm>
@@ -26,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <shared_mutex>
 #include <stop_token>
 
@@ -1576,6 +1579,7 @@ namespace heimdall::lsp
 				const std::lock_guard<std::mutex> lock(m_symbol_mu);
 				m_symbol_index.ClearOpen(FileKey(closed_path));
 			}
+			m_index_store.ClearOpen(closed_path.generic_string());
 			std::filesystem::path root;
 			{
 				const std::lock_guard<std::mutex> lock(m_init_mu);
@@ -2133,6 +2137,66 @@ namespace heimdall::lsp
 			return;
 		}
 
+		std::set<std::pair<std::string, std::size_t>> emitted;
+		const auto appendIndexed =[&](std::string& response)
+		{
+				const auto snapshot  = m_index_store.Snapshot();
+				const auto selfPath  = PathFromUri(uri_string).generic_string();
+				const auto selfShard = snapshot->ShardFor(selfPath);
+				if (selfShard != heimdall::index::kInvalid &&
+					snapshot->Shards()[selfShard]->ContentHash() ==
+						heimdall::index::HashBytes(*document->text))
+				{
+					auto anchor = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
+					if (anchor.Valid())
+					{
+						std::unordered_map<std::uint32_t, std::shared_ptr<const LineIndex>> shardLines;
+						for (const auto& use : snapshot->References(snapshot->HashOf(anchor)))
+						{
+							const bool declaring = use.role != heimdall::index::Role::Reference;
+							const auto& shard = *snapshot->Shards()[use.shard];
+							const auto otherUri = UriFromPath(shard.Path());
+							if ((declaring && !include_declaration) ||
+								!emitted.emplace(otherUri, use.offset).second)
+							{
+								continue;
+							}
+
+							auto& lines = shardLines[use.shard];
+							if (!lines)
+							{
+								if (auto open = GetDocument(otherUri))
+								{
+									lines = open->lines;
+								}
+								else if (auto contents = ReadWorkspaceFile(shard.Path()))
+								{
+									auto built = std::make_shared<LineIndex>();
+									built->Build(*contents);
+									lines = std::move(built);
+								}
+							}
+
+							if (!lines)
+							{
+								continue;
+							}
+
+							if (response.size() > 1)
+							{
+								response += ',';
+							}
+
+							response += "{\"uri\":";
+							QuoteJson(otherUri, response);
+							response += ",\"range\":";
+							range(lines, use.offset, use.length, response);
+							response += '}';
+						}
+					}
+				}
+		};
+
 		if (mode == 0)
 		{
 			// Locals and fields resolve in a single tree; free functions and
@@ -2142,14 +2206,17 @@ namespace heimdall::lsp
 				auto workspace_refs = heimdall::RefactoringService::WorkspaceReferences(
 					context.Snapshot(), context.Document(), offset, include_declaration,
 					CurrentStop());
-				if (!workspace_refs)
+				if (!workspace_refs &&
+					workspace_refs.error().code == heimdall::RefactoringErrorCode::Cancelled)
 				{
 					fail(workspace_refs.error());
 					return;
 				}
 
 				std::string response = "[";
-				for (const auto& document_refs : *workspace_refs)
+				for (const auto& document_refs : workspace_refs
+						? *workspace_refs
+						: std::vector<heimdall::DocumentOccurrences> {})
 				{
 					const std::string item_uri =
 						UriFromPath(context.Snapshot().Path(document_refs.document));
@@ -2187,6 +2254,7 @@ namespace heimdall::lsp
 							response += ',';
 						}
 
+						emitted.emplace(item_uri, item_tree->Tokens()[token].offset);
 						response += "{\"uri\":";
 						QuoteJson(item_uri, response);
 						response += ",\"range\":";
@@ -2196,6 +2264,7 @@ namespace heimdall::lsp
 					}
 				}
 
+				appendIndexed(response);
 				response += ']';
 				Respond(id, response);
 				return;
@@ -2209,12 +2278,16 @@ namespace heimdall::lsp
 					response += ',';
 				}
 
+				emitted.emplace(UriFromPath(PathFromUri(uri_string)),
+					tree->Tokens()[token].offset);
 				response += "{\"uri\":";
 				QuoteJson(uri, response);
 				response += ",\"range\":";
 				range(document->lines, tree->Tokens()[token].offset, tree->Tokens()[token].length, response);
 				response += '}';
 			}
+
+			appendIndexed(response);
 
 			response += ']';
 			Respond(id, response);
@@ -5084,6 +5157,49 @@ namespace heimdall::lsp
 		// each extra target multiplies file I/O + parses on this worker.
 		constexpr std::size_t kMaxGotoTargets = 8;
 		std::size_t handled_targets           = 0;
+		bool indexed                          = false;
+		if (!implementation)
+		{
+			const auto snapshot = m_index_store.Snapshot();
+			const auto selfShard = snapshot->ShardFor(self_path.generic_string());
+			const auto here      = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
+			std::vector<heimdall::index::SymbolRef> anchors;
+			if (selfShard != heimdall::index::kInvalid &&
+				snapshot->Shards()[selfShard]->ContentHash() == heimdall::index::HashBytes(*text))
+			{
+				if (here.Valid())
+				{
+					anchors.push_back(here);
+				}
+				else
+				{
+					anchors = snapshot->Candidates(selfShard, static_cast<std::uint32_t>(offset));
+				}
+			}
+
+			for (const auto anchor : anchors)
+			{
+				for (const auto& definition : snapshot->Definitions(snapshot->HashOf(anchor)))
+				{
+					const auto& shard = *snapshot->Shards()[definition.shard];
+					if (definition.shard == selfShard)
+					{
+						continue;
+					}
+
+					LoadedFile* file = load(std::filesystem::path(shard.Path()), {});
+					if (file == nullptr)
+					{
+						continue;
+					}
+
+					const auto begin = shard.Symbols().nameOffset[definition.symbol];
+					add_resolved(file, begin, shard.Symbols().nameLength[definition.symbol]);
+					indexed = true;
+				}
+			}
+		}
+
 		for (const heimdall::NavTarget& target : targets)
 		{
 			if (RequestCancelled())
@@ -5123,8 +5239,8 @@ namespace heimdall::lsp
 
 			// A function declared without a body: follow it into its source files.
 			const bool function = target.kind == heimdall::CompletionKind::Function;
-			bool followed       = false;
-			if (function && !target.is_definition && !target.back_reference)
+			bool followed       = indexed && function && !target.is_definition;
+			if (function && !indexed && !target.is_definition && !target.back_reference)
 			{
 				for (const auto& candidate : source_candidates(owner))
 				{
@@ -5345,10 +5461,35 @@ namespace heimdall::lsp
 			break;
 		}
 
-		const auto& symbols = model.Symbols();
-		const auto& tokens  = model.Tree().Tokens();
-		const auto& lines   = *document->lines;
+		const auto& symbols  = model.Symbols();
+		const auto& tokens   = model.Tree().Tokens();
 		std::string response = "[";
+		const auto append = [&](std::string_view name, const std::string& itemUri,
+								const LineIndex& lines, std::size_t rangeBegin, std::size_t rangeEnd,
+								std::size_t nameBegin, std::size_t nameEnd)
+		{
+			if (response.size() > 1)
+			{
+				response += ',';
+			}
+
+			response += "{\"name\":";
+			QuoteJson(name, response);
+			response += ",\"kind\":23,\"uri\":";
+			QuoteJson(itemUri, response);
+			response += ",\"range\":{\"start\":";
+			AppendPosition(lines.ToPosition(rangeBegin), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(rangeEnd), response);
+			response += "},\"selectionRange\":{\"start\":";
+			AppendPosition(lines.ToPosition(nameBegin), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(nameEnd), response);
+			response += "},\"data\":{\"uri\":";
+			QuoteJson(itemUri, response);
+			response += ",\"offset\":" + std::to_string(nameBegin) + "}}";
+		};
+
 		for (const auto symbol : classes)
 		{
 			const auto nameToken = symbols.decl_token[symbol];
@@ -5359,26 +5500,56 @@ namespace heimdall::lsp
 
 			const auto range = analysis.NodeRange(symbols.decl_node[symbol]);
 			const auto& name = tokens[nameToken];
-			if (response.size() > 1)
-			{
-				response += ',';
-			}
+			append(model.Names().Text(symbols.name[symbol]), uriString, *document->lines,
+				range.offset, range.offset + range.length, name.offset, name.offset + name.length);
+		}
 
-			response += "{\"name\":";
-			QuoteJson(model.Names().Text(symbols.name[symbol]), response);
-			response += ",\"kind\":23,\"uri\":";
-			QuoteJson(uriString, response);
-			response += ",\"range\":{\"start\":";
-			AppendPosition(lines.ToPosition(range.offset), response);
-			response += ",\"end\":";
-			AppendPosition(lines.ToPosition(range.offset + range.length), response);
-			response += "},\"selectionRange\":{\"start\":";
-			AppendPosition(lines.ToPosition(name.offset), response);
-			response += ",\"end\":";
-			AppendPosition(lines.ToPosition(name.offset + name.length), response);
-			response += "},\"data\":{\"uri\":";
-			QuoteJson(uriString, response);
-			response += ",\"offset\":" + std::to_string(name.offset) + "}}";
+		// Classes declared in other files, from the cross-file index. Items for this file
+		// are already covered by the model above.
+		if (mode != TypeHierarchyMode::Prepare)
+		{
+			const auto snapshot     = m_index_store.Snapshot();
+			const auto selfPath     = PathFromUri(uriString).generic_string();
+			const auto here         = snapshot->SymbolAt(snapshot->ShardFor(selfPath),
+				static_cast<std::uint32_t>(offset));
+			if (here.Valid())
+			{
+				const auto hash    = snapshot->HashOf(here);
+				const auto related = mode == TypeHierarchyMode::Supertypes
+					? snapshot->Supertypes(hash)
+					: snapshot->Subtypes(hash);
+				for (const auto& item : related)
+				{
+					const auto& shard = *snapshot->Shards()[item.symbol.shard];
+					if (shard.Path() == selfPath)
+					{
+						continue;
+					}
+
+					const auto otherUri = UriFromPath(shard.Path());
+					std::shared_ptr<const std::string> otherText;
+					if (const auto open = GetDocument(otherUri))
+					{
+						otherText = open->text;
+					}
+					else if (auto contents = ReadWorkspaceFile(shard.Path()))
+					{
+						otherText = std::make_shared<const std::string>(std::move(*contents));
+					}
+
+					if (!otherText)
+					{
+						continue;
+					}
+
+					LineIndex otherLines;
+					otherLines.Build(*otherText);
+					const auto begin = shard.Symbols().nameOffset[item.symbol.symbol];
+					const auto end   = begin + shard.Symbols().nameLength[item.symbol.symbol];
+					append(shard.Name(item.symbol.symbol), otherUri, otherLines, begin, end, begin,
+						end);
+				}
+			}
 		}
 
 		response += ']';
@@ -5423,10 +5594,13 @@ namespace heimdall::lsp
 		lines.Build(*text);
 		const auto outline = heimdall::SymbolOutline::Extract(tree);
 		auto file          = BuildIndexedFile(uri, outline, lines);
+		const auto model   = heimdall::Binder::Bind(tree);
+		auto shard = heimdall::index::ShardBuilder::Build(model, PathFromUri(uri).generic_string());
 		const std::lock_guard<std::mutex> lock(m_symbol_mu);
 		if (IsCurrentVersion(uri, version))
 		{
 			m_symbol_index.SetOpen(FileKey(PathFromUri(uri)), std::move(file));
+			m_index_store.SetOpen(PathFromUri(uri).generic_string(), std::move(shard));
 		}
 	}
 
@@ -5451,6 +5625,7 @@ namespace heimdall::lsp
 			if (!contents)
 			{
 				m_symbol_index.RemoveDisk(key);
+				m_index_store.RemoveDisk(file.generic_string());
 				return;
 			}
 
@@ -5467,6 +5642,9 @@ namespace heimdall::lsp
 			lines.Build(*text);
 			m_symbol_index.SetDisk(
 				key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
+			const auto model = heimdall::Binder::Bind(tree);
+			m_index_store.SetDisk(file.generic_string(),
+				heimdall::index::ShardBuilder::Build(model, file.generic_string()));
 		}
 		catch (...)
 		{
@@ -5634,6 +5812,7 @@ namespace heimdall::lsp
 			{
 				// A removed folder is reported once, not once per file inside it.
 				m_symbol_index.RemoveDiskUnder(FileKey(path));
+				m_index_store.RemoveDiskUnder(path.generic_string());
 			}
 			else if (IsWorkspaceSource(path))
 			{

@@ -18,8 +18,7 @@ namespace heimdall
 		}
 
 		bool TemplateParameterNamed(
-			const ParseTree& tree,
-			const GrammarNodeSoA& soa,
+			const SemanticModel& model,
 			NodeId node,
 			std::string_view name);
 
@@ -318,7 +317,7 @@ namespace heimdall
 
 			if (function < model.Scopes().Size() &&
 				model.Scopes().kind[function] == ScopeKind::Function &&
-				TemplateParameterNamed(tree, soa, model.Scopes().node[function], name))
+				TemplateParameterNamed(model, model.Scopes().node[function], name))
 			{
 				return std::unexpected(Error(RefactoringErrorCode::NameCollision,
 					"The new name collides with a template parameter"));
@@ -549,40 +548,26 @@ namespace heimdall
 		}
 
 		bool TemplateParameterNamed(
-			const ParseTree& tree,
-			const GrammarNodeSoA& soa,
+			const SemanticModel& model,
 			NodeId node,
 			std::string_view name)
 		{
-			const auto& tokens = tree.Tokens();
+			const auto& soa        = model.Tree().NodesSoA();
+			const auto& templates  = model.Templates();
+			const auto& parameters = model.TemplateParameters();
 			for (auto ancestor = node; ancestor < soa.size(); ancestor = soa.Parent(ancestor))
 			{
-				if (soa.Kind(ancestor) == GrammarKind::TemplateDeclaration)
+				for (TemplateId id = 0; id < templates.node.size(); ++id)
 				{
-					const auto begin = soa.FirstToken(ancestor);
-					const auto end = std::min<std::uint32_t>(begin + soa.TokenCount(ancestor),
-						static_cast<std::uint32_t>(tokens.size()));
-					std::uint32_t depth = 0;
-					for (auto i = begin; i < end; ++i)
+					if (templates.node[id] != ancestor)
 					{
-						if (tokens[i].tok == Tok::Lt)
-						{
-							++depth;
-							continue;
-						}
+						continue;
+					}
 
-						if (tokens[i].tok == Tok::Gt && depth != 0)
-						{
-							if (--depth == 0)
-							{
-								break;
-							}
-
-							continue;
-						}
-
-						if (depth != 0 && tokens[i].kind == TokenKind::Identifier &&
-							tokens[i].tok == Tok::None && tree.Text(tokens[i]) == name)
+					for (std::uint32_t i = 0; i < templates.parameterCount[id]; ++i)
+					{
+						const auto symbol = parameters.symbol[templates.firstParameter[id] + i];
+						if (symbol != kNone && model.Names().Text(model.Symbols().name[symbol]) == name)
 						{
 							return true;
 						}
@@ -625,7 +610,16 @@ namespace heimdall
 					continue;
 				}
 
-				member_use.emplace(soa.FirstToken(kids[1]), types.MemberSymbol(node));
+				const auto token = soa.FirstToken(kids[1]);
+				if (model.ReferenceState(token) == RefState::Dependent)
+				{
+					const auto binding = types.DependentBinding(token);
+					member_use.emplace(token, binding.state == TemplateResolution::Resolved ? binding.symbol : kNone);
+				}
+				else
+				{
+					member_use.emplace(token, types.MemberSymbol(node));
+				}
 			}
 
 			return member_use;
@@ -655,6 +649,24 @@ namespace heimdall
 				class_scope < scopes.Size() ? scopes.owner[class_scope] : kNone;
 			const NodeId class_node =
 				class_scope < scopes.Size() ? scopes.node[class_scope] : 0;
+			if (owner != kNone)
+			{
+				for (std::uint32_t i = 0; i < symbols.base_count[owner]; ++i)
+				{
+					if (model.Bases().target[symbols.first_base[owner] + i] == kNone)
+					{
+						return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
+							"Dependent or unavailable bases prevent a general collision proof"));
+					}
+				}
+
+				const auto declaration = model.TemplateOf(owner);
+				if (declaration != kNone && !model.Templates().complete[declaration])
+				{
+					return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
+						"Template constraints or unsupported parameter syntax are not fully modeled"));
+				}
+			}
 
 			SymbolOccurrences result {target,
 				tokens[selected].offset,
@@ -729,6 +741,12 @@ namespace heimdall
 				const SymbolId resolved   = model.ResolveToken(i);
 				const auto found          = member_use->find(i);
 				const SymbolId via_member = found == member_use->end() ? kNone : found->second;
+				if (types->DependentBinding(i).state == TemplateResolution::Ambiguous)
+				{
+					return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
+						"A dependent source occurrence binds to different declarations across instantiations"));
+				}
+
 				if (resolved == target || via_member == target)
 				{
 					for (const auto& [begin, end] : tainted)
@@ -817,7 +835,7 @@ namespace heimdall
 				return {};
 			}
 
-			if (TemplateParameterNamed(tree, tree.NodesSoA(),
+			if (TemplateParameterNamed(model,
 				scopes.node[class_scope], name))
 			{
 				return std::unexpected(Error(RefactoringErrorCode::NameCollision,
@@ -997,6 +1015,17 @@ namespace heimdall
 					"Rename changes reference dependency states"));
 			}
 
+			if (model.Bases().target != after.Bases().target ||
+				model.Templates().owner != after.Templates().owner ||
+				model.Templates().kind != after.Templates().kind ||
+				model.Templates().complete != after.Templates().complete ||
+				model.TemplateParameters().kind != after.TemplateParameters().kind ||
+				model.TemplateParameters().pack != after.TemplateParameters().pack)
+			{
+				return std::unexpected(Error(RefactoringErrorCode::SemanticChange,
+					"Rename changes templates or base bindings"));
+			}
+
 			for (SymbolId i = 0; i < before_symbols.Size(); ++i)
 			{
 				const auto at_renamed =
@@ -1017,6 +1046,24 @@ namespace heimdall
 
 			if (types != nullptr && after_types != nullptr)
 			{
+				const auto& instances      = types->Instantiations();
+				const auto& afterInstances = after_types->Instantiations();
+				const auto& dependent      = types->DependentReferences();
+				const auto& afterDependent = after_types->DependentReferences();
+				if (instances.primary != afterInstances.primary || instances.selected != afterInstances.selected ||
+					instances.state != afterInstances.state || instances.firstArgument != afterInstances.firstArgument ||
+					instances.argumentCount != afterInstances.argumentCount ||
+					instances.firstBase != afterInstances.firstBase || instances.baseCount != afterInstances.baseCount ||
+					instances.baseType != afterInstances.baseType ||
+					types->TemplateArguments().type != after_types->TemplateArguments().type ||
+					dependent.token != afterDependent.token || dependent.bindingInstance != afterDependent.bindingInstance ||
+					dependent.bindingTarget != afterDependent.bindingTarget || dependent.bindingState != afterDependent.bindingState ||
+					dependent.coverage != afterDependent.coverage)
+				{
+					return std::unexpected(Error(RefactoringErrorCode::SemanticChange,
+						"Rename changes instantiation selection or dependent bindings"));
+				}
+
 				if (after_tree.NodesSoA().size() != tree.NodesSoA().size())
 				{
 					return std::unexpected(Error(RefactoringErrorCode::SemanticChange,
@@ -1189,6 +1236,13 @@ namespace heimdall
 			const auto& scopes = model->Scopes();
 			if (IsFieldTarget(*model, target))
 			{
+				const auto owner = scopes.owner[symbols.scope[target]];
+				if (owner != kNone && model->TemplateOf(owner) != kNone && snapshot.Documents().size() > 1)
+				{
+					return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
+						"Template member rename requires cross-document canonical identity and coverage"));
+				}
+
 				auto field_types = snapshot.Types(document);
 				if (!field_types)
 				{

@@ -17,7 +17,7 @@ namespace heimdall
 	// Types are 32-bit indices into a hash-consed table (see
 	// docs/semantic-engine-architecture.md): equal types have equal ids, so type
 	// comparison is integer comparison. `TypeTable::Unknown` (0) means "not known":
-	// template-dependent, unresolved, or beyond what this engine models.
+	// unresolved or beyond what this engine models. Modeled dependence has its own kinds.
 	using TypeId = std::uint32_t;
 
 	enum class TypeKind : std::uint8_t
@@ -32,7 +32,11 @@ namespace heimdall
 		LRef,    // arg = referee
 		RRef,    // arg = referee
 		Const,   // arg = qualified type
-		Array    // arg = element, extent = bound or kNone
+		Array,   // arg = element, extent = bound or kNone
+		TemplateParameter,
+		TemplateId,
+		DependentName,
+		InjectedClass
 	};
 
 	enum class BuiltinType : std::uint8_t
@@ -74,6 +78,9 @@ namespace heimdall
 
 		TypeId Class(SymbolId symbol);
 
+		/** Injected class name in a template definition, not a concrete instantiation. */
+		[[nodiscard]] TypeId InjectedClass(SymbolId symbol);
+
 		TypeId Enum(SymbolId symbol);
 
 		TypeId External(NameId name);
@@ -87,6 +94,18 @@ namespace heimdall
 		TypeId Const(TypeId type);
 
 		TypeId Array(TypeId element, std::uint32_t extent);
+
+		/** Symbolically known type parameter; never a concrete type. */
+		[[nodiscard]] TypeId Parameter(TemplateParameterId parameter);
+
+		/** Local template-id refers to an immutable instantiation row. */
+		[[nodiscard]] TypeId TemplateInstance(std::uint32_t instance, bool dependent);
+
+		/** Qualified dependent spelling, not a concrete external type. */
+		[[nodiscard]] TypeId DependentName(NameId spelling, ScopeId definitionScope);
+
+		/** Distinguishes dependent types from both concrete and unknown types. */
+		[[nodiscard]] bool IsDependent(TypeId type) const noexcept;
 
 		std::size_t Size() const noexcept
 		{
@@ -110,7 +129,7 @@ namespace heimdall
 
 		bool IsKnown(TypeId type) const noexcept
 		{
-			return Kind(type) != TypeKind::Unknown;
+			return Kind(type) != TypeKind::Unknown && !IsDependent(type);
 		}
 
 		// Removes references: the type of an expression naming the object.
@@ -192,6 +211,77 @@ namespace heimdall
 		std::pmr::unordered_map<Key, TypeId, KeyHash> m_index;
 	};
 
+	/** Proof state: unsupported rules never select a presumed candidate. */
+	enum class TemplateResolution : std::uint8_t
+	{
+		Resolved, Dependent, Ambiguous, Incomplete
+	};
+
+	/** Workspace observations do not close a public template's instantiation universe. */
+	enum class TemplateCoverage : std::uint8_t
+	{
+		None, Workspace, Invariant
+	};
+
+	/** Argument categories, including unevaluated non-type and template arguments. */
+	enum class TemplateArgumentKind : std::uint8_t
+	{
+		Type, Value, Template, Unknown
+	};
+
+	/** Canonical argument/substitution columns shared by cached instantiations. */
+	struct TemplateArgumentTable
+	{
+		explicit TemplateArgumentTable(std::pmr::memory_resource* resource);
+
+		std::pmr::vector<TemplateArgumentKind> kind;
+		std::pmr::vector<TypeId> type;
+		std::pmr::vector<TemplateParameterId> parameter;
+		std::pmr::vector<std::uint32_t> sourceBegin;
+		std::pmr::vector<std::uint32_t> sourceEnd;
+	};
+
+	/** Cache is scoped to one model/configuration; arguments are canonical TypeIds. */
+	struct InstantiationTable
+	{
+		explicit InstantiationTable(std::pmr::memory_resource* resource);
+
+		std::pmr::vector<TemplateId> primary;
+		/** A concrete selection exists only when state is Resolved. */
+		std::pmr::vector<TemplateId> selected;
+		std::pmr::vector<std::uint32_t> firstArgument;
+		std::pmr::vector<std::uint32_t> argumentCount;
+		std::pmr::vector<TemplateResolution> state;
+		std::pmr::vector<std::uint32_t> firstBase;
+		std::pmr::vector<std::uint32_t> baseCount;
+		std::pmr::vector<TypeId> baseType;
+	};
+
+	/** Source occurrence to per-instantiation bindings, in contiguous ranges. */
+	struct DependentReferenceTable
+	{
+		explicit DependentReferenceTable(std::pmr::memory_resource* resource);
+
+		std::pmr::vector<std::uint32_t> node;
+		std::pmr::vector<std::uint32_t> token;
+		std::pmr::vector<ScopeId> definitionScope;
+		std::pmr::vector<NameId> name;
+		std::pmr::vector<TypeId> receiver;
+		std::pmr::vector<std::uint32_t> firstBinding;
+		std::pmr::vector<std::uint32_t> bindingCount;
+		std::pmr::vector<TemplateCoverage> coverage;
+		std::pmr::vector<std::uint32_t> bindingInstance;
+		std::pmr::vector<SymbolId> bindingTarget;
+		std::pmr::vector<TemplateResolution> bindingState;
+	};
+
+	/** Canonical declaration identity and explicit lookup proof. */
+	struct TemplateMemberBinding
+	{
+		SymbolId symbol          = kNone;
+		TemplateResolution state = TemplateResolution::Incomplete;
+	};
+
 	// Result of typing one SemanticModel: the declared type of every symbol and
 	// the value type of every expression node. Immutable once built, so it can be
 	// shared across threads without locks. The SemanticModel (and the tree behind
@@ -212,6 +302,34 @@ namespace heimdall
 		{
 			return m_types;
 		}
+
+		/** Instantiations collected while typing this translation unit. */
+		[[nodiscard]] const InstantiationTable& Instantiations() const noexcept
+		{
+			return mInstantiations;
+		}
+
+		/** Canonical substitutions belonging to instantiation argument ranges. */
+		[[nodiscard]] const TemplateArgumentTable& TemplateArguments() const noexcept
+		{
+			return mTemplateArguments;
+		}
+
+		/** Dependent source references retain distinct targets per instantiation. */
+		[[nodiscard]] const DependentReferenceTable& DependentReferences() const noexcept
+		{
+			return mDependentReferences;
+		}
+
+		/** Resolve a field only when the selected member view is complete. */
+		[[nodiscard]] TemplateMemberBinding LookupInstantiatedMember(std::uint32_t instance,
+			NameId name) const;
+
+		/** Certify one source occurrence; workspace-only observations cannot justify a global edit. */
+		[[nodiscard]] TemplateMemberBinding DependentBinding(std::uint32_t token) const noexcept;
+
+		/** Read-only substitution; unmodeled or noncanonical results stay Unknown. */
+		[[nodiscard]] TypeId SubstitutedType(TypeId type, std::uint32_t instance) const noexcept;
 
 		/** Return type of a lambda, including an explicitly written trailing type. */
 		[[nodiscard]] TypeId LambdaReturnType(std::uint32_t node) const noexcept
@@ -284,10 +402,23 @@ namespace heimdall
 		friend class Typer;
 		friend class TyperImpl;
 
+		TypeId Substitute(TypeId type, std::uint32_t instance);
+
+		TemplateMemberBinding LookupTypeMember(TypeId type, NameId name, std::uint32_t depth) const;
+
+		TemplateMemberBinding LookupMemberView(
+			SymbolId owner,
+			std::uint32_t instance,
+			NameId name,
+			std::uint32_t depth) const;
+
 		std::unique_ptr<Arena> m_arena;
 		const SemanticModel* m_model;
 		InternPool m_externals;
 		TypeTable m_types;
+		TemplateArgumentTable mTemplateArguments;
+		InstantiationTable mInstantiations;
+		DependentReferenceTable mDependentReferences;
 		std::pmr::vector<TypeId> m_symbol_type;
 		std::pmr::vector<TypeId> m_node_type;
 		std::pmr::vector<SymbolId> m_member_symbol;

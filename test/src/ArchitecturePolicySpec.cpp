@@ -72,6 +72,14 @@ namespace
         NoIncludes(root / "analysis", refactor);
     }
 
+    TEST(ArchitecturePolicy, CoreAndSemanticDoNotDependOnTheCrossFileIndex)
+    {
+        const fs::path root(HEIMDALL_SOURCE_DIR);
+        const auto     index = Headers(root / "index/include/Heimdall");
+        NoIncludes(root / "core", index);
+        NoIncludes(root / "semantic", index);
+    }
+
     TEST(ArchitecturePolicy, PublicPluginApiDoesNotExposeInternalRepresentations)
     {
         const auto api =

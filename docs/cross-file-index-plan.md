@@ -1,5 +1,18 @@
 # Plan: cross-file index (data-oriented)
 
+## Status
+
+| Phase | State |
+|-------|-------|
+| 0 Baselines | Not started: no `CoreBench` benchmarks or budgets yet |
+| 1 Shard format + builder | Done: `index/` (`FileShard`, `ShardBuilder`), `IndexSpec.cpp` |
+| 2 Snapshot + queries | Done: `IndexSnapshot` (`Declarations`, `Definitions`, `References`, `Subtypes`, `Supertypes`, `Search`, `SymbolAt`) and `IndexStore` (open buffers shadow disk). `workspace/symbol` is **not** migrated yet |
+| 3 Background indexer | Partial: the LSP feeds `IndexStore` from the existing open-buffer and disk-scan paths. Snapshot is rebuilt in full on change (no delta segment); no priority scheduling |
+| 4 LSP features | Partial: `typeHierarchy` supertypes/subtypes and `definition` (declaration to definition in other files, via `Candidates`) use the index; the sibling-file search remains as fallback. `references` appends cross-file uses (name-matched) to the local/workspace result; implementation/hover still on the old paths |
+| 5-8 | Not started |
+
+Known gaps in what exists: cross-file uses are matched by written name plus transitive `#include` visibility and are labelled `Unresolved`; bases in other files link by written name and are labelled inexact; occurrences do not record their enclosing symbol yet (needed for call hierarchy); forward-only declarations are not symbols because the binder does not create them.
+
 ## 1. Why
 
 Four partial indexes exist today, none of which can answer "what is this symbol everywhere in the project?":
@@ -118,3 +131,5 @@ Benchmark every hot-path change against the Phase 0 numbers before claiming a sp
 - Index is on by default for workspaces with a `compile_commands.json`, syntactic-only fallback otherwise.
 - Cache lives outside the source tree (per-workspace cache directory).
 - LSP quality (phases 2-4) ships before whole-project lint rules (phase 7).
+
+Type names written in type positions are now recorded as uses (resolved in-file when the lookup succeeds, otherwise name-matched).
