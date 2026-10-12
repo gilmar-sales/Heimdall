@@ -27,6 +27,7 @@ add_library(heimdall_core STATIC
   src/TypeLayout.cpp
   src/Navigation.cpp
   src/SymbolOutline.cpp
+  src/SyntaxHighlight.cpp
 )
 add_library(heimdall::core ALIAS heimdall_core)
 

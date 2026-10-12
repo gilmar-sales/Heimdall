@@ -223,6 +223,9 @@ namespace heimdall::lsp
 		// Outline / "Go to Symbol in Editor": syntactic, from the pinned snapshot's parse.
 		void DocumentSymbols(simdjson::dom::element request, std::string_view id);
 
+		// Syntax highlight: lexical and declaration-based classification, full or ranged.
+		void SemanticTokensRequest(simdjson::dom::element request, std::string_view id, bool ranged);
+
 		enum class TypeHierarchyMode
 		{
 			Prepare,
@@ -273,8 +276,7 @@ namespace heimdall::lsp
 			const std::shared_ptr<const std::string>& text,
 			const heimdall::CompileCommand* command);
 
-		HeaderView HeaderScopes(const std::string& uri,
-			const std::shared_ptr<const std::string>& text,
+		HeaderView HeaderScopes(const std::string& uri, const std::shared_ptr<const std::string>& text,
 			const heimdall::CompileCommand* command);
 
 		std::shared_ptr<const heimdall::ParseTree> CachedParse(
@@ -369,7 +371,7 @@ namespace heimdall::lsp
 
 		static thread_local const RequestContext* t_context;
 
-		bool m_versioned_edits = false;
+		bool mVersionedEdits = false;
 
 		// m_docs_mu guards only m_documents (hot: every request and keystroke),
 		// so readers never queue behind cache bookkeeping under the sharded
@@ -523,11 +525,9 @@ namespace heimdall::lsp
 		std::atomic<bool> mWorkDoneProgress    = false;
 		std::atomic<bool> mIndexStatus         = false;
 		WorkspaceSymbolIndex mSymbolIndex;
-		// Orders "buffer indexed" against "buffer closed" so a late index pass cannot
-		// resurrect the entry of a document that was closed meanwhile.
 		std::mutex mSymbolMutex;
 		std::jthread mSymbolWorker;
-		std::filesystem::path mWorkspaceRoot; // guarded by m_init_mu
+		std::filesystem::path mWorkspaceRoot;
 		std::jthread mScanWorker;
 		std::string mInitializationError;
 		std::condition_variable_any mIndexCv;
@@ -540,7 +540,6 @@ namespace heimdall::lsp
 		std::stop_source mDiagStop;
 		std::jthread mIndexWorker;
 		std::jthread mDiagWorker;
-		// Shutdown drains document jobs, parse jobs/continuations, then handlers.
 		ThreadPool mPool;
 		ThreadPool mParsePool;
 		ThreadPool mDocumentPool;

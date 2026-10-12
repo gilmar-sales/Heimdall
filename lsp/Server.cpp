@@ -2,6 +2,7 @@
 
 #include "Document.hpp"
 #include "JsonRpc.hpp"
+#include "SemanticTokens.hpp"
 #include "SymbolProtocol.hpp"
 #include "WorkspaceFiles.hpp"
 
@@ -20,6 +21,7 @@
 #include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/Doxygen.hpp>
 #include <Heimdall/SymbolOutline.hpp>
+#include <Heimdall/SyntaxHighlight.hpp>
 #include <Heimdall/IndexStore.hpp>
 #include <Heimdall/ShardBuilder.hpp>
 #include <Heimdall/TypeHierarchy.hpp>
@@ -230,7 +232,7 @@ namespace heimdall::lsp
 				{
 					LoadInitializationOptions(request);
 					const std::string rename_capability =
-						m_versioned_edits ? "{\"prepareProvider\":true}" : "false";
+						mVersionedEdits ? "{\"prepareProvider\":true}" : "false";
 					const std::string workspace_symbol_capability =
 						mWorkspaceSymbols.load(std::memory_order_relaxed) ? "true" : "false";
 					Respond(id_json,
@@ -249,6 +251,8 @@ namespace heimdall::lsp
 						rename_capability +
 						","
 						"\"inlayHintProvider\":true,"
+						"\"semanticTokensProvider\":{\"legend\":" +
+						SemanticTokensLegend() + ",\"range\":true,\"full\":true},"
 						"\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\",\"{\"],"
 						"\"retriggerCharacters\":[\")\"]},"
 						"\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\","
@@ -388,6 +392,16 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							InlayHints(request, id);
+					});
+				}
+				else if (method == "textDocument/semanticTokens/full" ||
+					method == "textDocument/semanticTokens/range")
+				{
+					const bool ranged = method == "textDocument/semanticTokens/range";
+					Dispatch(body, request, id_json,
+						[this, ranged](simdjson::dom::element request, std::string_view id)
+						{
+							SemanticTokensRequest(request, id, ranged);
 					});
 				}
 				else if (method == "textDocument/documentSymbol")
@@ -815,7 +829,7 @@ namespace heimdall::lsp
 			bool supported = false;
 			if (!edit_capabilities["documentChanges"].get_bool().get(supported))
 			{
-				m_versioned_edits = supported;
+				mVersionedEdits = supported;
 			}
 		}
 
@@ -2088,7 +2102,7 @@ namespace heimdall::lsp
 	void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id,
 		int mode)
 	{
-		if (mode != 0 && !m_versioned_edits)
+		if (mode != 0 && !mVersionedEdits)
 		{
 			Respond(id, "null");
 			return;
@@ -2608,7 +2622,7 @@ namespace heimdall::lsp
 
 			response += "]}]}}";
 		};
-		if (m_versioned_edits && selection_end > selection_start)
+		if (mVersionedEdits && selection_end > selection_start)
 		{
 			// Deterministic collision-free default; the plan still checks lookup.
 			std::string name = "extractedValue";
@@ -2660,7 +2674,7 @@ namespace heimdall::lsp
 			}
 		}
 
-		if (m_versioned_edits && accepts("refactor.inline.variable"))
+		if (mVersionedEdits && accepts("refactor.inline.variable"))
 		{
 			append_refactor(
 				heimdall::RefactoringService::InlineVariable(
@@ -2668,7 +2682,7 @@ namespace heimdall::lsp
 				"refactor.inline.variable");
 		}
 
-		if (m_versioned_edits && accepts("refactor.inline.function"))
+		if (mVersionedEdits && accepts("refactor.inline.function"))
 		{
 			append_refactor(
 				heimdall::RefactoringService::InlineFunction(
@@ -2676,7 +2690,7 @@ namespace heimdall::lsp
 				"refactor.inline.function");
 		}
 
-		if (m_versioned_edits && selection_end > selection_start
+		if (mVersionedEdits && selection_end > selection_start
 			&& accepts("refactor.extract.constant"))
 		{
 			std::string name = "extractedConstant";
@@ -2701,7 +2715,7 @@ namespace heimdall::lsp
 				"refactor.extract.constant");
 		}
 
-		if (m_versioned_edits && selection_end > selection_start
+		if (mVersionedEdits && selection_end > selection_start
 			&& accepts("refactor.extract.method"))
 		{
 			std::string name = "extractedMethod";
@@ -5465,6 +5479,56 @@ namespace heimdall::lsp
 			AppendFlatDocumentSymbols(symbols, uri, *document->lines, response);
 		}
 
+		Respond(id, response);
+	}
+
+	void LanguageServer::SemanticTokensRequest(
+		simdjson::dom::element request, std::string_view id, bool ranged)
+	{
+		std::string_view uri;
+		simdjson::dom::object textDocument;
+		if (!DocumentParams(request, uri, textDocument))
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		const std::string uriString(uri);
+		const auto document = GetDocument(uriString);
+		if (!document)
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		const auto tree =
+			CachedParse(uriString, document->text, document->version, CommandFor(uriString));
+		if (!tree || RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		std::optional<ByteRange> range;
+		if (ranged)
+		{
+			simdjson::dom::object params, rangeObject, start, end;
+			if (!GetObject(request, "params", params) ||!GetObject(params, "range", rangeObject) ||
+				!GetObject(rangeObject, "start", start) ||!GetObject(rangeObject, "end", end))
+			{
+				Respond(id, "null");
+				return;
+			}
+
+			range = ByteRange {document->lines->OffsetFromPosition(
+					{PositionNumber(start, "line"), PositionNumber(start, "character")}),
+				document->lines->OffsetFromPosition(
+					{PositionNumber(end, "line"), PositionNumber(end, "character")})};
+		}
+
+		const auto spans = heimdall::SyntaxHighlight::Extract(*tree);
+		std::string response;
+		AppendSemanticTokens(spans, tree->Source(), *document->lines, range, response);
 		Respond(id, response);
 	}
 

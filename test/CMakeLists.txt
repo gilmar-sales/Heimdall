@@ -53,6 +53,8 @@ add_executable(Tests_run
   src/IncludeInsertionSpec.cpp
   src/NavigationSpec.cpp
   src/SymbolOutlineSpec.cpp
+  src/SyntaxHighlightSpec.cpp
+  src/SemanticTokensSpec.cpp
   src/SymbolProtocolSpec.cpp
   src/WorkspaceSymbolIndexSpec.cpp
   src/WorkspaceFilesSpec.cpp
@@ -67,6 +69,7 @@ add_executable(Tests_run
   src/CliOptionsSpec.cpp
   ../../lsp/Document.cpp
   ../../lsp/JsonRpc.cpp
+  ../../lsp/SemanticTokens.cpp
   ../../lsp/SymbolProtocol.cpp
   ../../lsp/WorkspaceFiles.cpp
   ../../lsp/WorkspaceSymbolIndex.cpp

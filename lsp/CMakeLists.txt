@@ -3,6 +3,7 @@ add_executable(heimdall-lsp
   main.cpp
   Document.cpp
   JsonRpc.cpp
+  SemanticTokens.cpp
   Server.cpp
   SymbolProtocol.cpp
   WorkspaceFiles.cpp
