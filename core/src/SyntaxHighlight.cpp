@@ -116,6 +116,7 @@ namespace heimdall
 			{
 				mSpans.reserve(mTokens.size() / kTokensPerSpan);
 				CollectDeclarations(SymbolOutline::Extract(tree));
+				mTypeNames = tree.TypeNames();
 				Walk();
 				return std::move(mSpans);
 			}
@@ -344,6 +345,11 @@ namespace heimdall
 					return lower ? HighlightKind::Namespace : HighlightKind::Type;
 				}
 
+				if (mTypeNames && mTypeNames->IsType(text))
+				{
+					return HighlightKind::Type;
+				}
+
 				if (call && !FollowsTypeName())
 				{
 					return HighlightKind::Function;
@@ -528,6 +534,7 @@ namespace heimdall
 			std::unordered_map<std::size_t, HighlightKind> mDeclarations;
 			std::unordered_map<std::string_view, NameKind> mNames;
 			std::unordered_set<std::string_view> mMacros;
+			std::shared_ptr<const TypeNameOracle> mTypeNames;
 			std::optional<std::size_t> mPrevSignificant;
 			bool mExpectMacroName            = false;
 			bool mExpectDefine               = false;

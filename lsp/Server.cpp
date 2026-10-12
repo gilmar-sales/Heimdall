@@ -2029,6 +2029,16 @@ namespace heimdall::lsp
 			};
 			diagnostics = heimdall::AnalysisFeatures::Diagnostics(
 				AnalysisFor(uri, parsed, ParserOptionsFor(command)), engine, true, context);
+			const auto headers = AwaitHeaderScopes(uri, tree.SharedSource(), command);
+			if (headers.index)
+			{
+				const auto analysis = AnalysisFor(uri, parsed, ParserOptionsFor(command));
+				auto indexed = engine.ApplyPolicy(
+					heimdall::SemanticRules::AnalyzeIndexedCallArgumentTypes(
+					analysis.Types(), headers.index->Scopes()), tree);
+				diagnostics.insert(diagnostics.end(), std::make_move_iterator(indexed.begin()),
+					std::make_move_iterator(indexed.end()));
+			}
 		}
 
 		if (profile == nullptr)
@@ -4180,6 +4190,8 @@ namespace heimdall::lsp
 		const auto& nodes              = tree->NodesSoA();
 		const auto& semantic           = context.Semantic();
 		const auto& semantic_symbols   = context.Symbols();
+		const HeaderView typeHeaders   = AwaitHeaderScopes(uri_string, text, command);
+		const auto* typeIndex          = typeHeaders.index ? &typeHeaders.index->Scopes() : nullptr;
 		const auto next_significant =[&](std::size_t token, std::size_t limit)
 		{
 			while (token < limit && (tokens[token].kind == heimdall::TokenKind::Whitespace ||
@@ -4378,6 +4390,15 @@ namespace heimdall::lsp
 				(semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Variable ||
 				semantic_symbols.kind[sourceSymbol] == heimdall::SymbolKind::Parameter))
 			{
+				const auto following = next_significant(initializer + 1, declaration_end);
+				if (following < declaration_end &&
+					(tokens[following].tok == heimdall::Tok::Dot ||
+					tokens[following].tok == heimdall::Tok::Arrow ||
+					tokens[following].tok == heimdall::Tok::LParen))
+				{
+					return std::string {};
+				}
+
 				const auto declaredType = context.Types().SymbolType(sourceSymbol);
 				if (context.Types().Types().IsKnown(declaredType))
 				{
@@ -4721,6 +4742,11 @@ namespace heimdall::lsp
 				{
 					type_spelling = inferred_spelling(symbol);
 				}
+			}
+
+			if (type_spelling.empty())
+			{
+				type_spelling = heimdall::CompletionEngine::InferredType(*tree, token_index, typeIndex);
 			}
 
 			if (type_spelling == "auto")

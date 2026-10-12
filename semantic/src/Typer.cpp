@@ -3269,7 +3269,13 @@ namespace heimdall
 
 		if (as_call)
 		{
-			return kind == SymbolKind::Function ? OverloadReturn(member) : TypeTable::Unknown;
+			if (kind != SymbolKind::Function)
+			{
+				return TypeTable::Unknown;
+			}
+
+			m_out.m_member_symbol[node] = member;
+			return OverloadReturn(member);
 		}
 
 		return kind == SymbolKind::Variable || kind == SymbolKind::Parameter
@@ -3358,7 +3364,32 @@ namespace heimdall
 				return CastType(callee);
 			}
 
-			const auto[begin, end] = NodeSig(callee);
+			const auto[begin, end]      = NodeSig(callee);
+			const auto templateChildren = m_model.ChildrenOf(callee);
+			if (!templateChildren.empty() &&
+				m_nodes.Kind(templateChildren[0]) == GrammarKind::MemberExpression)
+			{
+				const auto memberNode = templateChildren[0];
+				(void) MemberType(memberNode, true);
+				const auto member       = m_out.m_member_symbol[memberNode];
+				const auto declaration  = member == kNone ? kNone : m_model.TemplateOf(member);
+				const auto argumentOpen = NodeSig(memberNode).second;
+				if (declaration == kNone || m_symbols.next_same_name[member] != kNone ||
+					At(argumentOpen) != Tok::Lt || At(end - 1) != Tok::Gt)
+				{
+					return TypeTable::Unknown;
+				}
+
+				const auto arguments = ParseTemplateArguments(argumentOpen + 1, end - 1,
+					m_model.ScopeOfNode(callee), m_sig[begin]);
+				if (arguments.size() != m_model.Templates().parameterCount[declaration])
+				{
+					return TypeTable::Unknown;
+				}
+
+				return SubstituteArguments(SymbolType(member), declaration, arguments);
+			}
+
 			const auto constructed = ParseTypeTokens(begin, end, m_model.ScopeOfNode(callee), m_sig[begin]);
 			return m_types.Kind(constructed) == TypeKind::TemplateId ? constructed : TypeTable::Unknown;
 		}

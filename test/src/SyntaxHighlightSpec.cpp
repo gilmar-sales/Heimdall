@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,33 @@ namespace
 TEST(SyntaxHighlightSpec, EmptySourceHasNoSpans)
 {
     EXPECT_TRUE(Highlight("").empty());
+}
+
+TEST(SyntaxHighlightSpec, ClassifiesHeaderTypesInMemberTemplateArguments)
+{
+    struct HeaderTypes final : heimdall::TypeNameOracle
+    {
+        bool IsType(std::string_view name) const noexcept override
+        {
+            return name == "ComponentManager";
+        }
+
+        std::uint64_t Fingerprint() const noexcept override
+        {
+            return 1;
+        }
+    };
+
+    constexpr std::string_view source =
+        "void F() { services.AddSingleton<ComponentManager>(); }";
+    heimdall::ParserOptions options;
+    options.type_names = std::make_shared<HeaderTypes>();
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+
+    const auto spans = heimdall::SyntaxHighlight::Extract(tree);
+
+    EXPECT_TRUE(IsKind(source, spans, "ComponentManager", HighlightKind::Type));
+    EXPECT_TRUE(IsKind(source, spans, "AddSingleton", HighlightKind::Method));
 }
 
 TEST(SyntaxHighlightSpec, ClassifiesLexicalCategories)

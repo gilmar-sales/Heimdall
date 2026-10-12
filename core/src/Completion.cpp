@@ -1742,7 +1742,21 @@ namespace heimdall
 				std::vector<std::string> names;
 				while (pos < significant.size() && is_identifier(significant[pos]))
 				{
-					names.emplace_back(text(significant[pos]));
+					const auto spelling  = text(significant[pos]);
+					const auto& resolver = tree.MacroResolverRef();
+					const auto* macro = resolver ? resolver->Find(spelling,
+						tree.Tokens()[significant[pos]].offset) : nullptr;
+					const auto replacement = macro && !macro->functionLike
+					? std::string_view(macro->body) : tree.PredefinedReplacement(spelling);
+					if (!replacement.empty() && std::ranges::all_of(replacement, IsIdentChar))
+					{
+						names.emplace_back(replacement);
+					}
+					else
+					{
+						names.emplace_back(spelling);
+					}
+
 					++pos;
 					if (pos + 1 < significant.size() && text(significant[pos]) == "::" &&
 						is_identifier(significant[pos + 1]))
@@ -3214,8 +3228,15 @@ namespace heimdall
 		std::vector<std::string> TemplateParamNames(const ParseTree& tree, std::size_t record)
 		{
 			std::vector<std::string> names;
-			const auto& nodes         = tree.NodesSoA();
-			const std::size_t wrapper = nodes.Parent(record);
+			const auto& nodes = tree.NodesSoA();
+			auto wrapper      = nodes.Parent(record);
+			while (wrapper < nodes.size() && wrapper != ParseTree::RootNode &&
+				nodes.Kind(wrapper) != GrammarKind::TemplateDeclaration &&
+				nodes.Kind(wrapper) != GrammarKind::RecordDefinition)
+			{
+				wrapper = nodes.Parent(wrapper);
+			}
+
 			if (wrapper >= nodes.size() || nodes.Kind(wrapper) != GrammarKind::TemplateDeclaration)
 			{
 				return names;
@@ -3752,7 +3773,8 @@ namespace heimdall
 			}
 			else if (kind == CompletionKind::Function)
 			{
-				item.type_text = ReturnTypeText(tree, node);
+				item.type_text      = ReturnTypeText(tree, node);
+				item.templateParams = TemplateParamNames(tree, node);
 			}
 			else if (kind == CompletionKind::Type)
 			{
@@ -4835,11 +4857,12 @@ namespace heimdall
 			CompletionItem item {std::string(name), CompletionKind::Type,
 				KindDetail(CompletionKind::Type),
 				DocCommentFor(source, tokens, grammar.GetFirstToken())};
-			item.has_location  = true;
-			item.offset        = tokens[name_token].offset;
-			item.is_definition = true;
-			item.type_text     = std::move(target);
-			item.detail        = "using " + item.label + " = " + item.type_text;
+			item.has_location   = true;
+			item.offset         = tokens[name_token].offset;
+			item.is_definition  = true;
+			item.type_text      = std::move(target);
+			item.templateParams = TemplateParamNames(tree, n);
+			item.detail         = "using " + item.label + " = " + item.type_text;
 			IndexedScope& entry =
 				entry_for(scope < scope_paths.size() ? scope_paths[scope] : ScopePath(tree, scope),
 				CompletionKind::Type);
@@ -4858,12 +4881,33 @@ namespace heimdall
 
 			auto bases  = RecordBases(tree, n);
 			auto params = TemplateParamNames(tree, n);
-			if (bases.empty() && params.empty())
+
+			bool hasReferenceConversion = false;
+			const auto recordEnd = std::min<std::size_t>(
+				tree.NodesSoA().FirstToken(n) + tree.NodesSoA().TokenCount(n), tree.Tokens().size());
+			for (auto token = tree.NodesSoA().FirstToken(n); token < recordEnd; ++token)
+			{
+				if (tree.Tokens()[token].tok != Tok::KwOperator)
+				{
+					continue;
+				}
+
+				bool typeName = false;
+				for (auto part = token + 1; part < recordEnd && tree.Tokens()[part].tok != Tok::LParen; ++part)
+				{
+					typeName |= tree.Tokens()[part].kind == TokenKind::Identifier;
+					hasReferenceConversion |= typeName &&
+						(tree.Tokens()[part].tok == Tok::Amp || tree.Tokens()[part].tok == Tok::AmpAmp);
+				}
+			}
+
+			if (bases.empty() && params.empty() && !hasReferenceConversion)
 			{
 				continue;
 			}
 
 			IndexedScope& entry = entry_for(scope_paths[n], CompletionKind::Type);
+			entry.hasReferenceConversion |= hasReferenceConversion;
 			if (entry.template_params.empty())
 			{
 				entry.template_params = std::move(params);
@@ -5907,7 +5951,7 @@ namespace heimdall
 					angle -= p == ">" ? 1 : kDoubleAngleCount;
 					if (angle <= 0)
 					{
-						const std::size_t end = toks[k].offset;
+						const std::size_t end = toks[k].offset +(p == ">>" && angle == 0 ? 1 : 0);
 						if (end > arg_start)
 						{
 							args.push_back(
@@ -6287,6 +6331,12 @@ namespace heimdall
 			// (`= a.b().c()`), or the name of a type it constructs. Empty when unknown.
 			std::string DeducedTypeText(std::size_t name) const
 			{
+				const auto rangeType = RangeBindingType(name);
+				if (!rangeType.empty())
+				{
+					return rangeType;
+				}
+
 				const Resolved value = ResolveInitializerAfter(name, 0);
 				if (!value.text.empty())
 				{
@@ -6321,6 +6371,213 @@ namespace heimdall
 				}
 
 				return written;
+			}
+
+			std::string VariableTypeText(std::size_t token) const
+			{
+				if (token >= m_tokens.size())
+				{
+					return {};
+				}
+
+				const auto value = ResolveVariable(std::string(TokenText(m_source, m_tokens[token])), 0);
+				auto written     = value.text;
+				if (written.empty() && value.ok)
+				{
+					for (const auto& part : value.path)
+					{
+						written += written.empty() ? part : "::" + part;
+					}
+
+					if (!value.args.empty())
+					{
+						written += '<';
+						for (std::size_t i = 0; i < value.args.size(); ++i)
+						{
+							written +=(i == 0 ? "" : ", ") + value.args[i];
+						}
+
+						written += '>';
+					}
+				}
+
+				auto hint                            = value.hint.empty() ? m_hint : value.hint;
+				constexpr std::size_t kMaxAliasDepth = 8;
+				for (std::size_t depth = 0; depth < kMaxAliasDepth; ++depth)
+				{
+					const auto type = ParseTypeName(written);
+					if (!type.ok)
+					{
+						return written;
+					}
+
+					Found alias;
+					for (const auto& prefix : Prefixes(hint))
+					{
+						const auto full = Join(prefix, type.path);
+						alias           = FindAlias(Parent(full), full.back());
+						if (alias.item)
+						{
+							break;
+						}
+					}
+
+					if (!alias.item || alias.item->templateParams.size() != type.args.size())
+					{
+						return written;
+					}
+
+					written = SubstituteText(alias.item->type_text, alias.item->templateParams, type.args);
+					hint    = alias.owner;
+				}
+
+				return {};
+			}
+
+			static std::string SubstituteText(std::string_view text,
+				const std::vector<std::string>& parameters, const std::vector<std::string>& arguments)
+			{
+				std::string result;
+				for (std::size_t begin = 0; begin < text.size();)
+				{
+					if (!IsIdentStart(text[begin]))
+					{
+						result += text[begin++];
+						continue;
+					}
+
+					auto end = begin + 1;
+					while (end < text.size() && IsIdentChar(text[end]))
+					{
+						++end;
+					}
+
+					const auto word      = text.substr(begin, end - begin);
+					const auto parameter = std::find(parameters.begin(), parameters.end(), word);
+					const auto index     = static_cast<std::size_t>(parameter - parameters.begin());
+					result += index < arguments.size() ? std::string_view(arguments[index]) : word;
+					begin = end;
+				}
+
+				return result;
+			}
+
+			std::string RangeBindingType(std::size_t name, int depth = 0) const
+			{
+				constexpr int kMaxRangeDepth = 6;
+				if (name >= m_tokens.size() || depth > kMaxRangeDepth)
+				{
+					return {};
+				}
+
+				const auto& nodes = m_tree.NodesSoA();
+				for (std::size_t node = 0; node < nodes.size(); ++node)
+				{
+					if (nodes.Kind(node) != GrammarKind::DeclarationStatement ||
+						name < nodes.FirstToken(node) ||
+						name >= nodes.FirstToken(node) + nodes.TokenCount(node))
+					{
+						continue;
+					}
+
+					auto colon               = NextSignificant(name);
+					bool structured          = false;
+					std::size_t bindingIndex = 0;
+					bool reference           = false;
+					bool constant            = false;
+					for (auto token = nodes.FirstToken(node); token < name; ++token)
+					{
+						structured |= m_tokens[token].tok == Tok::LBracket;
+						reference |= m_tokens[token].tok == Tok::Amp || m_tokens[token].tok == Tok::AmpAmp;
+						constant |= m_tokens[token].tok == Tok::KwConst;
+						if (structured && m_tokens[token].tok == Tok::Comma)
+						{
+							++bindingIndex;
+						}
+					}
+
+					if (structured)
+					{
+						while (colon < m_tokens.size() && m_tokens[colon].tok != Tok::RBracket)
+						{
+							colon = NextSignificant(colon);
+						}
+
+						colon = NextSignificant(colon);
+					}
+
+					if (colon >= m_tokens.size() || m_tokens[colon].tok != Tok::Colon)
+					{
+						return {};
+					}
+
+					auto end          = NextSignificant(colon);
+					std::size_t depth = 0;
+					for (; end < m_tokens.size(); ++end)
+					{
+						if (m_tokens[end].tok == Tok::LParen)
+						{
+							++depth;
+						}
+						else if (m_tokens[end].tok == Tok::RParen)
+						{
+							if (depth == 0)
+							{
+								break;
+							}
+
+							--depth;
+						}
+					}
+
+					const auto container  = ResolveChain(ParseChainEndingAt(end, colon), depth + 1);
+					const auto type       = ParseTypeName(container.text);
+					const auto& path      = container.path.empty() ? type.path : container.path;
+					const auto& arguments = container.args.empty() ? type.args : container.args;
+					if (path.size() < 2 || path.front() != "std" || arguments.empty())
+					{
+						return {};
+					}
+
+					const auto& head = path.back();
+					const bool map = head == "map" || head == "unordered_map" ||
+						head == "multimap" || head == "unordered_multimap";
+					std::string element;
+					if (map && arguments.size() >= 2)
+					{
+						if (structured && bindingIndex < 2)
+						{
+							element = (bindingIndex == 0 ? "const " : "") + arguments[bindingIndex];
+						}
+						else if (!structured)
+						{
+							element = "std::pair<const " + arguments[0] + ", " + arguments[1] + ">";
+						}
+					}
+					else if (!structured && (head == "vector" || head == "array" || head == "span" ||
+						head == "deque" || head == "list" || head == "forward_list" || head == "set" ||
+						head == "unordered_set" || head == "multiset" || head == "unordered_multiset"))
+					{
+						element = arguments[0];
+						constant |= reference && (head == "set" || head == "unordered_set" ||
+							head == "multiset" || head == "unordered_multiset");
+					}
+
+					if (element.empty())
+					{
+						return {};
+					}
+
+					if ((constant ||(reference && container.text.starts_with("const "))) &&
+						!element.starts_with("const "))
+					{
+						element = "const " + element;
+					}
+
+					return element +(reference && !structured ? "&" : "");
+				}
+
+				return {};
 			}
 
 			Resolved ResolveChain(const Chain& chain, int depth = 0) const
@@ -7184,6 +7441,12 @@ namespace heimdall
 					return resolved;
 				}
 
+				const auto rangeType = RangeBindingType(m_tree.NodesSoA().FirstToken(node), depth);
+				if (!rangeType.empty())
+				{
+					return FromText(rangeType, m_hint, depth);
+				}
+
 				return ResolveInitializerAfter(m_tree.NodesSoA().FirstToken(node), depth);
 			}
 
@@ -7409,6 +7672,20 @@ namespace heimdall
 				if (found.item == nullptr || found.item->type_text.empty())
 				{
 					return {};
+				}
+
+				if (call && !segment.targs.empty() &&
+					segment.targs.size() == found.item->templateParams.size())
+				{
+					auto written = SubstituteText(found.item->type_text,
+						found.item->templateParams, segment.targs);
+					auto result = FromText(written, found.owner, 0);
+					if (result.ok)
+					{
+						result.text.clear();
+					}
+
+					return ApplyPostfix(std::move(result), rest);
 				}
 
 				// `T& value()` of `expected<Item, E>`: the member is the argument written
@@ -9196,6 +9473,30 @@ namespace heimdall
 		}
 
 	} // namespace
+
+	std::string CompletionEngine::InferredType(const ParseTree& tree,
+		std::size_t nameToken, const ScopeIndex* external)
+	{
+		if (nameToken >= tree.Tokens().size())
+		{
+			return {};
+		}
+
+		const MemberResolver resolver(tree, external, tree.Tokens()[nameToken].offset);
+		return resolver.DeducedTypeText(nameToken);
+	}
+
+	std::string CompletionEngine::VariableType(const ParseTree& tree,
+		std::size_t nameToken, const ScopeIndex* external)
+	{
+		if (nameToken >= tree.Tokens().size())
+		{
+			return {};
+		}
+
+		const MemberResolver resolver(tree, external, tree.Tokens()[nameToken].offset);
+		return resolver.VariableTypeText(nameToken);
+	}
 
 	std::optional<CompletionItem> CompletionEngine::Hover(
 		std::string_view source,

@@ -26,7 +26,7 @@ namespace
     }
 
     const heimdall::CompletionItem* Find(const std::vector<heimdall::CompletionItem>& items,
-                                         std::string_view                             label)
+        std::string_view label)
     {
         for (const auto& item : items)
         {
@@ -83,7 +83,7 @@ TEST(CompletionSpec, SuggestsLocalVariablesAndFunctionsByPrefix)
 TEST(CompletionSpec, SuggestsKeywordsByPrefix)
 {
     constexpr std::string_view source = "int f() { ret";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
     EXPECT_TRUE(Contains(items, "return"));
     const auto* item = Find(items, "return");
     ASSERT_NE(item, nullptr);
@@ -93,7 +93,7 @@ TEST(CompletionSpec, SuggestsKeywordsByPrefix)
 TEST(CompletionSpec, FiltersCandidatesByPrefix)
 {
     constexpr std::string_view source = "int alpha = 1;\nint beta = 2;\nint al";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
     EXPECT_TRUE(Contains(items, "alpha"));
     EXPECT_FALSE(Contains(items, "beta"));
 }
@@ -101,7 +101,7 @@ TEST(CompletionSpec, FiltersCandidatesByPrefix)
 TEST(CompletionSpec, EmptyPrefixReturnsKeywords)
 {
     constexpr std::string_view source = "int x = 1;\n";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
     EXPECT_TRUE(Contains(items, "return"));
     EXPECT_TRUE(Contains(items, "int"));
 }
@@ -145,7 +145,7 @@ TEST(CompletionSpec, SuppressesMemberAccessOnReceiversItCannotType)
 TEST(CompletionSpec, SuggestsPreprocessorDirectivesAfterHash)
 {
     constexpr std::string_view source = "#inc";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
     EXPECT_TRUE(Contains(items, "include"));
     const auto* item = Find(items, "include");
     ASSERT_NE(item, nullptr);
@@ -155,7 +155,7 @@ TEST(CompletionSpec, SuggestsPreprocessorDirectivesAfterHash)
 TEST(CompletionSpec, SuggestsDefinesAndPredefinedMacros)
 {
     constexpr std::string_view source = "#define MY_FEATURE 1\nint x = MY_FEA";
-    heimdall::ParserOptions    options;
+    heimdall::ParserOptions options;
     options.predefined_macros.emplace("PLATFORM_FLAG", "1");
     const auto items = heimdall::CompletionEngine::Complete(source, options, source.size());
     EXPECT_TRUE(Contains(items, "MY_FEATURE"));
@@ -190,7 +190,7 @@ TEST(CompletionSpec, ClassifiesDeclaredFunctionsAndTypes)
 TEST(CompletionSpec, CompletesOnBrokenCodeWithoutCrashing)
 {
     constexpr std::string_view source = "int f() { int broken return con";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
     // `con` matches `continue`/`const`/`constexpr` even though the missing
     // ';' leaves a parse diagnostic behind.
     EXPECT_TRUE(Contains(items, "continue"));
@@ -205,13 +205,13 @@ TEST(CompletionSpec, ClassifiesLocalsAndParametersAsVariables)
         "  return myL;\n"
         "}\n";
     const std::size_t param_pos = source.find("= myPa") + 5;
-    const auto        params    = heimdall::CompletionEngine::Complete(source, param_pos);
-    const auto*       param     = Find(params, "myParam");
+    const auto params = heimdall::CompletionEngine::Complete(source, param_pos);
+    const auto* param = Find(params, "myParam");
     ASSERT_NE(param, nullptr) << "expected myParam among completions";
     EXPECT_EQ(param->kind, heimdall::CompletionKind::Variable);
     const std::size_t local_pos = source.rfind("myL") + 3;
-    const auto        locals    = heimdall::CompletionEngine::Complete(source, local_pos);
-    const auto*       local     = Find(locals, "myLocal");
+    const auto locals = heimdall::CompletionEngine::Complete(source, local_pos);
+    const auto* local = Find(locals, "myLocal");
     ASSERT_NE(local, nullptr) << "expected myLocal among completions";
     EXPECT_EQ(local->kind, heimdall::CompletionKind::Variable);
 }
@@ -227,8 +227,8 @@ TEST(CompletionSpec, HidesLocalsFromOtherFunctions)
         "  int alpha_second = 2;\n"
         "  int x = alpha_;\n"
         "}\n";
-    const std::size_t pos   = source.rfind("alpha_") + 6;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
+    const std::size_t pos = source.rfind("alpha_") + 6;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
     EXPECT_TRUE(Contains(items, "alpha_second"));
     EXPECT_FALSE(Contains(items, "alpha_local"));
 }
@@ -240,8 +240,8 @@ TEST(CompletionSpec, HidesDeclarationsAfterCursor)
         "  int x = late_;\n"
         "  int late_value = 1;\n"
         "}\n";
-    const std::size_t pos   = source.find("late_") + 5;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
+    const std::size_t pos = source.find("late_") + 5;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
     EXPECT_FALSE(Contains(items, "late_value"));
 }
 
@@ -257,7 +257,7 @@ TEST(CompletionSpec, SuggestsParametersOnlyInsideTheirFunction)
     const std::size_t inside = source.find("return first_") + 13;
     EXPECT_TRUE(Contains(heimdall::CompletionEngine::Complete(source, inside), "first_arg"));
     const std::size_t outside = source.rfind("return first_") + 13;
-    const auto        outer   = heimdall::CompletionEngine::Complete(source, outside);
+    const auto outer = heimdall::CompletionEngine::Complete(source, outside);
     EXPECT_FALSE(Contains(outer, "first_arg"));
     EXPECT_FALSE(Contains(outer, "second_arg"));
 }
@@ -271,8 +271,8 @@ TEST(CompletionSpec, ResolvesNamespaceMembers)
         "int tool_other = 3;\n"
         "}\n"
         "int x = tools::tool_i;\n";
-    const std::size_t pos   = source.rfind("tool_i") + 6;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
+    const std::size_t pos = source.rfind("tool_i") + 6;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
     EXPECT_TRUE(Contains(items, "tool_item"));
     EXPECT_FALSE(Contains(items, "tool_other"));
     EXPECT_FALSE(Contains(items, "global_item"));
@@ -289,12 +289,12 @@ TEST(CompletionSpec, ResolvesNestedNamespaces)
         "}\n"
         "int a = outer::inner::deep_;\n"
         "int b = outer::shallow_;\n";
-    const std::size_t deep       = source.find("deep_;") + 5;
-    const auto        deep_items = heimdall::CompletionEngine::Complete(source, deep);
+    const std::size_t deep = source.find("deep_;") + 5;
+    const auto deep_items = heimdall::CompletionEngine::Complete(source, deep);
     EXPECT_TRUE(Contains(deep_items, "deep_item"));
 
-    const std::size_t shallow       = source.find("shallow_;") + 8;
-    const auto        shallow_items = heimdall::CompletionEngine::Complete(source, shallow);
+    const std::size_t shallow = source.find("shallow_;") + 8;
+    const auto shallow_items = heimdall::CompletionEngine::Complete(source, shallow);
     EXPECT_TRUE(Contains(shallow_items, "shallow_item"));
     EXPECT_FALSE(Contains(shallow_items, "deep_item"));
 }
@@ -315,8 +315,8 @@ TEST(CompletionSpec, ResolvesScopedEnumMembers)
         "enum class Color { Red, Green };\n"
         "int compute() { return 0; }\n"
         "Color c = Color::R;\n";
-    const std::size_t pos   = source.find("Color::R") + 8;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
+    const std::size_t pos = source.find("Color::R") + 8;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
     EXPECT_TRUE(Contains(items, "Red"));
     EXPECT_FALSE(Contains(items, "Green"));
     EXPECT_FALSE(Contains(items, "compute"));
@@ -326,7 +326,7 @@ TEST(CompletionSpec, ResolvesScopedEnumMembers)
         "int compute() { return 0; }\n"
         "Color c2 = Color::;\n";
     const std::size_t all_pos = all_source.find("Color::") + 7;
-    const auto        all     = heimdall::CompletionEngine::Complete(all_source, all_pos);
+    const auto all = heimdall::CompletionEngine::Complete(all_source, all_pos);
     EXPECT_TRUE(Contains(all, "Red"));
     EXPECT_TRUE(Contains(all, "Green"));
     EXPECT_FALSE(Contains(all, "compute"));
@@ -341,8 +341,8 @@ TEST(CompletionSpec, GlobalQualifierListsGlobalsWithoutLocalsOrKeywords)
         "  consume(gotham);\n"
         "}\n"
         "int y = ::g;\n";
-    const std::size_t pos   = source.rfind("::g") + 3;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
+    const std::size_t pos = source.rfind("::g") + 3;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
     EXPECT_TRUE(Contains(items, "gvalue"));
     EXPECT_FALSE(Contains(items, "gotham"));
     EXPECT_FALSE(Contains(items, "goto"));
@@ -364,7 +364,8 @@ TEST(CompletionSpec, IndexScopesListsScopesAndMembers)
     const heimdall::ScopeIndex index =
         heimdall::CompletionEngine::IndexScopes(source, heimdall::ParserOptions {});
 
-    auto find_scope = [&](std::vector<std::string> path) -> const heimdall::IndexedScope* {
+    auto find_scope =[&](std::vector<std::string> path)->const heimdall::IndexedScope *
+    {
         for (const auto& scope : index)
         {
             if (scope.path == path)
@@ -381,14 +382,14 @@ TEST(CompletionSpec, IndexScopesListsScopesAndMembers)
     EXPECT_TRUE(Contains(root->members, "FEATURE_FLAG"));
     EXPECT_TRUE(Contains(root->members, "tools"));
 
-    const auto* tools = find_scope({ "tools" });
+    const auto* tools = find_scope({"tools"});
     ASSERT_NE(tools, nullptr);
     EXPECT_TRUE(Contains(tools->members, "Widget"));
     EXPECT_TRUE(Contains(tools->members, "tool_fn"));
     EXPECT_TRUE(Contains(tools->members, "inner"));
     EXPECT_FALSE(Contains(tools->members, "deep_fn"));
 
-    const auto* inner = find_scope({ "tools", "inner" });
+    const auto* inner = find_scope({"tools", "inner"});
     ASSERT_NE(inner, nullptr);
     EXPECT_TRUE(Contains(inner->members, "deep_fn"));
 }
@@ -396,15 +397,25 @@ TEST(CompletionSpec, IndexScopesListsScopesAndMembers)
 TEST(CompletionSpec, ExternalIndexFeedsQualifiedLookup)
 {
     const heimdall::ScopeIndex external = {
-        { { "std" },
-          heimdall::CompletionKind::Namespace,
-          { { "vector", heimdall::CompletionKind::Type, "type" } } },
-        { {},
-          heimdall::CompletionKind::Keyword,
-          { { "printf", heimdall::CompletionKind::Function, "function" } } },
+        {
+            {
+                "std"
+            },
+                heimdall::CompletionKind::Namespace,
+                {
+                {
+                    "vector", heimdall::CompletionKind::Type, "type"
+            }}
+        },
+        {{},
+            heimdall::CompletionKind::Keyword,
+            {
+                {
+                    "printf", heimdall::CompletionKind::Function, "function"
+        }}},
     };
-    constexpr std::string_view use       = "int x = std::vec;\n";
-    const auto                 qualified = heimdall::CompletionEngine::Complete(
+    constexpr std::string_view use = "int x = std::vec;\n";
+    const auto qualified = heimdall::CompletionEngine::Complete(
         use, heimdall::ParserOptions {}, use.size() - 2, &external);
     EXPECT_TRUE(Contains(qualified, "vector"));
     EXPECT_FALSE(Contains(qualified, "printf"));
@@ -412,12 +423,12 @@ TEST(CompletionSpec, ExternalIndexFeedsQualifiedLookup)
     // Namespaced header members stay qualified-only: unqualified `vec` must
     // not offer `std::vector`...
     constexpr std::string_view plain_use = "int y = vec;\n";
-    const auto                 plain     = heimdall::CompletionEngine::Complete(
+    const auto plain = heimdall::CompletionEngine::Complete(
         plain_use, heimdall::ParserOptions {}, plain_use.size() - 2, &external);
     EXPECT_FALSE(Contains(plain, "vector"));
     // ...while header globals are visible unqualified.
     constexpr std::string_view global_use = "int y = print;\n";
-    const auto                 globals    = heimdall::CompletionEngine::Complete(
+    const auto globals = heimdall::CompletionEngine::Complete(
         global_use, heimdall::ParserOptions {}, global_use.size() - 2, &external);
     EXPECT_TRUE(Contains(globals, "printf"));
 }
@@ -430,7 +441,7 @@ TEST(CompletionSpec, ClassifiesTypeAliasesAsTypes)
         "using wide = Basic<wchar_t>;\n"
         "int nar;\n";
     // Cursor past `;` (empty prefix) so both aliases match.
-    const auto  items  = heimdall::CompletionEngine::Complete(source, source.size() - 1);
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 1);
     const auto* narrow = Find(items, "narrow");
     ASSERT_NE(narrow, nullptr);
     EXPECT_EQ(narrow->kind, heimdall::CompletionKind::Type);
@@ -446,8 +457,8 @@ TEST(CompletionSpec, FunctionDetailShowsSignatureAndDocs)
         "/// Returns their sum.\n"
         "int add(int left, int right) { return left + right; }\n"
         "int x = ad;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
-    const auto* item  = Find(items, "add");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "add");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "int add(int left, int right)");
     EXPECT_EQ(item->documentation, "Adds two numbers.\nReturns their sum.");
@@ -461,9 +472,9 @@ TEST(CompletionSpec, VariableDetailShowsTypeAndDocs)
         "  long total = 0;\n"
         "  return tot;\n"
         "}\n";
-    const std::size_t pos   = source.rfind("tot") + 3;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
-    const auto*       item  = Find(items, "total");
+    const std::size_t pos = source.rfind("tot") + 3;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    const auto* item = Find(items, "total");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "long");
     EXPECT_EQ(item->documentation, "The running total.");
@@ -476,8 +487,8 @@ TEST(CompletionSpec, BlankLineBreaksDocAttachment)
         "\n"
         "int fresh = 1;\n"
         "int y = fre;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
-    const auto* item  = Find(items, "fresh");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "fresh");
     ASSERT_NE(item, nullptr);
     EXPECT_TRUE(item->documentation.empty());
 }
@@ -488,8 +499,8 @@ TEST(CompletionSpec, MacroDetailShowsValueAndDocs)
         "/// Maximum buffer size.\n"
         "#define LIMIT 1024\n"
         "int x = LIM;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
-    const auto* item  = Find(items, "LIMIT");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "LIMIT");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "1024");
     EXPECT_EQ(item->documentation, "Maximum buffer size.");
@@ -503,8 +514,8 @@ TEST(CompletionSpec, NamespaceDetailAndDocs)
         "int run();\n"
         "}\n"
         "int x = tool;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
-    const auto* item  = Find(items, "tools");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "tools");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->kind, heimdall::CompletionKind::Namespace);
     EXPECT_EQ(item->detail, "namespace tools");
@@ -518,7 +529,7 @@ TEST(CompletionSpec, CompoundHeaderNamespaceKeepsNamespaceKind)
     constexpr std::string_view source = "heimdall::cli::Options options;";
     for (const auto& scope : index)
     {
-        if (scope.path == std::vector<std::string> { "heimdall", "cli" })
+        if (scope.path == std::vector<std::string> {"heimdall", "cli"})
         {
             EXPECT_EQ(scope.kind, heimdall::CompletionKind::Namespace);
         }
@@ -537,8 +548,8 @@ TEST(CompletionSpec, StructTagDetailAndDocs)
         "/// A small widget.\n"
         "struct Widget { int value; };\n"
         "Wid x;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
-    const auto* item  = Find(items, "Widget");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
+    const auto* item = Find(items, "Widget");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "struct Widget");
     EXPECT_EQ(item->documentation, "A small widget.");
@@ -549,9 +560,9 @@ TEST(CompletionSpec, EnumMemberDetailShowsScope)
     constexpr std::string_view source =
         "enum class Color { Red, Green };\n"
         "Color c = Color::R;\n";
-    const std::size_t pos   = source.find("Color::R") + 8;
-    const auto        items = heimdall::CompletionEngine::Complete(source, pos);
-    const auto*       item  = Find(items, "Red");
+    const std::size_t pos = source.find("Color::R") + 8;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    const auto* item = Find(items, "Red");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "Color::Red");
 }
@@ -624,8 +635,8 @@ TEST(CompletionSpec, TemplateTagDocsAttachAboveTemplateHead)
         "template<class T>\n"
         "struct Box { T value; };\n"
         "Box x;\n";
-    const auto  items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
-    const auto* item  = Find(items, "Box");
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
+    const auto* item = Find(items, "Box");
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->detail, "struct Box");
     EXPECT_EQ(item->documentation, "A generic box.");
@@ -634,16 +645,17 @@ TEST(CompletionSpec, TemplateTagDocsAttachAboveTemplateHead)
 TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
 {
     constexpr std::string_view source = "int alpha = 1;\nint alpha = 2;\nint alp";
-    const auto                 items  = heimdall::CompletionEngine::Complete(source, source.size());
-    std::size_t                count  = 0;
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
+    std::size_t count = 0;
     for (const auto& item : items)
     {
         count += item.label == "alpha";
     }
 
     EXPECT_EQ(count, 1);
-    EXPECT_TRUE(std::is_sorted(items.begin(), items.end(), [](const auto& left, const auto& right) {
-        return left.label < right.label;
+    EXPECT_TRUE(std::is_sorted(items.begin(), items.end(),[](const auto& left, const auto& right)
+        {
+            return left.label < right.label;
     }));
 }
 
@@ -651,7 +663,7 @@ namespace
 {
 
     // `|` marks the cursor. Returns the labels offered there.
-    std::vector<std::string> MemberLabels(std::string                 source,
+    std::vector<std::string> MemberLabels(std::string source,
                                           const heimdall::ScopeIndex* external = nullptr)
     {
         const std::size_t cursor = source.find('|');
@@ -685,7 +697,7 @@ TEST(CompletionSpec, MemberAccessListsMembersOfLocalAndParameterTypes)
 {
     const auto dot =
         MemberLabels("struct P { int x; void run(); private: int y; void hid(); P(); ~P(); };\n"
-                     "void f() { P p; p.| }\n");
+        "void f() { P p; p.| }\n");
     EXPECT_TRUE(Has(dot, "x"));
     EXPECT_TRUE(Has(dot, "run"));
     EXPECT_FALSE(Has(dot, "y"));   // private
@@ -693,7 +705,7 @@ TEST(CompletionSpec, MemberAccessListsMembersOfLocalAndParameterTypes)
     EXPECT_FALSE(Has(dot, "P"));   // constructors are not members you can name
 
     const auto arrow = MemberLabels("struct P { int x; void run(); };\nvoid f(P* p) { p->r| }\n");
-    EXPECT_EQ(arrow, std::vector<std::string> { "run" });
+    EXPECT_EQ(arrow, std::vector<std::string> {"run"});
     const auto reference = MemberLabels("struct P { int x; };\nvoid f(const P& r) { r.| }\n");
     EXPECT_TRUE(Has(reference, "x"));
     EXPECT_TRUE(MemberLabels("struct P { int x; };\nvoid f(const P& r, int z) { z.| }\n").empty());
@@ -703,7 +715,7 @@ TEST(CompletionSpec, MemberAccessIncludesInheritedMembers)
 {
     const auto labels =
         MemberLabels("struct B { int bx; void bm(); };\nstruct M : public B { int mx; };\n"
-                     "struct D : M { int dx; };\nvoid f() { D d; d.| }\n");
+        "struct D : M { int dx; };\nvoid f() { D d; d.| }\n");
     EXPECT_TRUE(Has(labels, "dx"));
     EXPECT_TRUE(Has(labels, "mx"));
     EXPECT_TRUE(Has(labels, "bx"));
@@ -728,12 +740,12 @@ TEST(CompletionSpec, MemberAccessResolvesAliasesNamespacesAndAuto)
     EXPECT_TRUE(
         Has(MemberLabels("namespace n { struct P { int x; }; }\nvoid f() { n::P a; a.| }\n"), "x"));
     EXPECT_TRUE(Has(MemberLabels("namespace n { struct P { int x; }; }\nusing namespace n;\n"
-                                 "void f() { P a; a.| }\n"),
-                    "x"));
+        "void f() { P a; a.| }\n"),
+        "x"));
     EXPECT_TRUE(
         Has(MemberLabels(
-                "namespace n { struct P { int x; }; }\nnamespace n { void f() { P a; a.| } }\n"),
-            "x"));
+        "namespace n { struct P { int x; }; }\nnamespace n { void f() { P a; a.| } }\n"),
+        "x"));
     EXPECT_TRUE(Has(MemberLabels("struct P { int x; };\nvoid f() { auto a = P(); a.| }\n"), "x"));
     EXPECT_TRUE(
         Has(MemberLabels("struct P { int x; };\nvoid f() { auto a = new P(); a->| }\n"), "x"));
@@ -743,8 +755,8 @@ TEST(CompletionSpec, MemberAccessResolvesAliasesNamespacesAndAuto)
 TEST(CompletionSpec, MemberAccessOnThisAndImplicitFields)
 {
     const auto labels = MemberLabels("struct I { int deep; };\n"
-                                     "struct P { int x; I in; void m(); };\n"
-                                     "void P::m() { this->| }\n");
+        "struct P { int x; I in; void m(); };\n"
+        "void P::m() { this->| }\n");
     EXPECT_TRUE(Has(labels, "x"));
     EXPECT_TRUE(Has(labels, "m"));
     EXPECT_TRUE(
@@ -752,8 +764,8 @@ TEST(CompletionSpec, MemberAccessOnThisAndImplicitFields)
             "deep"));
     EXPECT_TRUE(
         Has(MemberLabels(
-                "struct I { int deep; };\nstruct P { I in; void m(); };\nvoid P::m() { in.| }\n"),
-            "deep"));
+        "struct I { int deep; };\nstruct P { I in; void m(); };\nvoid P::m() { in.| }\n"),
+        "deep"));
 }
 
 TEST(CompletionSpec, MemberAccessUsesTheHeaderIndexForStandardLikeTypes)
@@ -765,7 +777,7 @@ TEST(CompletionSpec, MemberAccessUsesTheHeaderIndexForStandardLikeTypes)
     EXPECT_TRUE(Has(text, "resize"));
     EXPECT_TRUE(Has(text, "clear"));
     EXPECT_EQ(MemberLabels("void f() { std::string s; s.cl| }\n", &index),
-              std::vector<std::string> { "clear" });
+              std::vector<std::string> {"clear"});
     EXPECT_TRUE(
         Has(MemberLabels("using namespace std;\nvoid f() { string s; s.| }\n", &index), "resize"));
     EXPECT_TRUE(Has(MemberLabels("void f() { auto s = std::string(); s.| }\n", &index), "resize"));
@@ -783,7 +795,7 @@ TEST(CompletionSpec, MemberAccessUsesTheHeaderIndexForStandardLikeTypes)
 TEST(CompletionSpec, MemberAccessThroughSmartPointersAndContainers)
 {
     const heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(kStdLike, {});
-    const std::string          p     = "struct P { int x; };\n";
+    const std::string p = "struct P { int x; };\n";
     const auto arrow = MemberLabels(p + "void f() { std::unique_ptr<P> u; u->| }\n", &index);
     EXPECT_TRUE(Has(arrow, "x"));
     EXPECT_FALSE(Has(arrow, "reset"));
@@ -810,21 +822,20 @@ TEST(CompletionSpec, IndexRecordsAliasTargetsAndBases)
 {
     const auto index = heimdall::CompletionEngine::IndexScopes(
         "struct B { int b; };\nstruct D : public B, private ns::Other<int> { };\nusing Alias = "
-        "std::vector<int>;\n",
-        {});
+        "std::vector<int>;\n", {});
     bool saw_bases = false;
     bool saw_alias = false;
     for (const auto& scope : index)
     {
-        if (scope.path == std::vector<std::string> { "D" })
+        if (scope.path == std::vector<std::string> {"D"})
         {
-            saw_bases = scope.bases == std::vector<std::string> { "B", "ns::Other" };
+            saw_bases = scope.bases == std::vector<std::string> {"B", "ns::Other"};
         }
 
         for (const auto& member : scope.members)
         {
             saw_alias =
-                saw_alias || (member.label == "Alias" && member.type_text == "std::vector<int>");
+                saw_alias ||(member.label == "Alias" && member.type_text == "std::vector<int>");
         }
     }
 
@@ -841,10 +852,9 @@ TEST(CompletionSpec, HoverKeepsDocCommentWhenAForwardDeclarationIsIndexedToo)
         "namespace n {\n"
         "/**\n * A JSON element.\n */\n"
         "class element { public: int v; };\n"
-        "}\n",
-        {});
+        "}\n", {});
     const std::string source = "n::element value;";
-    const auto        hover  = heimdall::CompletionEngine::Hover(source, {}, 5, &index);
+    const auto hover = heimdall::CompletionEngine::Hover(source, {}, 5, &index);
     ASSERT_TRUE(hover.has_value());
     EXPECT_EQ(hover->label, "element");
     EXPECT_NE(hover->documentation.find("A JSON element."), std::string::npos);
@@ -865,9 +875,13 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveEnumsAndEnumerators)
         "    };\n"
         "}\n";
     const std::string use = "void f() { n::Style s = n::Style::Keep; }\n";
-    for (const std::string source : { header + use })
+    for (const std::string source :
+        {
+            header + use
+    })
     {
-        auto hover = [&](std::string_view needle, const heimdall::ScopeIndex* index) {
+        auto hover =[&](std::string_view needle, const heimdall::ScopeIndex* index)
+        {
             return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, index);
         };
         const auto enumeration = hover("Style :", nullptr);
@@ -888,9 +902,9 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveEnumsAndEnumerators)
     }
 
     // Same through the header index.
-    const auto        index  = heimdall::CompletionEngine::IndexScopes(header, {});
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
     const std::string source = use;
-    const auto        indexed =
+    const auto indexed =
         heimdall::CompletionEngine::Hover(source, {}, source.find("Style s") + 1, &index);
     ASSERT_TRUE(indexed.has_value());
     EXPECT_NE(indexed->documentation.find("How single-statement"), std::string::npos);
@@ -915,7 +929,8 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveMethodsAndFields)
         "    int nodes;\n"
         "};\n"
         "void f() { Tree t; t.nodes; Tree::Parse(1, 2); t.count; }\n";
-    auto hover = [&](std::string_view needle, std::size_t skip = 1) {
+    auto hover =[&](std::string_view needle, std::size_t skip = 1)
+    {
         return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + skip, nullptr);
     };
     const auto method = hover("Parse(int");
@@ -973,8 +988,7 @@ TEST(CompletionSpec, HoverOnHeaderClassQualifyingAMethodDefinition)
         "public:\n"
         "    void DiagWorkerMain(int stop);\n"
         "};\n"
-        "}\n",
-        {});
+        "}\n", {});
     const std::string_view source =
         "namespace heimdall::lsp\n"
         "{\n"
@@ -992,7 +1006,8 @@ TEST(CompletionSpec, HeaderNamespaceMembersVisibleInNestedNamespaceOnly)
 {
     const auto index = heimdall::CompletionEngine::IndexScopes(
         "namespace heimdall::lsp {\nclass LanguageServer {};\n}\n", {});
-    auto hover = [&](std::string_view source) {
+    auto hover =[&](std::string_view source)
+    {
         return heimdall::CompletionEngine::Hover(
             source, {}, source.find("LanguageServer") + 3, &index);
     };
@@ -1013,8 +1028,7 @@ TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
         "struct Config {};\n"
         "std::expected<Config, std::string> Load(const char *path);\n"
         "const Config& Shared();\n"
-        "}\n",
-        {});
+        "}\n", {});
     const std::string source =
         "void run() {\n"
         "    auto loaded = lib::Load(\"x\");\n"
@@ -1023,7 +1037,8 @@ TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
         "    auto made = lib::Config();\n"
         "    auto unknown = other();\n"
         "}\n";
-    const auto detail = [&](const char* needle) {
+    const auto detail =[&](const char* needle)
+    {
         const auto hover =
             heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, &index);
         return hover.has_value() ? hover->detail : std::string("<none>");
@@ -1071,10 +1086,9 @@ TEST(CompletionSpec, MemberAccessOnAutoFromAHeaderFunctionReturningAStdType)
         "namespace heimdall {\n"
         "struct RuleConfiguration { bool root; };\n"
         "std::expected<RuleConfiguration, std::string> LoadRuleConfiguration(const char *path);\n"
-        "}\n",
-        {});
+        "}\n", {});
     const std::string body = "void run() {\n    auto loaded = "
-                             "heimdall::LoadRuleConfiguration(\"x\");\n    loaded.|\n}\n";
+        "heimdall::LoadRuleConfiguration(\"x\");\n    loaded.|\n}\n";
     const auto dot = MemberLabels(body, &index);
     EXPECT_TRUE(Has(dot, "has_value"));
     EXPECT_TRUE(Has(dot, "value"));
@@ -1082,9 +1096,9 @@ TEST(CompletionSpec, MemberAccessOnAutoFromAHeaderFunctionReturningAStdType)
     EXPECT_TRUE(Has(inside, "has_value"));
     // `->` reaches the held value.
     EXPECT_TRUE(Has(MemberLabels("void run() {\n    auto loaded = "
-                                 "heimdall::LoadRuleConfiguration(\"x\");\n    loaded->|\n}\n",
-                                 &index),
-                    "root"));
+        "heimdall::LoadRuleConfiguration(\"x\");\n    loaded->|\n}\n",
+        &index),
+        "root"));
 }
 
 TEST(CompletionSpec, IndexesRecordsWithAttributesBetweenKeywordAndName)
@@ -1096,9 +1110,9 @@ TEST(CompletionSpec, IndexesRecordsWithAttributesBetweenKeywordAndName)
         "  class [[nodiscard]] expected { public: bool has_value() const; };\n"
         "struct [[deprecated(\"x\")]] Old { int a; };\n"
         "class alignas(8) Aligned { public: int b; };\n"
-        "}\n",
-        {});
-    const auto members = [&](const std::vector<std::string>& path) {
+        "}\n", {});
+    const auto members =[&](const std::vector<std::string>& path)
+    {
         std::vector<std::string> labels;
         for (const auto& scope : index)
         {
@@ -1113,9 +1127,9 @@ TEST(CompletionSpec, IndexesRecordsWithAttributesBetweenKeywordAndName)
 
         return labels;
     };
-    EXPECT_TRUE(Has(members({ "std", "expected" }), "has_value"));
-    EXPECT_TRUE(Has(members({ "std", "Old" }), "a"));
-    EXPECT_TRUE(Has(members({ "std", "Aligned" }), "b"));
+    EXPECT_TRUE(Has(members({"std", "expected"}), "has_value"));
+    EXPECT_TRUE(Has(members({"std", "Old"}), "a"));
+    EXPECT_TRUE(Has(members({"std", "Aligned"}), "b"));
 }
 
 namespace
@@ -1136,8 +1150,7 @@ namespace
             "              std::expected<Item, std::string> find(int); };\n"
             "Repo& GetRepo();\n"
             "Repo MakeRepo(int);\n"
-            "}\n",
-            {});
+            "}\n", {});
         return index;
     }
 
@@ -1145,18 +1158,18 @@ namespace
     // hovers.
     std::pair<std::vector<std::string>, std::string> AutoChain(const std::string& statement)
     {
-        const std::string        source = "void run() {\n    " + statement + "\n    a.\n}\n";
-        const auto               cursor = source.find("a.\n}") + 2;
+        const std::string source = "void run() {\n    " + statement + "\n    a.\n}\n";
+        const auto cursor = source.find("a.\n}") + 2;
         std::vector<std::string> labels;
         for (const auto& item :
-             heimdall::CompletionEngine::Complete(source, {}, cursor, &ChainIndex()))
+            heimdall::CompletionEngine::Complete(source, {}, cursor, &ChainIndex()))
         {
             labels.push_back(item.label);
         }
 
         const auto hover =
             heimdall::CompletionEngine::Hover(source, {}, source.find("a ="), &ChainIndex());
-        return { labels, hover.has_value() ? hover->detail : std::string("<none>") };
+        return {labels, hover.has_value() ? hover->detail : std::string("<none>")};
     }
 
 } // namespace
@@ -1210,13 +1223,13 @@ TEST(CompletionSpec, AutoChainsThroughParenthesesDereferencesAndNamedCasts)
         Has(AutoChain("std::vector<lib::Item> v; auto a = (v.front()).name();").first, "length"));
     // `(*p)` goes through a pointer-like; `(p)->` too.
     EXPECT_TRUE(Has(AutoChain("std::expected<lib::Item, std::string> p = lib::GetRepo().find(1);"
-                              " auto a = (*p).name();")
-                        .first,
-                    "length"));
+        " auto a = (*p).name();")
+        .first,
+        "length"));
     EXPECT_TRUE(Has(AutoChain("std::expected<lib::Item, std::string> p = lib::GetRepo().find(1);"
-                              " auto a = (p)->name();")
-                        .first,
-                    "length"));
+        " auto a = (p)->name();")
+        .first,
+        "length"));
     EXPECT_TRUE(Has(AutoChain("lib::Repo* r; auto a = (*r).first();").first, "name"));
     EXPECT_TRUE(
         Has(AutoChain("auto a = static_cast<lib::Repo&>(lib::GetRepo()).first();").first, "name"));
@@ -1256,11 +1269,11 @@ TEST(CompletionSpec, TemplateParametersAreFoundBehindDeclarationSpecifiers)
         "namespace lib {\n"
         "struct Config { bool root; };\n"
         "std::expected<Config, std::string> Load(const char *path);\n"
-        "}\n",
-        {});
-    const auto labels = [&](const std::string& statement) {
+        "}\n", {});
+    const auto labels =[&](const std::string& statement)
+    {
         const std::string source = "void run() {\n    " + statement + "\n    loaded.value().\n}\n";
-        const auto        cursor = source.find("value().") + 8;
+        const auto cursor = source.find("value().") + 8;
         std::vector<std::string> result;
         for (const auto& item : heimdall::CompletionEngine::Complete(source, {}, cursor, &index))
         {
@@ -1282,7 +1295,8 @@ TEST(CompletionSpec, HoverOfAutoFromANewExpressionIsAPointer)
         "    auto root = new Node{ .next = 0, .value = 10 };\n"
         "    auto plain = Node{ .next = 0, .value = 1 };\n"
         "}\n";
-    const auto detail = [&](const char* needle) {
+    const auto detail =[&](const char* needle)
+    {
         const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1);
         return hover.has_value() ? hover->detail : std::string("<none>");
     };
@@ -1309,7 +1323,10 @@ TEST(CompletionSpec, HoverPrefersVisibleLocalOverSameNamedMember)
         "\tnext.value = 30;\n"
         "\treturn 0;\n"
         "}\n";
-    for (const std::string& source : {multiline, singleline})
+    for (const std::string& source :
+        {
+            multiline, singleline
+    })
     {
         // The use, not the member declaration: the local shadows `Node::next`.
         const auto hover = heimdall::CompletionEngine::Hover(
@@ -1337,7 +1354,8 @@ TEST(CompletionSpec, HoverOfDesignatorShowsTheFieldType)
         "\tnext.value = 30;\n"
         "\treturn 0;\n"
         "}\n";
-    const auto detail = [&](const char* needle, int occurrence = 0) {
+    const auto detail =[&](const char* needle, int occurrence = 0)
+    {
         std::size_t at = 0;
         for (int i = 0; i <= occurrence; ++i)
         {
@@ -1361,7 +1379,8 @@ TEST(CompletionSpec, HoverOfDesignatorShowsTheFieldType)
 
 TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
 {
-    const auto labels = [](std::string source) {
+    const auto labels =[](std::string source)
+    {
         const auto at = source.find('|');
         source.erase(at, 1);
         return heimdall::CompletionEngine::Complete(source, at);
@@ -1369,8 +1388,10 @@ TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
     const std::string node = "struct Node { Node* next; int value; void run(); };\n";
 
     for (const char* form :
-         { "void f() { auto p = new Node{ .| }; }\n", "void f() { Node n{ .| }; }\n",
-           "void f() { Node n = { .| }; }\n", "void f() { auto n = Node{ .| }; }\n" })
+        {
+            "void f() { auto p = new Node{ .| }; }\n", "void f() { Node n{ .| }; }\n",
+            "void f() { Node n = { .| }; }\n", "void f() { auto n = Node{ .| }; }\n"
+    })
     {
         const auto items = labels(node + form);
         EXPECT_TRUE(Contains(items, "next")) << form;
@@ -1400,8 +1421,8 @@ namespace
 {
     struct HoverLayout
     {
-        bool          known = false;
-        std::uint64_t size  = 0;
+        bool known = false;
+        std::uint64_t size = 0;
         std::uint64_t align = 0;
     };
 
@@ -1416,7 +1437,7 @@ namespace
             return {};
         }
 
-        return { hovered->has_layout, hovered->size_bytes, hovered->align_bytes };
+        return {hovered->has_layout, hovered->size_bytes, hovered->align_bytes};
     }
 } // namespace
 
@@ -1444,10 +1465,13 @@ TEST(CompletionSpec, HoverReportsSizeAndAlignmentOfFundamentalVariables)
 TEST(CompletionSpec, HoverReportsLayoutOnBuiltinTypeTokens)
 {
     constexpr std::string_view source = "bool json = false; int count = 0; double ratio = 0;";
-    const auto                 tree   = heimdall::ParseTree::Parse(source, {});
-    for (const auto name : { "bool", "int", "double" })
+    const auto tree = heimdall::ParseTree::Parse(source, {});
+    for (const auto name :
+        {
+            "bool", "int", "double"
+    })
     {
-        const auto offset     = source.find(name) + 1;
+        const auto offset = source.find(name) + 1;
         const auto text_hover = heimdall::CompletionEngine::Hover(source, {}, offset);
         const auto tree_hover = heimdall::CompletionEngine::Hover(tree, {}, offset);
         ASSERT_TRUE(text_hover.has_value());
@@ -1470,7 +1494,7 @@ TEST(CompletionSpec, HoverSourceAndParseTreePathsAgree)
         "Packet packet;\n"
         "int size = sizeof(int);\n";
     const auto tree = heimdall::ParseTree::Parse(source, {});
-    const std::vector<std::string_view> probes = { "Packet packet", "packet", "id", "sizeof" };
+    const std::vector<std::string_view> probes = {"Packet packet", "packet", "id", "sizeof"};
 
     for (const auto probe : probes)
     {
@@ -1504,7 +1528,10 @@ TEST(CompletionSpec, HoverAliasesCarryOriginDocumentationAndLayout)
         "struct Point { double x; double y; }; using Coord = Point; using Position = Coord; }\n"
         "using Flag = bool; geo::Position position; Flag flag;";
     const auto index = heimdall::CompletionEngine::IndexScopes(source, {});
-    for (const auto* external : { static_cast<const heimdall::ScopeIndex*>(nullptr), &index })
+    for (const auto* external :
+        {
+            static_cast<const heimdall::ScopeIndex * >(nullptr), &index
+    })
     {
         const auto position =
             heimdall::CompletionEngine::Hover(source, {}, source.rfind("Position") + 1, external);
@@ -1527,9 +1554,9 @@ TEST(CompletionSpec, OutOfLineNestedRecordDoesNotReplaceItsOwner)
     constexpr std::string_view header =
         "namespace std::filesystem { class path { public: class iterator; int storage; };\n"
         "class path::iterator { double cursor; }; }";
-    const auto                 index  = heimdall::CompletionEngine::IndexScopes(header, {});
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
     constexpr std::string_view source = "std::filesystem::path file;";
-    const auto                 hovered =
+    const auto hovered =
         heimdall::CompletionEngine::Hover(source, {}, source.find("path") + 1, &index);
     ASSERT_TRUE(hovered.has_value());
     EXPECT_EQ(hovered->detail, "class std::filesystem::path");
@@ -1541,7 +1568,7 @@ TEST(CompletionSpec, OutOfLineNestedRecordDoesNotReplaceItsOwner)
     {
         saw_iterator =
             saw_iterator ||
-            scope.path == std::vector<std::string> { "std", "filesystem", "path", "iterator" };
+            scope.path == std::vector<std::string> {"std", "filesystem", "path", "iterator"};
     }
 
     EXPECT_TRUE(saw_iterator);
@@ -1563,10 +1590,9 @@ TEST(CompletionSpec, HoverAliasUsesItsDeclarationScope)
 {
     const auto index = heimdall::CompletionEngine::IndexScopes(
         "namespace a { struct Value { char data; }; using Alias = Value; }\n"
-        "namespace b { struct Value { double data; }; using Alias = Value; }",
-        {});
+        "namespace b { struct Value { double data; }; using Alias = Value; }", {});
     constexpr std::string_view source = "b::Alias value;";
-    const auto                 hover  = heimdall::CompletionEngine::Hover(source, {}, 4, &index);
+    const auto hover = heimdall::CompletionEngine::Hover(source, {}, 4, &index);
     ASSERT_TRUE(hover.has_value());
     EXPECT_EQ(hover->type_origin, "b::Value");
     EXPECT_TRUE(hover->has_layout);
@@ -1576,7 +1602,7 @@ TEST(CompletionSpec, HoverAliasUsesItsDeclarationScope)
 TEST(CompletionSpec, HoverBuiltinUsesTheWholeSpecifierAndSkipsComments)
 {
     constexpr std::string_view source = "unsigned char byte; long long wide; long double precise;";
-    const auto                 byte   = LayoutAtHover(source, "unsigned");
+    const auto byte = LayoutAtHover(source, "unsigned");
     EXPECT_TRUE(byte.known);
     EXPECT_EQ(byte.size, sizeof(unsigned char));
     const auto wide = LayoutAtHover(source, "long wide");
@@ -1598,12 +1624,12 @@ TEST(CompletionSpec, HoverAliasCyclesAndUnknownTargetsHaveNoLayout)
 
 TEST(CompletionSpec, FilesystemLayoutDoesNotAssumeAnotherDataModelOrLibrary)
 {
-    auto target                    = heimdall::LayoutTarget::FromMacros({});
+    auto target = heimdall::LayoutTarget::FromMacros({});
     target.native_standard_library = false;
     const heimdall::TypeLayoutResolver foreign(nullptr, nullptr, target);
     EXPECT_FALSE(foreign.OfType("std::filesystem::path").has_value());
     target.native_standard_library = true;
-    target.pointer_size            = sizeof(void*) == 8 ? 4 : 8;
+    target.pointer_size = sizeof(void*) == 8 ? 4 : 8;
     const heimdall::TypeLayoutResolver cross(nullptr, nullptr, target);
     EXPECT_FALSE(cross.OfType("std::filesystem::path").has_value());
 }
@@ -1749,7 +1775,7 @@ namespace
     struct SelfLinkedNode
     {
         SelfLinkedNode* next;
-        int             value;
+        int value;
     };
 } // namespace
 
@@ -1776,14 +1802,14 @@ namespace
 {
     struct OffsetProbe
     {
-        char   tag;
+        char tag;
         double weight;
-        short  count;
+        short count;
     };
 
     struct HoverOffset
     {
-        bool          known  = false;
+        bool known = false;
         std::uint64_t offset = 0;
     };
 
@@ -1803,14 +1829,14 @@ namespace
             return {};
         }
 
-        return { hovered->has_field_offset, hovered->field_offset };
+        return {hovered->has_field_offset, hovered->field_offset};
     }
 } // namespace
 
 TEST(CompletionSpec, HoverOnMemberReportsOffsetWithinRecord)
 {
     constexpr std::string_view source = "struct Probe { char tag; double weight; short count; };\n";
-    const auto                 tag    = OffsetAtHover(source, "tag");
+    const auto tag = OffsetAtHover(source, "tag");
     ASSERT_TRUE(tag.known);
     EXPECT_EQ(tag.offset, offsetof(OffsetProbe, tag));
 
@@ -1848,3 +1874,84 @@ TEST(CompletionSpec, HoverOnOffsetofEvaluatesTheMember)
         OffsetAtHover("struct P { int a; };\nauto w = offsetof(P, nope);\n", "offsetof").known);
 }
 
+TEST(CompletionSpec, InfersIndexedServiceTemplateAndRangeBindingTypes)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace skr { template<class T> struct Arc {}; "
+        "struct Provider { template<class T> Arc<T> GetService(); }; } "
+        "struct ComponentManager {}; struct SystemManager {}; struct Publisher {};", {});
+    const std::string source =
+        "void F(skr::Provider& provider) { "
+        "auto component = provider.GetService<ComponentManager>(); "
+        "auto system = provider.GetService<SystemManager>(); "
+        "std::vector<ComponentManager> components; "
+        "for (auto& value : components) {} "
+        "for (const auto readonly : components) {} "
+        "std::set<ComponentManager> unique; for (auto copy : unique) {} "
+        "for (auto& immutable : unique) {} "
+        "std::unordered_map<int, Publisher*> publishers; "
+        "for (auto [key, publisher] : publishers) {} }";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    const auto infer =[&](std::string_view name)
+    {
+        for (std::size_t token = 0; token < tree.Tokens().size(); ++token)
+        {
+            if (tree.Text(tree.Tokens()[token]) == name)
+            {
+                return heimdall::CompletionEngine::InferredType(tree, token, &index);
+            }
+        }
+
+        return std::string {};
+    };
+
+    EXPECT_EQ(infer("component"), "skr::Arc<ComponentManager>");
+    EXPECT_EQ(infer("system"), "skr::Arc<SystemManager>");
+    EXPECT_EQ(infer("value"), "ComponentManager&");
+    EXPECT_EQ(infer("readonly"), "const ComponentManager");
+    EXPECT_EQ(infer("copy"), "ComponentManager");
+    EXPECT_EQ(infer("immutable"), "const ComponentManager&");
+    EXPECT_EQ(infer("key"), "const int");
+    EXPECT_EQ(infer("publisher"), "Publisher*");
+
+    const auto nestedTree = heimdall::ParseTree::Parse(
+        "void F() { std::vector<std::pair<int, int>> values; for (auto& pair : values) {} }");
+    for (std::size_t token = 0; token < nestedTree.Tokens().size(); ++token)
+    {
+        if (nestedTree.Text(nestedTree.Tokens()[token]) == "pair" &&
+            nestedTree.Tokens()[token].offset > nestedTree.Source().find("for"))
+        {
+            EXPECT_EQ(heimdall::CompletionEngine::InferredType(nestedTree, token),
+                      "std::pair<int, int>&");
+        }
+    }
+}
+
+TEST(CompletionSpec, HoversIndexedRegistrationMethodsBeforeTemplateArguments)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace LIB_NAMESPACE { struct ServiceCollection { "
+        "template<class T> ServiceCollection& AddSingleton(); "
+        "template<class T> ServiceCollection& AddTransient(); }; }",
+        []
+        {
+            heimdall::ParserOptions options; options.predefined_macros["LIB_NAMESPACE"] = "skr"; return options;
+    }
+        ());
+    const std::string source =
+        "namespace freyr { class Extension { void Configure(skr::ServiceCollection&); }; "
+        "void Extension::Configure(skr::ServiceCollection& services) { "
+        "services.AddSingleton<ComponentManager>(); "
+        "services.AddTransient<Query>(); } }";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto singleton = heimdall::CompletionEngine::Hover(tree, {},
+        source.find("AddSingleton") + 3, &index);
+    const auto transient = heimdall::CompletionEngine::Hover(tree, {},
+        source.find("AddTransient") + 3, &index);
+
+    ASSERT_TRUE(singleton);
+    EXPECT_EQ(singleton->label, "AddSingleton");
+    ASSERT_TRUE(transient);
+    EXPECT_EQ(transient->label, "AddTransient");
+}

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/Completion.hpp>
 #include <Heimdall/FlowModel.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/RuleEngine.hpp>
@@ -35,6 +36,10 @@ namespace heimdall
 
 		/** Reports proven argument-type mismatches, accepting known implicit conversions. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(const TypeModel& types);
+
+		/// Checks indexed function-object calls whose non-const reference cannot bind a wrapper.
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeIndexedCallArgumentTypes(
+			const TypeModel& types, const ScopeIndex& external);
 
 		/** Reports '.' member access on a receiver the typer knows is a pointer. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeDotOnPointer(const TypeModel& types);

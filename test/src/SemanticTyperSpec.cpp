@@ -609,6 +609,21 @@ TEST(Typer, AutoInRangeFor)
     EXPECT_EQ(typed.Of("e"), "int");
 }
 
+TEST(Typer, SubstitutesExplicitMemberFunctionTemplateReturnType)
+{
+    const Typed typed(
+        "template<class T> struct Arc {};\n"
+        "struct ComponentManager {}; struct SystemManager {};\n"
+        "struct Provider { template<class T> Arc<T> GetService(); };\n"
+        "void F(Provider& provider) {\n"
+        "const auto componentManager = provider.GetService<ComponentManager>();\n"
+        "const auto systemManager = provider.GetService<SystemManager>();\n"
+        "}\n");
+
+    EXPECT_EQ(typed.Of("componentManager"), "const Arc<ComponentManager>");
+    EXPECT_EQ(typed.Of("systemManager"), "const Arc<SystemManager>");
+}
+
 TEST(Typer, AutoReturnTypeIsDeducedFromTheBody)
 {
     const Typed typed(

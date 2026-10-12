@@ -86,6 +86,8 @@ namespace heimdall
 		bool explicit_object = false;
 		// Functions defined `= delete`: not callable, so signature help skips them.
 		bool deleted = false;
+		/// Template parameter names used to substitute explicit call and alias arguments.
+		std::vector<std::string> templateParams;
 	};
 
 	// One named scope and its direct members. `path` is the qualified path from
@@ -106,6 +108,8 @@ namespace heimdall
 		// The record's layout cannot be derived from the members indexed here
 		// (virtuals, bitfields, anonymous members, packing, `alignas`, hidden fields).
 		bool layout_unknown = false;
+		/// A conversion operator may return a reference; conservative argument checks must defer.
+		bool hasReferenceConversion = false;
 	};
 
 	using ScopeIndex = std::vector<IndexedScope>;
@@ -156,6 +160,14 @@ namespace heimdall
 	class CompletionEngine
 	{
 	public:
+		/// Infers an auto variable or range-for binding using local and indexed declarations.
+		[[nodiscard]] static std::string InferredType(const ParseTree& tree,
+			std::size_t nameToken, const ScopeIndex* external = nullptr);
+
+		/// Resolves a visible variable's type, expanding indexed aliases.
+		[[nodiscard]] static std::string VariableType(const ParseTree& tree,
+			std::size_t nameToken, const ScopeIndex* external = nullptr);
+
 		static std::string PrefixAt(std::string_view source, std::size_t offset);
 
 		static CompletionContext ContextAt(std::string_view source, std::size_t offset);

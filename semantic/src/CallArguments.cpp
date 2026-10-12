@@ -965,4 +965,131 @@ namespace heimdall
 
 		return diagnostics;
 	}
+
+	std::vector<Diagnostic> SemanticRules::AnalyzeIndexedCallArgumentTypes(
+		const TypeModel& types, const ScopeIndex& external)
+	{
+		const auto& tree   = types.Model().Tree();
+		const auto& nodes  = tree.NodesSoA();
+		const auto& tokens = tree.Tokens();
+		std::vector<Diagnostic> diagnostics;
+		LineTable lines;
+		lines.Build(tree.Source());
+		for (std::uint32_t node = 0; node < nodes.size(); ++node)
+		{
+			if (nodes.Kind(node) != GrammarKind::CallExpression)
+			{
+				continue;
+			}
+
+			const auto children = types.Model().ChildrenOf(node);
+			if (children.size() != 2 || nodes.Kind(children[0]) != GrammarKind::IdentifierExpression ||
+				nodes.Kind(children[1]) != GrammarKind::IdentifierExpression)
+			{
+				continue;
+			}
+
+			const auto callableToken = nodes.FirstToken(children[0]);
+			const auto argumentToken = nodes.FirstToken(children[1]);
+			const auto callable      = CompletionEngine::VariableType(tree, callableToken, &external);
+			const auto open          = callable.find('<');
+			const auto parameterOpen = callable.find('(', open);
+			const auto parameterEnd  = callable.rfind(')');
+			if (open == std::string::npos || parameterOpen == std::string::npos ||
+				parameterEnd == std::string::npos || parameterEnd <= parameterOpen ||
+				(callable.substr(0, open) != "std::function" && callable.substr(0, open) != "function"))
+			{
+				continue;
+			}
+
+			auto parameter = callable.substr(parameterOpen + 1, parameterEnd - parameterOpen - 1);
+			parameter.erase(std::remove_if(parameter.begin(), parameter.end(),
+				[](char value)
+				{
+					return value == ' ' || value == '\t' || value == '\n';
+				}), parameter.end());
+			if (!parameter.ends_with('&') || parameter.ends_with("&&") ||
+				parameter.starts_with("const") || parameter.find_first_of("<,()*") != std::string::npos)
+			{
+				continue;
+			}
+
+			parameter.pop_back();
+			const auto actual     = CompletionEngine::VariableType(tree, argumentToken, &external);
+			const auto actualOpen = actual.find('<');
+			const auto actualEnd  = actual.rfind('>');
+			if (actualOpen == std::string::npos || actualEnd == std::string::npos ||
+				actual.substr(actualOpen + 1, actualEnd - actualOpen - 1) != parameter)
+			{
+				continue;
+			}
+
+			auto wrapper = actual.substr(0, actualOpen);
+			if (wrapper.starts_with("const "))
+			{
+				wrapper.erase(0, 6);
+			}
+
+			bool proven = false;
+			for (const auto& scope : external)
+			{
+				std::string path;
+				for (const auto& part : scope.path)
+				{
+					path += path.empty() ? part : "::" + part;
+				}
+
+				if (path != wrapper || scope.kind != CompletionKind::Type ||!scope.bases.empty() ||
+					scope.hasReferenceConversion)
+				{
+					continue;
+				}
+
+				for (const auto& owner : external)
+				{
+					if (owner.path.size() + 1 != scope.path.size() ||
+						!std::equal(owner.path.begin(), owner.path.end(), scope.path.begin()))
+					{
+						continue;
+					}
+
+					proven = std::ranges::any_of(owner.members,[&](const CompletionItem& member)
+						{
+							return (member.kind == CompletionKind::Type || member.kind == CompletionKind::Namespace) &&
+							member.label == scope.path.back() && member.is_definition;
+					});
+				}
+
+				for (const auto& member : scope.members)
+				{
+					if (!member.label.starts_with("operator "))
+					{
+						continue;
+					}
+
+					if (member.label.find(parameter) != std::string::npos ||
+						std::ranges::any_of(scope.template_params,[&](const std::string& name)
+						{
+							return member.label.find(name) != std::string::npos;
+					}))
+					{
+						proven = false;
+					}
+				}
+
+				break;
+			}
+
+			if (proven && argumentToken < tokens.size())
+			{
+				const auto& token   = tokens[argumentToken];
+				const auto position = lines.Lookup(token.offset);
+				diagnostics.push_back({RuleId::CallArgumentType, Severity::Error,
+						"cpp/call-argument-type", "cannot bind '" + actual + "' to '" + parameter + "&'",
+						token.offset, token.length, position.line, position.column, false, {}});
+			}
+		}
+
+		return diagnostics;
+	}
 }

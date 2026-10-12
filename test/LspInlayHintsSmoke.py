@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 
 server = sys.argv[1]
@@ -32,21 +34,73 @@ source = (
 )
 
 
-def run(disabled=False, text=source, hint_range=None):
+def run(disabled=False, text=source, hint_range=None, initialization_options=None,
+        document_uri=uri):
     messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "initializationOptions": {"inlayHints": not disabled}}},
+            "initializationOptions": {"inlayHints": not disabled,
+                                      **(initialization_options or {})}}},
         {"jsonrpc": "2.0", "method": "initialized", "params": {}},
         {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
-            "textDocument": {"uri": uri, "languageId": "cpp", "version": 1,
+            "textDocument": {"uri": document_uri, "languageId": "cpp", "version": 1,
                              "text": text}}},
         {"jsonrpc": "2.0", "id": 2, "method": "textDocument/inlayHint", "params": {
-            "textDocument": {"uri": uri},
+            "textDocument": {"uri": document_uri},
             "range": hint_range or {"start": {"line": 7, "character": 0},
                                     "end": {"line": 22, "character": 0}}}},
         {"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": {}},
         {"jsonrpc": "2.0", "method": "exit"},
     ]
+    if initialization_options:
+        process = subprocess.Popen([server], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def send(message):
+            body = json.dumps(message, separators=(",", ":")).encode()
+            process.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            process.stdin.flush()
+
+        def response(identifier):
+            while True:
+                length = None
+                while True:
+                    line = process.stdout.readline()
+                    assert line, "server closed stdout"
+                    if line == b"\r\n":
+                        break
+                    if line.lower().startswith(b"content-length:"):
+                        length = int(line.split(b":", 1)[1])
+                message = json.loads(process.stdout.read(length))
+                if message.get("id") == identifier:
+                    return message["result"]
+
+        try:
+            send(messages[0])
+            response(1)
+            send(messages[1])
+            send(messages[2])
+            for attempt in range(60):
+                identifier = 100 + attempt
+                send({"jsonrpc": "2.0", "id": identifier,
+                      "method": "textDocument/completion", "params": {
+                          "textDocument": {"uri": document_uri},
+                          "position": {"line": 2, "character": 0}}})
+                if not response(identifier)["isIncomplete"]:
+                    break
+            else:
+                raise AssertionError("header index did not finish")
+            send(messages[3])
+            result = response(2)
+            send(messages[4])
+            response(3)
+            send(messages[5])
+            process.wait(timeout=10)
+            assert process.returncode == 0
+            return result
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
     wire = bytearray()
     for message in messages:
         body = json.dumps(message, separators=(",", ":")).encode()
@@ -158,3 +212,45 @@ example_source = (
 )
 example = run(text=example_source, hint_range=full_range)
 assert [hint["label"] for hint in example] == ["first:", "second:", "desc:"], example
+
+assert run(text=("struct Provider {};\n"
+                 "void F(Provider& provider) { auto invalid = provider.GetService<int>(); }\n"),
+           hint_range=full_range) == []
+
+with tempfile.TemporaryDirectory(prefix="heimdall-template-hints-") as directory:
+    workspace = Path(directory)
+    header = workspace / "services.hpp"
+    header.write_text(
+        "namespace LIB_NAMESPACE { template<class T> struct Arc {};\n"
+        "struct Provider { template<class T> Arc<T> GetService(); }; }\n"
+        "namespace APP_NAMESPACE { struct ComponentManager {}; struct SystemManager {};\n"
+        "struct Publisher {}; template<class T> using Action = std::function<void(T&)>;\n"
+        "struct Extension { std::vector<Action<ComponentManager>> callbacks;\n"
+        "std::map<int, Publisher*> publishers; void Use(skr::Provider&); }; }\n")
+    commands = workspace / "compile_commands.json"
+    main = workspace / "main.cpp"
+    commands.write_text(json.dumps([{
+        "directory": str(workspace), "file": str(main),
+        "arguments": ["c++", "-std=c++20", "-DLIB_NAMESPACE=skr", "-DAPP_NAMESPACE=app",
+                      "-c", str(main)],
+    }]))
+    indexed_source = (
+        f'#include "{header.as_posix()}"\n'
+        "namespace APP_NAMESPACE { void Extension::Use(skr::Provider& provider) {\n"
+        "auto component = provider.GetService<ComponentManager>();\n"
+        "auto system = provider.GetService<SystemManager>();\n"
+        "for (auto& func : callbacks) { func(component); }\n"
+        "for (auto [key, publisher] : publishers) {}\n"
+        "} }\n")
+    main.write_text(indexed_source)
+    indexed_hints = run(text=indexed_source, hint_range=full_range,
+                        initialization_options={"compileCommands": str(commands)},
+                        document_uri=main.as_uri())
+    assert [(hint["position"]["line"], hint["label"]) for hint in indexed_hints
+            if hint["kind"] == 1] == [
+        (2, ": skr::Arc<ComponentManager>"),
+        (3, ": skr::Arc<SystemManager>"),
+        (4, ": Action<ComponentManager>&"),
+        (5, ": const int"),
+        (5, ": Publisher*"),
+    ], indexed_hints

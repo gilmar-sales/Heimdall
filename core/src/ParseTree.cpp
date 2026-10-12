@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -94,9 +95,15 @@ namespace heimdall
 	void ParseTree::Build(const ParserOptions& options, std::stop_token stop,
 		const ParseReuse* reuse)
 	{
-		auto& tree        = *this;
-		tree.m_type_names = options.type_names;
-		tree.m_macro_resolver = options.macro_resolver;
+		auto& tree             = *this;
+		tree.m_type_names      = options.type_names;
+		tree.m_macro_resolver  = options.macro_resolver;
+		tree.mPredefinedMacros = options.shared_macros;
+		if (!tree.mPredefinedMacros && !options.predefined_macros.empty())
+		{
+			tree.mPredefinedMacros = std::make_shared<const Preprocessor::MacroMap>(options.predefined_macros);
+		}
+
 		if (stop.stop_requested())
 		{
 			m_cancelled = true;

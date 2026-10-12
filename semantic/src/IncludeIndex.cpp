@@ -19,1381 +19,1408 @@
 namespace heimdall
 {
 
-    namespace
-    {
+	namespace
+	{
 
-        struct IncludeRef
-        {
-            std::string name;
-            bool        angled = false;
-            bool        next   = false;
-        };
+		struct IncludeRef
+		{
+			std::string name;
+			bool angled = false;
+			bool next   = false;
+		};
 
-        std::vector<IncludeRef> ScanIncludes(std::string_view text)
-        {
-            std::vector<IncludeRef>  refs;
-            const std::vector<Token> tokens      = Lexer(text).Lex();
-            auto                     significant = [&](std::size_t i) -> std::size_t {
-                while (i < tokens.size() && (tokens[i].kind == TokenKind::Whitespace ||
-                                             tokens[i].kind == TokenKind::LineComment ||
-                                             tokens[i].kind == TokenKind::BlockComment))
-                {
-                    ++i;
-                }
+		std::vector<IncludeRef> ScanIncludes(std::string_view text)
+		{
+			std::vector<IncludeRef> refs;
+			const std::vector<Token> tokens = Lexer(text).Lex();
+			auto significant =[&](std::size_t i)->std::size_t
+			{
+				while (i < tokens.size() && (tokens[i].kind == TokenKind::Whitespace ||
+					tokens[i].kind == TokenKind::LineComment ||
+					tokens[i].kind == TokenKind::BlockComment))
+				{
+					++i;
+				}
 
-                return i;
-            };
-            auto text_of = [&](std::size_t i) -> std::string_view {
-                return text.substr(tokens[i].offset, tokens[i].length);
-            };
-            for (std::size_t i = 0; i < tokens.size(); ++i)
-            {
-                if (tokens[i].kind != TokenKind::Punctuation || text_of(i) != "#")
-                {
-                    continue;
-                }
+				return i;
+			};
+			auto text_of =[&](std::size_t i)->std::string_view
+			{
+				return text.substr(tokens[i].offset, tokens[i].length);
+			};
+			for (std::size_t i = 0; i < tokens.size(); ++i)
+			{
+				if (tokens[i].kind != TokenKind::Punctuation || text_of(i) != "#")
+				{
+					continue;
+				}
 
-                i = significant(i + 1);
-                if (i >= tokens.size() || tokens[i].kind != TokenKind::Identifier ||
-                    (text_of(i) != "include" && text_of(i) != "include_next"))
-                {
-                    continue;
-                }
+				i = significant(i + 1);
+				if (i >= tokens.size() || tokens[i].kind != TokenKind::Identifier ||
+					(text_of(i) != "include" && text_of(i) != "include_next"))
+				{
+					continue;
+				}
 
-                const bool next = text_of(i) == "include_next";
+				const bool next = text_of(i) == "include_next";
 
-                i = significant(i + 1);
-                if (i >= tokens.size())
-                {
-                    break;
-                }
+				i = significant(i + 1);
+				if (i >= tokens.size())
+				{
+					break;
+				}
 
-                if (tokens[i].kind == TokenKind::StringLiteral)
-                {
-                    std::string_view  quoted = text_of(i);
-                    const std::size_t open   = quoted.find('"');
-                    const std::size_t close  = quoted.rfind('"');
-                    if (open != std::string_view::npos && close != std::string_view::npos &&
-                        close > open)
-                    {
-                        refs.push_back({ std::string(quoted.substr(open + 1, close - open - 1)),
-                                         false, next });
-                    }
-                }
-                else if (tokens[i].kind == TokenKind::Punctuation && text_of(i) == "<")
-                {
-                    // Header names contain no `>`; slice raw source up to it.
-                    const std::size_t start = tokens[i].offset + tokens[i].length;
-                    std::size_t       stop  = start;
-                    while (stop < text.size() && text[stop] != '>' && text[stop] != '\n')
-                    {
-                        ++stop;
-                    }
+				if (tokens[i].kind == TokenKind::StringLiteral)
+				{
+					std::string_view quoted = text_of(i);
+					const std::size_t open  = quoted.find('"');
+					const std::size_t close = quoted.rfind('"');
+					if (open != std::string_view::npos && close != std::string_view::npos &&
+						close > open)
+					{
+						refs.push_back({std::string(quoted.substr(open + 1, close - open - 1)),
+								false, next});
+					}
+				}
+				else if (tokens[i].kind == TokenKind::Punctuation && text_of(i) == "<")
+				{
+					// Header names contain no `>`; slice raw source up to it.
+					const std::size_t start = tokens[i].offset + tokens[i].length;
+					std::size_t stop        = start;
+					while (stop < text.size() && text[stop] != '>' && text[stop] != '\n')
+					{
+						++stop;
+					}
 
-                    if (stop < text.size() && text[stop] == '>')
-                    {
-                        std::string_view name = text.substr(start, stop - start);
-                        while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
-                        {
-                            name.remove_prefix(1);
-                        }
+					if (stop < text.size() && text[stop] == '>')
+					{
+						std::string_view name = text.substr(start, stop - start);
+						while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
+						{
+							name.remove_prefix(1);
+						}
 
-                        while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
-                        {
-                            name.remove_suffix(1);
-                        }
+						while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
+						{
+							name.remove_suffix(1);
+						}
 
-                        if (!name.empty())
-                        {
-                            refs.push_back({ std::string(name), true, next });
-                        }
-                    }
-                }
-            }
+						if (!name.empty())
+						{
+							refs.push_back({std::string(name), true, next});
+						}
+					}
+				}
+			}
 
-            return refs;
-        }
+			return refs;
+		}
 
-        std::filesystem::path NormalizedAbsolute(const std::filesystem::path& path)
-        {
-            std::error_code ec;
-            auto            absolute = std::filesystem::absolute(path, ec);
-            return (ec ? path : absolute).lexically_normal();
-        }
+		std::filesystem::path NormalizedAbsolute(const std::filesystem::path& path)
+		{
+			std::error_code ec;
+			auto absolute = std::filesystem::absolute(path, ec);
+			return (ec ? path : absolute).lexically_normal();
+		}
 
-        std::filesystem::path TryResolve(const std::string&                        name,
-                                         bool                                      angled,
-                                         const std::filesystem::path&              including_dir,
-                                         const CompileCommand*                     command,
-                                         const std::vector<std::filesystem::path>& system_dirs,
-                                         const SourceOverlay* overlay = nullptr)
-        {
-            std::vector<std::filesystem::path> dirs;
-            if (!angled)
-            {
-                if (!including_dir.empty())
-                {
-                    dirs.push_back(including_dir);
-                }
+		std::filesystem::path TryResolve(
+			const std::string& name,
+			bool angled,
+			const std::filesystem::path& including_dir,
+			const CompileCommand* command,
+			const std::vector<std::filesystem::path>& system_dirs,
+			const SourceOverlay* overlay = nullptr)
+		{
+			std::vector<std::filesystem::path> dirs;
+			if (!angled)
+			{
+				if (!including_dir.empty())
+				{
+					dirs.push_back(including_dir);
+				}
 
-                if (command != nullptr)
-                {
-                    dirs.insert(dirs.end(), command->quote_directories.begin(),
-                                command->quote_directories.end());
-                }
-            }
+				if (command != nullptr)
+				{
+					dirs.insert(dirs.end(), command->quote_directories.begin(),
+						command->quote_directories.end());
+				}
+			}
 
-            if (command != nullptr)
-            {
-                dirs.insert(dirs.end(), command->include_directories.begin(),
-                            command->include_directories.end());
-            }
+			if (command != nullptr)
+			{
+				dirs.insert(dirs.end(), command->include_directories.begin(),
+					command->include_directories.end());
+			}
 
-            dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
-            std::error_code ec;
-            for (const auto& dir : dirs)
-            {
-                if (dir.empty())
-                {
-                    continue;
-                }
+			dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
+			std::error_code ec;
+			for (const auto& dir : dirs)
+			{
+				if (dir.empty())
+				{
+					continue;
+				}
 
-                const auto candidate = NormalizedAbsolute(dir / name);
-                if (overlay && overlay->Find(candidate))
-                {
-                    return candidate;
-                }
+				const auto candidate = NormalizedAbsolute(dir / name);
+				if (overlay && overlay->Find(candidate))
+				{
+					return candidate;
+				}
 
-                if (std::filesystem::exists(candidate, ec) && !ec &&
-                    std::filesystem::is_regular_file(candidate, ec))
-                {
-                    return candidate;
-                }
-            }
+				if (std::filesystem::exists(candidate, ec) && !ec &&
+					std::filesystem::is_regular_file(candidate, ec))
+				{
+					return candidate;
+				}
+			}
 
-            return {};
-        }
+			return {};
+		}
 
-        bool IsUnder(const std::filesystem::path& path, const std::filesystem::path& dir)
-        {
-            if (dir.empty())
-            {
-                return false;
-            }
+		bool IsUnder(const std::filesystem::path& path, const std::filesystem::path& dir)
+		{
+			if (dir.empty())
+			{
+				return false;
+			}
 
-            const auto relative = path.lexically_relative(dir);
-            return !relative.empty() && *relative.begin() != "..";
-        }
+			const auto relative = path.lexically_relative(dir);
+			return !relative.empty() && *relative.begin() != "..";
+		}
 
-        // `#include_next`: continue the angled search after the directory that
-        // supplied `current`.
-        std::filesystem::path TryResolveNext(const std::string&                        name,
-                                             const std::filesystem::path&              current,
-                                             const CompileCommand*                     command,
-                                             const std::vector<std::filesystem::path>& system_dirs,
-                                             const SourceOverlay* overlay = nullptr)
-        {
-            std::vector<std::filesystem::path> dirs;
-            if (command != nullptr)
-            {
-                dirs.insert(dirs.end(), command->include_directories.begin(),
-                            command->include_directories.end());
-            }
+		// `#include_next`: continue the angled search after the directory that
+		// supplied `current`.
+		std::filesystem::path TryResolveNext(
+			const std::string& name,
+			const std::filesystem::path& current,
+			const CompileCommand* command,
+			const std::vector<std::filesystem::path>& system_dirs,
+			const SourceOverlay* overlay = nullptr)
+		{
+			std::vector<std::filesystem::path> dirs;
+			if (command != nullptr)
+			{
+				dirs.insert(dirs.end(), command->include_directories.begin(),
+					command->include_directories.end());
+			}
 
-            dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
-            std::size_t first = 0;
-            for (std::size_t i = 0; i < dirs.size(); ++i)
-            {
-                if (IsUnder(current, NormalizedAbsolute(dirs[i])))
-                {
-                    first = i + 1;
-                    break;
-                }
-            }
+			dirs.insert(dirs.end(), system_dirs.begin(), system_dirs.end());
+			std::size_t first = 0;
+			for (std::size_t i = 0; i < dirs.size(); ++i)
+			{
+				if (IsUnder(current, NormalizedAbsolute(dirs[i])))
+				{
+					first = i + 1;
+					break;
+				}
+			}
 
-            std::error_code ec;
-            for (std::size_t i = first; i < dirs.size(); ++i)
-            {
-                if (dirs[i].empty())
-                {
-                    continue;
-                }
+			std::error_code ec;
+			for (std::size_t i = first; i < dirs.size(); ++i)
+			{
+				if (dirs[i].empty())
+				{
+					continue;
+				}
 
-                const auto candidate = NormalizedAbsolute(dirs[i] / name);
-                if (overlay && overlay->Find(candidate))
-                {
-                    return candidate;
-                }
+				const auto candidate = NormalizedAbsolute(dirs[i] / name);
+				if (overlay && overlay->Find(candidate))
+				{
+					return candidate;
+				}
 
-                if (std::filesystem::exists(candidate, ec) && !ec &&
-                    std::filesystem::is_regular_file(candidate, ec))
-                {
-                    return candidate;
-                }
-            }
+				if (std::filesystem::exists(candidate, ec) && !ec &&
+					std::filesystem::is_regular_file(candidate, ec))
+				{
+					return candidate;
+				}
+			}
 
-            return {};
-        }
+			return {};
+		}
 
-        std::string DriverOf(const CompileCommand* command)
-        {
-            if (command != nullptr && !command->arguments.empty() &&
-                !command->arguments.front().empty())
-            {
-                return command->arguments.front();
-            }
+		std::string DriverOf(const CompileCommand* command)
+		{
+			if (command != nullptr && !command->arguments.empty() &&
+				!command->arguments.front().empty())
+			{
+				return command->arguments.front();
+			}
 
-            return "c++";
-        }
+			return "c++";
+		}
 
-        std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes,
-                             const SourceOverlay* overlay = nullptr)
-        {
-            if (overlay)
-                if (const auto source = overlay->Find(path))
-                    return source->size() <= max_bytes ? *source : std::string {};
-            std::error_code ec;
-            const auto      size = std::filesystem::file_size(path, ec);
-            if (ec || size > max_bytes)
-                return {};
-            std::ifstream in(path, std::ios::binary);
-            if (!in)
-                return {};
-            std::string content;
-            content.resize(static_cast<std::size_t>(size));
-            in.read(content.data(), static_cast<std::streamsize>(content.size()));
-            content.resize(static_cast<std::size_t>(in.gcount()));
-            return content;
-        }
+		std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes,
+			const SourceOverlay* overlay = nullptr)
+		{
+			if (overlay)
+				if (const auto source = overlay->Find(path))
+					return source->size() <= max_bytes ? *source : std::string {};
+			std::error_code ec;
+			const auto size = std::filesystem::file_size(path, ec);
+			if (ec || size > max_bytes)
+				return {};
+			std::ifstream in(path, std::ios::binary);
+			if (!in)
+				return {};
+			std::string content;
+			content.resize(static_cast<std::size_t>(size));
+			in.read(content.data(), static_cast<std::streamsize>(content.size()));
+			content.resize(static_cast<std::size_t>(in.gcount()));
+			return content;
+		}
 
-        // Name `X` of a leading `#ifndef X` / `#define X` include guard, or empty.
-        std::string IncludeGuardOf(std::string_view text)
-        {
-            auto directive_name =
-                [](std::string_view line, std::string_view keyword) -> std::string {
-                std::size_t i = 0;
-                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
-                {
-                    ++i;
-                }
+		// Name `X` of a leading `#ifndef X` / `#define X` include guard, or empty.
+		std::string IncludeGuardOf(std::string_view text)
+		{
+			auto directive_name =
+				[](std::string_view line, std::string_view keyword)->std::string
+			{
+				std::size_t i = 0;
+				while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+				{
+					++i;
+				}
 
-                if (i >= line.size() || line[i] != '#')
-                {
-                    return {};
-                }
+				if (i >= line.size() || line[i] != '#')
+				{
+					return {};
+				}
 
-                ++i;
-                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
-                {
-                    ++i;
-                }
+				++i;
+				while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+				{
+					++i;
+				}
 
-                if (line.substr(i, keyword.size()) != keyword)
-                {
-                    return {};
-                }
+				if (line.substr(i, keyword.size()) != keyword)
+				{
+					return {};
+				}
 
-                i += keyword.size();
-                while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
-                {
-                    ++i;
-                }
+				i += keyword.size();
+				while (i < line.size() && (line[i] == ' ' || line[i] == '\t'))
+				{
+					++i;
+				}
 
-                std::size_t end = i;
-                while (end < line.size() &&
-                       (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
-                {
-                    ++end;
-                }
+				std::size_t end = i;
+				while (end < line.size() &&
+					(std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_'))
+				{
+					++end;
+				}
 
-                return std::string(line.substr(i, end - i));
-            };
-            std::string guard;
-            bool        in_block_comment = false;
-            std::size_t pos              = 0;
-            while (pos < text.size())
-            {
-                std::size_t end = text.find('\n', pos);
-                if (end == std::string_view::npos)
-                {
-                    end = text.size();
-                }
+				return std::string(line.substr(i, end - i));
+			};
+			std::string guard;
+			bool in_block_comment = false;
+			std::size_t pos       = 0;
+			while (pos < text.size())
+			{
+				std::size_t end = text.find('\n', pos);
+				if (end == std::string_view::npos)
+				{
+					end = text.size();
+				}
 
-                std::string_view line = text.substr(pos, end - pos);
-                pos                   = end + 1;
-                if (in_block_comment)
-                {
-                    in_block_comment = line.find("*/") == std::string_view::npos;
-                    continue;
-                }
+				std::string_view line = text.substr(pos, end - pos);
+				pos                   = end + 1;
+				if (in_block_comment)
+				{
+					in_block_comment = line.find("*/") == std::string_view::npos;
+					continue;
+				}
 
-                std::size_t first = line.find_first_not_of(" \t\r");
-                if (first == std::string_view::npos || line.substr(first, 2) == "//")
-                {
-                    continue;
-                }
+				std::size_t first = line.find_first_not_of(" \t\r");
+				if (first == std::string_view::npos || line.substr(first, 2) == "//")
+				{
+					continue;
+				}
 
-                if (line.substr(first, 2) == "/*")
-                {
-                    in_block_comment = line.find("*/", first + 2) == std::string_view::npos;
-                    continue;
-                }
+				if (line.substr(first, 2) == "/*")
+				{
+					in_block_comment = line.find("*/", first + 2) == std::string_view::npos;
+					continue;
+				}
 
-                if (guard.empty())
-                {
-                    guard = directive_name(line, "ifndef");
-                    if (guard.empty())
-                    {
-                        return {};
-                    }
+				if (guard.empty())
+				{
+					guard = directive_name(line, "ifndef");
+					if (guard.empty())
+					{
+						return {};
+					}
 
-                    continue;
-                }
+					continue;
+				}
 
-                return directive_name(line, "define") == guard ? guard : std::string {};
-            }
+				return directive_name(line, "define") == guard ? guard : std::string {};
+			}
 
-            return {};
-        }
+			return {};
+		}
 
-        // Macros the compiler itself would have defined after preprocessing the
-        // given headers (`__cplusplus`, `_GLIBCXX_USE_CXX11_ABI`, feature-test
-        // macros...). Headers are parsed one by one with no `#include` expansion,
-        // so without this every `#if __cplusplus >= ...` guard in the standard
-        // library selects nothing and the class bodies never reach the index.
-        // Object-like macros only; empty when the compiler cannot be run.
-        Preprocessor::MacroMap CompilerMacros(const CompileCommand*                     command,
-                                              const std::vector<std::filesystem::path>& headers,
-                                              const SourceOverlay*                      overlay)
-        {
-            Preprocessor::MacroMap       macros;
-            static std::atomic<unsigned> counter { 0 };
-            std::error_code              ec;
-            const std::filesystem::path  scratch =
-                std::filesystem::temp_directory_path(ec) /
-                ("heimdall-macros-" + std::to_string(counter.fetch_add(1)) + "-" +
-                 std::to_string(
-                     std::hash<std::thread::id> {}(std::this_thread::get_id()) % 100000) +
-                 ".cpp");
-            if (ec)
-            {
-                return macros;
-            }
+		// Macros the compiler itself would have defined after preprocessing the
+		// given headers (`__cplusplus`, `_GLIBCXX_USE_CXX11_ABI`, feature-test
+		// macros...). Headers are parsed one by one with no `#include` expansion,
+		// so without this every `#if __cplusplus >= ...` guard in the standard
+		// library selects nothing and the class bodies never reach the index.
+		// Object-like macros only; empty when the compiler cannot be run.
+		Preprocessor::MacroMap CompilerMacros(const CompileCommand* command,
+			const std::vector<std::filesystem::path>& headers,
+			const SourceOverlay* overlay)
+		{
+			Preprocessor::MacroMap macros;
+			static std::atomic<unsigned> counter {0};
+			std::error_code ec;
+			const std::filesystem::path scratch =
+				std::filesystem::temp_directory_path(ec) /
+				("heimdall-macros-" + std::to_string(counter.fetch_add(1)) + "-" +
+				std::to_string(
+				std::hash<std::thread::id> {}(std::this_thread::get_id()) % 100000) +
+				".cpp");
+			if (ec)
+			{
+				return macros;
+			}
 
-            {
-                std::ofstream out(scratch, std::ios::binary);
-                if (!out)
-                {
-                    return macros;
-                }
+			{
+				std::ofstream out(scratch, std::ios::binary);
+				if (!out)
+				{
+					return macros;
+				}
 
-                for (const auto& header : headers)
-                {
-                    out << "#include \"" << header.generic_string() << "\"\n";
-                }
-            }
+				for (const auto& header : headers)
+				{
+					out << "#include \"" << header.generic_string() << "\"\n";
+				}
+			}
 
-            std::string flags;
-            bool        has_standard = false;
-            if (command != nullptr)
-            {
-                for (std::size_t i = 1; i < command->arguments.size(); ++i)
-                {
-                    const std::string& argument = command->arguments[i];
-                    const bool takes_next       = argument == "-isystem" || argument == "-iquote" ||
-                                                  argument == "-idirafter" || argument == "-I" ||
-                                                  argument == "-D" || argument == "-U";
-                    if (takes_next && i + 1 < command->arguments.size())
-                    {
-                        flags += " " + argument + " \"" + command->arguments[++i] + "\"";
-                    }
-                    else if (argument == "-freflection" || argument.starts_with("-std=") ||
-                             argument.starts_with("-stdlib=") ||
-                             argument.starts_with("-D") || argument.starts_with("-U") ||
-                             argument.starts_with("-I") || argument.starts_with("-isystem") ||
-                             argument.starts_with("-nostd") || argument.starts_with("--target") ||
-                             argument.starts_with("-m"))
-                    {
-                        has_standard = has_standard || argument.starts_with("-std=");
-                        flags += " \"" + argument + "\"";
-                    }
-                }
-            }
+			std::string flags;
+			bool has_standard = false;
+			if (command != nullptr)
+			{
+				for (std::size_t i = 1; i < command->arguments.size(); ++i)
+				{
+					const std::string& argument = command->arguments[i];
+					const bool takes_next = argument == "-isystem" || argument == "-iquote" ||
+						argument == "-idirafter" || argument == "-I" ||
+						argument == "-D" || argument == "-U";
+					if (takes_next && i + 1 < command->arguments.size())
+					{
+						flags += " " + argument + " \"" + command->arguments[++i] + "\"";
+					}
+					else if (argument == "-freflection" || argument.starts_with("-std=") ||
+						argument.starts_with("-stdlib=") ||
+						argument.starts_with("-D") || argument.starts_with("-U") ||
+						argument.starts_with("-I") || argument.starts_with("-isystem") ||
+						argument.starts_with("-nostd") || argument.starts_with("--target") ||
+						argument.starts_with("-m"))
+					{
+						has_standard = has_standard || argument.starts_with("-std=");
+						flags += " \"" + argument + "\"";
+					}
+				}
+			}
 
-            if (!has_standard)
-            {
-                const CppStandard standard =
-                    command != nullptr ? command->standard : CppStandard::Cpp20;
-                flags += standard == CppStandard::Cpp26   ? " -std=c++26"
-                         : standard == CppStandard::Cpp23 ? " -std=c++23"
-                                                          : " -std=c++20";
-            }
+			if (!has_standard)
+			{
+				const CppStandard standard =
+					command != nullptr ? command->standard : CppStandard::Cpp20;
+				flags += standard == CppStandard::Cpp26 ? " -std=c++26"
+				: standard == CppStandard::Cpp23 ? " -std=c++23"
+				: " -std=c++20";
+			}
 
-            const std::string driver = DriverOf(command);
+			const std::string driver = DriverOf(command);
 #if defined(_WIN32)
-            const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
-                                     scratch.string() + "\" 2>nul\"";
-            std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(line.c_str(), "r"), _pclose);
+			const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
+				scratch.string() + "\" 2>nul\"";
+			std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(line.c_str(), "r"), _pclose);
 #else
-            const std::string line = "\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
-                                     scratch.string() + "\" 2>/dev/null";
-            std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(line.c_str(), "r"), pclose);
+			const std::string line = "\"" + driver + "\" -x c++ -dM -E" + flags + " \"" +
+				scratch.string() + "\" 2>/dev/null";
+			std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(line.c_str(), "r"), pclose);
 #endif
-            if (pipe)
-            {
-                std::string text;
-                char        buffer[4096];
-                while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
-                {
-                    text += buffer;
-                }
+			if (pipe)
+			{
+				std::string text;
+				char buffer[4096];
+				while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
+				{
+					text += buffer;
+				}
 
-                std::size_t pos = 0;
-                while (pos < text.size())
-                {
-                    std::size_t end = text.find('\n', pos);
-                    if (end == std::string::npos)
-                    {
-                        end = text.size();
-                    }
+				std::size_t pos = 0;
+				while (pos < text.size())
+				{
+					std::size_t end = text.find('\n', pos);
+					if (end == std::string::npos)
+					{
+						end = text.size();
+					}
 
-                    std::string_view row(text.data() + pos, end - pos);
-                    pos = end + 1;
-                    while (!row.empty() && row.back() == '\r')
-                    {
-                        row.remove_suffix(1);
-                    }
+					std::string_view row(text.data() + pos, end - pos);
+					pos = end + 1;
+					while (!row.empty() && row.back() == '\r')
+					{
+						row.remove_suffix(1);
+					}
 
-                    constexpr std::string_view define = "#define ";
-                    if (!row.starts_with(define))
-                    {
-                        continue;
-                    }
+					constexpr std::string_view define = "#define ";
+					if (!row.starts_with(define))
+					{
+						continue;
+					}
 
-                    row.remove_prefix(define.size());
-                    const std::size_t name_end = row.find_first_of(" (");
-                    if (name_end == std::string_view::npos || row[name_end] == '(')
-                    {
-                        if (name_end == std::string_view::npos)
-                        {
-                            macros.emplace(std::string(row), std::string());
-                        }
+					row.remove_prefix(define.size());
+					const std::size_t name_end = row.find_first_of(" (");
+					if (name_end == std::string_view::npos || row[name_end] == '(')
+					{
+						if (name_end == std::string_view::npos)
+						{
+							macros.emplace(std::string(row), std::string());
+						}
 
-                        continue; // function-like macros stay unexpanded
-                    }
+						continue; // function-like macros stay unexpanded
+					}
 
-                    macros.emplace(std::string(row.substr(0, name_end)),
-                                   std::string(row.substr(name_end + 1)));
-                }
-            }
+					macros.emplace(std::string(row.substr(0, name_end)),
+						std::string(row.substr(name_end + 1)));
+				}
+			}
 
-            std::filesystem::remove(scratch, ec);
-            // The probe included every header, so every include guard is now
-            // defined; each header is parsed on its own and must still see its
-            // body. Drop the guards (`#ifndef X` / `#define X` at the top).
-            for (const auto& header : headers)
-            {
-                const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20, overlay));
-                if (!guard.empty())
-                {
-                    macros.erase(guard);
-                }
-            }
+			std::filesystem::remove(scratch, ec);
+			// The probe included every header, so every include guard is now
+			// defined; each header is parsed on its own and must still see its
+			// body. Drop the guards (`#ifndef X` / `#define X` at the top).
+			for (const auto& header : headers)
+			{
+				const std::string guard = IncludeGuardOf(ReadFile(header, 1 << 20, overlay));
+				if (!guard.empty())
+				{
+					macros.erase(guard);
+				}
+			}
 
-            return macros;
-        }
+			return macros;
+		}
 
-        bool IsReservedName(std::string_view name)
-        {
-            return !name.empty() && name.front() == '_';
-        }
+		bool IsReservedName(std::string_view name)
+		{
+			return !name.empty() && name.front() == '_';
+		}
 
-        bool ReflectionEnabled(const CompileCommand& command)
-        {
-            return std::find(command.arguments.begin(), command.arguments.end(), "-freflection") !=
-                   command.arguments.end();
-        }
+		bool ReflectionEnabled(const CompileCommand& command)
+		{
+			return std::find(command.arguments.begin(), command.arguments.end(), "-freflection") !=
+				command.arguments.end();
+		}
 
-        std::string ScopePathKey(const std::vector<std::string>& path)
-        {
-            std::string key;
-            for (const auto& element : path)
-            {
-                key += element;
-                key += '\0';
-            }
+		std::string ScopePathKey(const std::vector<std::string>& path)
+		{
+			std::string key;
+			for (const auto& element : path)
+			{
+				key += element;
+				key += '\0';
+			}
 
-            return key;
-        }
+			return key;
+		}
 
-    } // namespace
+	} // namespace
 
-    std::string IncludeIndex::SpellHeader(const std::filesystem::path& header,
-                                          const std::filesystem::path& file,
-                                          const CompileCommand*        command)
-    {
-        if (header.empty())
-        {
-            return {};
-        }
+	std::string IncludeIndex::SpellHeader(const std::filesystem::path& header,
+		const std::filesystem::path& file,
+		const CompileCommand* command)
+	{
+		if (header.empty())
+		{
+			return {};
+		}
 
-        const std::filesystem::path target = header.lexically_normal();
-        std::string                 best;
-        bool                        best_angled = false;
-        const auto consider = [&](const std::filesystem::path& directory, bool angled)
-        {
-            if (directory.empty())
-            {
-                return;
-            }
+		const std::filesystem::path target = header.lexically_normal();
+		std::string best;
+		bool best_angled = false;
+		const auto consider =[&](const std::filesystem::path& directory, bool angled)
+		{
+			if (directory.empty())
+			{
+				return;
+			}
 
-            const std::filesystem::path relative =
-                target.lexically_relative(directory.lexically_normal());
-            const std::string spelled = relative.generic_string();
-            if (relative.empty() || spelled.starts_with("..") || relative.is_absolute())
-            {
-                return;
-            }
+			const std::filesystem::path relative =
+				target.lexically_relative(directory.lexically_normal());
+			const std::string spelled = relative.generic_string();
+			if (relative.empty() || spelled.starts_with("..") || relative.is_absolute())
+			{
+				return;
+			}
 
-            if (best.empty() || spelled.size() < best.size())
-            {
-                best        = spelled;
-                best_angled = angled;
-            }
-        };
+			if (best.empty() || spelled.size() < best.size())
+			{
+				best        = spelled;
+				best_angled = angled;
+			}
+		};
 
-        consider(file.parent_path(), false);
-        if (command != nullptr)
-        {
-            for (const auto& directory : command->quote_directories)
-            {
-                consider(directory.is_absolute() ? directory : command->directory / directory,
-                         false);
-            }
+		consider(file.parent_path(), false);
+		if (command != nullptr)
+		{
+			for (const auto& directory : command->quote_directories)
+			{
+				consider(directory.is_absolute() ? directory : command->directory / directory,
+					false);
+			}
 
-            for (const auto& directory : command->include_directories)
-            {
-                consider(directory.is_absolute() ? directory : command->directory / directory,
-                         false);
-            }
-        }
+			for (const auto& directory : command->include_directories)
+			{
+				consider(directory.is_absolute() ? directory : command->directory / directory,
+					false);
+			}
+		}
 
-        if (best.empty())
-        {
-            for (const auto& directory : SystemIncludes(DriverOf(command)))
-            {
-                consider(directory, true);
-            }
-        }
+		if (best.empty())
+		{
+			for (const auto& directory : SystemIncludes(DriverOf(command)))
+			{
+				consider(directory, true);
+			}
+		}
 
-        if (best.empty())
-        {
-            best = target.lexically_relative(file.parent_path().lexically_normal()).generic_string();
-            if (best.empty())
-            {
-                best = target.generic_string();
-            }
-        }
+		if (best.empty())
+		{
+			best = target.lexically_relative(file.parent_path().lexically_normal()).generic_string();
+			if (best.empty())
+			{
+				best = target.generic_string();
+			}
+		}
 
-        return best_angled ? "<" + best + ">" : "\"" + best + "\"";
-    }
+		return best_angled ? "<" + best + ">" : "\"" + best + "\"";
+	}
 
-    std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view compiler)
-    {
-        // Thread-safe memoization: previously a bare static map (data race as
-        // soon as workers arrive) populated on the I/O thread via popen.
-        static std::mutex                                                          mutex;
-        static std::unordered_map<std::string, std::vector<std::filesystem::path>> cache;
-        const std::string key(compiler.empty() ? "c++" : compiler);
-        {
-            const std::lock_guard<std::mutex> lock(mutex);
-            if (const auto found = cache.find(key); found != cache.end())
-            {
-                return found->second;
-            }
-        }
+	std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view compiler)
+	{
+		// Thread-safe memoization: previously a bare static map (data race as
+		// soon as workers arrive) populated on the I/O thread via popen.
+		static std::mutex mutex;
+		static std::unordered_map<std::string, std::vector<std::filesystem::path>> cache;
+		const std::string key(compiler.empty() ? "c++" : compiler);
+		{
+			const std::lock_guard<std::mutex> lock(mutex);
+			if (const auto found = cache.find(key); found != cache.end())
+			{
+				return found->second;
+			}
+		}
 
-        std::vector<std::filesystem::path> dirs;
+		std::vector<std::filesystem::path> dirs;
 #if defined(_WIN32)
-        const std::string command = "\"" + key + "\" -xc++ -E -v - <nul 2>&1";
-        std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(command.c_str(), "r"), _pclose);
+		const std::string command = "\"" + key + "\" -xc++ -E -v - <nul 2>&1";
+		std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(command.c_str(), "r"), _pclose);
 #else
-        const std::string command = "\"" + key + "\" -xc++ -E -v - </dev/null 2>&1";
-        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+		const std::string command = "\"" + key + "\" -xc++ -E -v - </dev/null 2>&1";
+		std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(command.c_str(), "r"), pclose);
 #endif
-        if (pipe)
-        {
-            bool listing = false;
-            char buffer[512];
-            while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
-            {
-                std::string_view line(buffer);
-                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-                {
-                    line.remove_suffix(1);
-                }
-
-                while (!line.empty() && line.front() == ' ')
-                {
-                    line.remove_prefix(1);
-                }
-
-                if (line == "#include <...> search starts here:")
-                {
-                    listing = true;
-                }
-                else if (line == "End of search list.")
-                {
-                    listing = false;
-                }
-                else if (listing && !line.empty())
-                {
-                    constexpr std::string_view framework = " (framework directory)";
-                    if (line.ends_with(framework))
-                    {
-                        line.remove_suffix(framework.size());
-                    }
-
-                    if (!line.empty())
-                    {
-                        dirs.push_back(NormalizedAbsolute(std::filesystem::path(line)));
-                    }
-                }
-            }
-        }
-
-        {
-            const std::lock_guard<std::mutex> lock(mutex);
-            // Another thread may have populated while popen ran outside the lock.
-            if (const auto found = cache.find(key); found != cache.end())
-            {
-                return found->second;
-            }
-
-            cache.emplace(key, dirs);
-        }
-        return dirs;
-    }
-
-    std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(
-        const std::filesystem::path& base_dir,
-        std::string_view             text,
-        const CompileCommand*        command,
-        const Limits&                limits,
-        ResolveReport*               report,
-        const SourceOverlay*         overlay)
-    {
-        const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
-        std::vector<std::filesystem::path>       normalized_system;
-        normalized_system.reserve(system_dirs.size());
-        for (const auto& dir : system_dirs)
-        {
-            normalized_system.push_back(NormalizedAbsolute(dir));
-        }
-
-        auto in_system = [&](const std::filesystem::path& file) {
-            return std::any_of(
-                normalized_system.begin(), normalized_system.end(),
-                [&](const std::filesystem::path& dir) { return IsUnder(file, dir); });
-        };
-        auto incomplete = [&] {
-            if (report != nullptr)
-            {
-                report->complete = false;
-            }
-        };
-        std::vector<std::filesystem::path> ordered;
-        std::unordered_set<std::string>    visited;
-        // Worklist of (including directory, include name, angled, depth).
-        struct Work
-        {
-            std::filesystem::path dir;
-            std::string           name;
-            bool                  angled = false;
-            bool                  next   = false;
-            int                   depth  = 0;
-            std::filesystem::path from;
-        };
-
-        // Breadth-first, project (quoted) includes before system (angled) ones:
-        // with the header cap a depth-first walk spent the whole budget inside
-        // the last <standard header> and never reached the project's own headers.
-        std::deque<Work> stack;
-        auto enqueue = [&](const std::filesystem::path& dir, int depth, std::string_view source,
-                           const std::filesystem::path& from) {
-            const std::vector<IncludeRef> refs = ScanIncludes(source);
-            for (const bool angled : { false, true })
-            {
-                for (const auto& ref : refs)
-                {
-                    if (ref.angled != angled || (ref.next && !limits.follow_include_next))
-                    {
-                        continue;
-                    }
-
-                    stack.push_back({ dir, ref.name, ref.angled, ref.next, depth, from });
-                }
-            }
-        };
-        enqueue(base_dir, 0, text, {});
-
-        while (!stack.empty() && ordered.size() < limits.max_headers)
-        {
-            Work work = std::move(stack.front());
-            stack.pop_front();
-            const bool from_system = !work.from.empty() && in_system(work.from);
-            if (work.depth > limits.max_depth)
-            {
-                if (!from_system)
-                {
-                    incomplete();
-                }
-
-                continue;
-            }
-
-            const auto resolved =
-                work.next
-                    ? TryResolveNext(work.name, work.from, command, system_dirs, overlay)
-                    : TryResolve(work.name, work.angled, work.dir, command, system_dirs, overlay);
-            if (resolved.empty())
-            {
-                if (!from_system)
-                {
-                    incomplete();
-                }
-
-                continue;
-            }
-
-            const std::string key = resolved.string();
-            if (!visited.insert(key).second)
-            {
-                continue;
-            }
-
-            ordered.push_back(resolved);
-            const std::string nested = ReadFile(resolved, limits.max_file_bytes, overlay);
-            if (nested.empty())
-            {
-                if (overlay)
-                    if (const auto source = overlay->Find(resolved))
-                    {
-                        if (!source->empty())
-                        {
-                            incomplete();
-                        }
-
-                        continue;
-                    }
-
-                std::error_code size_ec;
-                if (std::filesystem::file_size(resolved, size_ec) != 0 || size_ec)
-                {
-                    incomplete();
-                }
-
-                continue;
-            }
-
-            enqueue(resolved.parent_path(), work.depth + 1, nested, resolved);
-        }
-
-        if (!stack.empty())
-        {
-            incomplete();
-        }
-
-        return ordered;
-    }
-
-    namespace
-    {
-
-        bool IsIncludableFile(const std::filesystem::path& path)
-        {
-            // Standard headers have no extension; skip sources and binaries.
-            static const std::unordered_set<std::string> accepted = {
-                "",     ".h",   ".hh",  ".hpp", ".hxx", ".h++", ".inl",
-                ".inc", ".def", ".tpp", ".ipp", ".tcc", ".cuh",
-            };
-            std::string extension = path.extension().string();
-            std::transform(extension.begin(), extension.end(), extension.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            return accepted.contains(extension);
-        }
-
-        bool StartsWithNoCase(std::string_view text, std::string_view prefix)
-        {
-            if (text.size() < prefix.size())
-            {
-                return false;
-            }
-
-            for (std::size_t i = 0; i < prefix.size(); ++i)
-            {
-                if (std::tolower(static_cast<unsigned char>(text[i])) !=
-                    std::tolower(static_cast<unsigned char>(prefix[i])))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-    } // namespace
-
-    std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(
-        const std::filesystem::path& base_dir,
-        bool                         angled,
-        std::string_view             typed,
-        const CompileCommand*        command,
-        std::size_t                  max_results)
-    {
-        // `typed` is what follows the opening delimiter: `dir/sub/na`.
-        std::string_view directory_part;
-        std::string_view name_prefix = typed;
-        if (const auto slash = typed.find_last_of("/\\"); slash != std::string_view::npos)
-        {
-            directory_part = typed.substr(0, slash + 1);
-            name_prefix    = typed.substr(slash + 1);
-        }
-
-        // Search order mirrors the compiler: `"..."` looks next to the including
-        // file and in -iquote directories first, `<...>` never does.
-        struct Root
-        {
-            std::filesystem::path path;
-            IncludeOrigin         origin;
-        };
-
-        std::vector<Root>           roots;
-        const std::filesystem::path typed_directory(directory_part);
-        if (typed_directory.is_absolute())
-        {
-            roots.push_back({ {}, IncludeOrigin::Absolute });
-        }
-        else
-        {
-            if (!angled)
-            {
-                if (!base_dir.empty())
-                {
-                    roots.push_back({ base_dir, IncludeOrigin::Local });
-                }
-
-                if (command != nullptr)
-                {
-                    for (const auto& dir : command->quote_directories)
-                    {
-                        roots.push_back({ dir, IncludeOrigin::Quote });
-                    }
-                }
-            }
-
-            if (command != nullptr)
-            {
-                for (const auto& dir : command->include_directories)
-                {
-                    roots.push_back({ dir, IncludeOrigin::Include });
-                }
-            }
-
-            for (const auto& dir : SystemIncludes(DriverOf(command)))
-            {
-                roots.push_back({ dir, IncludeOrigin::System });
-            }
-        }
-
-        std::vector<IncludeCandidate>   result;
-        std::unordered_set<std::string> seen;
-        for (const auto& root : roots)
-        {
-            const std::filesystem::path directory =
-                root.origin == IncludeOrigin::Absolute
-                    ? typed_directory
-                    : NormalizedAbsolute(root.path / typed_directory);
-            std::error_code                     ec;
-            std::filesystem::directory_iterator iterator(
-                directory, std::filesystem::directory_options::skip_permission_denied, ec);
-            if (ec)
-            {
-                continue;
-            }
-
-            for (const auto& entry : iterator)
-            {
-                const std::string name = entry.path().filename().string();
-                if (name.empty() || name.front() == '.' || !StartsWithNoCase(name, name_prefix))
-                {
-                    continue;
-                }
-
-                std::error_code type_ec;
-                const bool      is_directory = entry.is_directory(type_ec);
-                if (type_ec || (!is_directory && (!entry.is_regular_file(type_ec) ||
-                                                  !IsIncludableFile(entry.path()))))
-                {
-                    continue;
-                }
-
-                std::string label = is_directory ? name + "/" : name;
-                if (!seen.insert(label).second)
-                {
-                    continue;
-                }
-
-                result.push_back({ std::move(label), is_directory, root.origin, directory });
-            }
-        }
-
-        // Project directories before system ones (the cap must never drop a
-        // project header in favour of a system one); inside an origin,
-        // directories first because they lead to the rest of the tree.
-        std::sort(result.begin(), result.end(),
-                  [](const IncludeCandidate& a, const IncludeCandidate& b) {
-                      if (a.origin != b.origin)
-                      {
-                          return a.origin < b.origin;
-                      }
-
-                      return a.directory != b.directory ? a.directory : a.label < b.label;
-                  });
-        if (result.size() > max_results)
-        {
-            result.resize(max_results);
-        }
-
-        return result;
-    }
-
-    std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text,
-                                                                 std::size_t      offset)
-    {
-        offset                             = std::min(offset, text.size());
-        const std::size_t      line_begin  = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
-        const std::string_view line        = text.substr(line_begin, offset - line_begin);
-        std::size_t            i           = 0;
-        auto                   skip_blanks = [&] {
-            while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
-            {
-                ++i;
-            }
-        };
-
-        skip_blanks();
-        if (i >= line.size() || line[i] != '#')
-        {
-            return std::nullopt;
-        }
-
-        ++i;
-        skip_blanks();
-        constexpr std::string_view keyword = "include";
-        if (line.substr(i, keyword.size()) != keyword)
-        {
-            return std::nullopt;
-        }
-
-        i += keyword.size();
-        constexpr std::string_view next_suffix = "_next";
-        if (line.substr(i, next_suffix.size()) == next_suffix)
-        {
-            i += next_suffix.size();
-        }
-
-        skip_blanks();
-        if (i >= line.size() || (line[i] != '<' && line[i] != '"'))
-        {
-            return std::nullopt;
-        }
-
-        const bool angled  = line[i] == '<';
-        const char closing = angled ? '>' : '"';
-        ++i;
-        if (line.substr(i).find(closing) != std::string_view::npos)
-        {
-            return std::nullopt;
-        }
-
-        return IncludeContext { angled, line_begin + i };
-    }
-
-    std::filesystem::path IncludeIndex::ResolveIncludeAt(const std::filesystem::path& base_dir,
-                                                         std::string_view             text,
-                                                         std::size_t                  offset,
-                                                         const CompileCommand*        command)
-    {
-        offset                  = std::min(offset, text.size());
-        const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
-        std::size_t       end   = text.find('\n', offset);
-        if (end == std::string_view::npos)
-        {
-            end = text.size();
-        }
-
-        // begin wraps to 0 when no newline precedes the offset (npos + 1).
-        const std::vector<IncludeRef> refs = ScanIncludes(text.substr(begin, end - begin));
-        if (refs.empty() || refs.front().next)
-        {
-            return {};
-        }
-
-        return TryResolve(refs.front().name, refs.front().angled, base_dir, command,
-                          SystemIncludes(DriverOf(command)));
-    }
-
-    std::string IncludeIndex::IncludeFingerprint(
-        const std::filesystem::path& base_dir, std::string_view text, const CompileCommand* command)
-    {
-        // Raw line scan: no lexer, no filesystem access. Only the file's own
-        // include lines matter; nested headers are covered by CacheKey's mtimes.
-        std::string fingerprint;
-        fingerprint += base_dir.string();
-        fingerprint += '\0';
-        std::size_t pos = 0;
-        while (pos < text.size())
-        {
-            std::size_t end = text.find('\n', pos);
-            if (end == std::string_view::npos)
-            {
-                end = text.size();
-            }
-
-            std::string_view line  = text.substr(pos, end - pos);
-            std::size_t      first = 0;
-            while (first < line.size() &&
-                   (line[first] == ' ' || line[first] == '\t' || line[first] == '\r'))
-            {
-                ++first;
-            }
-
-            if (first < line.size() && line[first] == '#')
-            {
-                std::size_t word = first + 1;
-                while (word < line.size() && (line[word] == ' ' || line[word] == '\t'))
-                {
-                    ++word;
-                }
-
-                const std::size_t      word_end  = line.find_first_of(" \t\r(", word);
-                const std::string_view directive = line.substr(
-                    word, word_end == std::string_view::npos ? word_end : word_end - word);
-                if (directive == "include" || directive == "include_next")
-                {
-                    fingerprint.append(line);
-                    fingerprint += '\n';
-                }
-            }
-
-            pos = end + 1;
-        }
-
-        fingerprint += '\0';
-        if (command != nullptr)
-        {
-            fingerprint += std::to_string(static_cast<int>(command->standard));
-            fingerprint += '\0';
-            fingerprint += ReflectionEnabled(*command) ? '1' : '0';
-            fingerprint += '\0';
-            for (const auto& dir : command->include_directories)
-            {
-                fingerprint += dir.string();
-                fingerprint += '\0';
-            }
-
-            for (const auto& dir : command->quote_directories)
-            {
-                fingerprint += dir.string();
-                fingerprint += '\0';
-            }
-
-            std::vector<std::string> defines;
-            for (const auto& [name, value] : command->defines)
-            {
-                defines.push_back(name + "=" + value);
-            }
-
-            std::sort(defines.begin(), defines.end());
-            for (const auto& define : defines)
-            {
-                fingerprint += define;
-                fingerprint += '\0';
-            }
-        }
-
-        return fingerprint;
-    }
-
-    std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
-                                       const CompileCommand* command, const SourceOverlay* overlay)
-    {
-        std::string key;
-        for (const auto& header : headers)
-        {
-            std::error_code ec;
-            const auto      size = std::filesystem::file_size(header, ec);
-            const auto      time = std::filesystem::last_write_time(header, ec);
-            key += header.string();
-            key += '\0';
-            key += std::to_string(ec ? 0 : size);
-            key += '\0';
-            key += std::to_string(ec ? 0 : time.time_since_epoch().count());
-            key += '\0';
-        }
-
-        key += '\1';
-        if (command != nullptr)
-        {
-            key += std::to_string(static_cast<int>(command->standard));
-            key += '\0';
-            key += ReflectionEnabled(*command) ? '1' : '0';
-            key += '\0';
-            std::vector<std::string> defines;
-            for (const auto& [name, value] : command->defines)
-            {
-                defines.push_back(name + "=" + value);
-            }
-
-            std::sort(defines.begin(), defines.end());
-            for (const auto& define : defines)
-            {
-                key += define;
-                key += '\0';
-            }
-        }
-
-        if (overlay)
-        {
-            key += overlay->Fingerprint(headers);
-        }
-
-        return key;
-    }
-
-    IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& headers,
-                                     const CompileCommand*                     command,
-                                     const Limits&                             limits,
-                                     const SourceOverlay*                      overlay)
-    {
-        IncludeIndex index;
-        // Path -> position in index.m_scopes: merging is O(1) per scope instead of
-        // the previous linear MergeScope scan (O(S^2) over hundreds of scopes for
-        // <vector>+<string>+<algorithm>).
-        std::unordered_map<std::string, std::size_t> positions;
-        ParserOptions                                options;
-        if (command != nullptr)
-        {
-            options.standard = command->standard;
-            options.shared_macros =
-                std::make_shared<const Preprocessor::MacroMap>(command->defines);
-            if (!command->undefines.empty())
-            {
-                auto filtered = std::make_shared<Preprocessor::MacroMap>(command->defines);
-                for (const auto& name : command->undefines)
-                {
-                    filtered->erase(name);
-                }
-
-                options.shared_macros = std::move(filtered);
-            }
-        }
-
-        if (!headers.empty())
-        {
-            Preprocessor::MacroMap probed = CompilerMacros(command, headers, overlay);
-            if (!probed.contains("__cplusplus"))
-            {
-                // No compiler to ask: at least select the right language branch.
-                probed["__cplusplus"] =
-                    options.standard == CppStandard::Cpp26 ? "202400L"
-                    : options.standard == CppStandard::Cpp23
-                        ? "202302L"
-                        : "202002L";
-            }
-
-            // The project's own -D/-U win over what the compiler reports.
-            if (command != nullptr)
-            {
-                for (const auto& [name, value] : command->defines)
-                {
-                    probed[name] = value;
-                }
-
-                for (const auto& name : command->undefines)
-                {
-                    probed.erase(name);
-                }
-            }
-
-            options.shared_macros =
-                std::make_shared<const Preprocessor::MacroMap>(std::move(probed));
-        }
-
-        // Headers are independent: read + parse them on a worker fan-out, then
-        // merge serially. IndexScopes is a pure function of (content, options),
-        // so concurrent calls only share read-only state.
-        std::vector<ScopeIndex> per_header(headers.size());
-        index.m_sources.resize(headers.size());
-        if (!headers.empty())
-        {
-            if (headers.size() <= 2)
-            {
-                for (std::size_t h = 0; h < headers.size(); ++h)
-                {
-                    const auto content = std::make_shared<const std::string>(
-                        ReadFile(headers[h], limits.max_file_bytes, overlay));
-                    index.m_sources[h] = content;
-                    if (content->empty())
-                    {
-                        continue;
-                    }
-
-                    per_header[h] = CompletionEngine::IndexScopes(*content, options);
-                }
-            }
-            else
-            {
-                unsigned workers = std::thread::hardware_concurrency();
-                if (workers == 0)
-                {
-                    workers = 4;
-                }
-
-                if (workers > 2)
-                {
-                    workers -= 2;
-                } // reserve I/O + diagnostics
-
-                workers = std::max<unsigned>(workers, 1);
-                workers = std::min<unsigned>(workers, static_cast<unsigned>(headers.size()));
-                std::atomic<std::size_t>  next = 0;
-                std::vector<std::jthread> pool;
-                pool.reserve(workers);
-                for (unsigned w = 0; w < workers; ++w)
-                {
-                    pool.emplace_back([&] {
-                        while (true)
-                        {
-                            const std::size_t h = next.fetch_add(1, std::memory_order_relaxed);
-                            if (h >= headers.size())
-                            {
-                                return;
-                            }
-
-                            const auto content = std::make_shared<const std::string>(
-                                ReadFile(headers[h], limits.max_file_bytes, overlay));
-                            index.m_sources[h] = content;
-                            if (content->empty())
-                            {
-                                continue;
-                            }
-
-                            // An exception escaping a worker thread is std::terminate.
-                            try
-                            {
-                                per_header[h] = CompletionEngine::IndexScopes(*content, options);
-                            }
-                            catch (...)
-                            {
-                                per_header[h] = {};
-                            }
-                        }
-                    });
-                }
-            }
-        }
-
-        index.m_files = headers;
-        for (std::size_t header = 0; header < per_header.size(); ++header)
-        {
-            auto& scopes = per_header[header];
-            for (auto& scope : scopes)
-            {
-                for (auto& member : scope.members)
-                {
-                    if (member.has_location)
-                    {
-                        member.file = static_cast<std::int32_t>(header);
-                    }
-                }
-            }
-
-            for (auto& scope : scopes)
-            {
-                if (!scope.path.empty())
-                {
-                    bool reserved = false;
-                    for (const auto& element : scope.path)
-                    {
-                        if (IsReservedName(element))
-                        {
-                            reserved = true;
-                            break;
-                        }
-                    }
-
-                    if (reserved)
-                    {
-                        continue;
-                    }
-                }
-
-                IndexedScope filtered;
-                filtered.path            = scope.path;
-                filtered.kind            = scope.kind;
-                filtered.members         = std::move(scope.members);
-                filtered.bases           = std::move(scope.bases);
-                filtered.template_params = std::move(scope.template_params);
-                filtered.layout_unknown  = scope.layout_unknown;
-                std::erase_if(filtered.members, [](const CompletionItem& member) {
-                    return IsReservedName(member.label);
-                });
-                if (!filtered.members.empty() || !filtered.bases.empty())
-                {
-                    const std::string key = ScopePathKey(filtered.path);
-                    if (const auto found = positions.find(key); found != positions.end())
-                    {
-                        auto& entry          = index.m_scopes[found->second];
-                        entry.layout_unknown = entry.layout_unknown || filtered.layout_unknown;
-                        if (entry.template_params.empty())
-                        {
-                            entry.template_params = std::move(filtered.template_params);
-                        }
-
-                        entry.members.insert(entry.members.end(), filtered.members.begin(),
-                                             filtered.members.end());
-                        for (auto& base : filtered.bases)
-                        {
-                            if (std::find(entry.bases.begin(), entry.bases.end(), base) ==
-                                entry.bases.end())
-                            {
-                                entry.bases.push_back(std::move(base));
-                            }
-                        }
-                    }
-                    else
-                    {
-                        positions.emplace(key, index.m_scopes.size());
-                        index.m_scopes.push_back(std::move(filtered));
-                    }
-                }
-            }
-        }
-
-        index.m_type_names = CompletionEngine::TypeNamesOf(index.m_scopes);
-        return index;
-    }
-
-    IncludeIndex IncludeIndex::Build(const std::filesystem::path& base_dir,
-                                     std::string_view             text,
-                                     const CompileCommand*        command,
-                                     const Limits&                limits,
-                                     const SourceOverlay*         overlay)
-    {
-        return Build(ResolveHeaders(base_dir, text, command, limits, nullptr, overlay), command,
-                     limits, overlay);
-    }
+		if (pipe)
+		{
+			bool listing = false;
+			char buffer[512];
+			while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
+			{
+				std::string_view line(buffer);
+				while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+				{
+					line.remove_suffix(1);
+				}
+
+				while (!line.empty() && line.front() == ' ')
+				{
+					line.remove_prefix(1);
+				}
+
+				if (line == "#include <...> search starts here:")
+				{
+					listing = true;
+				}
+				else if (line == "End of search list.")
+				{
+					listing = false;
+				}
+				else if (listing && !line.empty())
+				{
+					constexpr std::string_view framework = " (framework directory)";
+					if (line.ends_with(framework))
+					{
+						line.remove_suffix(framework.size());
+					}
+
+					if (!line.empty())
+					{
+						dirs.push_back(NormalizedAbsolute(std::filesystem::path(line)));
+					}
+				}
+			}
+		}
+
+		{
+			const std::lock_guard<std::mutex> lock(mutex);
+			// Another thread may have populated while popen ran outside the lock.
+			if (const auto found = cache.find(key); found != cache.end())
+			{
+				return found->second;
+			}
+
+			cache.emplace(key, dirs);
+		}
+		return dirs;
+	}
+
+	std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(
+		const std::filesystem::path& base_dir,
+		std::string_view text,
+		const CompileCommand* command,
+		const Limits& limits,
+		ResolveReport* report,
+		const SourceOverlay* overlay)
+	{
+		const std::vector<std::filesystem::path> system_dirs = SystemIncludes(DriverOf(command));
+		std::vector<std::filesystem::path> normalized_system;
+		normalized_system.reserve(system_dirs.size());
+		for (const auto& dir : system_dirs)
+		{
+			normalized_system.push_back(NormalizedAbsolute(dir));
+		}
+
+		auto in_system =[&](const std::filesystem::path& file)
+		{
+			return std::any_of(
+				normalized_system.begin(), normalized_system.end(),
+				[&](const std::filesystem::path& dir)
+				{
+					return IsUnder(file, dir);
+			});
+		};
+		auto incomplete =[&]
+		{
+			if (report != nullptr)
+			{
+				report->complete = false;
+			}
+		};
+		std::vector<std::filesystem::path> ordered;
+		std::unordered_set<std::string> visited;
+		// Worklist of (including directory, include name, angled, depth).
+		struct Work
+		{
+			std::filesystem::path dir;
+			std::string name;
+			bool angled = false;
+			bool next   = false;
+			int depth   = 0;
+			std::filesystem::path from;
+		};
+
+		// Breadth-first, project (quoted) includes before system (angled) ones:
+		// with the header cap a depth-first walk spent the whole budget inside
+		// the last <standard header> and never reached the project's own headers.
+		std::deque<Work> stack;
+		auto enqueue =[&](const std::filesystem::path& dir, int depth, std::string_view source,
+			const std::filesystem::path& from)
+		{
+			const std::vector<IncludeRef> refs = ScanIncludes(source);
+			for (const bool angled :
+				{
+					false, true
+			})
+			{
+				for (const auto& ref : refs)
+				{
+					if (ref.angled != angled ||(ref.next && !limits.follow_include_next))
+					{
+						continue;
+					}
+
+					stack.push_back({dir, ref.name, ref.angled, ref.next, depth, from});
+				}
+			}
+		};
+		enqueue(base_dir, 0, text, {});
+
+		while (!stack.empty() && ordered.size() < limits.max_headers)
+		{
+			Work work = std::move(stack.front());
+			stack.pop_front();
+			const bool from_system = !work.from.empty() && in_system(work.from);
+			if (work.depth > limits.max_depth)
+			{
+				if (!from_system)
+				{
+					incomplete();
+				}
+
+				continue;
+			}
+
+			const auto resolved =
+				work.next
+			? TryResolveNext(work.name, work.from, command, system_dirs, overlay)
+			: TryResolve(work.name, work.angled, work.dir, command, system_dirs, overlay);
+			if (resolved.empty())
+			{
+				if (!from_system)
+				{
+					incomplete();
+				}
+
+				continue;
+			}
+
+			const std::string key = resolved.string();
+			if (!visited.insert(key).second)
+			{
+				continue;
+			}
+
+			ordered.push_back(resolved);
+			const std::string nested = ReadFile(resolved, limits.max_file_bytes, overlay);
+			if (nested.empty())
+			{
+				if (overlay)
+					if (const auto source = overlay->Find(resolved))
+				{
+					if (!source->empty())
+					{
+						incomplete();
+					}
+
+					continue;
+				}
+
+				std::error_code size_ec;
+				if (std::filesystem::file_size(resolved, size_ec) != 0 || size_ec)
+				{
+					incomplete();
+				}
+
+				continue;
+			}
+
+			enqueue(resolved.parent_path(), work.depth + 1, nested, resolved);
+		}
+
+		if (!stack.empty())
+		{
+			incomplete();
+		}
+
+		return ordered;
+	}
+
+	namespace
+	{
+
+		bool IsIncludableFile(const std::filesystem::path& path)
+		{
+			// Standard headers have no extension; skip sources and binaries.
+			static const std::unordered_set<std::string> accepted = {
+				"", ".h", ".hh", ".hpp", ".hxx", ".h++", ".inl",
+				".inc", ".def", ".tpp", ".ipp", ".tcc", ".cuh",
+			};
+			std::string extension = path.extension().string();
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char c)
+				{
+					return static_cast<char>(std::tolower(c));
+			});
+			return accepted.contains(extension);
+		}
+
+		bool StartsWithNoCase(std::string_view text, std::string_view prefix)
+		{
+			if (text.size() < prefix.size())
+			{
+				return false;
+			}
+
+			for (std::size_t i = 0; i < prefix.size(); ++i)
+			{
+				if (std::tolower(static_cast<unsigned char>(text[i])) !=
+					std::tolower(static_cast<unsigned char>(prefix[i])))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+	} // namespace
+
+	std::vector<IncludeCandidate> IncludeIndex::CompleteIncludePath(
+		const std::filesystem::path& base_dir,
+		bool angled,
+		std::string_view typed,
+		const CompileCommand* command,
+		std::size_t max_results)
+	{
+		// `typed` is what follows the opening delimiter: `dir/sub/na`.
+		std::string_view directory_part;
+		std::string_view name_prefix = typed;
+		if (const auto slash = typed.find_last_of("/\\"); slash != std::string_view::npos)
+		{
+			directory_part = typed.substr(0, slash + 1);
+			name_prefix    = typed.substr(slash + 1);
+		}
+
+		// Search order mirrors the compiler: `"..."` looks next to the including
+		// file and in -iquote directories first, `<...>` never does.
+		struct Root
+		{
+			std::filesystem::path path;
+			IncludeOrigin origin;
+		};
+
+		std::vector<Root> roots;
+		const std::filesystem::path typed_directory(directory_part);
+		if (typed_directory.is_absolute())
+		{
+			roots.push_back({{}, IncludeOrigin::Absolute});
+		}
+		else
+		{
+			if (!angled)
+			{
+				if (!base_dir.empty())
+				{
+					roots.push_back({base_dir, IncludeOrigin::Local});
+				}
+
+				if (command != nullptr)
+				{
+					for (const auto& dir : command->quote_directories)
+					{
+						roots.push_back({dir, IncludeOrigin::Quote});
+					}
+				}
+			}
+
+			if (command != nullptr)
+			{
+				for (const auto& dir : command->include_directories)
+				{
+					roots.push_back({dir, IncludeOrigin::Include});
+				}
+			}
+
+			for (const auto& dir : SystemIncludes(DriverOf(command)))
+			{
+				roots.push_back({dir, IncludeOrigin::System});
+			}
+		}
+
+		std::vector<IncludeCandidate> result;
+		std::unordered_set<std::string> seen;
+		for (const auto& root : roots)
+		{
+			const std::filesystem::path directory =
+				root.origin == IncludeOrigin::Absolute
+			? typed_directory
+			: NormalizedAbsolute(root.path / typed_directory);
+			std::error_code ec;
+			std::filesystem::directory_iterator iterator(
+				directory, std::filesystem::directory_options::skip_permission_denied, ec);
+			if (ec)
+			{
+				continue;
+			}
+
+			for (const auto& entry : iterator)
+			{
+				const std::string name = entry.path().filename().string();
+				if (name.empty() || name.front() == '.' ||!StartsWithNoCase(name, name_prefix))
+				{
+					continue;
+				}
+
+				std::error_code type_ec;
+				const bool is_directory = entry.is_directory(type_ec);
+				if (type_ec ||(!is_directory && (!entry.is_regular_file(type_ec) ||
+					!IsIncludableFile(entry.path()))))
+				{
+					continue;
+				}
+
+				std::string label = is_directory ? name + "/" : name;
+				if (!seen.insert(label).second)
+				{
+					continue;
+				}
+
+				result.push_back({std::move(label), is_directory, root.origin, directory});
+			}
+		}
+
+		// Project directories before system ones (the cap must never drop a
+		// project header in favour of a system one); inside an origin,
+		// directories first because they lead to the rest of the tree.
+		std::sort(result.begin(), result.end(),
+			[](const IncludeCandidate& a, const IncludeCandidate& b)
+			{
+				if (a.origin != b.origin)
+				{
+					return a.origin < b.origin;
+			}
+
+				return a.directory != b.directory ? a.directory : a.label < b.label;
+		});
+		if (result.size() > max_results)
+		{
+			result.resize(max_results);
+		}
+
+		return result;
+	}
+
+	std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text,
+		std::size_t offset)
+	{
+		offset                       = std::min(offset, text.size());
+		const std::size_t line_begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
+		const std::string_view line  = text.substr(line_begin, offset - line_begin);
+		std::size_t i                = 0;
+		auto skip_blanks =[&]
+		{
+			while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
+			{
+				++i;
+			}
+		};
+
+		skip_blanks();
+		if (i >= line.size() || line[i] != '#')
+		{
+			return std::nullopt;
+		}
+
+		++i;
+		skip_blanks();
+		constexpr std::string_view keyword = "include";
+		if (line.substr(i, keyword.size()) != keyword)
+		{
+			return std::nullopt;
+		}
+
+		i += keyword.size();
+		constexpr std::string_view next_suffix = "_next";
+		if (line.substr(i, next_suffix.size()) == next_suffix)
+		{
+			i += next_suffix.size();
+		}
+
+		skip_blanks();
+		if (i >= line.size() ||(line[i] != '<' && line[i] != '"'))
+		{
+			return std::nullopt;
+		}
+
+		const bool angled  = line[i] == '<';
+		const char closing = angled ? '>' : '"';
+		++i;
+		if (line.substr(i).find(closing) != std::string_view::npos)
+		{
+			return std::nullopt;
+		}
+
+		return IncludeContext {angled, line_begin + i};
+	}
+
+	std::filesystem::path IncludeIndex::ResolveIncludeAt(
+		const std::filesystem::path& base_dir,
+		std::string_view text,
+		std::size_t offset,
+		const CompileCommand* command)
+	{
+		offset                  = std::min(offset, text.size());
+		const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
+		std::size_t end         = text.find('\n', offset);
+		if (end == std::string_view::npos)
+		{
+			end = text.size();
+		}
+
+		// begin wraps to 0 when no newline precedes the offset (npos + 1).
+		const std::vector<IncludeRef> refs = ScanIncludes(text.substr(begin, end - begin));
+		if (refs.empty() || refs.front().next)
+		{
+			return {};
+		}
+
+		return TryResolve(refs.front().name, refs.front().angled, base_dir, command,
+			SystemIncludes(DriverOf(command)));
+	}
+
+	std::string IncludeIndex::IncludeFingerprint(
+		const std::filesystem::path& base_dir, std::string_view text, const CompileCommand* command)
+	{
+		// Raw line scan: no lexer, no filesystem access. Only the file's own
+		// include lines matter; nested headers are covered by CacheKey's mtimes.
+		std::string fingerprint;
+		fingerprint += base_dir.string();
+		fingerprint += '\0';
+		std::size_t pos = 0;
+		while (pos < text.size())
+		{
+			std::size_t end = text.find('\n', pos);
+			if (end == std::string_view::npos)
+			{
+				end = text.size();
+			}
+
+			std::string_view line = text.substr(pos, end - pos);
+			std::size_t first     = 0;
+			while (first < line.size() &&
+				(line[first] == ' ' || line[first] == '\t' || line[first] == '\r'))
+			{
+				++first;
+			}
+
+			if (first < line.size() && line[first] == '#')
+			{
+				std::size_t word = first + 1;
+				while (word < line.size() && (line[word] == ' ' || line[word] == '\t'))
+				{
+					++word;
+				}
+
+				const std::size_t word_end = line.find_first_of(" \t\r(", word);
+				const std::string_view directive = line.substr(
+					word, word_end == std::string_view::npos ? word_end : word_end - word);
+				if (directive == "include" || directive == "include_next")
+				{
+					fingerprint.append(line);
+					fingerprint += '\n';
+				}
+			}
+
+			pos = end + 1;
+		}
+
+		fingerprint += '\0';
+		if (command != nullptr)
+		{
+			fingerprint += std::to_string(static_cast<int>(command->standard));
+			fingerprint += '\0';
+			fingerprint += ReflectionEnabled(*command) ? '1' : '0';
+			fingerprint += '\0';
+			for (const auto& dir : command->include_directories)
+			{
+				fingerprint += dir.string();
+				fingerprint += '\0';
+			}
+
+			for (const auto& dir : command->quote_directories)
+			{
+				fingerprint += dir.string();
+				fingerprint += '\0';
+			}
+
+			std::vector<std::string> defines;
+			for (const auto& [name, value] : command->defines)
+			{
+				defines.push_back(name + "=" + value);
+			}
+
+			std::sort(defines.begin(), defines.end());
+			for (const auto& define : defines)
+			{
+				fingerprint += define;
+				fingerprint += '\0';
+			}
+		}
+
+		return fingerprint;
+	}
+
+	std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
+		const CompileCommand* command, const SourceOverlay* overlay)
+	{
+		std::string key;
+		for (const auto& header : headers)
+		{
+			std::error_code ec;
+			const auto size = std::filesystem::file_size(header, ec);
+			const auto time = std::filesystem::last_write_time(header, ec);
+			key += header.string();
+			key += '\0';
+			key += std::to_string(ec ? 0 : size);
+			key += '\0';
+			key += std::to_string(ec ? 0 : time.time_since_epoch().count());
+			key += '\0';
+		}
+
+		key += '\1';
+		if (command != nullptr)
+		{
+			key += std::to_string(static_cast<int>(command->standard));
+			key += '\0';
+			key += ReflectionEnabled(*command) ? '1' : '0';
+			key += '\0';
+			std::vector<std::string> defines;
+			for (const auto& [name, value] : command->defines)
+			{
+				defines.push_back(name + "=" + value);
+			}
+
+			std::sort(defines.begin(), defines.end());
+			for (const auto& define : defines)
+			{
+				key += define;
+				key += '\0';
+			}
+		}
+
+		if (overlay)
+		{
+			key += overlay->Fingerprint(headers);
+		}
+
+		return key;
+	}
+
+	IncludeIndex IncludeIndex::Build(
+		const std::vector<std::filesystem::path>& headers,
+		const CompileCommand* command,
+		const Limits& limits,
+		const SourceOverlay* overlay)
+	{
+		IncludeIndex index;
+		// Path -> position in index.m_scopes: merging is O(1) per scope instead of
+		// the previous linear MergeScope scan (O(S^2) over hundreds of scopes for
+		// <vector>+<string>+<algorithm>).
+		std::unordered_map<std::string, std::size_t> positions;
+		ParserOptions options;
+		if (command != nullptr)
+		{
+			options.standard = command->standard;
+			options.shared_macros =
+				std::make_shared<const Preprocessor::MacroMap>(command->defines);
+			if (!command->undefines.empty())
+			{
+				auto filtered = std::make_shared<Preprocessor::MacroMap>(command->defines);
+				for (const auto& name : command->undefines)
+				{
+					filtered->erase(name);
+				}
+
+				options.shared_macros = std::move(filtered);
+			}
+		}
+
+		if (!headers.empty())
+		{
+			Preprocessor::MacroMap probed = CompilerMacros(command, headers, overlay);
+			if (!probed.contains("__cplusplus"))
+			{
+				// No compiler to ask: at least select the right language branch.
+				probed["__cplusplus"] =
+					options.standard == CppStandard::Cpp26 ? "202400L"
+				: options.standard == CppStandard::Cpp23
+				? "202302L"
+				: "202002L";
+			}
+
+			// The project's own -D/-U win over what the compiler reports.
+			if (command != nullptr)
+			{
+				for (const auto& [name, value] : command->defines)
+				{
+					probed[name] = value;
+				}
+
+				for (const auto& name : command->undefines)
+				{
+					probed.erase(name);
+				}
+			}
+
+			options.shared_macros =
+				std::make_shared<const Preprocessor::MacroMap>(std::move(probed));
+		}
+
+		// Headers are independent: read + parse them on a worker fan-out, then
+		// merge serially. IndexScopes is a pure function of (content, options),
+		// so concurrent calls only share read-only state.
+		std::vector<ScopeIndex> per_header(headers.size());
+		index.m_sources.resize(headers.size());
+		if (!headers.empty())
+		{
+			if (headers.size() <= 2)
+			{
+				for (std::size_t h = 0; h < headers.size(); ++h)
+				{
+					const auto content = std::make_shared<const std::string>(
+						ReadFile(headers[h], limits.max_file_bytes, overlay));
+					index.m_sources[h] = content;
+					if (content->empty())
+					{
+						continue;
+					}
+
+					per_header[h] = CompletionEngine::IndexScopes(*content, options);
+				}
+			}
+			else
+			{
+				unsigned workers = std::thread::hardware_concurrency();
+				if (workers == 0)
+				{
+					workers = 4;
+				}
+
+				if (workers > 2)
+				{
+					workers -= 2;
+				} // reserve I/O + diagnostics
+
+				workers                       = std::max<unsigned>(workers, 1);
+				workers                       = std::min<unsigned>(workers, static_cast<unsigned>(headers.size()));
+				std::atomic<std::size_t> next = 0;
+				std::vector<std::jthread> pool;
+				pool.reserve(workers);
+				for (unsigned w = 0; w < workers; ++w)
+				{
+					pool.emplace_back([&]
+						{
+							while (true)
+							{
+								const std::size_t h = next.fetch_add(1, std::memory_order_relaxed);
+								if (h >= headers.size())
+								{
+									return;
+							}
+
+								const auto content = std::make_shared<const std::string>(
+								ReadFile(headers[h], limits.max_file_bytes, overlay));
+								index.m_sources[h] = content;
+								if (content->empty())
+								{
+									continue;
+							}
+
+							// An exception escaping a worker thread is std::terminate.
+								try
+								{
+									per_header[h] = CompletionEngine::IndexScopes(*content, options);
+							}
+								catch (...)
+								{
+									per_header[h] = {};
+							}
+						}
+					});
+				}
+			}
+		}
+
+		index.m_files = headers;
+		for (std::size_t header = 0; header < per_header.size(); ++header)
+		{
+			auto& scopes = per_header[header];
+			for (auto& scope : scopes)
+			{
+				for (auto& member : scope.members)
+				{
+					if (member.has_location)
+					{
+						member.file = static_cast<std::int32_t>(header);
+					}
+				}
+			}
+
+			for (auto& scope : scopes)
+			{
+				if (!scope.path.empty())
+				{
+					bool reserved = false;
+					for (const auto& element : scope.path)
+					{
+						if (IsReservedName(element))
+						{
+							reserved = true;
+							break;
+						}
+					}
+
+					if (reserved)
+					{
+						continue;
+					}
+				}
+
+				IndexedScope filtered;
+				filtered.path                   = scope.path;
+				filtered.kind                   = scope.kind;
+				filtered.members                = std::move(scope.members);
+				filtered.bases                  = std::move(scope.bases);
+				filtered.template_params        = std::move(scope.template_params);
+				filtered.layout_unknown         = scope.layout_unknown;
+				filtered.hasReferenceConversion = scope.hasReferenceConversion;
+				std::erase_if(filtered.members,[](const CompletionItem& member)
+					{
+						return IsReservedName(member.label);
+				});
+				if (!filtered.members.empty() ||!filtered.bases.empty() ||
+					!filtered.template_params.empty() || filtered.hasReferenceConversion)
+				{
+					const std::string key = ScopePathKey(filtered.path);
+					if (const auto found = positions.find(key); found != positions.end())
+					{
+						auto& entry          = index.m_scopes[found->second];
+						entry.layout_unknown = entry.layout_unknown || filtered.layout_unknown;
+						entry.hasReferenceConversion |= filtered.hasReferenceConversion;
+						if (entry.template_params.empty())
+						{
+							entry.template_params = std::move(filtered.template_params);
+						}
+
+						entry.members.insert(entry.members.end(), filtered.members.begin(),
+							filtered.members.end());
+						for (auto& base : filtered.bases)
+						{
+							if (std::find(entry.bases.begin(), entry.bases.end(), base) ==
+								entry.bases.end())
+							{
+								entry.bases.push_back(std::move(base));
+							}
+						}
+					}
+					else
+					{
+						positions.emplace(key, index.m_scopes.size());
+						index.m_scopes.push_back(std::move(filtered));
+					}
+				}
+			}
+		}
+
+		index.m_type_names = CompletionEngine::TypeNamesOf(index.m_scopes);
+		return index;
+	}
+
+	IncludeIndex IncludeIndex::Build(
+		const std::filesystem::path& base_dir,
+		std::string_view text,
+		const CompileCommand* command,
+		const Limits& limits,
+		const SourceOverlay* overlay)
+	{
+		return Build(ResolveHeaders(base_dir, text, command, limits, nullptr, overlay), command,
+			limits, overlay);
+	}
 
 } // namespace heimdall
