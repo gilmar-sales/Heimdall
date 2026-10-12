@@ -15,7 +15,8 @@ files = {
 }
 for name, text in files.items():
     (root / name).parent.mkdir(parents=True, exist_ok=True)
-    (root / name).write_text(text)
+    (root / name).write_bytes(text.encode("utf-8"))
+    assert (root / name).read_bytes() == text.encode("utf-8")
 
 process = subprocess.Popen([sys.argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 condition = threading.Condition()
@@ -92,7 +93,7 @@ try:
     assert "error" in refused and "stringif" in refused["error"]["message"], refused
 
     # Without the stringifying user, the rename covers the definition and every use.
-    (root / "b.cpp").write_text('#include "config.h"\nint c = 1;\n')
+    (root / "b.cpp").write_bytes(b'#include "config.h"\nint c = 1;\n')
     send("workspace/didChangeWatchedFiles", {"changes": [{"uri": uris["b.cpp"], "type": 2}]})
     send("textDocument/didOpen", {"textDocument": {"uri": uris["b.cpp"], "languageId": "cpp", "version": 1,
                                                    "text": '#include "config.h"\nint c = 1;\n'}})
