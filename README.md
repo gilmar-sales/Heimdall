@@ -226,7 +226,8 @@ outside the extension) still needs to be closed before relinking.
   is structural scaffolding, not yet a C++ declaration/expression grammar.
 - **Rule engine**: `cpp/no-null` replaces `NULL` with `nullptr` outside comments,
   literals and directives; `format/no-trailing-whitespace` removes trailing
-  spaces/tabs; `format/require-final-newline` ensures a final newline;
+  spaces/tabs; `format/require-final-newline` ensures a final newline and makes
+  CLI/LSP formatting insert it when configured as `warning` or `error`, preserving LF/CRLF;
   `cpp/no-empty-catch` flags empty catch blocks; `cpp/no-duplicate-include`
   flags repeated literal includes outside conditional blocks;
   `cpp/modernize-using` rewrites plain `typedef` declarations as `using`

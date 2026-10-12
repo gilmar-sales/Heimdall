@@ -10,12 +10,12 @@
 
 TEST(FormatterSpec, PreCancelledTreeFormattingReturnsNoOutputOrEdits)
 {
-    const auto       tree = heimdall::ParseTree::Parse("int Value() {return 1;}");
+    const auto tree = heimdall::ParseTree::Parse("int Value() {return 1;}");
     std::stop_source stop;
     stop.request_stop();
 
     const auto output = heimdall::Formatter().Format(tree, stop.get_token());
-    const auto edits  = heimdall::Formatter().FormatEdits(tree, stop.get_token());
+    const auto edits = heimdall::Formatter().FormatEdits(tree, stop.get_token());
 
     EXPECT_TRUE(output.empty());
     EXPECT_TRUE(edits.empty());
@@ -24,10 +24,10 @@ TEST(FormatterSpec, PreCancelledTreeFormattingReturnsNoOutputOrEdits)
 TEST(FormatterSpec, TreeEditsMatchSourceEditsForTheSameDialect)
 {
     constexpr std::string_view source = "int Value() {return 1;}\nint Other;";
-    const auto                 tree   = heimdall::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
 
     const auto expected = heimdall::Formatter().FormatEdits(source);
-    const auto actual   = heimdall::Formatter().FormatEdits(tree);
+    const auto actual = heimdall::Formatter().FormatEdits(tree);
 
     ASSERT_EQ(actual.size(), expected.size());
     for (std::size_t i = 0; i < actual.size(); ++i)
@@ -41,8 +41,8 @@ TEST(FormatterSpec, TreeEditsMatchSourceEditsForTheSameDialect)
 TEST(FormatterSpec, IndentsByBraceDepthAndIsIdempotent)
 {
     constexpr std::string_view source = "int main() {\nint x = 1;\nif (x) {\nreturn x;\n}\n}\n";
-    const heimdall::Formatter  formatter;
-    const std::string          expected =
+    const heimdall::Formatter formatter;
+    const std::string expected =
         "int main()\n{\n    int x = 1;\n    if (x)\n    {\n        return x;\n    }\n}\n";
     const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, expected);
@@ -58,7 +58,7 @@ TEST(FormatterSpec, IgnoresBracesInCommentsLiteralsAndPreprocessorDirectives)
         "/* { comment */\n"
         "}\n";
     const heimdall::Formatter formatter;
-    const std::string         expected =
+    const std::string expected =
         "#define BLOCK { ignored }\n"
         "void f()\n"
         "{\n"
@@ -72,13 +72,28 @@ TEST(FormatterSpec, IgnoresBracesInCommentsLiteralsAndPreprocessorDirectives)
 
 TEST(FormatterSpec, SupportsTabsBlankLinesCrLfAndMissingFinalNewline)
 {
-    const heimdall::Formatter formatter({ .indent_width = 2, .use_tabs = true });
+    const heimdall::Formatter formatter({.indent_width = 2,.use_tabs = true});
     EXPECT_EQ(formatter.Format("{\r\n\r\nx\r\n}\r\n"), "{\r\n\r\n\tx\r\n}\r\n");
     EXPECT_EQ(formatter.Format("{\nx\n}"), "{\n\tx\n}");
     // CRLF is preserved byte-for-byte and formatting is a fixed point.
     const std::string crlf = formatter.Format("{\r\nx\r\n}\r\n");
     EXPECT_EQ(crlf, "{\r\n\tx\r\n}\r\n");
     EXPECT_EQ(formatter.Format(crlf), crlf);
+}
+
+TEST(FormatterSpec, AddsConfiguredFinalNewlineAndPreservesLineEndings)
+{
+    heimdall::FormatOptions options;
+    options.requireFinalNewline = true;
+    const heimdall::Formatter formatter(options);
+
+    EXPECT_EQ(formatter.Format("int value;"), "int value;\n");
+    EXPECT_EQ(formatter.Format("int value;\r\nint other;"), "int value;\r\nint other;\r\n");
+    EXPECT_EQ(formatter.Format("int value;\n"), "int value;\n");
+    EXPECT_EQ(formatter.Format(""), "");
+    const auto tree = heimdall::ParseTree::Parse("int value;");
+    EXPECT_EQ(formatter.FormatIncremental(tree).Formatted(), "int value;\n");
+    EXPECT_EQ(heimdall::Formatter().Format("int value;"), "int value;");
 }
 
 TEST(FormatterSpec, IndentsInnerScopesOfNamespacesAndClasses)
@@ -97,7 +112,7 @@ TEST(FormatterSpec, IndentsInnerScopesOfNamespacesAndClasses)
         "int hidden;\n"
         "};\n";
     const heimdall::Formatter formatter;
-    const std::string         expected =
+    const std::string expected =
         "namespace outer\n"
         "{\n"
         "    namespace inner\n"
@@ -135,8 +150,8 @@ TEST(FormatterSpec, DedentsCaseLabelsAndGotoLabels)
         "done:\n"
         "return -1;\n"
         "}\n";
-    const heimdall::Formatter formatter({ .blank_line_after_control_block = false });
-    const std::string         expected =
+    const heimdall::Formatter formatter({.blank_line_after_control_block = false});
+    const std::string expected =
         "int f(int x)\n"
         "{\n"
         "    switch (x)\n"
@@ -162,8 +177,8 @@ TEST(FormatterSpec, DedentsCaseLabelsAndGotoLabels)
 TEST(FormatterSpec, DedentsOneLevelPerLeadingCloser)
 {
     constexpr std::string_view source = "namespace a {\nnamespace b {\nint x;\n}}\n";
-    const heimdall::Formatter  formatter({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string expected  = "namespace a {\n    namespace b {\n        int x;\n    }\n}\n";
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string expected = "namespace a {\n    namespace b {\n        int x;\n    }\n}\n";
     const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
@@ -171,7 +186,7 @@ TEST(FormatterSpec, DedentsOneLevelPerLeadingCloser)
 
 TEST(FormatterSpec, CollapsesBlankLinesToMaxEmptyLines)
 {
-    const heimdall::Formatter  formatter;
+    const heimdall::Formatter formatter;
     constexpr std::string_view source =
         "std::string line;\n"
         "std::size_t length = 0;\n"
@@ -189,21 +204,21 @@ TEST(FormatterSpec, CollapsesBlankLinesToMaxEmptyLines)
     EXPECT_EQ(formatter.Format(formatted), formatted);
 
     // Custom budget keeps two; zero strips all; edges are always trimmed.
-    const heimdall::Formatter keep_two({ .max_empty_lines = 2 });
-    const std::string         two = keep_two.Format(source);
+    const heimdall::Formatter keep_two({.max_empty_lines = 2});
+    const std::string two = keep_two.Format(source);
     EXPECT_EQ(two,
               "std::string line;\n"
-              "std::size_t length = 0;\n"
-              "\n"
-              "\n"
-              "bool got_length = false;\n");
+        "std::size_t length = 0;\n"
+        "\n"
+        "\n"
+        "bool got_length = false;\n");
     EXPECT_EQ(keep_two.Format(two), two);
 
-    const heimdall::Formatter keep_none({ .max_empty_lines = 0 });
+    const heimdall::Formatter keep_none({.max_empty_lines = 0});
     EXPECT_EQ(keep_none.Format(source),
               "std::string line;\n"
-              "std::size_t length = 0;\n"
-              "bool got_length = false;\n");
+        "std::size_t length = 0;\n"
+        "bool got_length = false;\n");
     EXPECT_EQ(formatter.Format("\n\nint x;\n\n\n"), "int x;\n");
 }
 
@@ -220,7 +235,7 @@ TEST(FormatterSpec, DoesNotTreatCodeBeforeDirectivesAsDirectives)
         "x();\n"
         "}\n";
     const heimdall::Formatter formatter;
-    const std::string         expected =
+    const std::string expected =
         "int main()\n"
         "{\n"
         "#if defined(_WIN32)\n"
@@ -236,9 +251,9 @@ TEST(FormatterSpec, DoesNotTreatCodeBeforeDirectivesAsDirectives)
 TEST(FormatterSpec, TrimsTrailingWhitespace)
 {
     constexpr std::string_view source = "int x;   \n\tint y;\t \n";
-    const heimdall::Formatter  formatter;
-    const std::string          expected  = "int x;\nint y;\n";
-    const std::string          formatted = formatter.Format(source);
+    const heimdall::Formatter formatter;
+    const std::string expected = "int x;\nint y;\n";
+    const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
@@ -254,8 +269,8 @@ TEST(FormatterSpec, IndentsContinuationLines)
         "&& y) {\n"
         "f();\n"
         "}\n";
-    const heimdall::Formatter formatter({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string         expected =
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string expected =
         "int sum = a +\n"
         "    b;\n"
         "foo(a,\n"
@@ -282,7 +297,7 @@ TEST(FormatterSpec, NormalizesSpacing)
         "x* (y+1);\n"
         "}else{\n";
     const heimdall::Formatter formatter(
-        { .brace_style = heimdall::BraceStyle::Attach, .blank_line_after_control_block = false });
+        {.brace_style = heimdall::BraceStyle::Attach,.blank_line_after_control_block = false});
     const std::string expected =
         "int x = 1 + 2;\n"
         "foo(a, b, c);\n"
@@ -410,7 +425,7 @@ TEST(FormatterSpec, SpacesBracedListsWithoutChangingBlockBraces)
 TEST(FormatterSpec, LogicalNotSpacingCanBeSelected)
 {
     const heimdall::Formatter joined;
-    const heimdall::Formatter spaced({ .space_after_logical_not = true });
+    const heimdall::Formatter spaced({.space_after_logical_not = true});
 
     EXPECT_EQ(joined.Format("bool x = ! flag;\n"), "bool x = !flag;\n");
     EXPECT_EQ(spaced.Format("bool x = !flag;\n"), "bool x = ! flag;\n");
@@ -420,7 +435,7 @@ TEST(FormatterSpec, LogicalNotSpacingCanBeSelected)
 TEST(FormatterSpec, CStyleCastSpacingDoesNotChangeFunctionCalls)
 {
     const heimdall::Formatter formatter;
-    const heimdall::Formatter joined({ .space_after_c_style_cast = false });
+    const heimdall::Formatter joined({.space_after_c_style_cast = false});
 
     EXPECT_EQ(formatter.Format("int x = (int)y;\nfoo(y);\n"),
               "int x = (int) y;\nfoo(y);\n");
@@ -432,7 +447,7 @@ TEST(FormatterSpec, CStyleCastSpacingDoesNotChangeFunctionCalls)
 
 TEST(FormatterSpec, AlignsConsecutiveAssignmentsWithoutTouchingComparisons)
 {
-    const heimdall::Formatter formatter({ .align_consecutive_assignments = true });
+    const heimdall::Formatter formatter({.align_consecutive_assignments = true});
     constexpr std::string_view source =
         "int x=1; // first\nint longer=2; // second\n"
         "if (x == longer) {\n    foo(x=3);\n}\n"
@@ -442,8 +457,8 @@ TEST(FormatterSpec, AlignsConsecutiveAssignmentsWithoutTouchingComparisons)
 
     EXPECT_EQ(formatted,
               "int x      = 1; // first\nint longer = 2; // second\n"
-              "if (x == longer)\n{\n    foo(x = 3);\n}\n\n"
-              "int y = 4;\n\nint longName = 5;\n");
+        "if (x == longer)\n{\n    foo(x = 3);\n}\n\n"
+        "int y = 4;\n\nint longName = 5;\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
     EXPECT_EQ(formatter.Format("auto a = \"x=y\";\nauto longer = \"z\";\n"),
               "auto a      = \"x=y\";\nauto longer = \"z\";\n");
@@ -451,7 +466,7 @@ TEST(FormatterSpec, AlignsConsecutiveAssignmentsWithoutTouchingComparisons)
 
 TEST(FormatterSpec, AlignsDesignatedInitializerAssignments)
 {
-    const heimdall::Formatter formatter({ .align_consecutive_assignments = true });
+    const heimdall::Formatter formatter({.align_consecutive_assignments = true});
     constexpr std::string_view source =
         "auto root = new Node\n"
         "{\n"
@@ -475,7 +490,7 @@ TEST(FormatterSpec, AlignsDesignatedInitializerAssignments)
 
 TEST(FormatterSpec, AlignsOnlyConsecutiveSingleLineMacroDefinitions)
 {
-    const heimdall::Formatter formatter({ .align_consecutive_macros = true });
+    const heimdall::Formatter formatter({.align_consecutive_macros = true});
     constexpr std::string_view source =
         "#define A 1\n#define LONG_NAME 2\n"
         "#define F(x) (x)\n"
@@ -487,10 +502,10 @@ TEST(FormatterSpec, AlignsOnlyConsecutiveSingleLineMacroDefinitions)
 
     EXPECT_EQ(formatted,
               "#define A         1\n#define LONG_NAME 2\n"
-              "#define F(x)      (x)\n"
-              "#define CONT \\\n"
-              "  42\n"
-              "#define B 3\n");
+        "#define F(x)      (x)\n"
+        "#define CONT \\\n"
+        "  42\n"
+        "#define B 3\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
 
@@ -502,8 +517,8 @@ TEST(FormatterSpec, LeavesTemplatesAndShiftOperatorsAsTyped)
     constexpr std::string_view source =
         "std::map<std::string,int> m;\n"
         "if (a<b) {}\n";
-    const heimdall::Formatter formatter({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string         formatted = formatter.Format(source);
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, "std::map<std::string, int> m;\nif (a<b) {}\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
@@ -511,8 +526,8 @@ TEST(FormatterSpec, LeavesTemplatesAndShiftOperatorsAsTyped)
 TEST(FormatterSpec, SplitsOneLineBlocks)
 {
     constexpr std::string_view source = "int g(){return 1;}\nvoid f() {}\nx=1; y=2;\n";
-    const heimdall::Formatter  formatter({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string expected  = "int g() {\n    return 1;\n}\n\nvoid f() {}\nx = 1;\ny = 2;\n";
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string expected = "int g() {\n    return 1;\n}\n\nvoid f() {}\nx = 1;\ny = 2;\n";
     const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
@@ -521,9 +536,9 @@ TEST(FormatterSpec, SplitsOneLineBlocks)
 TEST(FormatterSpec, SupportsAllmanBraces)
 {
     constexpr std::string_view source = "int main() {\nreturn 0;\n}\n";
-    const heimdall::Formatter  allman({ .brace_style = heimdall::BraceStyle::Allman });
-    const std::string          expected  = "int main()\n{\n    return 0;\n}\n";
-    const std::string          formatted = allman.Format(source);
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman});
+    const std::string expected = "int main()\n{\n    return 0;\n}\n";
+    const std::string formatted = allman.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(allman.Format(formatted), formatted);
 }
@@ -540,8 +555,8 @@ TEST(FormatterSpec, AttachKeepsBracesOnTheSameLine)
         "y();\n"
         "}\n"
         "}\n";
-    const heimdall::Formatter attach({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string         expected =
+    const heimdall::Formatter attach({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string expected =
         "int main() {\n"
         "    if (a) {\n"
         "        x();\n"
@@ -568,7 +583,7 @@ TEST(FormatterSpec, AllmanDetachesElseAndCatch)
         "g();\n"
         "}\n";
     const heimdall::Formatter allman(
-        { .brace_style = heimdall::BraceStyle::Allman, .blank_line_after_control_block = false });
+        {.brace_style = heimdall::BraceStyle::Allman,.blank_line_after_control_block = false});
     const std::string expected =
         "if (a)\n"
         "{\n"
@@ -593,7 +608,7 @@ TEST(FormatterSpec, AllmanDetachesElseAndCatch)
 
 TEST(FormatterSpec, AllmanBreaksOneLineBlocks)
 {
-    const heimdall::Formatter allman({ .brace_style = heimdall::BraceStyle::Allman });
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman});
     EXPECT_EQ(allman.Format("int g(){return 1;}\n"), "int g()\n{\n    return 1;\n}\n");
     EXPECT_EQ(allman.Format("do {\nx();\n} while (y);\n"), "do\n{\n    x();\n} while (y);\n");
     const std::string formatted = allman.Format("int g(){return 1;}\n");
@@ -602,22 +617,22 @@ TEST(FormatterSpec, AllmanBreaksOneLineBlocks)
 
 TEST(FormatterSpec, AllmanNewDesignatedInitMultiLineKeepsEntryIndent)
 {
-    const heimdall::Formatter allman({ .brace_style = heimdall::BraceStyle::Allman });
-    const std::string         out = allman.Format(
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman});
+    const std::string out = allman.Format(
         "void f() {\n    auto r = new Node{\n        .next = next,\n        .value = 20,\n"
         "        .x = 1\n    };\n}\n");
     EXPECT_EQ(out,
               "void f()\n{\n    auto r = new Node\n    {\n        .next = next,\n"
-              "        .value = 20,\n        .x = 1\n    };\n}\n");
+        "        .value = 20,\n        .x = 1\n    };\n}\n");
     EXPECT_EQ(allman.Format(out), out);
 }
 
 TEST(FormatterSpec, AllmanCombinesWithAddedBraces)
 {
     const heimdall::Formatter both(
-        { .brace_style       = heimdall::BraceStyle::Allman,
-          .single_line_style = heimdall::SingleLineStyle::IndentWithBraces });
-    const std::string expected  = "if (x)\n{\n    return;\n}\n";
+        {.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::IndentWithBraces});
+    const std::string expected = "if (x)\n{\n    return;\n}\n";
     const std::string formatted = both.Format("if (x) return;\n");
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(both.Format(formatted), formatted);
@@ -626,9 +641,10 @@ TEST(FormatterSpec, AllmanCombinesWithAddedBraces)
 TEST(FormatterSpec, SplitsBracesAfterFunctionSuffixes)
 {
     // Pin Keep: this test is about brace placement, not single_line_style.
-    const heimdall::Formatter allman({ .brace_style       = heimdall::BraceStyle::Allman,
-                                       .single_line_style = heimdall::SingleLineStyle::Keep });
-    const auto                check = [&](std::string_view source, std::string_view expected) {
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::Keep});
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(allman.Format(formatted), formatted);
@@ -659,36 +675,38 @@ TEST(FormatterSpec, IndentsConstructorInitializerListAfterTrailingColon)
     // Regression: the member init following a trailing ctor-initializer `:`
     // used to dedent to column 0 instead of continuing one level deeper.
     const heimdall::Formatter formatter;
-    const auto                check = [&](std::string_view source, std::string_view expected) {
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
     };
     check("Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
-          "mComponentManager(componentManager) {}\n",
-          "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
-          "    mComponentManager(componentManager) {}\n");
+        "mComponentManager(componentManager) {}\n",
+        "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+        "    mComponentManager(componentManager) {}\n");
     check("Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
-          "    mComponentManager(componentManager) {}\n",
-          "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
-          "    mComponentManager(componentManager) {}\n");
+        "    mComponentManager(componentManager) {}\n",
+        "Query::Query(const skr::Arc<ComponentManager>& componentManager) :\n"
+        "    mComponentManager(componentManager) {}\n");
     check("C::C() noexcept :\n"
-          "x(1) {}\n",
-          "C::C() noexcept:\n"
-          "    x(1) {}\n");
+        "x(1) {}\n",
+        "C::C() noexcept:\n"
+        "    x(1) {}\n");
     check("C::C() :\n"
-          "x(1),\n"
-          "y(2) {}\n",
-          "C::C() :\n"
-          "    x(1),\n"
-          "    y(2) {}\n");
+        "x(1),\n"
+        "y(2) {}\n",
+        "C::C() :\n"
+        "    x(1),\n"
+        "    y(2) {}\n");
 }
 
 TEST(FormatterSpec, SplitsBracesOfNamedScopes)
 {
-    const heimdall::Formatter allman({ .brace_style       = heimdall::BraceStyle::Allman,
-                                       .single_line_style = heimdall::SingleLineStyle::Keep });
-    const auto                check = [&](std::string_view source, std::string_view expected) {
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::Keep});
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(allman.Format(formatted), formatted);
@@ -712,10 +730,11 @@ TEST(FormatterSpec, SplitsBracesOfNamedScopes)
 TEST(FormatterSpec, KeepsInitializerBracesAttached)
 {
     // Initializers and expressions never split, in either brace style.
-    const heimdall::Formatter allman({ .brace_style       = heimdall::BraceStyle::Allman,
-                                       .single_line_style = heimdall::SingleLineStyle::Keep,
-                                       .space_before_cpp11_braced_list = false });
-    const auto                check = [&](std::string_view source, std::string_view expected) {
+    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::Keep,
+            .space_before_cpp11_braced_list = false});
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(allman.Format(formatted), formatted);
@@ -731,7 +750,8 @@ TEST(FormatterSpec, KeepsInitializerBracesAttached)
 TEST(FormatterSpec, SpacesTrailingReturnArrow)
 {
     const heimdall::Formatter formatter;
-    const auto                check = [&](std::string_view source, std::string_view expected) {
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
@@ -747,29 +767,29 @@ TEST(FormatterSpec, CreatedSingleLineBlocksFollowTheBraceStyle)
     // The collapsed block itself stays brace-free on one line while the
     // surrounding blocks follow the selected brace style.
     constexpr std::string_view source = "void f() {\nif (x) {\nreturn;\n}\n}\n";
-    const heimdall::Formatter  flat_allman(
-        { .brace_style       = heimdall::BraceStyle::Allman,
-          .single_line_style = heimdall::SingleLineStyle::SingleLine });
+    const heimdall::Formatter flat_allman(
+        {.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::SingleLine});
     const std::string flat_expected = "void f()\n{\n    if (x) return;\n}\n";
-    const std::string flat          = flat_allman.Format(source);
+    const std::string flat = flat_allman.Format(source);
     EXPECT_EQ(flat, flat_expected);
     EXPECT_EQ(flat_allman.Format(flat), flat);
 
     // Indent mode: the unbraced split body nests under Allman function braces.
     const heimdall::Formatter split_allman(
-        { .brace_style       = heimdall::BraceStyle::Allman,
-          .single_line_style = heimdall::SingleLineStyle::Indent });
+        {.brace_style = heimdall::BraceStyle::Allman,
+            .single_line_style = heimdall::SingleLineStyle::Indent});
     const std::string split_expected = "void f()\n{\n    if (x)\n        return;\n}\n";
-    const std::string split          = split_allman.Format("void f() {\nif (x) return;\n}\n");
+    const std::string split = split_allman.Format("void f() {\nif (x) return;\n}\n");
     EXPECT_EQ(split, split_expected);
     EXPECT_EQ(split_allman.Format(split), split);
 
     // Attach (explicit) keeps the created single line cuddled in place.
     const heimdall::Formatter flat_attach(
-        { .brace_style       = heimdall::BraceStyle::Attach,
-          .single_line_style = heimdall::SingleLineStyle::SingleLine });
+        {.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::SingleLine});
     const std::string attach_expected = "void f() {\n    if (x) return;\n}\n";
-    const std::string attach          = flat_attach.Format(source);
+    const std::string attach = flat_attach.Format(source);
     EXPECT_EQ(attach, attach_expected);
     EXPECT_EQ(flat_attach.Format(attach), attach);
 }
@@ -777,10 +797,10 @@ TEST(FormatterSpec, CreatedSingleLineBlocksFollowTheBraceStyle)
 TEST(FormatterSpec, SupportsLeftPointerAlignment)
 {
     constexpr std::string_view source = "int*x;\nint &r=x;\n";
-    const heimdall::Formatter  left({ .pointer_alignment   = heimdall::PointerAlignment::Left,
-                                      .reference_alignment = heimdall::ReferenceAlignment::Left });
-    const std::string          expected  = "int* x;\nint& r = x;\n";
-    const std::string          formatted = left.Format(source);
+    const heimdall::Formatter left({.pointer_alignment = heimdall::PointerAlignment::Left,
+            .reference_alignment = heimdall::ReferenceAlignment::Left});
+    const std::string expected = "int* x;\nint& r = x;\n";
+    const std::string formatted = left.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(left.Format(formatted), formatted);
 }
@@ -797,33 +817,34 @@ TEST(FormatterSpec, AlignsReferencesAfterQualifiedTypes)
         "x = a * b();\n"
         "f(a * b());\n";
 
-    const auto check = [](heimdall::FormatOptions options, std::string_view expected) {
+    const auto check =[](heimdall::FormatOptions options, std::string_view expected)
+    {
         options.blank_line_between_methods = false; // isolate pointer/reference spacing
         const heimdall::Formatter formatter(options);
-        const std::string         formatted = formatter.Format(source);
+        const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
     };
 
     // Defaults bind to the type.
     check({}, "std::filesystem::path AbsoluteNormalized(const std::filesystem::path& path);\n"
-              "foo::Bar* alias;\n"
-              "int* Make();\n"
-              "foo::Bar* Create();\n"
-              "void Consume(const std::vector<Token>& tokens);\n"
-              "void Take(std::vector<int>&& values);\n"
-              "x = a * b();\n"
-              "f(a * b());\n");
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Right,
-            .reference_alignment = heimdall::ReferenceAlignment::Right },
-          "std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path);\n"
-          "foo::Bar *alias;\n"
-          "int *Make();\n"
-          "foo::Bar *Create();\n"
-          "void Consume(const std::vector<Token> &tokens);\n"
-          "void Take(std::vector<int> &&values);\n"
-          "x = a * b();\n"
-          "f(a * b());\n");
+        "foo::Bar* alias;\n"
+        "int* Make();\n"
+        "foo::Bar* Create();\n"
+        "void Consume(const std::vector<Token>& tokens);\n"
+        "void Take(std::vector<int>&& values);\n"
+        "x = a * b();\n"
+        "f(a * b());\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Right,
+          .reference_alignment = heimdall::ReferenceAlignment::Right},
+        "std::filesystem::path AbsoluteNormalized(const std::filesystem::path &path);\n"
+        "foo::Bar *alias;\n"
+        "int *Make();\n"
+        "foo::Bar *Create();\n"
+        "void Consume(const std::vector<Token> &tokens);\n"
+        "void Take(std::vector<int> &&values);\n"
+        "x = a * b();\n"
+        "f(a * b());\n");
 }
 
 TEST(FormatterSpec, AlignsRangeForReferencesAndSpacesSeparator)
@@ -836,9 +857,10 @@ TEST(FormatterSpec, AlignsRangeForReferencesAndSpacesSeparator)
         "for (auto nodes = Get(); const auto & node: nodes) {}\n"
         "for (auto value: enabled?first:second) {}\n"
         "if (a & b) {}\nwhile (a && b) {}\n";
-    const auto check = [&](heimdall::ReferenceAlignment alignment, std::string_view expected) {
+    const auto check =[&](heimdall::ReferenceAlignment alignment, std::string_view expected)
+    {
         const heimdall::Formatter formatter(
-            { .reference_alignment = alignment, .blank_line_after_control_block = false });
+            {.reference_alignment = alignment,.blank_line_after_control_block = false});
         const auto formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
@@ -846,28 +868,28 @@ TEST(FormatterSpec, AlignsRangeForReferencesAndSpacesSeparator)
     };
     check(heimdall::ReferenceAlignment::Left,
           "for (const auto& node : tree.Nodes()) {}\n"
-          "for (auto&& value : values) {}\n"
-          "for (const auto& [key, value] : entries) {}\n"
-          "for (const ns::Node& node : nodes) {}\n"
-          "for (auto nodes = Get(); const auto& node : nodes) {}\n"
-          "for (auto value : enabled ? first : second) {}\n"
-          "if (a & b) {}\nwhile (a && b) {}\n");
+        "for (auto&& value : values) {}\n"
+        "for (const auto& [key, value] : entries) {}\n"
+        "for (const ns::Node& node : nodes) {}\n"
+        "for (auto nodes = Get(); const auto& node : nodes) {}\n"
+        "for (auto value : enabled ? first : second) {}\n"
+        "if (a & b) {}\nwhile (a && b) {}\n");
     check(heimdall::ReferenceAlignment::Right,
           "for (const auto &node : tree.Nodes()) {}\n"
-          "for (auto &&value : values) {}\n"
-          "for (const auto &[key, value] : entries) {}\n"
-          "for (const ns::Node &node : nodes) {}\n"
-          "for (auto nodes = Get(); const auto &node : nodes) {}\n"
-          "for (auto value : enabled ? first : second) {}\n"
-          "if (a & b) {}\nwhile (a && b) {}\n");
+        "for (auto &&value : values) {}\n"
+        "for (const auto &[key, value] : entries) {}\n"
+        "for (const ns::Node &node : nodes) {}\n"
+        "for (auto nodes = Get(); const auto &node : nodes) {}\n"
+        "for (auto value : enabled ? first : second) {}\n"
+        "if (a & b) {}\nwhile (a && b) {}\n");
 }
 
 TEST(FormatterSpec, KeepsBracedInitializerArithmeticInForHeader)
 {
-    const heimdall::Formatter formatter({ .space_before_cpp11_braced_list = false });
-    const std::string         source = "void Run() {\n"
-                                       "for (std::size_t i = std::size_t{name_token} + 1; i < "
-                               "tokens.size(); ++i) { use(i); }\n}\n";
+    const heimdall::Formatter formatter({.space_before_cpp11_braced_list = false});
+    const std::string source = "void Run() {\n"
+        "for (std::size_t i = std::size_t{name_token} + 1; i < "
+        "tokens.size(); ++i) { use(i); }\n}\n";
     const std::string expected =
         "void Run()\n{\n"
         "    for (std::size_t i = std::size_t{name_token} + 1; i < tokens.size(); ++i)\n"
@@ -901,16 +923,18 @@ TEST(FormatterSpec, SeparatesNestedBlockClosingBraces)
 TEST(FormatterSpec, AlignsRangeForPointersWithMultilineBracedRanges)
 {
     const std::string source = "void Run() {\nfor (const char * sub:\n"
-                               "{\n\"core/include/Heimdall\", \"core/src\"\n}) {}\n}\n";
+        "{\n\"core/include/Heimdall\", \"core/src\"\n}) {}\n}\n";
     for (const auto alignment :
-         { heimdall::PointerAlignment::Left, heimdall::PointerAlignment::Right })
+        {
+            heimdall::PointerAlignment::Left, heimdall::PointerAlignment::Right
+    })
     {
-        const heimdall::Formatter formatter({ .pointer_alignment = alignment });
-        const auto                formatted = formatter.Format(source);
+        const heimdall::Formatter formatter({.pointer_alignment = alignment});
+        const auto formatted = formatter.Format(source);
         EXPECT_NE(formatted.find(alignment == heimdall::PointerAlignment::Left
-                                     ? "for (const char* sub :"
-                                     : "for (const char *sub :"),
-                  std::string::npos);
+            ? "for (const char* sub :"
+            : "for (const char *sub :"),
+            std::string::npos);
         EXPECT_NE(formatted.find("\"core/include/Heimdall\", \"core/src\""), std::string::npos);
         EXPECT_EQ(formatter.Format(formatted), formatted);
         EXPECT_TRUE(formatter.FormatEdits(formatted).empty());
@@ -924,25 +948,26 @@ TEST(FormatterSpec, AlignsReturnTypesBeforeQualifiedMethodNames)
         "ns::Model && ns::Context::Take() { return model; }\n"
         "const ns::Model * ns::Context::Get() { return ptr; }\n"
         "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n";
-    const auto check = [&](heimdall::FormatOptions options, std::string_view expected) {
+    const auto check =[&](heimdall::FormatOptions options, std::string_view expected)
+    {
         options.blank_line_between_methods = false;
         const heimdall::Formatter formatter(options);
-        const auto                formatted = formatter.Format(source);
+        const auto formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
         EXPECT_TRUE(formatter.FormatEdits(formatted).empty());
     };
     check({},
           "const SemanticModel& AnalysisContext::Semantic() const\n{\n    return model;\n}\n"
-          "ns::Model&& ns::Context::Take()\n{\n    return model;\n}\n"
-          "const ns::Model* ns::Context::Get()\n{\n    return ptr;\n}\n"
-          "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n");
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Right,
-            .reference_alignment = heimdall::ReferenceAlignment::Right },
-          "const SemanticModel &AnalysisContext::Semantic() const\n{\n    return model;\n}\n"
-          "ns::Model &&ns::Context::Take()\n{\n    return model;\n}\n"
-          "const ns::Model *ns::Context::Get()\n{\n    return ptr;\n}\n"
-          "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n");
+        "ns::Model&& ns::Context::Take()\n{\n    return model;\n}\n"
+        "const ns::Model* ns::Context::Get()\n{\n    return ptr;\n}\n"
+        "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Right,
+          .reference_alignment = heimdall::ReferenceAlignment::Right},
+        "const SemanticModel &AnalysisContext::Semantic() const\n{\n    return model;\n}\n"
+        "ns::Model &&ns::Context::Take()\n{\n    return model;\n}\n"
+        "const ns::Model *ns::Context::Get()\n{\n    return ptr;\n}\n"
+        "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n");
 }
 
 TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
@@ -950,49 +975,50 @@ TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
     constexpr std::string_view source =
         "int*x;\nint &r=x;\nvoid f(int&&v);\nint*const p=nullptr;\n";
 
-    const auto check = [](heimdall::FormatOptions options, std::string_view expected) {
+    const auto check =[](heimdall::FormatOptions options, std::string_view expected)
+    {
         const heimdall::Formatter formatter(options);
-        const std::string         formatted = formatter.Format(source);
+        const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
     };
 
     // Right: both bind to the declarator name.
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Right,
-            .reference_alignment = heimdall::ReferenceAlignment::Right },
-          "int *x;\nint &r = x;\nvoid f(int &&v);\nint *const p = nullptr;\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Right,
+          .reference_alignment = heimdall::ReferenceAlignment::Right},
+        "int *x;\nint &r = x;\nvoid f(int &&v);\nint *const p = nullptr;\n");
     // Split: pointers to the type, references to the name.
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Left,
-            .reference_alignment = heimdall::ReferenceAlignment::Right },
-          "int* x;\nint &r = x;\nvoid f(int &&v);\nint * const p = nullptr;\n");
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Right,
-            .reference_alignment = heimdall::ReferenceAlignment::Left },
-          "int *x;\nint& r = x;\nvoid f(int&& v);\nint *const p = nullptr;\n");
-    check({ .pointer_alignment   = heimdall::PointerAlignment::Left,
-            .reference_alignment = heimdall::ReferenceAlignment::Left },
-          "int* x;\nint& r = x;\nvoid f(int&& v);\nint * const p = nullptr;\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Left,
+          .reference_alignment = heimdall::ReferenceAlignment::Right},
+        "int* x;\nint &r = x;\nvoid f(int &&v);\nint * const p = nullptr;\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Right,
+          .reference_alignment = heimdall::ReferenceAlignment::Left},
+        "int *x;\nint& r = x;\nvoid f(int&& v);\nint *const p = nullptr;\n");
+    check({.pointer_alignment = heimdall::PointerAlignment::Left,
+          .reference_alignment = heimdall::ReferenceAlignment::Left},
+        "int* x;\nint& r = x;\nvoid f(int&& v);\nint * const p = nullptr;\n");
 }
 
 TEST(FormatterSpec, BreaksLongLinesAtCommas)
 {
     // Isolate width-driven wrapping from the parameter-count rule.
-    const heimdall::Formatter  narrow({ .column_limit = 40, .max_parameters_per_line = 0 });
-    constexpr std::string_view source    = "void f(int alpha, int beta, int gamma, int delta);\n";
-    const std::string          formatted = narrow.Format(source);
+    const heimdall::Formatter narrow({.column_limit = 40,.max_parameters_per_line = 0});
+    constexpr std::string_view source = "void f(int alpha, int beta, int gamma, int delta);\n";
+    const std::string formatted = narrow.Format(source);
     EXPECT_EQ(formatted,
               "void f(int alpha, int beta, int gamma,\n"
-              "    int delta);\n");
+        "    int delta);\n");
     EXPECT_EQ(narrow.Format(formatted), formatted);
     // Disabled limit keeps the line whole.
-    const heimdall::Formatter unlimited({ .column_limit = 0, .max_parameters_per_line = 0 });
+    const heimdall::Formatter unlimited({.column_limit = 0,.max_parameters_per_line = 0});
     EXPECT_EQ(unlimited.Format(source), source);
 }
 
 TEST(FormatterSpec, NormalizesAndAlignsTrailingComments)
 {
     constexpr std::string_view source = "int x;   // comment\nint y; //c2\n";
-    const heimdall::Formatter  formatter;
-    const std::string          formatted = formatter.Format(source);
+    const heimdall::Formatter formatter;
+    const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, "int x; // comment\nint y; // c2\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
 
@@ -1009,8 +1035,8 @@ TEST(FormatterSpec, SortsIncludesWhenEnabled)
         "#include \"a.h\"\n";
     const heimdall::Formatter plain;
     EXPECT_EQ(plain.Format(source), source); // off by default: verbatim
-    const heimdall::Formatter sorter({ .sort_includes = true });
-    const std::string         expected =
+    const heimdall::Formatter sorter({.sort_includes = true});
+    const std::string expected =
         "#include \"a.h\"\n"
         "#include \"b.h\"\n"
         "#include <string>\n"
@@ -1022,11 +1048,11 @@ TEST(FormatterSpec, SortsIncludesWhenEnabled)
 
 TEST(FormatterSpec, ReportsNoEditsWhenAlreadyFormatted)
 {
-    const heimdall::Formatter  formatter({ .brace_style = heimdall::BraceStyle::Attach });
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
     constexpr std::string_view clean = "int main() {\n    return 0;\n}\n";
     EXPECT_TRUE(formatter.FormatEdits(clean).empty());
     constexpr std::string_view messy = "int main() {\nreturn 0;\n}\n";
-    const auto                 edits = formatter.FormatEdits(messy);
+    const auto edits = formatter.FormatEdits(messy);
     ASSERT_FALSE(edits.empty());
     // Edits are disjoint, ascending, and reproduce Format().
     std::string applied(messy);
@@ -1068,8 +1094,8 @@ TEST(FormatterSpec, LeavesMultilineCommentsAndRawStringsVerbatim)
         ")\";\n"
         "int y=2;\n"
         "}\n";
-    const heimdall::Formatter formatter({ .brace_style = heimdall::BraceStyle::Attach });
-    const std::string         expected =
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
+    const std::string expected =
         "void f() {\n"
         "/* { open\n"
         "} close */\n"
@@ -1095,7 +1121,7 @@ TEST(FormatterSpec, IsIdempotentOnEveryBenchmarkCorpusFile)
             continue;
         }
 
-        std::ifstream     file(entry.path(), std::ios::binary);
+        std::ifstream file(entry.path(), std::ios::binary);
         const std::string source(std::istreambuf_iterator<char>(file), {});
         const std::string once = formatter.Format(source);
         EXPECT_EQ(formatter.Format(once), once) << entry.path().string();
@@ -1107,8 +1133,8 @@ TEST(FormatterSpec, AddsBracesToSingleLineBlocks)
     // Attach pinned: this test isolates single_line_style (Allman
     // combinations have their own tests below).
     const heimdall::Formatter braced(
-        { .brace_style       = heimdall::BraceStyle::Attach,
-          .single_line_style = heimdall::SingleLineStyle::IndentWithBraces });
+        {.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::IndentWithBraces});
     EXPECT_EQ(braced.Format("if (x) return;\n"), "if (x) {\n    return;\n}\n");
     EXPECT_EQ(braced.Format("if (a) if (b) x();\n"),
               "if (a) {\n    if (b) {\n        x();\n    }\n}\n");
@@ -1129,8 +1155,8 @@ TEST(FormatterSpec, AddsBracesToSingleLineBlocks)
 TEST(FormatterSpec, SplitsSingleLineBlocksWithIndent)
 {
     // Attach pinned: this test isolates single_line_style.
-    const heimdall::Formatter split({ .brace_style       = heimdall::BraceStyle::Attach,
-                                      .single_line_style = heimdall::SingleLineStyle::Indent });
+    const heimdall::Formatter split({.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::Indent});
     EXPECT_EQ(split.Format("if (x) return;\n"), "if (x)\n    return;\n");
     // Braced singles lose the braces instead of gaining indentation.
     EXPECT_EQ(split.Format("if (x) {\n    return;\n}\n"), "if (x)\n    return;\n");
@@ -1146,8 +1172,8 @@ TEST(FormatterSpec, SplitsSingleLineBlocksWithIndent)
 TEST(FormatterSpec, CollapsesSingleLineBlocks)
 {
     // Attach pinned: this test isolates single_line_style.
-    const heimdall::Formatter flat({ .brace_style       = heimdall::BraceStyle::Attach,
-                                     .single_line_style = heimdall::SingleLineStyle::SingleLine });
+    const heimdall::Formatter flat({.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::SingleLine});
     EXPECT_EQ(flat.Format("if (x) {\n    return;\n}\n"), "if (x) return;\n");
     EXPECT_EQ(flat.Format("if (x)\n    return;\n"), "if (x) return;\n");
     EXPECT_EQ(flat.Format("while (x) {\n    x = f();\n}\n"), "while (x) x = f();\n");
@@ -1166,19 +1192,19 @@ TEST(FormatterSpec, CollapsesSingleLineBlocks)
 TEST(FormatterSpec, BracesElseIfChainsWithoutNesting)
 {
     const heimdall::Formatter formatter(
-        { .brace_style       = heimdall::BraceStyle::Attach,
-          .single_line_style = heimdall::SingleLineStyle::IndentWithBraces });
+        {.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::IndentWithBraces});
     const std::string formatted =
         formatter.Format("void f() {\nif (a) x();\nelse if (b) y();\nelse return;\n}\n");
     EXPECT_EQ(formatted,
               "void f() {\n    if (a) {\n        x();\n    } else if (b) {\n        y();\n"
-              "    } else {\n        return;\n    }\n}\n");
+        "    } else {\n        return;\n    }\n}\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
 
 TEST(FormatterSpec, KeepsStackedPointersTogether)
 {
-    const heimdall::Formatter formatter({ .brace_style = heimdall::BraceStyle::Attach });
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach});
     EXPECT_EQ(formatter.Format("int main(int argc, char **argv, const char *const *p);\n"),
               "int main(int argc, char**argv, const char* const* p);\n");
     EXPECT_EQ(formatter.Format("void f() { x = a * *p; }\n"), "void f() {\n    x = a * *p;\n}\n");
@@ -1186,9 +1212,9 @@ TEST(FormatterSpec, KeepsStackedPointersTogether)
 
 TEST(FormatterSpec, BlankLineAfterControlBlock)
 {
-    const heimdall::Formatter  formatter({ .brace_style       = heimdall::BraceStyle::Attach,
-                                           .single_line_style = heimdall::SingleLineStyle::Keep,
-                                           .blank_line_after_control_block = true });
+    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach,
+            .single_line_style = heimdall::SingleLineStyle::Keep,
+            .blank_line_after_control_block = true});
     constexpr std::string_view source =
         "void f() {\n"
         "if (a) {\n"
@@ -1236,15 +1262,15 @@ TEST(FormatterSpec, BlankLineAfterControlBlock)
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
     // Disabled: nothing is inserted.
-    EXPECT_EQ(heimdall::Formatter({ .brace_style                    = heimdall::BraceStyle::Attach,
-                                    .blank_line_after_control_block = false })
-                  .Format("void f() {\nif (a) {\nx();\n}\ny();\n}\n"),
-              "void f() {\n    if (a) {\n        x();\n    }\n    y();\n}\n");
+    EXPECT_EQ(heimdall::Formatter({.brace_style = heimdall::BraceStyle::Attach,
+                                  .blank_line_after_control_block = false})
+        .Format("void f() {\nif (a) {\nx();\n}\ny();\n}\n"),
+        "void f() {\n    if (a) {\n        x();\n    }\n    y();\n}\n");
 }
 
 TEST(FormatterSpec, KeepsEnumeratorsAndInitializerListsAtOneLevel)
 {
-    const heimdall::Formatter formatter({ .blank_line_after_control_block = false });
+    const heimdall::Formatter formatter({.blank_line_after_control_block = false});
     const std::string enum_source = "enum class Command\n{\nLint,\nCheck,\nFormat,\nParse\n};\n";
     const std::string enum_expected =
         "enum class Command\n{\n    Lint,\n    Check,\n    Format,\n    Parse\n};\n";
@@ -1258,10 +1284,10 @@ TEST(FormatterSpec, KeepsEnumeratorsAndInitializerListsAtOneLevel)
 
 TEST(FormatterSpec, KeepsMemberAndVariableBraceInitializersAttached)
 {
-    const heimdall::Formatter formatter({ .blank_line_after_control_block = false,
-                                          .space_before_cpp11_braced_list = false });
+    const heimdall::Formatter formatter({.blank_line_after_control_block = false,
+            .space_before_cpp11_braced_list = false});
     const std::string source = "struct Options {\nCommand command{};\nint x{1};\nstd::vector<int> "
-                               "v{};\nstd::string s {};\n};\n";
+        "v{};\nstd::string s {};\n};\n";
     const std::string expected =
         "struct Options\n{\n    Command command{};\n    int x{1};\n    std::vector<int> v{};\n"
         "    std::string s{};\n};\n";
@@ -1275,8 +1301,9 @@ TEST(FormatterSpec, KeepsMemberAndVariableBraceInitializersAttached)
 TEST(FormatterSpec, SpacesTernaryOperatorsOnBothSides)
 {
     const heimdall::Formatter formatter(
-        { .brace_style = heimdall::BraceStyle::Attach, .blank_line_after_control_block = false });
-    const auto check = [&](std::string_view source, std::string_view expected) {
+        {.brace_style = heimdall::BraceStyle::Attach,.blank_line_after_control_block = false});
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(formatter.Format(formatted), formatted);
@@ -1297,8 +1324,9 @@ TEST(FormatterSpec, SpacesTernaryOperatorsOnBothSides)
 TEST(FormatterSpec, NeverBreaksEmptyBracePairs)
 {
     const heimdall::Formatter allman(
-        { .brace_style = heimdall::BraceStyle::Allman, .blank_line_after_control_block = false });
-    const auto check = [&](std::string_view source, std::string_view expected) {
+        {.brace_style = heimdall::BraceStyle::Allman,.blank_line_after_control_block = false});
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
         EXPECT_EQ(allman.Format(formatted), formatted);
@@ -1318,7 +1346,7 @@ TEST(FormatterSpec, NeverBreaksEmptyBracePairs)
 TEST(FormatterSpec, BlankLineAfterTypeDefinitions)
 {
     const heimdall::Formatter formatter(
-        { .brace_style = heimdall::BraceStyle::Attach, .blank_line_after_type_definition = true });
+        {.brace_style = heimdall::BraceStyle::Attach,.blank_line_after_type_definition = true});
     constexpr std::string_view source =
         "struct A {\nint x;\n};\n"
         "class B {\npublic:\nstruct In {\nint y;\n};\nint z;\n};\n"
@@ -1337,10 +1365,10 @@ TEST(FormatterSpec, BlankLineAfterTypeDefinitions)
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
     // Disabled: definitions stay tight.
-    EXPECT_EQ(heimdall::Formatter({ .brace_style = heimdall::BraceStyle::Attach,
-                                    .blank_line_after_type_definition = false })
-                  .Format("struct A {\nint x;\n};\nint y;\n"),
-              "struct A {\n    int x;\n};\nint y;\n");
+    EXPECT_EQ(heimdall::Formatter({.brace_style = heimdall::BraceStyle::Attach,
+                                  .blank_line_after_type_definition = false})
+        .Format("struct A {\nint x;\n};\nint y;\n"),
+        "struct A {\n    int x;\n};\nint y;\n");
     // The end of the enclosing scope never gets a trailing blank line.
     EXPECT_EQ(formatter.Format("namespace n {\nstruct A {\nint x;\n};\n}\n"),
               "namespace n {\n    struct A {\n        int x;\n    };\n}\n");
@@ -1349,7 +1377,7 @@ TEST(FormatterSpec, BlankLineAfterTypeDefinitions)
 TEST(FormatterSpec, SeparatesConsecutiveMethodsAndKeepsDocumentationAttached)
 {
     const heimdall::Formatter formatter;
-    const std::string         source =
+    const std::string source =
         "class Model {\npublic:\n"
         "const ParseTree& Tree() const noexcept\n{\nreturn *m_tree;\n}\n"
         "/// The names.\nconst InternPool& Names() const noexcept\n{\nreturn m_names;\n}\n};\n";
@@ -1363,7 +1391,7 @@ TEST(FormatterSpec, SeparatesConsecutiveMethodsAndKeepsDocumentationAttached)
     EXPECT_EQ(formatter.Format(heimdall::ParseTree::Parse(source, {})), expected);
     EXPECT_TRUE(formatter.FormatEdits(expected).empty());
     const std::string fragment = "const ParseTree& Tree() const noexcept { return *m_tree; }\n"
-                                 "const InternPool& Names() const noexcept { return m_names; }\n";
+        "const InternPool& Names() const noexcept { return m_names; }\n";
     const std::string fragment_expected =
         "const ParseTree& Tree() const noexcept\n{\n    return *m_tree;\n}\n\n"
         "const InternPool& Names() const noexcept\n{\n    return m_names;\n}\n";
@@ -1377,14 +1405,14 @@ TEST(FormatterSpec, MethodSeparationCanBeDisabledAndDoesNotSeparateFields)
     const heimdall::Formatter formatter;
     EXPECT_EQ(formatter.Format(source),
               "struct S\n{\n    void first() {}\n\n    void second() {}\n\n    int value;\n};\n");
-    EXPECT_EQ(heimdall::Formatter({ .blank_line_between_methods = false }).Format(source),
+    EXPECT_EQ(heimdall::Formatter({.blank_line_between_methods = false}).Format(source),
               "struct S\n{\n    void first() {}\n    void second() {}\n    int value;\n};\n");
 }
 
 TEST(FormatterSpec, BreaksMoreThanThreeParametersOnePerLine)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "class ParseTree {\nstatic ParseTree Parse(std::string_view source, const ParserOptions& "
         "options,\n"
         "std::stop_token stop, const std::vector<Token>* lexed = nullptr,\n"
@@ -1401,8 +1429,8 @@ TEST(FormatterSpec, BreaksMoreThanThreeParametersOnePerLine)
 
 TEST(FormatterSpec, WrapsConstructorDeclarationsAndSeparatesPublicMethods)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "class DiagnosticSink {\npublic:\n"
         "DiagnosticSink(const AnalysisContext& context, const RuleDescriptor& rule,\n"
         "std::vector<Diagnostic>& diagnostics, RuleMetrics& metrics, const LineTable& lines);\n"
@@ -1425,8 +1453,8 @@ TEST(FormatterSpec, WrapsConstructorDeclarationsAndSeparatesPublicMethods)
 
 TEST(FormatterSpec, SeparatesFieldsMethodsAndAccessSectionsWithoutSplittingFields)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "struct RuleMetrics {\nstd::string code;\nbool failed = false;\n"
         "double AverageNs() const noexcept { return failed ? 0 : 1; }\n"
         "private:\nint a;\nint b;\n/// Sets the count.\nvoid Set(int value);\n"
@@ -1442,8 +1470,8 @@ TEST(FormatterSpec, SeparatesFieldsMethodsAndAccessSectionsWithoutSplittingField
 
 TEST(FormatterSpec, SeparatesMethodDeclarationsFromEachOtherAndDefinitions)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "class Scheduler {\npublic:\n"
         "std::expected<void, std::string> Register(ScheduledRule rule);\n"
         "ScheduledResult Analyze(const AnalysisContext& context, const RuleEngine& engine, bool "
@@ -1462,15 +1490,18 @@ TEST(FormatterSpec, SeparatesMethodDeclarationsFromEachOtherAndDefinitions)
 
 TEST(FormatterSpec, WrapsConstructorDefinitionsAndInitializerLists)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    for (const std::string prefix : { "", "explicit ", "constexpr ", "explicit(false) " })
+    const heimdall::Formatter formatter({.column_limit = 0});
+    for (const std::string prefix :
+        {
+            "", "explicit ", "constexpr ", "explicit(false) "
+    })
     {
         SCOPED_TRACE(prefix);
         const std::string source = "struct S {\n" + prefix +
-                                   "S(int a, int b, int c, int d) : value(a) {}\nint value;\n};\n";
+            "S(int a, int b, int c, int d) : value(a) {}\nint value;\n};\n";
         const std::string expected = "struct S\n{\n    " + prefix +
-                                     "S(\n        int a,\n        int b,\n        int c,\n        "
-                                     "int d) : value(a) {}\n\n    int value;\n};\n";
+            "S(\n        int a,\n        int b,\n        int c,\n        "
+            "int d) : value(a) {}\n\n    int value;\n};\n";
         EXPECT_EQ(formatter.Format(source), expected);
         EXPECT_EQ(formatter.Format(expected), expected);
     }
@@ -1481,10 +1512,10 @@ TEST(FormatterSpec, WrapsConstructorDefinitionsAndInitializerLists)
 
 TEST(FormatterSpec, CallableFieldsAndCallInitializersRemainGrouped)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source = "struct S {\nint (*callback)(int);\nint count = factory();\n"
-                                       "void Run();\nint value;\n};\n";
-    const std::string         expected =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source = "struct S {\nint (*callback)(int);\nint count = factory();\n"
+        "void Run();\nint value;\n};\n";
+    const std::string expected =
         "struct S\n{\n    int(*callback)(int);\n    int count = factory();\n\n"
         "    void Run();\n\n    int value;\n};\n";
     EXPECT_EQ(formatter.Format(source), expected);
@@ -1493,34 +1524,34 @@ TEST(FormatterSpec, CallableFieldsAndCallInitializersRemainGrouped)
 
 TEST(FormatterSpec, DeclarationSpacingCanBeDisabledAndPreservesCrLf)
 {
-    const std::string         source = "class S {\r\npublic:\r\nS(int a, int b, int c, int d);\r\n"
-                                       "void Run();\r\nprivate:\r\nint a;\r\nint b;\r\n};\r\n";
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const auto                formatted = formatter.Format(source);
+    const std::string source = "class S {\r\npublic:\r\nS(int a, int b, int c, int d);\r\n"
+        "void Run();\r\nprivate:\r\nint a;\r\nint b;\r\n};\r\n";
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const auto formatted = formatter.Format(source);
     EXPECT_NE(formatted.find("int d);\r\n\r\n"), std::string::npos);
     EXPECT_NE(formatted.find("Run();\r\n\r\nprivate:"), std::string::npos);
     EXPECT_EQ(formatter.Format(formatted), formatted);
-    EXPECT_EQ(heimdall::Formatter({ .column_limit               = 0,
-                                    .blank_line_between_methods = false,
-                                    .max_parameters_per_line    = 0 })
-                  .Format(source),
-              "class S\r\n{\r\npublic:\r\n    S(int a, int b, int c, int d);\r\n"
-              "    void Run();\r\nprivate:\r\n    int a;\r\n    int b;\r\n};\r\n");
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 0,
+                                  .blank_line_between_methods = false,
+            .max_parameters_per_line = 0})
+        .Format(source),
+        "class S\r\n{\r\npublic:\r\n    S(int a, int b, int c, int d);\r\n"
+        "    void Run();\r\nprivate:\r\n    int a;\r\n    int b;\r\n};\r\n");
 }
 
 TEST(FormatterSpec, ParameterThresholdDoesNotCountNestedCommasOrChangeCalls)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "void small(std::pair<int, int> pair, int x = call(1, 2), int y = 0);\n"
         "void run() { call(1, 2, 3, 4, 5); }\n";
     EXPECT_EQ(formatter.Format(source),
               "void small(std::pair<int, int> pair, int x = call(1, 2), int y = 0);\n\n"
-              "void run()\n{\n    call(1, 2, 3, 4, 5);\n}\n");
+        "void run()\n{\n    call(1, 2, 3, 4, 5);\n}\n");
     const std::string many =
         "void many(std::pair<int, int> p, int x = call(1, 2), int y = 0, int z = 1);\n";
     const std::string expected = "void many(\n    std::pair<int, int> p,\n    int x = call(1, "
-                                 "2),\n    int y = 0,\n    int z = 1);\n";
+        "2),\n    int y = 0,\n    int z = 1);\n";
     EXPECT_EQ(formatter.Format(many), expected);
     EXPECT_EQ(formatter.Format(expected), expected);
 }
@@ -1529,30 +1560,30 @@ TEST(FormatterSpec, ParameterWrappingCanBeDisabledOrConfigured)
 {
     const std::string source = "void f(int a, int b, int c, int d);\n";
     EXPECT_EQ(
-        heimdall::Formatter({ .column_limit = 0, .max_parameters_per_line = 0 }).Format(source),
+        heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 0}).Format(source),
         source);
     EXPECT_EQ(
-        heimdall::Formatter({ .column_limit = 0, .max_parameters_per_line = 4 }).Format(source),
+        heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 4}).Format(source),
         source);
-    EXPECT_EQ(heimdall::Formatter({ .column_limit = 0, .max_parameters_per_line = 2 })
-                  .Format("void f(int a, int b, int c);\n"),
-              "void f(\n    int a,\n    int b,\n    int c);\n");
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 2})
+        .Format("void f(int a, int b, int c);\n"),
+        "void f(\n    int a,\n    int b,\n    int c);\n");
 }
 
 TEST(FormatterSpec, DeclarationLayoutPreservesCrLfAndDirectives)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source =
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source =
         "#define FN(a,b,c,d) function(a,b,c,d)\r\nvoid f(int a,int b,int c,int d);\r\n";
     const std::string expected = "#define FN(a,b,c,d) function(a,b,c,d)\r\nvoid f(\r\n    int "
-                                 "a,\r\n    int b,\r\n    int c,\r\n    int d);\r\n";
+        "a,\r\n    int b,\r\n    int c,\r\n    int d);\r\n";
     EXPECT_EQ(formatter.Format(source), expected);
     EXPECT_EQ(formatter.Format(expected), expected);
 }
 
 TEST(FormatterSpec, WrapsDefinitionsVariadicsAndKeepsParameterComments)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
+    const heimdall::Formatter formatter({.column_limit = 0});
     const std::string source = "void f(int a, /* second */ int b, int c, ...) { use(a); }\n";
     const std::string expected =
         "void f(\n    int a,\n    /* second */ int b,\n    int c,\n    ...)\n{\n    use(a);\n}\n";
@@ -1562,10 +1593,10 @@ TEST(FormatterSpec, WrapsDefinitionsVariadicsAndKeepsParameterComments)
 
 TEST(FormatterSpec, MethodSeparationHandlesConstructorsTemplatesAndTrailingComments)
 {
-    const heimdall::Formatter formatter({ .column_limit = 0 });
-    const std::string         source    = "struct S {\nS() {} // constructor\n~S() {}\n"
-                                          "template<class T> void f(T value) {}\nvoid g() {}\n};\n";
-    const auto                formatted = formatter.Format(source);
+    const heimdall::Formatter formatter({.column_limit = 0});
+    const std::string source = "struct S {\nS() {} // constructor\n~S() {}\n"
+        "template<class T> void f(T value) {}\nvoid g() {}\n};\n";
+    const auto formatted = formatter.Format(source);
     EXPECT_NE(formatted.find("S() {} // constructor\n\n"), std::string::npos);
     EXPECT_NE(formatted.find("~S() {}\n\n"), std::string::npos);
     EXPECT_NE(formatted.find("void f(T value) {}\n\n"), std::string::npos);
@@ -1575,8 +1606,8 @@ TEST(FormatterSpec, MethodSeparationHandlesConstructorsTemplatesAndTrailingComme
 TEST(FormatterSpec, SeparatesAssignmentFromBitwiseComplement)
 {
     const heimdall::Formatter formatter;
-    const std::string         source   = "inline constexpr std::uint32_t kNone =~0u;\n";
-    const std::string         expected = "inline constexpr std::uint32_t kNone = ~0u;\n";
+    const std::string source = "inline constexpr std::uint32_t kNone =~0u;\n";
+    const std::string expected = "inline constexpr std::uint32_t kNone = ~0u;\n";
     EXPECT_EQ(formatter.Format(source), expected);
     EXPECT_EQ(formatter.Format(expected), expected);
     EXPECT_EQ(formatter.Format("void f() { x=~mask; auto y = ~value; }\n"),
@@ -1587,13 +1618,14 @@ TEST(FormatterSpec, SeparatesAssignmentFromBitwiseComplement)
 TEST(FormatterSpec, SpacesInheritanceAndUnderlyingTypeColon)
 {
     const heimdall::Formatter formatter(
-        { .brace_style = heimdall::BraceStyle::Attach, .blank_line_after_type_definition = false });
+        {.brace_style = heimdall::BraceStyle::Attach,.blank_line_after_type_definition = false});
     const auto check =
-        [&](const heimdall::Formatter& f, std::string_view source, std::string_view expected) {
-            const std::string formatted = f.Format(source);
-            EXPECT_EQ(formatted, expected);
-            EXPECT_EQ(f.Format(formatted), formatted);
-        };
+        [&](const heimdall::Formatter& f, std::string_view source, std::string_view expected)
+    {
+        const std::string formatted = f.Format(source);
+        EXPECT_EQ(formatted, expected);
+        EXPECT_EQ(f.Format(formatted), formatted);
+    };
     check(formatter, "enum class CompletionKind: std::uint8_t { A };\n",
           "enum class CompletionKind : std::uint8_t {\n    A\n};\n");
     check(formatter, "enum E:int { A };\n", "enum E : int {\n    A\n};\n");
@@ -1605,7 +1637,7 @@ TEST(FormatterSpec, SpacesInheritanceAndUnderlyingTypeColon)
     check(formatter, "x = a?b:c;\n", "x = a ? b : c;\n");
     // Disabled: attached colon as before.
     const heimdall::Formatter tight(
-        { .brace_style = heimdall::BraceStyle::Attach, .space_before_inheritance_colon = false });
+        {.brace_style = heimdall::BraceStyle::Attach,.space_before_inheritance_colon = false});
     check(tight, "enum class K : std::uint8_t {};\n", "enum class K: std::uint8_t {};\n");
 }
 
@@ -1634,7 +1666,7 @@ TEST(FormatterSpec, MemberAccessOperatorsTakeNoSpaces)
         "    g(a, b->c);\n"
         "}\n";
     const heimdall::Formatter formatter;
-    const std::string         formatted = formatter.Format(source);
+    const std::string formatted = formatter.Format(source);
     EXPECT_EQ(formatted, expected);
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
@@ -1642,20 +1674,21 @@ TEST(FormatterSpec, MemberAccessOperatorsTakeNoSpaces)
 TEST(FormatterSpec, TrailingReturnArrowKeepsItsSpacesAfterDeclaratorSuffixes)
 {
     const heimdall::Formatter formatter;
-    for (const std::string_view declaration : {
-             "auto f() -> int;",
-             "auto f() const -> int;",
-             "auto f() noexcept -> int;",
-             "auto f() const noexcept -> int;",
-             "auto f() & -> int;",
-             "auto f() const && -> int;",
-             "auto f(int a) -> Foo;",
-             "auto f() -> Foo *;",
-             "struct S { auto m() const override -> int; };",
-         })
+    for (const std::string_view declaration :
+        {
+            "auto f() -> int;",
+            "auto f() const -> int;",
+            "auto f() noexcept -> int;",
+            "auto f() const noexcept -> int;",
+            "auto f() & -> int;",
+            "auto f() const && -> int;",
+            "auto f(int a) -> Foo;",
+            "auto f() -> Foo *;",
+            "struct S { auto m() const override -> int; };",
+    })
     {
         EXPECT_NE(formatter.Format(std::string(declaration) + "\n").find(" -> "), std::string::npos)
-            << declaration;
+        << declaration;
     }
 
     const std::string lambda =
@@ -1687,16 +1720,16 @@ TEST(FormatterSpec, IfConstexprKeepsTheSpaceBeforeTheCondition)
         "int f()\n{\n    if constexpr(sizeof(void*) == 8) { return 1; } else { return 2; }\n}\n");
     EXPECT_EQ(formatted,
               "int f()\n"
-              "{\n"
-              "    if constexpr (sizeof(void*) == 8)\n"
-              "    {\n"
-              "        return 1;\n"
-              "    }\n"
-              "    else\n"
-              "    {\n"
-              "        return 2;\n"
-              "    }\n"
-              "}\n");
+        "{\n"
+        "    if constexpr (sizeof(void*) == 8)\n"
+        "    {\n"
+        "        return 1;\n"
+        "    }\n"
+        "    else\n"
+        "    {\n"
+        "        return 2;\n"
+        "    }\n"
+        "}\n");
     EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
 }
 
@@ -1715,21 +1748,21 @@ TEST(FormatterSpec, UnnamedPointerTypesFollowThePointerAlignment)
         "auto n = sizeof(void*);\nauto k = static_cast<void*>(p);\nvoid f(char*, int&);\n";
     EXPECT_EQ(heimdall::Formatter().Format(source), source);
     const auto right =
-        heimdall::Formatter({ .pointer_alignment   = heimdall::PointerAlignment::Right,
-                              .reference_alignment = heimdall::ReferenceAlignment::Right })
-            .Format(source);
+        heimdall::Formatter({.pointer_alignment = heimdall::PointerAlignment::Right,
+                            .reference_alignment = heimdall::ReferenceAlignment::Right})
+    .Format(source);
     EXPECT_NE(right.find("sizeof(void *)"), std::string::npos) << right;
     EXPECT_NE(right.find("static_cast<void *>(p)"), std::string::npos) << right;
 }
 
 TEST(FormatterSpec, CachedFormattedTextProducesTheSameEditsWithoutReformatting)
 {
-    const std::string         source = "int first(){return 1;}\nint second(){return 2;}\n";
-    const auto                tree   = heimdall::ParseTree::Parse(source);
+    const std::string source = "int first(){return 1;}\nint second(){return 2;}\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
     const heimdall::Formatter formatter;
-    const auto                formatted = formatter.Format(tree);
+    const auto formatted = formatter.Format(tree);
 
-    const auto edits    = heimdall::Formatter::ComputeEdits(source, formatted);
+    const auto edits = heimdall::Formatter::ComputeEdits(source, formatted);
     const auto expected = formatter.FormatEdits(tree);
 
     ASSERT_EQ(edits.size(), expected.size());
@@ -1739,6 +1772,7 @@ TEST(FormatterSpec, CachedFormattedTextProducesTheSameEditsWithoutReformatting)
         EXPECT_EQ(edits[i].end_offset, expected[i].end_offset);
         EXPECT_EQ(edits[i].replacement, expected[i].replacement);
     }
+
     std::stop_source cancelled;
     cancelled.request_stop();
     EXPECT_TRUE(
@@ -1765,7 +1799,7 @@ TEST(FormatterSpec, IncrementalFormattingMatchesEveryPassAcrossOptionsAndMalform
 {
     constexpr std::array<std::string_view, 5> kSources {
         "#include <z.h>\n#include <a.h>\n#define ONE 1\n#define LONG 2\n"
-        "class A{int field; void One(int a,int b,int c,int d); void Two(){} };\n",
+            "class A{int field; void One(int a,int b,int c,int d); void Two(){} };\n",
         "void A()\r\n{\r\nif(x) return;\r\nelse f();\r\nconst char* s=R\"(raw\ntext)\";\r\n}",
         "namespace broken { int f(int a, int b) { if (a) { return (b +\n",
         "#if ENABLED\nint x=1; //x\nint longer=2; //longer\n#else\nvoid A() {}\n#endif\n",
@@ -1781,7 +1815,7 @@ TEST(FormatterSpec, IncrementalFormattingMatchesEveryPassAcrossOptionsAndMalform
         options.column_limit = selection & 1 ? 30 : 0;
         options.use_tabs = (selection & 2) != 0;
         options.brace_style = selection & 4 ? heimdall::BraceStyle::Attach
-                                          : heimdall::BraceStyle::Allman;
+        : heimdall::BraceStyle::Allman;
         options.single_line_style = static_cast<heimdall::SingleLineStyle>(selection % 4);
         options.sort_includes = (selection & 8) != 0;
         options.align_consecutive_macros = true;
@@ -1839,6 +1873,7 @@ TEST(FormatterSpec, KeepsSemicolonAttachedToNestedRecordBeforeMethod)
 
     const auto formatted = formatter.Format(source);
 
-    EXPECT_EQ(formatted, "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n");
+    EXPECT_EQ(formatted,
+        "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n");
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }

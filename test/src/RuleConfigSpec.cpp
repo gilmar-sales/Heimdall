@@ -11,7 +11,7 @@ namespace
     std::filesystem::path MakeConfigDir(std::string_view suffix)
     {
         const auto path = std::filesystem::temp_directory_path() /
-            ("heimdall_rule_config_" + std::string(suffix));
+                          ("heimdall_rule_config_" + std::string(suffix));
         std::filesystem::remove_all(path);
         std::filesystem::create_directories(path);
         return path;
@@ -20,7 +20,7 @@ namespace
     void WriteConfig(const std::filesystem::path& directory, std::string_view contents)
     {
         std::ofstream out(directory / heimdall::RuleConfigFileName,
-            std::ios::binary | std::ios::trunc);
+                          std::ios::binary | std::ios::trunc);
         out << contents;
     }
 
@@ -81,6 +81,33 @@ TEST(RuleConfigSpec, RootConfigStopsInheritanceFromParentDirectories)
     std::filesystem::remove_all(directory);
 }
 
+TEST(RuleConfigSpec, FinalNewlineRuleControlsFormattingAndInheritsOverrides)
+{
+    const auto directory = MakeConfigDir("formatter-final-newline");
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(directory, R"({"root":true,"rules":{"format/require-final-newline":"warning"}})");
+    WriteConfig(child, R"({"rules":{"cpp/no-null":"off"}})");
+
+    const auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->format_options.requireFinalNewline);
+    const auto inherited = heimdall::FindFormatOptions(child);
+    ASSERT_TRUE(inherited&&*inherited);
+    EXPECT_TRUE((* *inherited).requireFinalNewline);
+
+    WriteConfig(child, R"({"rules":{"format/require-final-newline":"off"}})");
+    const auto disabled = heimdall::FindFormatOptions(child);
+    ASSERT_TRUE(disabled&&*disabled);
+    EXPECT_FALSE((* *disabled).requireFinalNewline);
+
+    WriteConfig(child, R"({"rules":{"format/require-final-newline":"error"}})");
+    const auto enabled = heimdall::FindFormatOptions(child);
+    ASSERT_TRUE(enabled&&*enabled);
+    EXPECT_TRUE((* *enabled).requireFinalNewline);
+    std::filesystem::remove_all(directory);
+}
+
 TEST(RuleConfigSpec, AcceptsNewRuleCodesAndStillRejectsUnknown)
 {
     const auto directory = MakeConfigDir("new-rules");
@@ -136,7 +163,7 @@ TEST(RuleConfigSpec, LoadsIncludeOrderSettings)
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
-        "#include \"app.h\"\n#include <vector>\n");
+              "#include \"app.h\"\n#include <vector>\n");
     std::filesystem::remove_all(directory);
 }
 
@@ -219,7 +246,7 @@ TEST(RuleConfigSpec, RejectsInvalidIncludeOrderSettings)
     WriteConfig(directory, R"({"include-order":{"groups":["angle","weird"]}})");
     EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
     WriteConfig(directory,
-        R"({"include-order":{"groups":["angle","quote"],"case-insensitive":"yes"}})");
+                R"({"include-order":{"groups":["angle","quote"],"case-insensitive":"yes"}})");
     EXPECT_FALSE(heimdall::LoadRuleConfiguration(path));
     std::filesystem::remove_all(directory);
 }
@@ -289,7 +316,7 @@ TEST(RuleConfigSpec, LoadsFormatAlignments)
     const auto directory = MakeConfigDir("format");
     const auto path = directory / heimdall::RuleConfigFileName;
     WriteConfig(directory,
-        R"({"format":{"pointer-alignment":"left","reference-alignment":"left"}})");
+                R"({"format":{"pointer-alignment":"left","reference-alignment":"left"}})");
 
     auto loaded = heimdall::LoadRuleConfiguration(path);
     ASSERT_TRUE(loaded) <<(loaded ? "" : loaded.error());
@@ -374,7 +401,7 @@ TEST(RuleConfigSpec, MergesFreyrSpacingSettingsPerKey)
     const auto child = directory / "child";
     std::filesystem::create_directories(child);
     WriteConfig(directory,
-        R"({"format":{"space-after-c-style-cast":false,"space-after-logical-not":true,"space-before-cpp11-braced-list":false}})");
+                R"({"format":{"space-after-c-style-cast":false,"space-after-logical-not":true,"space-before-cpp11-braced-list":false}})");
     WriteConfig(child, R"({"format":{"space-after-c-style-cast":true}})");
 
     const auto found = heimdall::FindFormatOptions(child);
@@ -393,7 +420,7 @@ TEST(RuleConfigSpec, MergesConsecutiveAlignmentSettingsPerKey)
     const auto child = directory / "child";
     std::filesystem::create_directories(child);
     WriteConfig(directory,
-        R"({"format":{"align-consecutive-macros":true,"align-consecutive-assignments":true}})");
+                R"({"format":{"align-consecutive-macros":true,"align-consecutive-assignments":true}})");
     WriteConfig(child, R"({"format":{"align-consecutive-macros":false}})");
 
     const auto found = heimdall::FindFormatOptions(child);
@@ -456,12 +483,12 @@ TEST(RuleConfigSpec, LoadsMacroLimitsAndMergesThemFromTheNearestConfig)
     const auto outer = heimdall::FindRuleOptions(directory);
     const auto inner = heimdall::FindRuleOptions(directory / "inner");
 
-    ASSERT_TRUE(outer && *outer);
-    EXPECT_EQ((*outer)->macro_max_include_depth, 64u);
-    EXPECT_EQ((*outer)->macro_max_macros, 1000u);
-    ASSERT_TRUE(inner && *inner);
-    EXPECT_EQ((*inner)->macro_max_macros, 50u);
-    EXPECT_EQ((*inner)->macro_max_include_depth, 64u);
+    ASSERT_TRUE(outer&&*outer);
+    EXPECT_EQ((*outer) -> macro_max_include_depth, 64u);
+    EXPECT_EQ((*outer) -> macro_max_macros, 1000u);
+    ASSERT_TRUE(inner&&*inner);
+    EXPECT_EQ((*inner) -> macro_max_macros, 50u);
+    EXPECT_EQ((*inner) -> macro_max_include_depth, 64u);
     std::filesystem::remove_all(directory);
 }
 
@@ -477,8 +504,10 @@ TEST(RuleConfigSpec, RejectsInvalidMacroLimits)
 {
     const auto directory = MakeConfigDir("macro_limits_invalid");
     for (const std::string_view contents :
-         { R"({"macros":{"max-macros":0}})", R"({"macros":{"max-macros":"many"}})",
-           R"({"macros":{"unknown":1}})", R"({"macros":[]})", R"({"macros":{"max-include-depth":2000000}})" })
+        {
+            R"({"macros":{"max-macros":0}})", R"({"macros":{"max-macros":"many"}})",
+            R"({"macros":{"unknown":1}})", R"({"macros":[]})", R"({"macros":{"max-include-depth":2000000}})"
+    })
     {
         WriteConfig(directory, contents);
 

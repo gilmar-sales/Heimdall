@@ -161,6 +161,8 @@ names = [item["name"] for item in outline]
 check("TEST(Suite, Case)" in names, f"the TEST() macro is listed in the outline: {names}")
 
 namespace_cpp = workspace / "namespace.cpp"
+(workspace / ".heimdall.json").write_text(json.dumps({
+    "root": True, "rules": {"format/require-final-newline": "warning"}}))
 namespace_text = '#include "config.h"\nnamespace FREYR_NAMESPACE\n{\n} // namespace FREYR_NAMESPACE'
 namespace_cpp.write_text(namespace_text)
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
@@ -173,6 +175,12 @@ kinds = [action["kind"] for action in actions]
 check("refactor.inline.macro" in kinds, f"macro expansion is offered at EOF: {kinds}")
 check("source.fixAll" in kinds, f"final newline fix is offered alongside expansion: {kinds}")
 check("quickfix" in kinds, f"individual newline fix is offered: {kinds}")
+
+formatted = request(201, "textDocument/formatting", {
+    "textDocument": {"uri": namespace_cpp.as_uri()},
+    "options": {"tabSize": 4, "insertSpaces": True}})["result"]
+check(len(formatted) == 1 and formatted[0]["newText"].endswith("\n"),
+      f"formatting adds the final newline required by the rule: {formatted}")
 
 request(7, "shutdown", None)
 send({"jsonrpc": "2.0", "method": "exit"})
