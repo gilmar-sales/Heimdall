@@ -18,6 +18,7 @@ namespace heimdall::detail
                           std::stop_token               stop,
                           const Preprocessor::MacroMap* macros,
                           const ParseReuse*             reuse,
-                          const TypeNameOracle*         type_names);
+                          const TypeNameOracle*         type_names,
+                          const MacroResolver*          resolver);
 
 } // namespace heimdall::detail

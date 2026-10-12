@@ -32,18 +32,18 @@ source = (
 )
 
 
-def run(disabled=False):
+def run(disabled=False, text=source, hint_range=None):
     messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "initializationOptions": {"inlayHints": not disabled}}},
         {"jsonrpc": "2.0", "method": "initialized", "params": {}},
         {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
             "textDocument": {"uri": uri, "languageId": "cpp", "version": 1,
-                             "text": source}}},
+                             "text": text}}},
         {"jsonrpc": "2.0", "id": 2, "method": "textDocument/inlayHint", "params": {
             "textDocument": {"uri": uri},
-            "range": {"start": {"line": 7, "character": 0},
-                      "end": {"line": 22, "character": 0}}}},
+            "range": hint_range or {"start": {"line": 7, "character": 0},
+                                    "end": {"line": 22, "character": 0}}}},
         {"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": {}},
         {"jsonrpc": "2.0", "method": "exit"},
     ]
@@ -83,3 +83,78 @@ assert actual == [
 ], hints
 assert all(hint["kind"] == 1 and hint["paddingLeft"] for hint in hints), hints
 assert run(disabled=True) == []
+
+parameter_source = (
+    "int MetodoTeste(unsigned int first, int second, const char* desc);\n"
+    "template<class T> struct List { void Push(const T& value); };\n"
+    "int Inner(int number);\n"
+    "void Outer(int left, int right);\n"
+    "void Unnamed(int, const char*);\n"
+    "void Ambiguous(int count);\n"
+    "void Ambiguous(double length);\n"
+    "void Variadic(int count, ...);\n"
+    "void Defaulted(int count, int limit = 10);\n"
+    "void Redeclared(int);\n"
+    "void Redeclared(int amount);\n"
+    "void f() {\n"
+    "    MetodoTeste(1, 2, \"\");\n"
+    "    auto list = List<int>();\n"
+    "    list.Push(2);\n"
+    "    Outer(Inner(3), (4 + 5));\n"
+    "    int first = 1;\n"
+    "    MetodoTeste(first, 2, \"\");\n"
+    "    Unnamed(1, \"\");\n"
+    "    Ambiguous(1);\n"
+    "    Variadic(1, 2, 3);\n"
+    "    Defaulted(2);\n"
+    "    Redeclared(3);\n"
+    "    MetodoTeste(\n"
+    "        1,\n"
+    "        2,\n"
+    "        \"\");\n"
+    "    // MetodoTeste(1, 2, \"\");\n"
+    "}\n"
+    "int MetodoTeste(unsigned int first, int second, const char* desc) { return 1; }\n"
+)
+full_range = {"start": {"line": 0, "character": 0},
+              "end": {"line": 30, "character": 0}}
+all_hints = run(text=parameter_source, hint_range=full_range)
+parameter_hints = [hint for hint in all_hints if hint["kind"] == 2]
+expected = [
+    (12, "1", "first:"), (12, "2", "second:"), (12, '""', "desc:"),
+    (14, "2", "value:"),
+    (15, "Inner", "left:"), (15, "3", "number:"), (15, "(4", "right:"),
+    (17, "2", "second:"), (17, '""', "desc:"),
+    (20, "1", "count:"), (21, "2", "count:"), (22, "3", "amount:"),
+    (24, "1", "first:"), (25, "2", "second:"), (26, '""', "desc:"),
+]
+source_lines = parameter_source.splitlines()
+assert [(hint["position"], hint["label"]) for hint in parameter_hints] == [
+    ({"line": line, "character": source_lines[line].index(argument)}, label)
+    for line, argument, label in expected
+], parameter_hints
+assert all(hint["paddingRight"] for hint in parameter_hints), parameter_hints
+positions = [(hint["position"]["line"], hint["position"]["character"])
+             for hint in all_hints]
+assert positions == sorted(positions), all_hints
+assert run(disabled=True, text=parameter_source, hint_range=full_range) == []
+
+partial_range = {"start": {"line": 12, "character": source_lines[12].index("2")},
+                 "end": {"line": 12, "character": source_lines[12].index('""')}}
+partial = run(text=parameter_source, hint_range=partial_range)
+assert [hint["label"] for hint in partial] == ["second:"], partial
+
+multiline_range = {"start": {"line": 25, "character": 0},
+                   "end": {"line": 26, "character": 0}}
+multiline = run(text=parameter_source, hint_range=multiline_range)
+assert [hint["label"] for hint in multiline] == ["second:"], multiline
+
+example_source = (
+    "#include <cstdint>\n"
+    "#include <string>\n"
+    "int MetodoTeste(std::uint32_t first, int second, const std::string& desc);\n"
+    "int main() { MetodoTeste(1, 2, \"\"); }\n"
+    "int MetodoTeste(std::uint32_t first, int second, const std::string& desc) { return 1; }\n"
+)
+example = run(text=example_source, hint_range=full_range)
+assert [hint["label"] for hint in example] == ["first:", "second:", "desc:"], example

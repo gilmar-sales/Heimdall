@@ -153,3 +153,47 @@ TEST(SyntaxHighlightSpec, KindNamesFollowTheLegendOrder)
     EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::EnumMember), "enumMember");
     EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::Variable), "variable");
 }
+
+TEST(SyntaxHighlightSpec, ResolvesMacrosDefinedOutsideTheFile)
+{
+    constexpr std::string_view source = "int a = EXTERNAL_LIMIT;\nint b = Local(1);\n";
+    const auto external = heimdall::MacroTable::ParseDefinition("EXTERNAL_LIMIT 8");
+    ASSERT_TRUE(external);
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    heimdall::HighlightContext context;
+    context.findMacro =[&](std::string_view name, std::size_t)->const heimdall::MacroDef *
+    {
+        return name == "EXTERNAL_LIMIT" ? & *external : nullptr;
+    };
+
+    const auto spans = heimdall::SyntaxHighlight::Extract(tree, context);
+
+    EXPECT_TRUE(IsKind(source, spans, "EXTERNAL_LIMIT", HighlightKind::Macro));
+    EXPECT_TRUE(IsKind(source, spans, "Local", HighlightKind::Function));
+}
+
+TEST(SyntaxHighlightSpec, MarksInactiveGroupsAndSkipsTheirIdentifiers)
+{
+    constexpr std::string_view source = "int a;\n#if 0\nint dead = Call(1);\n#endif\nint c;\n";
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const std::size_t deadBegin = source.find("int dead");
+    const std::size_t deadEnd = source.find("#endif");
+    const std::vector<heimdall::ActiveSourceRange> active = {
+        {
+            0, deadBegin
+        }, {deadEnd, source.size() - deadEnd}
+    };
+    heimdall::HighlightContext context;
+    context.activeRanges = active;
+
+    const auto spans = heimdall::SyntaxHighlight::Extract(tree, context);
+
+    const auto dead = SpanOf(source, spans, "int", 1);
+    ASSERT_TRUE(dead);
+    EXPECT_EQ(dead->modifiers & heimdall::kHighlightInactive, heimdall::kHighlightInactive);
+    EXPECT_FALSE(SpanOf(source, spans, "Call"));
+    const auto live = SpanOf(source, spans, "int", 0);
+    ASSERT_TRUE(live);
+    EXPECT_EQ(live->modifiers & heimdall::kHighlightInactive, 0);
+    EXPECT_EQ(SpanOf(source, spans, "#if")->modifiers & heimdall::kHighlightInactive, 0);
+}

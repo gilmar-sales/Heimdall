@@ -34,3 +34,7 @@ cliente LSP (VS Code, Neovim, Helix...), sem depender de gramática TextMate.
   tema/TextMate do cliente continuar valendo. Um nome com declarações de tipos conflitantes no
   mesmo arquivo é tratado como ambíguo e não é classificado pelo nome.
 - `semanticTokens/full/delta` fica para depois, caso a medição mostre necessidade.
+
+## Atualização
+
+As macros agora vêm do `MacroEnvironment` (ver `docs/macro-support-plan.md`): o realce reconhece macros definidas em qualquer header, `-D` ou builtin do compilador, e marca código excluído por `#if` com o modificador `inactive`.

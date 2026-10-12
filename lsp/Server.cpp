@@ -2,6 +2,7 @@
 
 #include "Document.hpp"
 #include "JsonRpc.hpp"
+#include "MacroProtocol.hpp"
 #include "SemanticTokens.hpp"
 #include "SymbolProtocol.hpp"
 #include "WorkspaceFiles.hpp"
@@ -242,7 +243,7 @@ namespace heimdall::lsp
 						"\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source."
 						"fixAll\","
 						"\"refactor.extract.variable\",\"refactor.extract.function\","
-						"\"refactor.inline.variable\",\"refactor.inline.function\",\"refactor.extract.constant\",\"refactor.extract.method\"]},\"hoverProvider\":true,"
+						"\"refactor.inline.variable\",\"refactor.inline.function\",\"refactor.inline.macro\",\"refactor.extract.constant\",\"refactor.extract.method\"]},\"hoverProvider\":true,"
 						"\"definitionProvider\":true,\"implementationProvider\":true,"
 						"\"documentLinkProvider\":{\"resolveProvider\":false},"
 						"\"documentSymbolProvider\":true,\"typeHierarchyProvider\":true,\"workspaceSymbolProvider\":" +
@@ -1567,6 +1568,10 @@ namespace heimdall::lsp
 			m_include_cache.erase(std::string(uri));
 		}
 		{
+			const std::lock_guard<std::mutex> lock(mMacroMutex);
+			mMacroEnvironments.erase(std::string(uri));
+		}
+		{
 			const std::lock_guard<std::mutex> lock(m_profile_mu);
 			m_include_profiles.erase(std::string(uri));
 		}
@@ -1647,7 +1652,8 @@ namespace heimdall::lsp
 
 		const heimdall::CompileCommand* command = CommandFor(uri);
 		auto tree = std::make_shared<const heimdall::ParseTree>(
-			heimdall::ParseTree::ParseSnapshot(text, ParserOptionsFor(command), stop));
+			heimdall::ParseTree::ParseSnapshot(
+			text, ParserOptionsForText(uri, text, 0, command, false), stop));
 		if (tree->Cancelled())
 		{
 			return -1;
@@ -2240,6 +2246,24 @@ namespace heimdall::lsp
 				heimdall::index::HashBytes(*document->text))
 			{
 				auto anchor = snapshot->SymbolAt(selfShard, static_cast<std::uint32_t>(offset));
+				if (!anchor.Valid())
+				{
+					// A use of something declared in an included file (a header macro, a
+					// function): the written name resolves through the include closure.
+					const auto& file      = *snapshot->Shards()[selfShard];
+					const auto occurrence = file.OccurrenceAt(static_cast<std::uint32_t>(offset));
+					if (occurrence != heimdall::index::kInvalid)
+					{
+						const auto& resolved = snapshot->Resolved(selfShard);
+						const auto targets   = resolved.Targets(occurrence);
+						if (resolved.state[occurrence] == heimdall::index::Resolution::Resolved &&
+							targets.size() == 1)
+						{
+							anchor = targets.front();
+						}
+					}
+				}
+
 				if (anchor.Valid())
 				{
 					std::unordered_map<std::uint32_t, std::shared_ptr<const LineIndex>> shardLines;
@@ -2680,6 +2704,42 @@ namespace heimdall::lsp
 				heimdall::RefactoringService::InlineVariable(
 				context.Snapshot(), context.Document(), selection_start, CurrentStop()),
 				"refactor.inline.variable");
+		}
+
+		if (mVersionedEdits && accepts("refactor.inline.macro"))
+		{
+			// "Expand macro": write back what the preprocessor would make of the call.
+			if (const auto word = IdentifierAt(*text, selection_start))
+			{
+				if (const auto environment = MacroEnvironmentFor(uri_string, text, version, command))
+				{
+					if (const heimdall::MacroDef * macro = MacroAt(*environment, *text, *word))
+					{
+						if (const auto edit = MacroExpansionForEdit(*environment, *text, *word, *macro))
+						{
+							if (!first)
+							{
+								response += ',';
+							}
+
+							first = false;
+							response += "{\"title\":";
+							QuoteJson("Expand macro " + macro->name, response);
+							response += ",\"kind\":\"refactor.inline.macro\",\"edit\":{\"documentChanges\":"
+								"[{\"textDocument\":{\"uri\":";
+							QuoteJson(uri_string, response);
+							response += ",\"version\":" + std::to_string(version) +
+								"},\"edits\":[{\"range\":{\"start\":";
+							AppendPosition(lines->ToPosition(edit->begin), response);
+							response += ",\"end\":";
+							AppendPosition(lines->ToPosition(edit->end), response);
+							response += "},\"newText\":";
+							QuoteJson(edit->text, response);
+							response += "}]}]}}";
+						}
+					}
+				}
+			}
 		}
 
 		if (mVersionedEdits && accepts("refactor.inline.function"))
@@ -3144,11 +3204,113 @@ namespace heimdall::lsp
 			response += "}}";
 		}
 
+		AppendMacroCompletions(uri_string, text, version, command, offset, prefix, start, end,
+			items, rank, response);
 		const bool truncated = AppendIncludeInsertionItems(uri_string, *text, offset, command,
 			headers, items, *lines, rank, response);
 		const bool incomplete = !headers.complete || truncated;
 		Respond(id, (incomplete ? "{\"isIncomplete\":true,\"items\":["
 			: "{\"isIncomplete\":false,\"items\":[") + response + "]}");
+	}
+
+	// Macros live at the cursor, from any header or the compile command. Not offered after
+	// `.`, `->` or `::`, where a macro name cannot appear.
+	void LanguageServer::AppendMacroCompletions(
+		const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		std::int64_t version,
+		const heimdall::CompileCommand* command,
+		std::size_t offset,
+		const std::string& prefix,
+		const Position& start,
+		const Position& end,
+		const std::vector<heimdall::CompletionItem>& items,
+		std::size_t& rank,
+		std::string& response)
+	{
+		constexpr std::size_t kMaxMacroItems = 100;
+		constexpr int kConstantKind          = 21;
+		constexpr int kFunctionKind          = 3;
+		constexpr std::size_t kSortTextWidth = 6;
+		if (prefix.empty())
+		{
+			return;
+		}
+
+		const std::size_t prefixStart = offset - prefix.size();
+		const char before             = prefixStart > 0 ? (*text)[prefixStart - 1] : ' ';
+		const char beforeThat         = prefixStart > 1 ? (*text)[prefixStart - 2] : ' ';
+		if (before == '.' || before == ':' ||(before == '>' && beforeThat == '-'))
+		{
+			return;
+		}
+
+		const auto environment = MacroEnvironmentFor(uri, text, version, command);
+		if (!environment)
+		{
+			return;
+		}
+
+		const auto lower =[](std::string_view word)
+		{
+			std::string folded(word);
+			for (char& c : folded)
+			{
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+
+			return folded;
+		};
+		const std::string wanted = lower(prefix);
+		std::unordered_set<std::string> offered;
+		for (const auto& item : items)
+		{
+			offered.insert(item.label);
+		}
+
+		std::vector<heimdall::MacroPtr> matches;
+		environment->At(offset).ForEach([&](const heimdall::MacroDef& macro)
+			{
+				if (macro.name.size() >= wanted.size() && lower(macro.name).starts_with(wanted) &&
+				(prefix.starts_with('_') ||!macro.name.starts_with("__")) &&
+				!offered.contains(macro.name))
+				{
+					matches.push_back(std::make_shared<const heimdall::MacroDef>(macro));
+			}
+		});
+		std::ranges::sort(matches,[](const heimdall::MacroPtr& a, const heimdall::MacroPtr& b)
+			{
+				return a->name.size() != b->name.size() ? a->name.size() < b->name.size() : a->name < b->name;
+		});
+		if (matches.size() > kMaxMacroItems)
+		{
+			matches.resize(kMaxMacroItems);
+		}
+
+		for (const auto& macro : matches)
+		{
+			if (!response.empty())
+			{
+				response += ',';
+			}
+
+			std::string sortText = std::to_string(rank++);
+			sortText.insert(0, kSortTextWidth - std::min(kSortTextWidth, sortText.size()), '0');
+			response += "{\"label\":";
+			QuoteJson(macro->name, response);
+			response += ",\"kind\":" +
+				std::to_string(macro->functionLike ? kFunctionKind : kConstantKind) + ",\"detail\":";
+			QuoteJson(heimdall::lsp::MacroSignature(*macro), response);
+			response += ",\"sortText\":";
+			QuoteJson(sortText, response);
+			response += ",\"textEdit\":{\"range\":{\"start\":";
+			AppendPosition(start, response);
+			response += ",\"end\":";
+			AppendPosition(end, response);
+			response += "},\"newText\":";
+			QuoteJson(macro->name, response);
+			response += "}}";
+		}
 	}
 
 	bool LanguageServer::AppendIncludeInsertionItems(
@@ -3540,6 +3702,26 @@ namespace heimdall::lsp
 		}
 	}
 
+	// Parser options plus the macros of this text's translation unit, so function-like and
+	// header-defined macros parse the way they compile. `remember` keeps the environment for
+	// the document's other requests; one-shot scans of closed files pass false.
+	heimdall::ParserOptions LanguageServer::ParserOptionsForText(
+		const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		std::int64_t version,
+		const heimdall::CompileCommand* command,
+		bool remember)
+	{
+		heimdall::ParserOptions options = ParserOptionsFor(command);
+		if (auto environment = MacroEnvironmentFor(uri, text, version, command, remember))
+		{
+			options.macro_resolver =
+				std::make_shared<heimdall::MacroEnvironmentResolver>(std::move(environment));
+		}
+
+		return options;
+	}
+
 	heimdall::ParserOptions LanguageServer::ParserOptionsFor(
 		const heimdall::CompileCommand* command)
 	{
@@ -3644,6 +3826,12 @@ namespace heimdall::lsp
 		}
 		if (start)
 		{
+			if (auto environment = MacroEnvironmentFor(uri, text, version, command, true))
+			{
+				options.macro_resolver =
+					std::make_shared<heimdall::MacroEnvironmentResolver>(std::move(environment));
+			}
+
 			// The parse belongs to the version, not to whichever request won
 			// the race. Cancelling one consumer cannot invalidate other users.
 			mParsePool.SubmitCancellable(
@@ -3869,7 +4057,12 @@ namespace heimdall::lsp
 			static_cast<std::size_t>(PositionNumber(position, "character"))};
 		const std::size_t offset = lines->OffsetFromPosition(cursor);
 
-		const heimdall::CompileCommand* command      = CommandFor(uri_string);
+		const heimdall::CompileCommand* command = CommandFor(uri_string);
+		if (MacroHover(uri_string, text, version, *lines, offset, command, id))
+		{
+			return;
+		}
+
 		const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
 		const HeaderView headers                     = AwaitHeaderScopes(uri_string, text, command);
 		const auto tree                              = CachedParse(uri_string, text, version, command);
@@ -4458,6 +4651,14 @@ namespace heimdall::lsp
 		};
 		std::string response = "[";
 		bool first           = true;
+		struct OrderedHint
+		{
+			std::size_t offset = 0;
+			std::string label;
+			int kind = 1;
+		};
+
+		std::vector<OrderedHint> orderedHints;
 		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
 			if (symbols.kind[symbol] != heimdall::SymbolKind::Variable)
@@ -4527,18 +4728,157 @@ namespace heimdall::lsp
 				continue;
 			}
 
-			const std::size_t hint_offset = token_offset + token.length;
-			if (!first)
+			orderedHints.push_back(
+				{token_offset + token.length, ": " + type_spelling, 1});
+		}
+
+		{
+			const auto IsBareName =[&](std::size_t argumentNode, std::string_view name)
 			{
-				response += ',';
+				if (name.empty() ||
+					nodes.Kind(argumentNode) != heimdall::GrammarKind::IdentifierExpression)
+				{
+					return false;
+				}
+
+				if (nodes.TokenCount(argumentNode) != 1)
+				{
+					return false;
+				}
+
+				const auto token = nodes.FirstToken(argumentNode);
+				return token < tokens.size() && tree->Text(tokens[token]) == name;
+			};
+
+			const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
+			const heimdall::ScopeIndex* external =
+				headers.index ? &headers.index->Scopes() : nullptr;
+			struct ParamHint
+			{
+				std::size_t offset = 0;
+				std::string label;
+			};
+
+			std::vector<ParamHint> parameterHints;
+			const auto rangeStart = lines->OffsetFromPosition(
+				{first_line, PositionNumber(start, "character")});
+			const auto rangeEnd = lines->OffsetFromPosition(
+				{last_line, PositionNumber(end, "character")});
+			constexpr std::size_t kMaxParamHints = 500;
+			for (std::size_t node = 0;
+				node < nodes.size() && parameterHints.size() < kMaxParamHints; ++node)
+			{
+				if (nodes.Kind(node) != heimdall::GrammarKind::CallExpression)
+				{
+					continue;
+				}
+
+				if (RequestCancelled())
+				{
+					RespondCancelled(id);
+					return;
+				}
+
+				std::vector<std::size_t> argumentNodes;
+				for (const std::size_t child : tree->DirectChildren(node))
+				{
+					argumentNodes.push_back(child);
+				}
+
+				if (argumentNodes.empty())
+				{
+					continue;
+				}
+
+				std::vector<std::size_t> argumentOffsets;
+				argumentOffsets.reserve(argumentNodes.size());
+				bool anyInRange = false;
+				for (const std::size_t argument : argumentNodes)
+				{
+					const auto firstToken = nodes.FirstToken(argument);
+					const std::size_t argumentOffset = firstToken < tokens.size()
+					? tokens[firstToken].offset
+					: std::string_view::npos;
+					argumentOffsets.push_back(argumentOffset);
+					anyInRange |= argumentOffset >= rangeStart && argumentOffset < rangeEnd;
+				}
+
+				if (!anyInRange || argumentOffsets.back() == std::string_view::npos)
+				{
+					continue;
+				}
+
+				const auto help = heimdall::AnalysisFeatures::Signatures(
+					context, argumentOffsets.back(), external);
+				auto callOpen = nodes.FirstToken(argumentNodes.front());
+				while (callOpen > nodes.FirstToken(node))
+				{
+					--callOpen;
+					if (next_significant(callOpen, tokens.size()) == callOpen)
+					{
+						break;
+					}
+				}
+
+				if (help.signatures.empty() || callOpen >= tokens.size() ||
+					tokens[callOpen].tok != heimdall::Tok::LParen ||
+					help.call_open != tokens[callOpen].offset)
+				{
+					continue;
+				}
+
+				const auto& names = help.signatures.front().parameterNames;
+
+				for (std::size_t i = 0;
+					i < argumentNodes.size() && i < names.size() &&
+					parameterHints.size() < kMaxParamHints;
+					++i)
+				{
+					if (names[i].empty() || argumentOffsets[i] == std::string_view::npos ||
+						argumentOffsets[i] < rangeStart || argumentOffsets[i] >= rangeEnd ||
+						IsBareName(argumentNodes[i], names[i]))
+					{
+						continue;
+					}
+
+					if (!std::ranges::all_of(help.signatures,[&](const auto& signature)
+						{
+							return i < signature.parameterNames.size() &&
+							signature.parameterNames[i] == names[i];
+					}))
+					{
+						continue;
+					}
+
+					parameterHints.push_back({argumentOffsets[i], names[i] + ":"});
+				}
 			}
 
-			first = false;
-			response += "{\"position\":";
-			AppendPosition(lines->ToPosition(hint_offset), response);
-			response += ",\"label\":";
-			QuoteJson(": " + type_spelling, response);
-			response += ",\"kind\":1,\"paddingLeft\":true}";
+			for (const auto& hint : parameterHints)
+			{
+				orderedHints.push_back({hint.offset, hint.label, 2});
+			}
+
+			std::stable_sort(orderedHints.begin(), orderedHints.end(),
+				[](const OrderedHint& left, const OrderedHint& right)
+				{
+					return left.offset < right.offset;
+			});
+			for (const auto& hint : orderedHints)
+			{
+				if (!first)
+				{
+					response += ',';
+				}
+
+				first = false;
+				response += "{\"position\":";
+				AppendPosition(lines->ToPosition(hint.offset), response);
+				response += ",\"label\":";
+				QuoteJson(hint.label, response);
+				response += hint.kind == 1 ? ",\"kind\":1,\"paddingLeft\":true}"
+				: ",\"kind\":2,\"paddingRight\":true}";
+			}
 		}
 
 		response += ']';
@@ -5084,6 +5424,11 @@ namespace heimdall::lsp
 			}
 		}
 
+		if (!implementation && MacroDefinition(uri_string, text, version, offset, command, id))
+		{
+			return;
+		}
+
 		const HeaderView headers = AwaitHeaderScopes(uri_string, text, command);
 		const auto tree          = CachedParse(uri_string, text, version, command);
 		if (!tree)
@@ -5482,6 +5827,174 @@ namespace heimdall::lsp
 		Respond(id, response);
 	}
 
+	std::shared_ptr<const heimdall::MacroEnvironment> LanguageServer::MacroEnvironmentFor(
+		const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		std::int64_t version,
+		const heimdall::CompileCommand* command,
+		bool remember)
+	{
+		{
+			const std::lock_guard<std::mutex> lock(mMacroMutex);
+			if (const auto found = mMacroEnvironments.find(uri);
+				found != mMacroEnvironments.end() && found->second.version == version)
+			{
+				return found->second.environment;
+			}
+		}
+
+		const std::filesystem::path file = PathFromUri(uri);
+		auto overlay                     = std::make_shared<heimdall::SourceOverlay>();
+		const auto snapshot =
+			t_context && t_context->interactive ? t_context->analysis : m_workspace.Snapshot();
+		for (auto document : snapshot.Documents())
+		{
+			const auto& path = snapshot.Path(document);
+			if (path == file)
+			{
+				continue;
+			}
+
+			if (auto buffer = snapshot.SourceBuffer(document))
+			{
+				overlay->AddSnapshot(path, std::move(buffer));
+			}
+			else
+			{
+				overlay->Add(path, snapshot.Source(document));
+			}
+		}
+
+		heimdall::MacroEnvironmentOptions options;
+		options.overlay            = overlay.get();
+		const std::stop_token stop = t_context ? t_context->stop : std::stop_token {};
+		auto environment = std::make_shared<const heimdall::MacroEnvironment>(
+			heimdall::MacroEnvironment::Build(file, *text, command, options, stop));
+		if (environment->Main().cancelled)
+		{
+			return nullptr;
+		}
+
+		if (remember)
+		{
+			const std::lock_guard<std::mutex> lock(mMacroMutex);
+			mMacroEnvironments[uri] = {version, environment};
+		}
+
+		return environment;
+	}
+
+	bool LanguageServer::MacroHover(
+		const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		std::int64_t version,
+		const LineIndex& lines,
+		std::size_t offset,
+		const heimdall::CompileCommand* command,
+		std::string_view id)
+	{
+		const auto word = IdentifierAt(*text, offset);
+		if (!word)
+		{
+			return false;
+		}
+
+		const auto environment = MacroEnvironmentFor(uri, text, version, command);
+		if (!environment)
+		{
+			return false;
+		}
+
+		const heimdall::MacroDef* macro = MacroAt(*environment, *text, *word);
+		if (macro == nullptr)
+		{
+			return false;
+		}
+
+		const std::string expansion =
+			MacroExpansionPreview(*environment, *text, *word, *macro);
+		std::string response = "{\"contents\":{\"kind\":\"markdown\",\"value\":";
+		QuoteJson(MacroHoverMarkdown(*macro, expansion), response);
+		response += "},\"range\":";
+		response += "{\"start\":";
+		AppendPosition(lines.ToPosition(word->begin), response);
+		response += ",\"end\":";
+		AppendPosition(lines.ToPosition(word->end), response);
+		response += "}}";
+		Respond(id, response);
+		return true;
+	}
+
+	bool LanguageServer::MacroDefinition(
+		const std::string& uri,
+		const std::shared_ptr<const std::string>& text,
+		std::int64_t version,
+		std::size_t offset,
+		const heimdall::CompileCommand* command,
+		std::string_view id)
+	{
+		const auto word = IdentifierAt(*text, offset);
+		if (!word)
+		{
+			return false;
+		}
+
+		const auto environment = MacroEnvironmentFor(uri, text, version, command);
+		if (!environment)
+		{
+			return false;
+		}
+
+		const heimdall::MacroDef* macro = MacroAt(*environment, *text, *word);
+		if (macro == nullptr)
+		{
+			return false;
+		}
+
+		if (macro->origin != heimdall::MacroOrigin::File || macro->file.empty())
+		{
+			Respond(id, "[]");
+			return true;
+		}
+
+		const std::string targetUri = UriFromPath(std::filesystem::path(macro->file));
+		std::shared_ptr<const std::string> targetText;
+		if (const auto open = GetDocument(targetUri))
+		{
+			targetText = open->text;
+		}
+		else if (std::ifstream in(macro->file, std::ios::binary); in)
+		{
+			targetText = std::make_shared<const std::string>(
+				std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+		}
+
+		if (!targetText)
+		{
+			Respond(id, "[]");
+			return true;
+		}
+
+		const auto name = DefinitionNameRange(*targetText, macro->offset, macro->name);
+		if (!name)
+		{
+			Respond(id, "[]");
+			return true;
+		}
+
+		LineIndex targetLines;
+		targetLines.Build(*targetText);
+		std::string response = "[{\"uri\":";
+		QuoteJson(targetUri, response);
+		response += ",\"range\":{\"start\":";
+		AppendPosition(targetLines.ToPosition(name->begin), response);
+		response += ",\"end\":";
+		AppendPosition(targetLines.ToPosition(name->end), response);
+		response += "}}]";
+		Respond(id, response);
+		return true;
+	}
+
 	void LanguageServer::SemanticTokensRequest(
 		simdjson::dom::element request, std::string_view id, bool ranged)
 	{
@@ -5526,7 +6039,19 @@ namespace heimdall::lsp
 					{PositionNumber(end, "line"), PositionNumber(end, "character")})};
 		}
 
-		const auto spans = heimdall::SyntaxHighlight::Extract(*tree);
+		const auto environment =
+			MacroEnvironmentFor(uriString, document->text, document->version, CommandFor(uriString));
+		heimdall::HighlightContext context;
+		if (environment)
+		{
+			context.findMacro =[&environment](std::string_view name, std::size_t offset)
+			{
+				return environment->Find(name, offset);
+			};
+			context.activeRanges = environment->Main().activeRanges;
+		}
+
+		const auto spans = heimdall::SyntaxHighlight::Extract(*tree, context);
 		std::string response;
 		AppendSemanticTokens(spans, tree->Source(), *document->lines, range, response);
 		Respond(id, response);
@@ -5745,7 +6270,158 @@ namespace heimdall::lsp
 
 		std::string response;
 		AppendWorkspaceSymbols(hits, response);
+		AppendHeaderMacroSymbols(query, hits, response);
 		Respond(id, response);
+	}
+
+	// Macros of the headers the open documents include (system and third-party ones are not
+	// part of the workspace index). Macros the index already lists are skipped.
+	void LanguageServer::AppendHeaderMacroSymbols(std::string_view query,
+		std::span<const SymbolHit> hits, std::string& response)
+	{
+		constexpr std::size_t kMaxHeaderMacros = 50;
+		if (query.empty())
+		{
+			return;
+		}
+
+		const auto lower =[](std::string text)
+		{
+			for (char& c : text)
+			{
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+
+			return text;
+		};
+		const std::string needle = lower(std::string(query));
+		struct Candidate
+		{
+			std::string name;
+			std::string file;
+			std::uint32_t offset = 0;
+			bool system          = false;
+		};
+
+		std::vector<Candidate> candidates;
+		std::unordered_set<std::string> seen;
+		{
+			const std::lock_guard<std::mutex> lock(mMacroMutex);
+			for (const auto& [uri, entry] : mMacroEnvironments)
+			{
+				entry.environment->Final().ForEach([&](const heimdall::MacroDef& macro)
+					{
+						if (macro.origin != heimdall::MacroOrigin::File || macro.file.empty() ||
+						lower(macro.name).find(needle) == std::string::npos)
+						{
+							return;
+					}
+
+						if (seen.insert(macro.file + "#" + macro.name).second)
+						{
+							candidates.push_back({macro.name, macro.file, macro.offset,
+								entry.environment->IsSystemFile(macro.file)});
+					}
+				});
+			}
+		}
+
+		for (const auto& hit : hits)
+		{
+			const SymbolView symbol = hit.Symbol();
+			if (symbol.kind == heimdall::OutlineKind::Macro)
+			{
+				const std::string path = PathFromUri(hit.file->uri).generic_string();
+				std::erase_if(candidates,[&](const Candidate& candidate)
+					{
+						return candidate.name == symbol.name &&
+						std::filesystem::path(candidate.file).generic_string() == path;
+				});
+			}
+		}
+
+		std::ranges::sort(candidates,[](const Candidate& a, const Candidate& b)
+			{
+				if (a.system != b.system)
+				{
+					return !a.system;
+			}
+
+				return a.name.size() != b.name.size() ? a.name.size() < b.name.size() : a.name < b.name;
+		});
+		if (candidates.size() > kMaxHeaderMacros)
+		{
+			candidates.resize(kMaxHeaderMacros);
+		}
+
+		struct LoadedText
+		{
+			std::shared_ptr<const std::string> text;
+			LineIndex lines;
+		};
+
+		std::unordered_map<std::string, LoadedText> loaded;
+		std::string extra;
+		for (const Candidate& candidate : candidates)
+		{
+			auto found = loaded.find(candidate.file);
+			if (found == loaded.end())
+			{
+				LoadedText entry;
+				if (std::ifstream in(candidate.file, std::ios::binary); in)
+				{
+					entry.text = std::make_shared<const std::string>(
+						std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+					entry.lines.Build(*entry.text);
+				}
+
+				found = loaded.emplace(candidate.file, std::move(entry)).first;
+			}
+
+			if (!found->second.text)
+			{
+				continue;
+			}
+
+			const auto name = DefinitionNameRange(*found->second.text, candidate.offset, candidate.name);
+			if (!name)
+			{
+				continue;
+			}
+
+			if (!extra.empty())
+			{
+				extra += ',';
+			}
+
+			extra += "{\"name\":";
+			QuoteJson(candidate.name, extra);
+			extra += ",\"kind\":14,\"location\":{\"uri\":";
+			QuoteJson(UriFromPath(std::filesystem::path(candidate.file)), extra);
+			extra += ",\"range\":{\"start\":";
+			AppendPosition(found->second.lines.ToPosition(name->begin), extra);
+			extra += ",\"end\":";
+			AppendPosition(found->second.lines.ToPosition(name->end), extra);
+			extra += "}},\"containerName\":";
+			QuoteJson(std::filesystem::path(candidate.file).filename().string() +
+				(candidate.system ? " (system)" : " (project)"), extra);
+			extra += '}';
+		}
+
+		if (extra.empty())
+		{
+			return;
+		}
+
+		if (response.size() <= 2)
+		{
+			response = "[" + extra + "]";
+		}
+		else
+		{
+			response.pop_back();
+			response += "," + extra + "]";
+		}
 	}
 
 	std::shared_ptr<const heimdall::index::FileShard> LanguageServer::IndexShard(
@@ -5829,7 +6505,7 @@ namespace heimdall::lsp
 			auto text             = std::make_shared<const std::string>(std::move(*contents));
 			const std::string uri = UriFromPath(file);
 			const auto tree = heimdall::ParseTree::ParseSnapshot(
-				text, ParserOptionsFor(CommandFor(uri)), stop);
+				text, ParserOptionsForText(uri, text, 0, CommandFor(uri), false), stop);
 			if (tree.Cancelled())
 			{
 				return;

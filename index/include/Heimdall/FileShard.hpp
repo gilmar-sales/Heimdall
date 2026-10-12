@@ -38,6 +38,10 @@ namespace heimdall::index
 
 	/** Occurrence flag bits. */
 	inline constexpr std::uint8_t kOccurrenceMember = 1; // written after `.` or `->`
+	inline constexpr std::uint8_t kOccurrenceMacro  = 2; // names a macro: resolves to macros only
+
+	/** Macro symbol flag: the replacement list uses `#` or `##`, so an argument's spelling matters. */
+	inline constexpr std::uint32_t kMacroTokenPasting = 1u << 30;
 
 	enum class RelationKind : std::uint8_t
 	{

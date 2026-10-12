@@ -27,14 +27,19 @@ struct Node
 	TValue value = {};
 };
 
+/**
+ * @brief Dynamic linked list
+ *
+ * @tparam TValue value type
+ */
 template <typename TValue>
-class List
+class LinkedList
 {
 
 public:
-	List() = default;
+	LinkedList() = default;
 
-	~List() = default;
+	~LinkedList() = default;
 
 	void Push(const TValue& value)
 	{
@@ -63,7 +68,7 @@ private:
 	Node<TValue>* mRoot;
 };
 
-List<int> CreateList()
+LinkedList<int> CreateList()
 {
 	return {};
 }
@@ -72,7 +77,7 @@ auto list = CreateList();
 
 int main()
 {
-	auto list = List<int>();
+	auto list = LinkedList<int>();
 
 	list.Push(2);
 
@@ -80,8 +85,8 @@ int main()
 	auto test  = node;
 	auto test2 = test;
 
-	test->value = 2.0f;
-	auto test2v = test->value;
+	test->value       = 2.0f;
+	const auto test2v = test->value;
 
 	MetodoTeste(1, 2, "");
 

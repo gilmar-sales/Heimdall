@@ -4,6 +4,7 @@
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/LineTable.hpp>
+#include <Heimdall/MacroEnvironment.hpp>
 #include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/SemanticRules.hpp>
 
@@ -141,6 +142,8 @@ namespace heimdall::cli
                 return "StaticAssertDeclaration";
             case GrammarKind::SpliceExpression:
                 return "SpliceExpression";
+            case GrammarKind::MacroInvocation:
+                return "MacroInvocation";
         }
 
         return "Unknown";
@@ -163,7 +166,8 @@ namespace heimdall::cli
 
     heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path&     path,
                                                  const Options&                   options,
-                                                 const heimdall::CompileDatabase* database)
+                                                 const heimdall::CompileDatabase* database,
+                                                 std::string_view                 source)
     {
         heimdall::ParserOptions parser_options;
         if (options.std_override)
@@ -189,6 +193,17 @@ namespace heimdall::cli
                 }
 
                 parser_options.shared_macros = std::move(macros);
+            }
+
+            // Macros of every included header, `-D` and the compiler's builtins, with
+            // function-like ones, so macro-heavy code parses as it compiles. Headers are not in
+            // the database and borrow the flags of the nearest entry.
+            if (const auto* command = database->FindOrNearest(path); command != nullptr)
+            {
+                parser_options.macro_resolver =
+                    std::make_shared<heimdall::MacroEnvironmentResolver>(
+                        std::make_shared<const heimdall::MacroEnvironment>(
+                            heimdall::MacroEnvironment::Build(path, source, command)));
             }
         }
 
@@ -229,11 +244,12 @@ namespace heimdall::cli
         // One parse per file shared by syntax diagnostics, the rule engine and
         // the semantic pass (was: each stage re-lexed the buffer from scratch).
         std::optional<heimdall::ParseTree> tree;
+        heimdall::ParserOptions            parser_options;
         if (options.command == Command::Parse || options.command == Command::Lint ||
             options.command == Command::Check)
         {
-            const auto parser_options = ParserOptionsForFile(path, options, database);
-            tree                      = heimdall::ParseTree::Parse(source, parser_options);
+            parser_options = ParserOptionsForFile(path, options, database, source);
+            tree           = heimdall::ParseTree::Parse(source, parser_options);
             result.standard_name      = std::string(StandardName(tree->Standard()));
             result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree->Diagnostics());
             if (options.command == Command::Parse)
@@ -395,7 +411,7 @@ namespace heimdall::cli
                     [](const heimdall::ParseTree*) {});
                 const heimdall::AnalysisContext analysis(
                     heimdall::AnalysisSnapshot::FromSyntax(
-                        borrowed, ParserOptionsForFile(path, options, database), path),
+                        borrowed, parser_options, path),
                     0);
                 result.diagnostics =
                     heimdall::AnalysisFeatures::Diagnostics(analysis, rule_engine, true, context);

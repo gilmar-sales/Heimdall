@@ -98,6 +98,9 @@ namespace heimdall::index
 			}
 		}
 
+		// Whether the occurrence being resolved names a macro: macros only match macros and
+		// every other name never matches a macro.
+		bool macroUse = false;
 		const auto find =[&](std::string_view qualified, std::vector<Candidate>& found)
 		{
 			const auto key   = HashBytes(qualified);
@@ -107,6 +110,8 @@ namespace heimdall::index
 				const auto candidateShard = mQualShard[at];
 				const auto symbol         = mQualSymbol[at];
 				if (!visible[candidateShard] ||
+					(mShards[candidateShard]->Symbols().kind[symbol] == heimdall::SymbolKind::Macro) !=
+						macroUse ||
 					mShards[candidateShard]->Qualified(symbol) != qualified ||
 					(mShards[candidateShard]->Symbols().flags[symbol] &
 					(SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
@@ -275,6 +280,7 @@ namespace heimdall::index
 		{
 			std::vector<Candidate> found;
 			auto state = occ.resolution[i];
+			macroUse   = (occ.flags[i] & kOccurrenceMacro) != 0;
 			if (occ.symbol[i] != kInvalid)
 			{
 				found.push_back({file.Symbols().hash[occ.symbol[i]], {shard, occ.symbol[i]}});

@@ -118,6 +118,8 @@ namespace heimdall
 		std::string label;
 		std::vector<std::pair<std::uint32_t, std::uint32_t>> parameters;
 		std::string documentation;
+		/** Parameter names in argument order; empty entries denote unnamed parameters. */
+		std::vector<std::string> parameterNames;
 	};
 
 	// What the word at the cursor completes, for frontends that add candidates of

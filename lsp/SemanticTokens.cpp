@@ -8,7 +8,7 @@ namespace heimdall::lsp
 	namespace
 	{
 
-		constexpr std::string_view kModifierNames = "\"declaration\"";
+		constexpr std::string_view kModifierNames = "\"declaration\",\"inactive\"";
 
 		struct Encoder
 		{

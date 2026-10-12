@@ -749,6 +749,7 @@ namespace heimdall
                     }
                     else
                     {
+                        result.macro_events.push_back({ true, line_start, std::string(trimmed) });
                         std::string name(trimmed.substr(0, name_len));
                         // Function-like macro: retain as an opaque definition; do not expand it.
                         if (name_len < trimmed.size() && trimmed[name_len] == '(')
@@ -767,6 +768,7 @@ namespace heimdall
                 else if (active && kind == DirectiveKind::Undef)
                 {
                     std::string name(ReadWord(trimmed));
+                    result.macro_events.push_back({ false, line_start, name });
                     local.erase(name);
                     erased.insert(std::move(name));
                 }

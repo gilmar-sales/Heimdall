@@ -4,6 +4,7 @@
 #include "detail/RuleSupport.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -455,6 +456,23 @@ namespace heimdall
                     }
                 }
 
+                // A macro the file defines itself is not the header's.
+                for (const auto& event : m_tree.MacroEvents())
+                {
+                    std::size_t n = 0;
+                    while (n < event.text.size() &&
+                           (std::isalnum(static_cast<unsigned char>(event.text[n])) != 0 ||
+                            event.text[n] == '_'))
+                    {
+                        ++n;
+                    }
+
+                    if (event.define && n != 0)
+                    {
+                        m_local.insert(event.text.substr(0, n));
+                    }
+                }
+
                 // `class N;` and `friend class N;` name something the file does not
                 // need the definition of.
                 for (std::size_t p = 1; p < m_sig.size(); ++p)
@@ -744,9 +762,10 @@ namespace heimdall
                         // a function or variable could be a member inherited from a
                         // base the file cannot see.
                         const ExportKind kind = summary.Kind(ref.index);
+                        // A macro is replaced wherever it is written: as certain as a type.
                         const bool       is_type =
                             kind == ExportKind::Class || kind == ExportKind::Enum ||
-                            kind == ExportKind::TypeAlias;
+                            kind == ExportKind::TypeAlias || kind == ExportKind::Macro;
                         if (!is_type && m_external_base)
                         {
                             continue;

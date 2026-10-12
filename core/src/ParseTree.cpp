@@ -96,6 +96,7 @@ namespace heimdall
 	{
 		auto& tree        = *this;
 		tree.m_type_names = options.type_names;
+		tree.m_macro_resolver = options.macro_resolver;
 		if (stop.stop_requested())
 		{
 			m_cancelled = true;
@@ -112,7 +113,12 @@ namespace heimdall
 
 		const auto preprocessingStart = ParseClock::now();
 		PreprocessorResult preprocessing;
-		if (reuse != nullptr && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
+		if (options.macro_resolver && options.macro_resolver->Preprocessing() != nullptr)
+		{
+			// Conditions were evaluated with the macros of the whole translation unit.
+			preprocessing = *options.macro_resolver->Preprocessing();
+		}
+		else if (reuse != nullptr && reuse->previous && reuse->directivesUnchanged && !reuse->previous->Cancelled())
 		{
 			preprocessing     = reuse->previous->mPreprocessing;
 			const auto oldEnd = reuse->offset + reuse->old_length;
@@ -138,6 +144,15 @@ namespace heimdall
 				{
 					directive.offset = static_cast<std::size_t>(
 						static_cast<std::ptrdiff_t>(directive.offset) + shift);
+				}
+			}
+
+			for (auto& event : preprocessing.macro_events)
+			{
+				if (event.offset >= oldEnd)
+				{
+					event.offset = static_cast<std::size_t>(
+						static_cast<std::ptrdiff_t>(event.offset) + shift);
 				}
 			}
 
@@ -169,7 +184,7 @@ namespace heimdall
 
 		const auto grammarStart = ParseClock::now();
 		detail::ParseWithGrammar(tree, preprocessing, stop, &options.Macros(), reuse,
-			options.type_names.get());
+			options.type_names.get(), options.macro_resolver.get());
 		mMetrics.grammarNs = static_cast<std::uint64_t>(
 			std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - grammarStart)
 			.count());

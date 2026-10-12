@@ -459,3 +459,21 @@ TEST(SymbolOutlineSpec, SurvivesGarbage)
     EXPECT_NO_FATAL_FAILURE((void) Outline("template <"));
     EXPECT_NO_FATAL_FAILURE((void) Outline("operator"));
 }
+
+TEST(SymbolOutlineSpec, ListsActiveDefinesAsMacroSymbolsInSourceOrder)
+{
+	constexpr std::string_view source = "#define LIMIT 8\nnamespace app\n{\nint value;\n}\n"
+										"#define SQUARE(x) ((x) * (x))\n#if 0\n#define HIDDEN 1\n#endif\n";
+
+	const auto symbols = Outline(source);
+
+	EXPECT_EQ(Names(symbols), (std::vector<std::string> { "LIMIT", "app", "value", "SQUARE" }));
+	const OutlineSymbol* limit = Named(symbols, "LIMIT");
+	ASSERT_NE(limit, nullptr);
+	EXPECT_EQ(limit->kind, OutlineKind::Macro);
+	EXPECT_EQ(NameText(source, *limit), "LIMIT");
+	EXPECT_EQ(limit->detail, "8");
+	EXPECT_EQ(Named(symbols, "SQUARE")->detail, "(x)");
+	EXPECT_EQ(symbols[2].parent, 1u);
+	EXPECT_EQ(Named(symbols, "HIDDEN"), nullptr);
+}

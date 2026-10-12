@@ -18,7 +18,11 @@ namespace heimdall
 			"namespace", "type", "class", "struct", "enum", "enumMember",
 			"function", "method", "property", "variable"};
 
-		constexpr std::array<std::string_view, 15> kTypeKeywords = {
+		constexpr std::size_t kTypeKeywordCount = 15;
+		// Roughly one span per two tokens; `#` and its directive name are at most two apart.
+		constexpr std::size_t kTokensPerSpan  = 2;
+		constexpr std::size_t kMaxDirectiveGap = 2;
+		constexpr std::array<std::string_view, kTypeKeywordCount> kTypeKeywords = {
 			"auto", "bool", "char", "char8_t", "char16_t", "char32_t", "double", "float",
 			"int", "long", "short", "signed", "unsigned", "void", "wchar_t"
 		};
@@ -106,12 +110,12 @@ namespace heimdall
 		class Highlighter
 		{
 		public:
-			explicit Highlighter(const ParseTree& tree) :
-			mSource(tree.Source()), mTokens(tree.Tokens()) {}
+			Highlighter(const ParseTree& tree, const HighlightContext* context) :
+			mSource(tree.Source()), mTokens(tree.Tokens()), mContext(context) {}
 
 			std::vector<HighlightSpan> Run(const ParseTree& tree)
 			{
-				mSpans.reserve(mTokens.size() / 2);
+				mSpans.reserve(mTokens.size() / kTokensPerSpan);
 				CollectDeclarations(SymbolOutline::Extract(tree));
 				Walk();
 				return std::move(mSpans);
@@ -124,6 +128,25 @@ namespace heimdall
 				return mSource.substr(token.offset, token.length);
 			}
 
+			// True when `offset` lies in a group excluded by conditional compilation. Offsets
+			// are queried in non-decreasing order, so one cursor walks the ranges once.
+			bool Inactive(std::size_t offset)
+			{
+				if (mContext == nullptr || mContext->activeRanges.empty())
+				{
+					return false;
+				}
+
+				const auto ranges = mContext->activeRanges;
+				while (mActiveCursor < ranges.size() &&
+					ranges[mActiveCursor].offset + ranges[mActiveCursor].length <= offset)
+				{
+					++mActiveCursor;
+				}
+
+				return mActiveCursor == ranges.size() || offset < ranges[mActiveCursor].offset;
+			}
+
 			void Emit(
 				std::size_t offset,
 				std::size_t length,
@@ -132,6 +155,11 @@ namespace heimdall
 			{
 				if (length != 0)
 				{
+					if (Inactive(offset))
+					{
+						modifiers |= kHighlightInactive;
+					}
+
 					mSpans.push_back({offset, length, kind, modifiers});
 				}
 			}
@@ -277,7 +305,7 @@ namespace heimdall
 			{
 				const std::size_t name = NextSignificant(hash);
 				if (name >= mTokens.size() || mTokens[name].kind != TokenKind::Identifier ||
-					name - hash > 2)
+					name - hash > kMaxDirectiveGap)
 				{
 					Emit(mTokens[hash].offset, mTokens[hash].length, HighlightKind::Macro);
 					return hash;
@@ -405,6 +433,18 @@ namespace heimdall
 					return;
 				}
 
+				if (mContext != nullptr && !mContext->activeRanges.empty() && Inactive(token.offset))
+				{
+					return;
+				}
+
+				if (mContext != nullptr && mContext->findMacro &&
+					mContext->findMacro(Text(index), token.offset) != nullptr)
+				{
+					Emit(token.offset, token.length, HighlightKind::Macro);
+					return;
+				}
+
 				if (const auto declared = mDeclarations.find(index); declared != mDeclarations.end())
 				{
 					Emit(token.offset, token.length, declared->second, kHighlightDeclaration);
@@ -424,9 +464,11 @@ namespace heimdall
 			std::unordered_map<std::string_view, NameKind> mNames;
 			std::unordered_set<std::string_view> mMacros;
 			std::optional<std::size_t> mPrevSignificant;
-			bool mExpectMacroName = false;
-			bool mExpectDefine    = false;
-			bool mExpectHeader    = false;
+			bool mExpectMacroName            = false;
+			bool mExpectDefine               = false;
+			bool mExpectHeader               = false;
+			const HighlightContext* mContext = nullptr;
+			std::size_t mActiveCursor        = 0;
 		};
 
 	} // namespace
@@ -439,7 +481,14 @@ namespace heimdall
 
 	std::vector<HighlightSpan> SyntaxHighlight::Extract(const ParseTree& tree)
 	{
-		Highlighter highlighter(tree);
+		Highlighter highlighter(tree, nullptr);
+		return highlighter.Run(tree);
+	}
+
+	std::vector<HighlightSpan> SyntaxHighlight::Extract(const ParseTree& tree,
+		const HighlightContext& context)
+	{
+		Highlighter highlighter(tree, &context);
 		return highlighter.Run(tree);
 	}
 

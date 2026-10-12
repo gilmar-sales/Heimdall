@@ -1,3 +1,4 @@
+#include <Heimdall/MacroTable.hpp>
 #include <Heimdall/SymbolOutline.hpp>
 
 #include <algorithm>
@@ -78,6 +79,10 @@ namespace heimdall
                         break;
                     case GrammarKind::ConceptDefinition:
                         EmitConcept(node, parent);
+                        next = SubtreeEnd(node);
+                        break;
+                    case GrammarKind::MacroInvocation:
+                        EmitMacroInvocation(node, parent);
                         next = SubtreeEnd(node);
                         break;
                     case GrammarKind::Enumerator:
@@ -871,6 +876,74 @@ namespace heimdall
                 Add(std::move(symbol), parent);
             }
 
+            // `TEST(Suite, Case) { ... }` defines a function through the macro: list it under
+            // the spelling the user wrote. Invocations without a body declare nothing the
+            // outline can name.
+            void EmitMacroInvocation(std::size_t node, std::uint32_t parent)
+            {
+                bool hasBody = false;
+                for (std::size_t child = node + 1; child < SubtreeEnd(node); ++child)
+                {
+                    if (mNodes.Kind(child) == GrammarKind::CompoundStatement &&
+                        mNodes.Parent(child) == node)
+                    {
+                        hasBody = true;
+                        break;
+                    }
+                }
+
+                const std::size_t end   = NodeEndToken(node);
+                const std::size_t first = FirstSig(node);
+                if (!hasBody || first == kNone)
+                {
+                    return;
+                }
+
+                const std::size_t open = NextSig(first, end);
+                if (open == kNone || !Is(open, "("))
+                {
+                    return;
+                }
+
+                std::size_t depth = 0;
+                std::size_t close = kNone;
+                for (std::size_t token = open; token < end; ++token)
+                {
+                    if (IsTrivia(mTokens[token].kind))
+                    {
+                        continue;
+                    }
+
+                    depth += Is(token, "(") ? 1 : 0;
+                    if (Is(token, ")") && --depth == 0)
+                    {
+                        close = token;
+                        break;
+                    }
+                }
+
+                if (close == kNone)
+                {
+                    return;
+                }
+
+                OutlineSymbol symbol;
+                symbol.kind       = OutlineKind::Function;
+                symbol.nameOffset = mTokens[first].offset;
+                symbol.nameLength = mTokens[first].length;
+                symbol.detail     = "macro";
+                const std::size_t firstArgument = NextSig(open, close);
+                std::string arguments;
+                if (firstArgument != kNone && firstArgument < close)
+                {
+                    arguments = Collapsed(firstArgument, PrevSig(close, open));
+                }
+
+                symbol.name = std::string(Text(first)) + "(" + arguments + ")";
+                SetRange(symbol, node);
+                Add(std::move(symbol), parent);
+            }
+
             void EmitConcept(std::size_t node, std::uint32_t parent)
             {
                 const std::size_t end   = NodeEndToken(node);
@@ -931,9 +1004,112 @@ namespace heimdall
 
     } // namespace
 
+    namespace
+    {
+
+        std::vector<OutlineSymbol> MacroSymbols(const ParseTree& tree)
+        {
+            std::vector<OutlineSymbol> macros;
+            const std::string_view source = tree.Source();
+            for (const PreprocessorDirective& directive : tree.Directives())
+            {
+                if (directive.kind != DirectiveKind::Define || !directive.active ||
+                    directive.offset + directive.length > source.size())
+                {
+                    continue;
+                }
+
+                std::string_view line = source.substr(directive.offset, directive.length);
+                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                {
+                    line.remove_suffix(1);
+                }
+
+                const std::size_t keyword = line.find("define");
+                if (keyword == std::string_view::npos)
+                {
+                    continue;
+                }
+
+                std::size_t nameBegin = keyword + 6;
+                while (nameBegin < line.size() && (line[nameBegin] == ' ' || line[nameBegin] == '\t'))
+                {
+                    ++nameBegin;
+                }
+
+                const auto parsed = MacroTable::ParseDefinition(line.substr(nameBegin));
+                if (!parsed)
+                {
+                    continue;
+                }
+
+                OutlineSymbol symbol;
+                symbol.name        = parsed->name;
+                symbol.kind        = OutlineKind::Macro;
+                symbol.nameOffset  = directive.offset + nameBegin;
+                symbol.nameLength  = parsed->name.size();
+                symbol.rangeOffset = directive.offset;
+                symbol.rangeLength = line.size();
+                if (parsed->functionLike)
+                {
+                    symbol.detail = "(";
+                    for (std::size_t i = 0; i < parsed->params.size(); ++i)
+                    {
+                        symbol.detail += (i == 0 ? "" : ", ") + parsed->params[i];
+                    }
+
+                    symbol.detail += ")";
+                }
+                else
+                {
+                    symbol.detail = parsed->body;
+                }
+
+                macros.push_back(std::move(symbol));
+            }
+
+            return macros;
+        }
+
+    } // namespace
+
     std::vector<OutlineSymbol> SymbolOutline::Extract(const ParseTree& tree)
     {
-        return Extractor(tree).Run();
+        std::vector<OutlineSymbol> symbols = Extractor(tree).Run();
+        std::vector<OutlineSymbol> macros  = MacroSymbols(tree);
+        if (macros.empty())
+        {
+            return symbols;
+        }
+
+        // Merge by source position; parents keep preceding their children.
+        std::vector<OutlineSymbol> merged;
+        merged.reserve(symbols.size() + macros.size());
+        std::vector<std::uint32_t> remap(symbols.size());
+        std::size_t next = 0;
+        for (std::size_t i = 0; i < symbols.size(); ++i)
+        {
+            while (next < macros.size() && macros[next].rangeOffset < symbols[i].rangeOffset)
+            {
+                merged.push_back(std::move(macros[next++]));
+            }
+
+            remap[i] = static_cast<std::uint32_t>(merged.size());
+            OutlineSymbol symbol = std::move(symbols[i]);
+            if (symbol.parent != kNoOutlineParent)
+            {
+                symbol.parent = remap[symbol.parent];
+            }
+
+            merged.push_back(std::move(symbol));
+        }
+
+        while (next < macros.size())
+        {
+            merged.push_back(std::move(macros[next++]));
+        }
+
+        return merged;
     }
 
 } // namespace heimdall

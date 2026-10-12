@@ -3,6 +3,7 @@
 #include <Heimdall/ParseTree.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -46,13 +47,18 @@ namespace heimdall
             std::size_t& mDepth;
         };
 
+        constexpr std::uint64_t kMacroHashMix = 1099511628211ull;
+
         // Predefined macros that only decorate a declaration (`_GLIBCXX_NOEXCEPT`,
         // `EXPORT`, `[[nodiscard]]` wrappers) or open/close a namespace
         // (`_GLIBCXX_BEGIN_NAMESPACE_CXX11` -> `namespace __cxx11 {`). The grammar
         // does not expand macros, so these identifiers would otherwise glue onto
         // the neighbouring declaration and hide its members. They are dropped from
         // the significant-token view; the tokens stay in the tree.
-        bool IsDecorationMacro(std::string_view value)
+        // `nestedDecoration` answers for other macros named in the body (`GUARDED_BY(x)` ->
+        // `THREAD_ANNOTATION_ATTRIBUTE__(guarded_by(x))`); null when unknown.
+        bool IsDecorationText(std::string_view value,
+                              const std::function<bool(std::string_view)>& nestedDecoration)
         {
             const std::vector<Token>          tokens    = Lexer(value).Lex();
             static constexpr std::string_view allowed[] = {
@@ -60,14 +66,19 @@ namespace heimdall
                 "const",      "volatile",      "static",        "explicit",      "extern",
                 "__inline",   "__inline__",    "__attribute__", "__declspec",    "__extension__",
                 "__restrict", "__restrict__",  "__const",       "__volatile__",  "alignas",
-                "nodiscard",  "__nodiscard__", "deprecated",    "__deprecated__"
+                "nodiscard",  "__nodiscard__", "deprecated",    "__deprecated__", "_Pragma",
+                "__pragma"
             };
             int  nest            = 0;
             bool opens_namespace = false;
             bool saw_brace       = false;
+            // The previous top-level word may take an argument list (`__attribute__((x))`);
+            // any other parenthesis at top level makes the body an expression (`(*errno_fn())`).
+            bool takes_arguments = false;
             for (const auto& token : tokens)
             {
-                if (token.kind == TokenKind::Whitespace)
+                if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
+                    token.kind == TokenKind::BlockComment)
                 {
                     continue;
                 }
@@ -77,6 +88,11 @@ namespace heimdall
                 {
                     if (text == "(" || text == "[")
                     {
+                        if (text == "(" && nest == 0 && !takes_arguments)
+                        {
+                            return false;
+                        }
+
                         ++nest;
                     }
                     else if (text == ")" || text == "]")
@@ -92,7 +108,18 @@ namespace heimdall
                         return false;
                     }
 
+                    takes_arguments = false;
                     continue;
+                }
+
+                if (token.kind != TokenKind::Identifier)
+                {
+                    if (nest > 0)
+                    {
+                        continue;
+                    }
+
+                    return false;
                 }
 
                 if (nest > 0)
@@ -100,27 +127,32 @@ namespace heimdall
                     continue;
                 }
 
-                if (token.kind != TokenKind::Identifier)
-                {
-                    return false;
-                }
-
                 if (text == "namespace")
                 {
                     opens_namespace = true;
+                    takes_arguments = false;
                     continue;
                 }
 
-                if (std::find(std::begin(allowed), std::end(allowed), text) == std::end(allowed) &&
-                    !(opens_namespace && !saw_brace))
+                const bool known = std::find(std::begin(allowed), std::end(allowed), text) !=
+                                       std::end(allowed) ||
+                                   (nestedDecoration && nestedDecoration(text));
+                if (!known && !(opens_namespace && !saw_brace))
                 {
                     return false;
                 }
+
+                takes_arguments = known;
             }
 
             // Braces are only decoration when they belong to a namespace open/close.
             return !saw_brace || opens_namespace ||
                    value.find_first_not_of(" 	}") == std::string_view::npos;
+        }
+
+        bool IsDecorationMacro(std::string_view value)
+        {
+            return IsDecorationText(value, {});
         }
 
     } // namespace
@@ -133,10 +165,17 @@ namespace heimdall
                       std::stop_token               stop,
                       const Preprocessor::MacroMap* macros,
                       const ParseReuse*             reuse,
-                      const TypeNameOracle*         type_names) :
-            m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names)
+                      const TypeNameOracle*         type_names,
+                      const MacroResolver*          resolver) :
+            m_tree(tree), m_stop(std::move(stop)), m_reuse(reuse), m_oracle(type_names),
+            m_resolver(resolver)
         {
             m_names_hash = type_names != nullptr ? type_names->Fingerprint() : 0;
+            if (resolver != nullptr)
+            {
+                m_names_hash = m_names_hash * kMacroHashMix ^ resolver->Fingerprint();
+            }
+
             // identifier text -> "is a decoration macro", memoized per parse
             std::unordered_map<std::string_view, bool> decoration;
             for (const auto& diagnostic : preprocessing.diagnostics)
@@ -189,7 +228,28 @@ namespace heimdall
                 if ((active || directive) && token.kind != TokenKind::Whitespace &&
                     token.kind != TokenKind::LineComment && token.kind != TokenKind::BlockComment)
                 {
-                    if (macros != nullptr &&
+                    if (resolver != nullptr && !directive && token.kind == TokenKind::Identifier &&
+                        token.tok == Tok::None)
+                    {
+                        const std::size_t last = DecorationEnd(tree, i);
+                        if (last != Invalid)
+                        {
+                            if (tree.m_decoration.empty())
+                            {
+                                tree.m_decoration.assign(tree.Tokens().size(), false);
+                            }
+
+                            for (std::size_t k = i; k <= last; ++k)
+                            {
+                                tree.m_decoration[k] = true;
+                            }
+
+                            i = last;
+                            continue;
+                        }
+                    }
+
+                    if (resolver == nullptr && macros != nullptr &&
                         (!macros->empty() || !preprocessing.local_macros.empty()) && !directive &&
                         token.kind == TokenKind::Identifier)
                     {
@@ -353,6 +413,9 @@ namespace heimdall
         std::size_t                     mGrammarDepth          = 0;
         const ParseReuse*               m_reuse                = nullptr;
         const TypeNameOracle*           m_oracle               = nullptr;
+        const MacroResolver*            m_resolver             = nullptr;
+        // Per definition: whether the macro only decorates (memoized for this parse).
+        std::unordered_map<const MacroDef*, bool> m_decoration_shape;
         // File-level names (flags above) and their order-independent hash, seeded
         // with the oracle's fingerprint; block scopes live on a stack.
         struct BlockName
@@ -2630,9 +2693,14 @@ namespace heimdall
                 }
             }
 
-            if (m_tree.Tokens()[m_sig[begin]].kind == TokenKind::Identifier)
+            // A leading `::` only anchors the name at global scope (`::std::string s;`).
+            const auto head = Is(begin, "::") && begin + 1 < end &&
+                                      m_tree.Tokens()[m_sig[begin + 1]].kind == TokenKind::Identifier
+                                  ? begin + 1
+                                  : begin;
+            if (m_tree.Tokens()[m_sig[head]].kind == TokenKind::Identifier)
             {
-                auto i = begin + 1;
+                auto i = head + 1;
                 while (i + 1 < end && Is(i, "::") &&
                        m_tree.Tokens()[m_sig[i + 1]].kind == TokenKind::Identifier)
                 {
@@ -2669,7 +2737,7 @@ namespace heimdall
                 if (i < end && m_tree.Tokens()[m_sig[i]].kind == TokenKind::Identifier)
                 {
                     // `a * b;` with `a` a variable in scope is a product, whatever it looks like.
-                    if (!Is(begin + 1, "::") && ClassOf(Text(begin)) == kNameValue)
+                    if (!Is(head + 1, "::") && ClassOf(Text(head)) == kNameValue)
                     {
                         return GrammarKind::ExpressionStatement;
                     }
@@ -2781,7 +2849,8 @@ namespace heimdall
             const auto  first       = Text(pos);
             if (first == "+" || first == "-" || first == "!" || first == "~" || first == "*" ||
                 first == "&" || first == "++" || first == "--" || first == "co_await" ||
-                first == "^^")
+                first == "^^" ||
+                (first == "::" && pos + 1 < end && (Is(pos + 1, "new") || Is(pos + 1, "delete"))))
             {
                 root = Add(GrammarKind::UnaryExpression, begin, begin + 1, parent);
                 ++pos;
@@ -2942,6 +3011,14 @@ namespace heimdall
             {
                 root = Add(GrammarKind::IdentifierExpression, pos, pos + 1, parent);
                 ++pos;
+                prefix_kind = GrammarKind::IdentifierExpression;
+            }
+            else if (first == "::" && pos + 1 < end &&
+                     m_tree.Tokens()[m_sig[pos + 1]].kind == TokenKind::Identifier)
+            {
+                // `::name`: the leading `::` anchors the name at global scope.
+                root = Add(GrammarKind::IdentifierExpression, pos, pos + kTwo, parent);
+                pos += kTwo;
                 prefix_kind = GrammarKind::IdentifierExpression;
             }
             else if (m_tree.Tokens()[m_sig[pos]].kind == TokenKind::Number ||
@@ -3229,6 +3306,16 @@ namespace heimdall
 
         void ParseStatement(std::size_t& pos, std::size_t end, std::size_t parent)
         {
+            if (m_resolver != nullptr)
+            {
+                const auto next = TryMacroInvocation(pos, end, parent, true);
+                if (next != Invalid)
+                {
+                    pos = next;
+                    return;
+                }
+            }
+
             const auto start = pos;
             if (Is(pos, "}"))
             {
@@ -4459,6 +4546,198 @@ namespace heimdall
             return true;
         }
 
+        // Whether a macro only decorates (memoized). Macros named in its body count when they
+        // decorate too; a cycle or a deep chain counts as not decorating.
+        bool IsDecorationDefinition(const MacroDef& macro, std::size_t offset, std::size_t depth)
+        {
+            constexpr std::size_t kMaxNestedMacros = 8;
+            const auto [shape, inserted]           = m_decoration_shape.try_emplace(&macro, false);
+            if (!inserted)
+            {
+                return shape->second;
+            }
+
+            if (macro.tokens.empty())
+            {
+                shape->second = true;
+                return true;
+            }
+
+            if (depth >= kMaxNestedMacros)
+            {
+                return false;
+            }
+
+            const bool decoration = IsDecorationText(
+                macro.body,
+                [&](std::string_view name)
+                {
+                    const MacroDef* nested = m_resolver->Find(name, offset);
+                    return nested != nullptr && IsDecorationDefinition(*nested, offset, depth + 1);
+                });
+            m_decoration_shape[&macro] = decoration;
+            return decoration;
+        }
+
+        // Last raw token of a decoration-only macro use starting at `index` (`EXPORT`,
+        // `GTEST_LOCK_EXCLUDED_(mu)`), or Invalid. A function-like name that is not called is
+        // not a use.
+        std::size_t DecorationEnd(const ParseTree& tree, std::size_t index)
+        {
+            const auto& tokens = tree.Tokens();
+            const Token& name  = tokens[index];
+            const MacroDef* macro =
+                m_resolver->Find(tree.m_source.substr(name.offset, name.length), name.offset);
+            if (macro == nullptr)
+            {
+                return Invalid;
+            }
+
+            if (!IsDecorationDefinition(*macro, name.offset, 0))
+            {
+                return Invalid;
+            }
+
+            if (!macro->functionLike)
+            {
+                return index;
+            }
+
+            std::size_t open = index + 1;
+            while (open < tokens.size() && (tokens[open].kind == TokenKind::Whitespace ||
+                                            tokens[open].kind == TokenKind::LineComment ||
+                                            tokens[open].kind == TokenKind::BlockComment))
+            {
+                ++open;
+            }
+
+            if (open >= tokens.size() || tokens[open].tok != Tok::LParen)
+            {
+                return Invalid;
+            }
+
+            std::size_t level = 0;
+            for (std::size_t k = open; k < tokens.size(); ++k)
+            {
+                if (tokens[k].tok == Tok::LParen)
+                {
+                    ++level;
+                }
+                else if (tokens[k].tok == Tok::RParen && --level == 0)
+                {
+                    return k;
+                }
+            }
+
+            return Invalid;
+        }
+
+        const MacroDef* MacroAtSig(std::size_t pos) const
+        {
+            if (m_resolver == nullptr || pos >= m_sig.size())
+            {
+                return nullptr;
+            }
+
+            const Token& token = m_tree.Tokens()[m_sig[pos]];
+            if (token.kind != TokenKind::Identifier || token.tok != Tok::None)
+            {
+                return nullptr;
+            }
+
+            return m_resolver->Find(m_tree.m_source.substr(token.offset, token.length),
+                                    token.offset);
+        }
+
+        // Expansion ends a declaration by itself (`...;` or `...}`), so nothing of the
+        // surrounding source belongs to it.
+        static bool ExpandsToWholeDeclarations(const MacroDef& macro)
+        {
+            if (macro.tokens.empty())
+            {
+                return false;
+            }
+
+            const Token& last = macro.tokens.back().token;
+            const std::string_view text = std::string_view(macro.body).substr(last.offset, last.length);
+            return text == ";" || text == "}";
+        }
+
+        // `NAME(args)` of a macro, then `;`, a `{ body }` that completes the expansion, or
+        // nothing when the expansion is whole declarations. Returns the position after the
+        // invocation, or Invalid when this is not one (the legacy parse then applies).
+        std::size_t TryMacroInvocation(std::size_t pos, std::size_t end, std::size_t parent,
+                                       bool blockOnly)
+        {
+            const MacroDef* macro = MacroAtSig(pos);
+            if (macro == nullptr)
+            {
+                return Invalid;
+            }
+
+            auto after = pos + 1;
+            if (macro->functionLike)
+            {
+                if (!Is(pos + 1, "(") || m_match[pos + 1] == Invalid || m_match[pos + 1] <= pos + 1 ||
+                    m_match[pos + 1] >= end)
+                {
+                    return Invalid;
+                }
+
+                after = m_match[pos + 1] + 1;
+            }
+            else if (blockOnly || !ExpandsToWholeDeclarations(*macro))
+            {
+                return Invalid;
+            }
+
+            if (after < end && Is(after, "{") && m_match[after] != Invalid &&
+                m_match[after] > after && m_match[after] < end && macro->functionLike)
+            {
+                const auto node = Add(GrammarKind::MacroInvocation, pos, after, parent);
+                auto       body = after;
+                ParseCompound(body, end, node);
+                if (!blockOnly && body < end && Is(body, ";"))
+                {
+                    ++body;
+                }
+
+                SetNodeRange(node, pos, body);
+                return body;
+            }
+
+            if (blockOnly)
+            {
+                return Invalid;
+            }
+
+            if (after < end && Is(after, ";"))
+            {
+                Add(GrammarKind::MacroInvocation, pos, after + 1, parent);
+                return after + 1;
+            }
+
+            if (after < end && (Is(after, "->") || Is(after, ".")))
+            {
+                const auto semi = FindSemicolon(after, end);
+                if (semi < end)
+                {
+                    Add(GrammarKind::MacroInvocation, pos, semi + 1, parent);
+                    return semi + 1;
+                }
+
+                return Invalid;
+            }
+
+            if (ExpandsToWholeDeclarations(*macro) || after >= end)
+            {
+                Add(GrammarKind::MacroInvocation, pos, after, parent);
+                return after;
+            }
+
+            return Invalid;
+        }
+
         void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
         {
             if (mGrammarDepth >= kMaxGrammarDepth && begin < end)
@@ -4507,6 +4786,16 @@ namespace heimdall
                     Add(GrammarKind::AccessSpecifier, pos, pos + kTwo, parent);
                     pos += kTwo;
                     continue;
+                }
+
+                if (m_resolver != nullptr)
+                {
+                    const auto next = TryMacroInvocation(pos, end, parent, false);
+                    if (next != Invalid)
+                    {
+                        pos = next;
+                        continue;
+                    }
                 }
 
                 auto exported_head = pos;
@@ -4949,9 +5238,11 @@ namespace heimdall
                               std::stop_token               stop,
                               const Preprocessor::MacroMap* macros,
                               const ParseReuse*             reuse,
-                              const TypeNameOracle*         type_names)
+                              const TypeNameOracle*         type_names,
+                              const MacroResolver*          resolver)
         {
-            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse, type_names);
+            GrammarParser parser(tree, preprocessing, std::move(stop), macros, reuse, type_names,
+                                 resolver);
             parser.Run();
         }
 

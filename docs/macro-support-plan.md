@@ -1,6 +1,53 @@
 # Plano: suporte completo a macros, independente de onde são definidas
 
-## 1. Situação atual (verificada no código)
+## 0. Estado da implementação
+
+| Fase | Estado | Onde |
+|------|--------|------|
+| F0 corpus e linha de base | **Parcial**: linha de base medida (293 erros de parse em GoogleTest/Benchmark, `docs/cpp-syntax-coverage.md` P12); falta o corpus versionado em `test/data/macros/` | |
+| F1 modelo e expansor | **Feita** | `core/.../MacroTable.hpp`, `MacroExpander.hpp`; testes `MacroExpanderSpec` (exemplos normativos de `#`, `##`, `__VA_OPT__`, hide-sets, limites, cancelamento) |
+| F2 ambiente por TU | **Feita**, com memoização por header | `core/.../MacroScanner.hpp` (diretivas e `#if` contra a tabela viva), `semantic/.../MacroEnvironment.hpp` (includes na ordem real, builtins via `-dM -E` com cache, `-D/-U`, `-include`, guardas, `#pragma once`, overlay de buffers abertos, snapshots por offset) |
+| F3 realce e navegação | **Feita** | realce `macro`/`inactive`, hover com expansão, definição, completion, `workspace/symbol` e outline com macros (`lsp/MacroProtocol.*`, `Server.cpp`); smoke `LspMacroSmoke.py` |
+| F4 parser consciente de expansão | **Feita nas camadas 1 a 3, sem filhos expandidos** | `MacroResolver` (core) + `MacroEnvironmentResolver` (semantic); `GrammarKind::MacroInvocation`; decoração por definição, inclusive function-like e aninhada; blocos `TEST(a, b) { }`; CLI com `--compile-commands` e LSP (`CachedParse`) usam o ambiente. 293 -> 12 erros de parse em GoogleTest/Benchmark |
+| F5 índice e semântica | **Feita no índice; Binder/Typer ficam de fora** | `SymbolKind::Macro` no `ShardBuilder` (definição como símbolo, usos como ocorrências com `kOccurrenceMacro`, inclusive em `#if`/`#ifdef`/`defined` e no corpo de outras macros, só em código ativo); resolução entre arquivos pelo fecho de includes (macro só casa com macro, nome comum nunca casa com macro); referências a partir do uso ou da definição; `TEST(a, b) { }` aparece no outline e no `workspace/symbol` como `TEST(a, b)` |
+| F6 regras e refatoração | **Feita** (com a ressalva do rename comum abaixo) | Rename de macro em `IndexRename::RenameMacro`; ação `refactor.inline.macro` "Expand macro NAME" (`MacroExpansionForEdit`); "Mostrar expansão" é o hover da F3; `cpp/include-what-you-use` passa a reconhecer macros (`ExportKind::Macro` em `HeaderSummary`: macros ainda definidas no fim do header, sem guardas, `#undef`s nem nomes iniciados por `_`); `modernize-const` e demais regras do `Flow` leem o uso de cada argumento de macro na expansão (`MacroArgumentContext`) em vez de tratá-lo como escape |
+| F7 robustez | **Parcial**: limites e `stop_token` existem; faltam benchmarks e fuzz | |
+
+Medido no `heimdall-lsp` (TU com 8 headers da biblioteca padrão, GCC): primeira consulta 97–142 ms (inclui a sondagem do compilador); depois de uma edição, 4 ms (antes da memoização do efeito dos headers eram 87 ms). Não há benchmark em `bench/` ainda.
+
+Limitações da F6:
+
+- O rename comum (de classe, função, variável...) continua recusando quando o nome aparece em diretivas, ou seja, dentro do corpo de um `#define`. É deliberado: o corpo é colado em cada uso e a árvore não parseia a expansão, então nenhuma checagem prova que o nome do corpo se refere à mesma entidade em todos os pontos de uso. Argumentos de macro em chamadas (`EXPECT_EQ(w.Size(), 3)`) são código comum e já eram renomeados. Relaxar isso depende de parsear expansões (continuação da F4/F5).
+- Uma macro exportada por vários headers (`NULL`-like) deixa o IWYU em silêncio, como qualquer nome com mais de um provedor; macros da biblioteca padrão (`assert`, `NULL`, `EOF`) não passam pela tabela do IWYU.
+- Em `MacroArgumentContext`, um argumento que a expansão entrega a uma função desconhecida, escreve, endereça ou usa com `.`/`->`/`[`/chamada continua sendo escape; só leitura em operadores, comparações e `sizeof`/`decltype`/`alignof`/`noexcept` vira leitura. Chamadas cujo callee não é macro seguem as regras de antes.
+- A recusa de rename de macro por uso como argumento de macro que cola/transforma em string só enxerga invocações cujos nomes o índice marcou; o corpo da macro é examinado pelo marcador `kMacroTokenPasting`, não por expansão.
+- Ocorrências dentro de comentários e literais de string não são alteradas.
+- Para o parser, diretivas, faixas ativas e eventos de macro agora vêm do `MacroScanner` (via `MacroResolver::Preprocessing()`), então `#ifdef FEATURE` com `FEATURE` definida num header parseia o grupo certo; sem resolvedor continua valendo o `Preprocessor` antigo.
+
+Limitações da F5:
+
+- Renomear macro é recusado (`UnsupportedSymbol`, "Renaming a macro is not supported yet"); a F6 trata.
+- `ConfigurationHash` do shard não inclui as macros vindas de headers: se um header muda uma definição, o shard de quem o inclui só é refeito quando o próprio arquivo muda ou o servidor reindexa.
+- Só macros vivas no ponto de uso viram ocorrências; texto dentro de grupos `#if` inativos e argumentos de macros não são indexados como usos de outros nomes.
+- Símbolos gerados por macro aparecem só no outline (invocações com bloco); `DECLARE_FLAG(x);` e afins não declaram nomes no índice porque a expansão não é parseada.
+- Binder e Typer não consomem os tokens expandidos.
+
+Limitações da F4:
+
+- A expansão não vira nós: um `MacroInvocation` cobre `NOME(args)` e o bloco que o completa, mas os argumentos não são parseados e os símbolos que a macro gera não entram na árvore (F5).
+- O reuso incremental de itens do parser (`TryReuseItem`) considera o `Fingerprint()` do resolvedor: mudar uma definição de header invalida o reuso, mesmo que só importe para um item.
+- No LSP, a árvore do `Workspace` (índice e refatoração) continua sem o resolvedor; só `CachedParse` e a varredura de arquivos fechados o usam.
+- O custo do ambiente passa a valer em todo parse com compile command: ~230 ms a frio para `gtest.cc` no CLI (cada processo recomeça sem cache); no LSP, ~4 ms por edição com o cache de efeitos.
+
+Limitações conhecidas desta entrega:
+
+- O `Preprocessor` usado pelo parser continua independente (só macros object-like); migrá-lo para o `MacroScanner` faz parte da F4.
+- A validade de um efeito em cache confere as macros lidas e o conteúdo (tamanho/mtime ou hash do buffer) dos headers visitados, mas não re-resolve a busca de includes: um header novo que passe a sombrear outro no caminho de busca só é visto quando algum arquivo envolvido mudar.
+- `maxMacros` (65 536) ainda não é aplicado; valem a profundidade de include, o tamanho de arquivo e os limites do expansor.
+- `__LINE__`, `__FILE__`, `__COUNTER__` não são expandidos.
+- O operando de `defined(X)` não é realçado como macro.
+
+## 1. Situação atual (verificada no código, antes desta entrega)
 
 | Área | Hoje | Limite |
 |------|------|--------|

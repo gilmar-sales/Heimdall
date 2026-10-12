@@ -125,6 +125,295 @@ namespace heimdall
 			}
 		};
 
+		RefactoringError Cancelled();
+
+		struct IdentifierToken
+		{
+			std::uint32_t offset;
+			std::uint32_t length;
+		};
+
+		bool IsTriviaToken(TokenKind kind)
+		{
+			return kind == TokenKind::Whitespace || kind == TokenKind::LineComment ||
+				kind == TokenKind::BlockComment;
+		}
+
+		// Byte ranges of `#include` / `#import` lines: header names are not identifiers.
+		std::vector<std::pair<std::size_t, std::size_t>> IncludeLines(std::string_view text)
+		{
+			std::vector<std::pair<std::size_t, std::size_t>> lines;
+			std::size_t start = 0;
+			while (start < text.size())
+			{
+				std::size_t end = text.find('\n', start);
+				end             = end == std::string_view::npos ? text.size() : end;
+				std::size_t at  = start;
+				while (at < end && (text[at] == ' ' || text[at] == '\t'))
+				{
+					++at;
+				}
+
+				if (at < end && text[at] == '#')
+				{
+					++at;
+					while (at < end && (text[at] == ' ' || text[at] == '\t'))
+					{
+						++at;
+					}
+
+					if (text.substr(at, 7) == "include" || text.substr(at, 6) == "import")
+					{
+						lines.emplace_back(start, end);
+					}
+				}
+
+				start = end + 1;
+			}
+
+			return lines;
+		}
+
+		// Renames a macro: its definitions, every use the index resolved to it (code,
+		// conditions, other macros' bodies). It refuses whenever the old spelling is reachable
+		// in a way the index does not see, or the new one could change what other code means.
+		std::expected<RefactoringPlan, RefactoringError> RenameMacro(
+			const idx::IndexSnapshot& snapshot, const PreparedIndexRename& prepared,
+			std::string_view newName, const IndexRenameContext& context, Run& run,
+			std::stop_token stop)
+		{
+			const std::string& oldName = prepared.name;
+			const auto hash            = snapshot.HashOf(prepared.symbol);
+			std::map<std::uint32_t, std::set<std::uint32_t>> uses;
+			for (std::uint32_t shardIndex = 0; shardIndex < snapshot.Shards().size(); ++shardIndex)
+			{
+				const auto& file     = *snapshot.Shards()[shardIndex];
+				const auto& occ      = file.Occurrences();
+				const auto& resolved = snapshot.Resolved(shardIndex);
+				for (std::uint32_t i = 0; i < occ.Size(); ++i)
+				{
+					if ((occ.flags[i] & idx::kOccurrenceMacro) == 0 ||
+						file.Strings().Text(occ.name[i]) != oldName)
+					{
+						continue;
+					}
+
+					const auto targets = resolved.Targets(i);
+					if (resolved.state[i] != idx::Resolution::Resolved || targets.size() != 1 ||
+						snapshot.HashOf(targets.front()) != hash)
+					{
+						return Fail(RefactoringErrorCode::IncompleteAnalysis,
+							"A use of this macro is not resolved to its definition: " +
+								run.Where(shardIndex, occ.offset[i]));
+					}
+
+					uses[shardIndex].insert(occ.offset[i]);
+				}
+			}
+
+			for (std::uint32_t shardIndex = 0; shardIndex < snapshot.Shards().size(); ++shardIndex)
+			{
+				if (stop.stop_requested())
+				{
+					return std::unexpected(Cancelled());
+				}
+
+				const auto& file     = *snapshot.Shards()[shardIndex];
+				const auto* document = run.Document(file.Path());
+				if (document == nullptr)
+				{
+					return Fail(RefactoringErrorCode::IncompleteAnalysis,
+						"Document is not available: " + file.Path());
+				}
+
+				if (idx::HashBytes(*document->text) != file.ContentHash() ||
+					(document->configHash && *document->configHash != file.ConfigHash()))
+				{
+					return Fail(RefactoringErrorCode::StaleSnapshot,
+						"The index of " + file.Path() + " is outdated; request the rename again");
+				}
+
+				if (document->options && document->options->Macros().contains(std::string(newName)))
+				{
+					return Fail(RefactoringErrorCode::MacroContext,
+						"The new name is a predefined macro: " + file.Path());
+				}
+
+				const std::string_view text = *document->text;
+				const bool hasOld           = text.find(oldName) != std::string_view::npos;
+				if (!hasOld && text.find(newName) == std::string_view::npos)
+				{
+					continue;
+				}
+
+				if (!file.SyntaxComplete() && hasOld)
+				{
+					return Fail(RefactoringErrorCode::IncompleteAnalysis,
+						"Syntax errors prevent proving the rename for an affected name: " +
+							file.Path());
+				}
+
+				const auto includeLines = IncludeLines(text);
+				const auto inInclude    = [&](std::size_t offset)
+				{
+					return std::ranges::any_of(includeLines, [&](const auto& line)
+						{ return offset >= line.first && offset < line.second; });
+				};
+				const auto tokens = Lexer(text).Lex();
+				std::vector<std::size_t> significant;
+				for (std::size_t t = 0; t < tokens.size(); ++t)
+				{
+					if (!IsTriviaToken(tokens[t].kind))
+					{
+						significant.push_back(t);
+					}
+				}
+
+				const auto spelling = [&](std::size_t sig)
+				{
+					return text.substr(tokens[significant[sig]].offset, tokens[significant[sig]].length);
+				};
+				// Macros used in this file that paste or stringify their arguments.
+				std::set<std::uint32_t> pastingCalls;
+				{
+					const auto& occ      = file.Occurrences();
+					const auto& resolved = snapshot.Resolved(shardIndex);
+					for (std::uint32_t i = 0; i < occ.Size(); ++i)
+					{
+						const auto targets = resolved.Targets(i);
+						if ((occ.flags[i] & idx::kOccurrenceMacro) != 0 && targets.size() == 1 &&
+							(snapshot.Shards()[targets.front().shard]->Symbols().flags[targets.front().symbol] &
+							idx::kMacroTokenPasting) != 0)
+						{
+							pastingCalls.insert(occ.offset[i]);
+						}
+					}
+				}
+
+				const auto found = uses.find(shardIndex);
+				for (std::size_t sig = 0; sig < significant.size(); ++sig)
+				{
+					const Token& token = tokens[significant[sig]];
+					if (token.kind != TokenKind::Identifier || inInclude(token.offset))
+					{
+						continue;
+					}
+
+					const auto word = spelling(sig);
+					if (word == newName)
+					{
+						return Fail(RefactoringErrorCode::NameCollision,
+							"The new name is already used: " +
+								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+					}
+
+					if (word != oldName)
+					{
+						continue;
+					}
+
+					if (found == uses.end() || !found->second.contains(token.offset))
+					{
+						return Fail(RefactoringErrorCode::IncompleteAnalysis,
+							"An occurrence of the macro's spelling is not a recorded use "
+							"(inactive code?): " +
+								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+					}
+
+					const bool pasted = (sig > 0 && (spelling(sig - 1) == "##" || spelling(sig - 1) == "#")) ||
+						(sig + 1 < significant.size() && spelling(sig + 1) == "##");
+					if (pasted)
+					{
+						return Fail(RefactoringErrorCode::MacroContext,
+							"The macro name takes part in token pasting or stringification: " +
+								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+					}
+
+					// An argument of a macro that pastes or stringifies it: its spelling is the result.
+					constexpr std::size_t kMaxLookback = 4096;
+					std::size_t depth = 0;
+					for (std::size_t back = sig, steps = 0; back > 0 && steps < kMaxLookback; --back, ++steps)
+					{
+						const auto previous = spelling(back - 1);
+						if (previous == ")")
+						{
+							++depth;
+						}
+						else if (previous == "(" && depth > 0)
+						{
+							--depth;
+						}
+						else if (previous == "(")
+						{
+							if (back >= 2 && pastingCalls.contains(static_cast<std::uint32_t>(
+									tokens[significant[back - 2]].offset)))
+							{
+								return Fail(RefactoringErrorCode::MacroContext,
+									"The macro name is an argument of a macro that pastes or stringifies "
+									"it: " + run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+							}
+						}
+						else if (depth == 0 && (previous == ";" || previous == "{" || previous == "}"))
+						{
+							break;
+						}
+					}
+				}
+			}
+
+			std::set<std::string> seen;
+			RefactoringPlan plan {"Rename " + oldName + " to " + std::string(newName),
+				snapshot.Revision(), {}};
+			for (const auto& [shardIndex, offsets] : uses)
+			{
+				const auto& file     = *snapshot.Shards()[shardIndex];
+				const auto* document = run.Document(file.Path());
+				if (context.editable && !context.editable(file.Path()))
+				{
+					return Fail(RefactoringErrorCode::IncompleteAnalysis,
+						"Document cannot be edited: " + file.Path());
+				}
+
+				DocumentEdits documentEdits {document->document, file.Path(), document->version,
+					document->text, {}, document->options};
+				std::string edited;
+				std::size_t cursor = 0;
+				for (const auto use : offsets)
+				{
+					if (use + oldName.size() > document->text->size() ||
+						document->text->compare(use, oldName.size(), oldName) != 0)
+					{
+						return Fail(RefactoringErrorCode::StaleSnapshot,
+							"Workspace changed; request the rename again");
+					}
+
+					documentEdits.edits.push_back({use, oldName.size(), oldName, std::string(newName)});
+					edited.append(*document->text, cursor, use - cursor);
+					edited += newName;
+					cursor = use + oldName.size();
+				}
+
+				edited.append(*document->text, cursor, std::string::npos);
+				const auto options = document->options.value_or(ParserOptions {});
+				const auto before  = ParseTree::Parse(*document->text, options, stop);
+				const auto after   = ParseTree::Parse(edited, options, stop);
+				if (before.Cancelled() || after.Cancelled() || stop.stop_requested())
+				{
+					return std::unexpected(Cancelled());
+				}
+
+				if (after.Diagnostics().size() > before.Diagnostics().size())
+				{
+					return Fail(RefactoringErrorCode::SemanticChange,
+						"The rename would introduce parse errors in " + file.Path());
+				}
+
+				plan.documents.push_back(std::move(documentEdits));
+			}
+
+			return plan;
+		}
+
 		RefactoringError Cancelled()
 		{
 			return {RefactoringErrorCode::Cancelled, "Request cancelled"};
@@ -589,6 +878,11 @@ namespace heimdall
 		if (oldName == newName)
 		{
 			return RefactoringPlan {"Rename " + oldName, snapshot.Revision(), {}};
+		}
+
+		if (kind == SymbolKind::Macro)
+		{
+			return RenameMacro(snapshot, *prepared, newName, context, run, stop);
 		}
 
 		if (declaringShard.Symbols().container[anchor.symbol] != idx::kInvalid)

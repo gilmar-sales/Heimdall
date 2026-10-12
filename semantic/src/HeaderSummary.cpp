@@ -80,6 +80,7 @@ namespace heimdall
             Intern({}); // id 0 is the empty string
             ScanIncludes();
             ScanSymbols();
+            ScanMacros();
         }
 
       private:
@@ -317,6 +318,73 @@ namespace heimdall
                 }
 
                 m_summary.m_class_base_count.push_back(count);
+            }
+        }
+
+        // Name of the include guard: the operand of a leading `#ifndef`, or empty.
+        std::string_view GuardName() const
+        {
+            const auto& directives = m_tree.Directives();
+            if (directives.empty() || directives.front().kind != DirectiveKind::Ifndef)
+            {
+                return {};
+            }
+
+            std::string_view line = m_tree.Source().substr(directives.front().offset,
+                                                           directives.front().length);
+            const std::size_t at  = line.find("ifndef");
+            if (at == std::string_view::npos)
+            {
+                return {};
+            }
+
+            line.remove_prefix(at + 6);
+            while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front())))
+            {
+                line.remove_prefix(1);
+            }
+
+            std::size_t n = 0;
+            while (n < line.size() && (std::isalnum(static_cast<unsigned char>(line[n])) || line[n] == '_'))
+            {
+                ++n;
+            }
+
+            return line.substr(0, n);
+        }
+
+        // Macros still defined when the header ends, in the order they were defined.
+        void ScanMacros()
+        {
+            const std::string_view guard = GuardName();
+            std::vector<std::string> live;
+            for (const auto& event : m_tree.MacroEvents())
+            {
+                std::size_t n = 0;
+                while (n < event.text.size() &&
+                       (std::isalnum(static_cast<unsigned char>(event.text[n])) || event.text[n] == '_'))
+                {
+                    ++n;
+                }
+
+                const std::string name = event.text.substr(0, n);
+                std::erase(live, name);
+                if (event.define && !name.empty())
+                {
+                    live.push_back(name);
+                }
+            }
+
+            for (const auto& name : live)
+            {
+                if (name == guard || name.front() == '_')
+                {
+                    continue;
+                }
+
+                m_summary.m_export_name.push_back(Intern(name));
+                m_summary.m_export_ns.push_back(Intern(""));
+                m_summary.m_export_kind.push_back(ExportKind::Macro);
             }
         }
 

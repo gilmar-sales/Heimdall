@@ -136,7 +136,7 @@ assert any(item["code"] == "cpp/access-control" and
            "mRoot" in item["message"] and "private" in item["message"]
            for item in access["params"]["diagnostics"]), access
 inlays = next(item for item in responses if item.get("id") == 13)["result"]
-assert [hint["label"] for hint in inlays] == [": LinkedList<int>", ": LinkedList<int>"], inlays
+assert [hint["label"] for hint in inlays] == [": LinkedList<int>", ": LinkedList<int>", "value:"], inlays
 redecl = next(item for item in responses
               if item.get("method") == "textDocument/publishDiagnostics"
               and item["params"]["uri"] == inlay_uri)

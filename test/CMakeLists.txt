@@ -54,7 +54,14 @@ add_executable(Tests_run
   src/NavigationSpec.cpp
   src/SymbolOutlineSpec.cpp
   src/SyntaxHighlightSpec.cpp
+  src/MacroExpanderSpec.cpp
+  src/MacroScannerSpec.cpp
+  src/MacroEnvironmentSpec.cpp
   src/SemanticTokensSpec.cpp
+  src/MacroProtocolSpec.cpp
+  src/MacroParseSpec.cpp
+  src/IndexMacroSpec.cpp
+  src/MacroFlowSpec.cpp
   src/SymbolProtocolSpec.cpp
   src/WorkspaceSymbolIndexSpec.cpp
   src/WorkspaceFilesSpec.cpp
@@ -69,6 +76,7 @@ add_executable(Tests_run
   src/CliOptionsSpec.cpp
   ../../lsp/Document.cpp
   ../../lsp/JsonRpc.cpp
+  ../../lsp/MacroProtocol.cpp
   ../../lsp/SemanticTokens.cpp
   ../../lsp/SymbolProtocol.cpp
   ../../lsp/WorkspaceFiles.cpp
@@ -268,6 +276,16 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspIncrementalSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncrementalSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspMacroRenameSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspMacroRenameSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspMacroSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspMacroSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

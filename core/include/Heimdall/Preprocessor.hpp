@@ -50,6 +50,17 @@ namespace heimdall
         std::size_t length;
     };
 
+    /// An active `#define` or `#undef` in source order, kept so a macro environment can replay
+    /// the file's effect on the macro table (including function-like macros).
+    struct MacroEvent
+    {
+        bool        define = true;
+        std::size_t offset = 0;
+        /// For `#define`, the text after the directive name (`NAME(a) body`); for `#undef`,
+        /// the macro name.
+        std::string text;
+    };
+
     struct PreprocessorResult
     {
         std::string                         active_source;
@@ -58,6 +69,8 @@ namespace heimdall
         std::vector<PreprocessorDiagnostic> diagnostics;
         // Object-like macros the file itself #defines (final state, #undef applied).
         std::unordered_map<std::string, std::string> local_macros;
+        // Every active #define / #undef in source order, function-like macros included.
+        std::vector<MacroEvent> macro_events;
     };
 
     // Transparent hash so macro lookups take string_view without allocating a

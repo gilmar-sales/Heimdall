@@ -1,4 +1,7 @@
 #include <Heimdall/IndexRename.hpp>
+#include <Heimdall/MacroResolver.hpp>
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
 #include <Heimdall/ShardBuilder.hpp>
 
 #include <gtest/gtest.h>
@@ -11,6 +14,42 @@ namespace
 {
     namespace idx = heimdall::index;
 
+    // Every macro any project file defines, live in every file: enough to index uses of
+    // header macros without running the include walk.
+    class ProjectMacros final : public heimdall::MacroResolver
+    {
+    public:
+        explicit ProjectMacros(const std::map<std::string, std::string>& files)
+        {
+            for (const auto& [path, text] : files)
+            {
+                for (const auto& event : heimdall::Preprocessor().Process(text).macro_events)
+                {
+                    if (!event.define)
+                    {
+                        continue;
+                    }
+
+                    if (auto parsed = heimdall::MacroTable::ParseDefinition(event.text))
+                    {
+                        parsed->file = path;
+                        mTable.Define(std::move(*parsed));
+                    }
+                }
+            }
+        }
+
+        const heimdall::MacroDef* Find(std::string_view name, std::size_t) const noexcept override
+        {
+            return mTable.Find(name);
+        }
+
+        std::uint64_t Fingerprint() const noexcept override { return mTable.Size(); }
+
+    private:
+        heimdall::MacroTable mTable;
+    };
+
     struct Project
     {
         std::map<std::string, std::string> files;
@@ -22,7 +61,9 @@ namespace
             std::vector<std::shared_ptr<const idx::FileShard>> shards;
             for (const auto& [path, text] : files)
             {
-                const auto tree = heimdall::ParseTree::Parse(text);
+                heimdall::ParserOptions options;
+                options.macro_resolver = std::make_shared<ProjectMacros>(files);
+                const auto tree = heimdall::ParseTree::Parse(text, options);
                 const auto model = heimdall::Binder::Bind(tree);
                 shards.push_back(idx::ShardBuilder::Build(model, path));
             }
@@ -969,4 +1010,110 @@ TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThisInOutOfLineDefi
 	const auto text = project.Apply(*plan).at("a.cpp");
 	EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
 	EXPECT_NE(text.find("this->x = 2"), std::string::npos) << text;
+}
+
+TEST(IndexRename, MacroIsRenamedAtItsDefinitionsUsesAndConditions)
+{
+    Project project({
+        {"config.h", "#pragma once\n#define LIMIT 8\n#define DOUBLE_LIMIT (LIMIT * 2)\n"},
+        {"use.cpp", "#include \"config.h\"\n#ifdef LIMIT\nint a = LIMIT;\n#endif\n"
+                    "#if defined(LIMIT) && LIMIT > 1\nint b = DOUBLE_LIMIT;\n#endif\n"},
+    });
+
+    const auto plan = project.Rename("config.h", project.At("config.h", "LIMIT"), "MAXIMUM");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("config.h"),
+              "#pragma once\n#define MAXIMUM 8\n#define DOUBLE_LIMIT (MAXIMUM * 2)\n");
+    EXPECT_EQ(result.at("use.cpp"),
+              "#include \"config.h\"\n#ifdef MAXIMUM\nint a = MAXIMUM;\n#endif\n"
+              "#if defined(MAXIMUM) && MAXIMUM > 1\nint b = DOUBLE_LIMIT;\n#endif\n");
+}
+
+TEST(IndexRename, RenamingAMacroFromAUseWorksToo)
+{
+    Project project({
+        {"config.h", "#define SQUARE(x) ((x) * (x))\n"},
+        {"use.cpp", "#include \"config.h\"\nint a = SQUARE(2);\n"},
+    });
+
+    const auto plan = project.Rename("use.cpp", project.At("use.cpp", "SQUARE"), "SQR");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("config.h"), "#define SQR(x) ((x) * (x))\n");
+    EXPECT_EQ(result.at("use.cpp"), "#include \"config.h\"\nint a = SQR(2);\n");
+}
+
+TEST(IndexRename, IncludeGuardMacrosAreRenamedAtIfndefDefineAndEndifComments)
+{
+    Project project({{"a.h", "#ifndef A_H\n#define A_H\nint a;\n#endif\n"}});
+
+    const auto plan = project.Rename("a.h", project.At("a.h", "A_H", 1), "ALPHA_H");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("a.h"), "#ifndef ALPHA_H\n#define ALPHA_H\nint a;\n#endif\n");
+}
+
+TEST(IndexRename, MacroRenameRefusesANewNameAlreadyInUse)
+{
+    Project project({
+        {"config.h", "#define LIMIT 8\n"},
+        {"use.cpp", "#include \"config.h\"\nint MAXIMUM = LIMIT;\n"},
+    });
+
+    const auto plan = project.Rename("config.h", project.At("config.h", "LIMIT"), "MAXIMUM");
+
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::NameCollision);
+}
+
+TEST(IndexRename, MacroRenameRefusesWhenTheNameIsStringifiedOrPasted)
+{
+    Project stringified({
+        {"a.h", "#define LIMIT 8\n#define STR(x) #x\n"},
+        {"use.cpp", "#include \"a.h\"\nconst char* s = STR(LIMIT);\n"},
+    });
+    Project pasted({
+        {"a.h", "#define LIMIT 8\n#define CAT(a, b) a##b\n"},
+        {"use.cpp", "#include \"a.h\"\nint x = CAT(LIMIT, 1);\n"},
+    });
+    Project inBody({
+        {"a.h", "#define LIMIT 8\n#define NAME LIMIT##_X\n"},
+    });
+
+    const auto first  = stringified.Rename("a.h", stringified.At("a.h", "LIMIT"), "MAXIMUM");
+    const auto second = pasted.Rename("a.h", pasted.At("a.h", "LIMIT"), "MAXIMUM");
+    const auto third  = inBody.Rename("a.h", inBody.At("a.h", "LIMIT"), "MAXIMUM");
+
+    ASSERT_FALSE(first.has_value());
+    EXPECT_EQ(first.error().code, heimdall::RefactoringErrorCode::MacroContext);
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, heimdall::RefactoringErrorCode::MacroContext);
+    ASSERT_FALSE(third.has_value());
+    EXPECT_EQ(third.error().code, heimdall::RefactoringErrorCode::MacroContext);
+}
+
+TEST(IndexRename, MacroRenameRefusesWhenTheNameAlsoAppearsInInactiveCode)
+{
+    Project project({
+        {"a.h", "#define LIMIT 8\n"},
+        {"use.cpp", "#include \"a.h\"\n#if 0\nint dead = LIMIT;\n#endif\nint a = LIMIT;\n"},
+    });
+
+    const auto plan = project.Rename("a.h", project.At("a.h", "LIMIT"), "MAXIMUM");
+
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::IncompleteAnalysis);
+}
+
+TEST(IndexRename, MacroRenameRefusesAReservedNewName)
+{
+    Project project({{"a.h", "#define LIMIT 8\n"}});
+
+    const auto plan = project.Rename("a.h", project.At("a.h", "LIMIT"), "class");
+
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::InvalidName);
 }

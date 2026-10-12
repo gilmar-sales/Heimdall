@@ -1,8 +1,11 @@
 #include <Heimdall/FlowModel.hpp>
 
+#include <Heimdall/MacroExpander.hpp>
+
 #include "detail/TokenView.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -736,6 +739,168 @@ namespace heimdall
 			return std::find(std::begin(kNames), std::end(kNames), name) != std::end(kNames);
 		}
 
+		// Whether the argument tokens at [a, b) of an expansion are only read: not written,
+		// not bound to a reference, not handed to an unknown function.
+		static bool OnlyReadInExpansion(const std::vector<ExpandedToken>& expansion, std::size_t a,
+										std::size_t b)
+		{
+			static constexpr std::string_view kWrites[] = { "=",  "+=", "-=", "*=", "/=", "%=", "&=",
+															"|=", "^=", "<<=", ">>=", "++", "--", ".",
+															"->", "[",  "(" };
+			static constexpr std::string_view kReadOnlyOperators[] = { "sizeof", "alignof", "decltype",
+																	   "noexcept", "__typeof__" };
+			const auto text = [&](std::size_t k) { return expansion[k].text; };
+			// `(x)++` writes x as much as `x++` does: look past parentheses that only wrap it.
+			std::size_t left  = a;
+			std::size_t right = b;
+			while (left > 0 && right < expansion.size() && text(left - 1) == "(" &&
+				   text(right) == ")")
+			{
+				--left;
+				++right;
+			}
+
+			if (left > 0 && (text(left - 1) == "&" || text(left - 1) == "++" || text(left - 1) == "--"))
+			{
+				return false;
+			}
+
+			if (right < expansion.size() && left != a &&
+				std::find(std::begin(kWrites), std::end(kWrites), text(right)) != std::end(kWrites) &&
+				text(right) != "(")
+			{
+				return false;
+			}
+
+			if (b < expansion.size() &&
+				std::find(std::begin(kWrites), std::end(kWrites), text(b)) != std::end(kWrites))
+			{
+				return false;
+			}
+
+			// The innermost unmatched parenthesis decides: `sizeof(x)` never evaluates x, and
+			// `f(x)` with an unknown f may keep a reference.
+			std::size_t depth = 0;
+			for (std::size_t k = a; k > 0; --k)
+			{
+				const auto previous = text(k - 1);
+				if (previous == ")")
+				{
+					++depth;
+				}
+				else if (previous == "(" && depth > 0)
+				{
+					--depth;
+				}
+				else if (previous == "(")
+				{
+					if (k >= 2)
+					{
+						const auto& callee = expansion[k - 2];
+						if (std::find(std::begin(kReadOnlyOperators), std::end(kReadOnlyOperators),
+									  callee.text) != std::end(kReadOnlyOperators))
+						{
+							return true;
+						}
+
+						if (callee.kind == TokenKind::Identifier && callee.tok == Tok::None)
+						{
+							return false;
+						}
+					}
+				}
+			}
+
+			return true;
+		}
+
+		// How a macro call treats the argument at `index`, read off the call's expansion:
+		// every token the argument contributes is traced back to the source, so `MIN(a, b)`
+		// that only compares leaves `a` and `b` untouched while `EXPECT_EQ(a, b)` that hands
+		// them to a function does not. Empty when the callee is not a macro with known text.
+		std::optional<EventKind> MacroArgumentContext(std::uint32_t callee, std::size_t index) const
+		{
+			const ParseTree& tree = model.Tree();
+			const MacroResolver* resolver = tree.MacroResolverRef().get();
+			const auto call               = nodes.Parent(callee);
+			if (resolver == nullptr || call >= nodes.size() ||
+				nodes.Kind(call) != GrammarKind::CallExpression)
+			{
+				return std::nullopt;
+			}
+
+			const auto& tokens   = tree.Tokens();
+			const Token& name    = tokens[view.TokenAt(view.Range(callee).first)];
+			const MacroDef* macro = resolver->Find(tree.Text(name), name.offset);
+			if (macro == nullptr || !macro->functionLike)
+			{
+				return std::nullopt;
+			}
+
+			const auto table = resolver->TableAt(name.offset);
+			const auto kids  = Sorted(call);
+			const auto whole = view.Range(call);
+			if (!table || index + 1 >= kids.size() || whole.second <= whole.first)
+			{
+				return std::nullopt;
+			}
+
+			const Token& first = tokens[view.TokenAt(whole.first)];
+			const Token& last  = tokens[view.TokenAt(whole.second - 1)];
+			const auto argument = view.Range(kids[index + 1]);
+			if (argument.second <= argument.first)
+			{
+				return std::nullopt;
+			}
+
+			const std::size_t argumentBegin = tokens[view.TokenAt(argument.first)].offset;
+			const Token& argumentLast       = tokens[view.TokenAt(argument.second - 1)];
+			const std::size_t argumentEnd   = argumentLast.offset + argumentLast.length;
+			const std::string_view invocation =
+				tree.Source().substr(first.offset, last.offset + last.length - first.offset);
+			const std::vector<Token> lexed = Lexer(invocation).Lex();
+			const ExpansionResult expansion = MacroExpander(*table).Expand(invocation, lexed);
+			if (expansion.truncated || !expansion.diagnostics.empty())
+			{
+				return EventKind::Escape;
+			}
+
+			std::vector<bool> fromArgument(expansion.tokens.size(), false);
+			for (std::size_t k = 0; k < expansion.tokens.size(); ++k)
+			{
+				const auto spelled = expansion.tokens[k].spelled;
+				if (spelled != kNoToken && spelled < lexed.size())
+				{
+					const std::size_t at = first.offset + lexed[spelled].offset;
+					fromArgument[k]      = at >= argumentBegin && at < argumentEnd;
+				}
+			}
+
+			for (std::size_t k = 0; k < fromArgument.size();)
+			{
+				if (!fromArgument[k])
+				{
+					++k;
+					continue;
+				}
+
+				std::size_t end = k;
+				while (end < fromArgument.size() && fromArgument[end])
+				{
+					++end;
+				}
+
+				if (!OnlyReadInExpansion(expansion.tokens, k, end))
+				{
+					return EventKind::Escape;
+				}
+
+				k = end;
+			}
+
+			return EventKind::Read;
+		}
+
 		EventKind ArgumentContext(std::uint32_t callee, std::size_t index, const Shape& shape)
 		{
 			const auto range = view.Range(callee);
@@ -751,6 +916,11 @@ namespace heimdall
 				const auto target = model.ResolveToken(nodes.FirstToken(callee));
 				if (target == kNone)
 				{
+					if (const auto macro = MacroArgumentContext(callee, index))
+					{
+						return *macro;
+					}
+
 					return shape.scalar && TakesByValue(text) ? EventKind::Read : EventKind::Escape;
 				}
 

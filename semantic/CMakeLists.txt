@@ -9,6 +9,7 @@ add_library(heimdall_semantic STATIC
   src/CompileDatabase.cpp
   src/SemanticAnalyzer.cpp
   src/IncludeIndex.cpp
+  src/MacroEnvironment.cpp
   src/IncludeAnalyzer.cpp
   src/SemanticModel.cpp
   src/Binder.cpp

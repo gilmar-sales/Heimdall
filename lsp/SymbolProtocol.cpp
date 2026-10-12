@@ -94,6 +94,7 @@ namespace heimdall::lsp
         constexpr int kEnumMember  = 22;
         constexpr int kStruct      = 23;
         constexpr int kOperator    = 25;
+        constexpr int kConstant    = 14;
 
         switch (kind)
         {
@@ -124,6 +125,8 @@ namespace heimdall::lsp
             return kVariable;
         case heimdall::OutlineKind::Concept:
             return kInterface;
+        case heimdall::OutlineKind::Macro:
+            return kConstant;
         }
 
         return kVariable;

@@ -8323,6 +8323,7 @@ namespace heimdall
 
 				const auto begin = static_cast<std::uint32_t>(signature.label.size());
 				signature.label += parameters[i].text;
+				signature.parameterNames.emplace_back(parameters[i].name);
 				signature.parameters.emplace_back(begin,
 					static_cast<std::uint32_t>(signature.label.size()));
 			}
@@ -8416,6 +8417,7 @@ namespace heimdall
 
 						const auto begin = static_cast<std::uint32_t>(aggregate.label.size());
 						aggregate.label += fields[i].detail + " " + fields[i].label;
+						aggregate.parameterNames.push_back(fields[i].label);
 						aggregate.parameters.emplace_back(begin,
 							static_cast<std::uint32_t>(aggregate.label.size()));
 					}

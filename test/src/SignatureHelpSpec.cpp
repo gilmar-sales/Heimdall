@@ -66,6 +66,17 @@ namespace
 
 } // namespace
 
+TEST(SignatureHelpSpec, ExposesParameterNamesWithoutTypesOrDefaults)
+{
+    const auto help = SignaturesAt(
+        "void Call(unsigned int first, int second, const char* desc = \"\", int = 0);\n"
+        "void f() { Call(^); }\n");
+
+    ASSERT_EQ(help.signatures.size(), 1u);
+    EXPECT_EQ(help.signatures.front().parameterNames,
+              (std::vector<std::string> {"first", "second", "desc", ""}));
+}
+
 TEST(SignatureHelpSpec, ListsEveryOverload)
 {
     const auto help = SignaturesAt(

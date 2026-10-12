@@ -82,5 +82,5 @@ TEST(SemanticTokensSpec, LegendListsEveryKindAndTheDeclarationModifier)
 
     EXPECT_NE(legend.find("\"keyword\""), std::string::npos);
     EXPECT_NE(legend.find("\"variable\""), std::string::npos);
-    EXPECT_NE(legend.find("\"tokenModifiers\":[\"declaration\"]"), std::string::npos);
+    EXPECT_NE(legend.find("\"tokenModifiers\":[\"declaration\",\"inactive\"]"), std::string::npos);
 }

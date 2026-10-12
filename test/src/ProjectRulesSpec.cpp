@@ -894,3 +894,57 @@ TEST(ProjectRulesSpec, RulesAreInTheCatalogAndCanBeSwitchedOff)
     options.overrides.push_back({ "cpp/modernize-final", false, heimdall::Severity::Warning });
     EXPECT_TRUE(heimdall::RuleEngine(options).ApplyPolicy(diagnostics, tree).empty());
 }
+
+TEST(IncludeWhatYouUseSpec, ReportsAMacroDefinedByAnIndirectlyIncludedHeader)
+{
+    Project project;
+    project.Header("limits.hpp", "#ifndef LIMITS_HPP\n#define LIMITS_HPP\n#define MAX_ITEMS 64\n"
+                                 "#define CLAMP(x) ((x) > MAX_ITEMS ? MAX_ITEMS : (x))\n#endif\n");
+    project.Header("wrapper.hpp", "#pragma once\n#include <limits.hpp>\nstruct Wrapper {};\n");
+    constexpr std::string_view source = "#include <wrapper.hpp>\nint a[MAX_ITEMS];\nint b = CLAMP(3);\n";
+
+    const auto diagnostics = project.Iwyu(source);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "MAX_ITEMS");
+    EXPECT_NE(diagnostics[0].message.find("limits.hpp"), std::string::npos);
+}
+
+TEST(IncludeWhatYouUseSpec, MacroRuleIsSilentForGuardsOwnDefinitionsAndDirectIncludes)
+{
+    Project project;
+    project.Header("limits.hpp", "#ifndef LIMITS_HPP\n#define LIMITS_HPP\n#define MAX_ITEMS 64\n#endif\n");
+    project.Header("wrapper.hpp", "#pragma once\n#include <limits.hpp>\n");
+
+    EXPECT_TRUE(project.Iwyu("#include <wrapper.hpp>\n#include <limits.hpp>\nint a[MAX_ITEMS];\n").empty());
+    EXPECT_TRUE(project.Iwyu("#include <wrapper.hpp>\n#define MAX_ITEMS 8\nint a[MAX_ITEMS];\n").empty());
+    EXPECT_TRUE(project.Iwyu("#include <wrapper.hpp>\n#ifndef LIMITS_HPP\nint x;\n#endif\n").empty());
+}
+
+TEST(IncludeWhatYouUseSpec, MacroRuleIsSilentWhenTwoHeadersDefineTheName)
+{
+    Project project;
+    project.Header("a.hpp", "#pragma once\n#define SHARED 1\n");
+    project.Header("b.hpp", "#pragma once\n#define SHARED 2\n");
+    project.Header("wrapper.hpp", "#pragma once\n#include <a.hpp>\n#include <b.hpp>\n");
+
+    EXPECT_TRUE(project.Iwyu("#include <wrapper.hpp>\nint a = SHARED;\n").empty());
+}
+
+TEST(HeaderSummarySpec, ExportsMacrosStillDefinedAtTheEndButNotGuardsOrUndefined)
+{
+    const auto summary = heimdall::HeaderSummary::FromSource(
+        "#ifndef H_HPP\n#define H_HPP\n#define KEEP 1\n#define TEMP 2\n#undef TEMP\n"
+        "#define FN(x) x\n#define _PRIVATE 3\n#endif\n");
+
+    std::vector<std::string> macros;
+    for (std::size_t i = 0; i < summary->ExportCount(); ++i)
+    {
+        if (summary->Kind(i) == heimdall::ExportKind::Macro)
+        {
+            macros.emplace_back(summary->ExportName(i));
+        }
+    }
+
+    EXPECT_EQ(macros, (std::vector<std::string> { "KEEP", "FN" }));
+}

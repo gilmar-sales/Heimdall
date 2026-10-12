@@ -1,7 +1,10 @@
+#include <Heimdall/MacroTable.hpp>
 #include <Heimdall/ShardBuilder.hpp>
 #include <Heimdall/TypeModel.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -36,6 +39,8 @@ namespace heimdall::index
 
 	} // namespace
 
+	constexpr std::size_t kMaxDirectiveTokens = 8;
+
 	class ShardBuilderImpl
 	{
 	public:
@@ -57,6 +62,7 @@ namespace heimdall::index
 			CollectUsings();
 			CollectReceivers();
 			CollectCallTypes();
+			CollectMacros();
 			CollectOccurrences();
 			CollectRelations();
 			CollectIncludes();
@@ -250,6 +256,7 @@ namespace heimdall::index
 			StringId name;
 			Role role;
 			Resolution resolution;
+			std::uint8_t flags = 0;
 		}
 
 		;
@@ -1404,6 +1411,259 @@ namespace heimdall::index
 			out.argCount.push_back(args);
 		}
 
+		static bool SamePath(std::string_view a, std::string_view b)
+		{
+			return std::filesystem::path(a).lexically_normal().generic_string() ==
+				std::filesystem::path(b).lexically_normal().generic_string();
+		}
+
+		// Whether the identifier token is the operand of `#ifdef`/`#ifndef`/`#undef`/`defined`.
+		bool IsMacroMention(std::uint32_t index) const
+		{
+			const auto& tokens = mModel.Tree().Tokens();
+			const auto previous = [&](std::size_t from) -> std::optional<std::size_t>
+			{
+				while (from > 0)
+				{
+					--from;
+					if (tokens[from].kind != TokenKind::Whitespace &&
+						tokens[from].kind != TokenKind::BlockComment)
+					{
+						return from;
+					}
+				}
+
+				return std::nullopt;
+			};
+			const auto text = [&](std::size_t token) { return mModel.Tree().Text(tokens[token]); };
+			auto before = previous(index);
+			if (before && text(*before) == "(")
+			{
+				before = previous(*before);
+			}
+
+			if (!before)
+			{
+				return false;
+			}
+
+			const auto word = text(*before);
+			if (word == "defined")
+			{
+				return true;
+			}
+
+			if (word != "ifdef" && word != "ifndef" && word != "undef" && word != "elifdef" &&
+				word != "elifndef")
+			{
+				return false;
+			}
+
+			const auto hash = previous(*before);
+			return hash && tokens[*hash].tok == Tok::Hash;
+		}
+
+		// `#define`s become Macro symbols; every identifier the preprocessor would replace
+		// becomes a reference to the macro of that name. The macro's own file is the only one
+		// that binds it directly: elsewhere the snapshot finds it by name through the includes.
+		void CollectMacros()
+		{
+			const auto& tree   = mModel.Tree();
+			const auto& tokens = tree.Tokens();
+			auto& out          = mShard->mSymbols;
+			struct Defined
+			{
+				std::string name;
+				std::uint32_t symbol;
+				std::uint32_t nameOffset;
+			};
+			std::vector<Defined> defined;
+			std::vector<std::uint32_t> nameOffsets;
+			for (const auto& event : tree.MacroEvents())
+			{
+				if (!event.define)
+				{
+					continue;
+				}
+
+				const auto parsed = MacroTable::ParseDefinition(event.text);
+				if (!parsed)
+				{
+					continue;
+				}
+
+				auto at = std::ranges::lower_bound(tokens, static_cast<std::uint32_t>(event.offset),
+					{}, [](const Token& token) { return token.offset; });
+				std::size_t seen = 0;
+				while (at != tokens.end() && seen < kMaxDirectiveTokens &&
+					!(at->kind == TokenKind::Identifier && tree.Text(*at) == parsed->name))
+				{
+					seen += at->kind != TokenKind::Whitespace ? 1 : 0;
+					++at;
+				}
+
+				if (at == tokens.end() || seen >= kMaxDirectiveTokens)
+				{
+					continue;
+				}
+
+				std::string signature;
+				std::uint8_t minimum = kNoArity;
+				std::uint8_t maximum = kNoArity;
+				if (parsed->functionLike)
+				{
+					signature = "(";
+					for (std::size_t i = 0; i < parsed->params.size(); ++i)
+					{
+						signature += (i == 0 ? "" : ", ") + parsed->params[i];
+					}
+
+					signature += ")";
+					const auto count = static_cast<std::uint8_t>(
+						std::min<std::size_t>(parsed->params.size(), kNoArity - 1));
+					minimum = parsed->variadic ? static_cast<std::uint8_t>(count - 1) : count;
+					maximum = parsed->variadic ? kNoArity : count;
+				}
+
+				const auto local = static_cast<std::uint32_t>(out.Size());
+				const std::string key =
+					std::string(1, static_cast<char>(heimdall::SymbolKind::Macro)) + parsed->name +
+					'\0';
+				out.hash.push_back(HashBytes(key));
+				out.nameMask.push_back(CharacterMask(parsed->name));
+				out.name.push_back(mShard->mStrings.Intern(parsed->name));
+				out.qualified.push_back(mShard->mStrings.Intern(parsed->name));
+				out.identity.push_back(mShard->mStrings.Intern(key));
+				out.signature.push_back(mShard->mStrings.Intern(signature));
+				out.container.push_back(kInvalid);
+				bool pastes = false;
+				for (const auto& bodyToken : parsed->tokens)
+				{
+					const std::string_view text = std::string_view(parsed->body)
+						.substr(bodyToken.token.offset, bodyToken.token.length);
+					pastes = pastes || text == "#" || text == "##";
+				}
+
+				out.flags.push_back(pastes ? kMacroTokenPasting : 0);
+				out.nameOffset.push_back(at->offset);
+				out.nameLength.push_back(at->length);
+				out.kind.push_back(heimdall::SymbolKind::Macro);
+				out.role.push_back(Role::Definition);
+				out.paramMin.push_back(minimum);
+				out.paramMax.push_back(maximum);
+				out.paramTypeBegin.push_back(static_cast<std::uint32_t>(mShard->mParameterTypes.size()));
+				out.paramTypeCount.push_back(0);
+				defined.push_back({ parsed->name, local, at->offset });
+				nameOffsets.push_back(at->offset);
+				mMacroPending.push_back({ at->offset, at->length, local,
+					mShard->mStrings.Intern(parsed->name), Role::Definition, Resolution::Resolved,
+					kOccurrenceMacro });
+			}
+
+			const MacroResolver* resolver = tree.MacroResolverRef().get();
+			if (resolver == nullptr && defined.empty())
+			{
+				return;
+			}
+
+			std::vector<std::pair<std::size_t, std::size_t>> skipped; // `#include` lines
+			for (const auto& directive : tree.Directives())
+			{
+				if (directive.kind == DirectiveKind::Include)
+				{
+					skipped.emplace_back(directive.offset, directive.offset + directive.length);
+				}
+			}
+
+			const auto& active     = tree.ActiveRanges();
+			const auto& directives = tree.Directives();
+			std::size_t activeAt   = 0;
+			std::size_t skipAt     = 0;
+			std::size_t directiveAt = 0;
+			for (const std::uint32_t index : tree.IdentifierTokens())
+			{
+				const Token& token = tokens[index];
+				if (token.tok != Tok::None || token.kind != TokenKind::Identifier)
+				{
+					continue;
+				}
+
+				while (activeAt < active.size() &&
+					active[activeAt].offset + active[activeAt].length <= token.offset)
+				{
+					++activeAt;
+				}
+
+				while (skipAt < skipped.size() && skipped[skipAt].second <= token.offset)
+				{
+					++skipAt;
+				}
+
+				// Directive lines are not part of the active ranges; they count while their own
+				// conditional group is active.
+				while (directiveAt < directives.size() &&
+					directives[directiveAt].offset + directives[directiveAt].length <= token.offset)
+				{
+					++directiveAt;
+				}
+
+				const bool inDirective =
+					directiveAt < directives.size() && directives[directiveAt].offset <= token.offset;
+				const bool inactive = inDirective
+					? !directives[directiveAt].active
+					: !active.empty() &&
+						(activeAt == active.size() || token.offset < active[activeAt].offset);
+				if (inactive || (skipAt < skipped.size() && token.offset >= skipped[skipAt].first) ||
+					std::ranges::binary_search(nameOffsets, token.offset))
+				{
+					continue;
+				}
+
+				const std::string_view text = tree.Text(token);
+				const MacroDef* found       = resolver != nullptr ? resolver->Find(text, token.offset) : nullptr;
+				const Defined* local        = nullptr;
+				for (const auto& entry : defined)
+				{
+					if (entry.name == text && entry.nameOffset < token.offset)
+					{
+						local = &entry;
+					}
+				}
+
+				// The operand of `#ifdef`, `#ifndef`, `#undef` and `defined` names a macro even
+				// where it is not defined yet (an include guard); count it when this file
+				// defines that name somewhere.
+				bool mention = false;
+				if (found == nullptr && local == nullptr)
+				{
+					mention = IsMacroMention(index) &&
+						std::ranges::any_of(defined, [&](const Defined& entry) { return entry.name == text; });
+				}
+
+				if (found == nullptr && !mention && (resolver != nullptr || local == nullptr))
+				{
+					continue;
+				}
+
+				if (mention && local == nullptr)
+				{
+					for (const auto& entry : defined)
+					{
+						if (entry.name == text)
+						{
+							local = &entry;
+							break;
+						}
+					}
+				}
+
+				const bool bound = local != nullptr && (found == nullptr || SamePath(found->file, mShard->mPath));
+				mMacroPending.push_back({ token.offset, token.length, bound ? local->symbol : kInvalid,
+					mShard->mStrings.Intern(text), Role::Reference,
+					bound ? Resolution::Resolved : Resolution::Unresolved, kOccurrenceMacro });
+			}
+		}
+
 		void CollectOccurrences()
 		{
 			const auto& symbols = mModel.Symbols();
@@ -1456,6 +1716,23 @@ namespace heimdall::index
 			CollectBaseUses(pending);
 			CollectTypeUses(pending, declTokens);
 
+			// A name that is a macro is replaced by the preprocessor, so the macro owns the
+			// token whatever the binder made of it.
+			std::vector<std::uint32_t> macroOffsets;
+			macroOffsets.reserve(mMacroPending.size());
+			for (const auto& item : mMacroPending)
+			{
+				macroOffsets.push_back(item.offset);
+			}
+
+			std::ranges::sort(macroOffsets);
+			std::erase_if(pending,
+				[&](const Pending& item)
+				{
+					return std::ranges::binary_search(macroOffsets, item.offset);
+			});
+			pending.insert(pending.end(), mMacroPending.begin(), mMacroPending.end());
+
 			std::ranges::stable_sort(pending,
 				[](const Pending& a, const Pending& b)
 				{
@@ -1472,6 +1749,7 @@ namespace heimdall::index
 				out.role.push_back(item.role);
 				out.resolution.push_back(item.resolution);
 				Annotate(item.offset, out);
+				out.flags.back() |= item.flags;
 			}
 		}
 
@@ -1579,6 +1857,7 @@ namespace heimdall::index
 		std::vector<std::uint32_t> mLocal; // global SymbolId -> shard-local index
 		std::vector<SymbolId> mKept;       // shard-local index -> global SymbolId
 		std::vector<Forward> mForward;
+		std::vector<Pending> mMacroPending;
 		struct Receiver
 		{
 			StringId name;

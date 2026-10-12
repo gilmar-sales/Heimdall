@@ -19,7 +19,9 @@ namespace heimdall
         TypeAlias,
         Function,
         Variable,
-        Enumerator
+        Enumerator,
+        // A `#define` left in force at the end of the header (include guards excluded).
+        Macro
     };
 
     // What one header offers to the files that include it (see

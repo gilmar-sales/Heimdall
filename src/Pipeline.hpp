@@ -56,7 +56,8 @@ namespace heimdall::cli
 
     heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path&     path,
                                                  const Options&                   options,
-                                                 const heimdall::CompileDatabase* database);
+                                                 const heimdall::CompileDatabase* database,
+                                                 std::string_view                 source);
 
     std::vector<SyntaxDiagnostic> ToSyntaxDiagnostics(
         std::string_view source, const std::vector<heimdall::GrammarDiagnostic>& grammar);

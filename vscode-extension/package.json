@@ -110,7 +110,7 @@
         "heimdall.inlayHints": {
           "type": "boolean",
           "default": true,
-          "description": "Show inferred type hints inline for variables declared with auto."
+          "description": "Show inferred type hints for auto variables and parameter name hints at call arguments."
         },
         "heimdall.compileCommands": {
           "type": "string",

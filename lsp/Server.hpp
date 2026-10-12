@@ -11,6 +11,7 @@
 #include <Heimdall/IndexStore.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/MacroEnvironment.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
 
@@ -25,6 +26,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <simdjson.h>
 #include <stop_token>
 #include <string>
@@ -222,6 +224,43 @@ namespace heimdall::lsp
 
 		// Outline / "Go to Symbol in Editor": syntactic, from the pinned snapshot's parse.
 		void DocumentSymbols(simdjson::dom::element request, std::string_view id);
+
+		// Macros live in a document's translation unit (builtins, -D, every #include in order).
+		// Cached per open document and version; dropped when the document closes.
+		std::shared_ptr<const heimdall::MacroEnvironment> MacroEnvironmentFor(
+			const std::string& uri, const std::shared_ptr<const std::string>& text,
+			std::int64_t version, const heimdall::CompileCommand* command, bool remember = true);
+
+		heimdall::ParserOptions ParserOptionsForText(const std::string& uri,
+			const std::shared_ptr<const std::string>& text, std::int64_t version,
+			const heimdall::CompileCommand* command, bool remember);
+
+		// Hover and go-to-definition of a macro name; false when `offset` is not on a macro.
+		bool MacroHover(const std::string& uri, const std::shared_ptr<const std::string>& text,
+			std::int64_t version, const LineIndex& lines, std::size_t offset,
+			const heimdall::CompileCommand* command, std::string_view id);
+		bool MacroDefinition(const std::string& uri, const std::shared_ptr<const std::string>& text,
+			std::int64_t version, std::size_t offset, const heimdall::CompileCommand* command,
+			std::string_view id);
+
+		void AppendMacroCompletions(const std::string& uri,
+			const std::shared_ptr<const std::string>& text, std::int64_t version,
+			const heimdall::CompileCommand* command, std::size_t offset, const std::string& prefix,
+			const Position& start, const Position& end,
+			const std::vector<heimdall::CompletionItem>& items, std::size_t& rank,
+			std::string& response);
+
+		void AppendHeaderMacroSymbols(std::string_view query, std::span<const SymbolHit> hits,
+			std::string& response);
+
+		struct MacroEnvironmentEntry
+		{
+			std::int64_t version = -1;
+			std::shared_ptr<const heimdall::MacroEnvironment> environment;
+		};
+
+		std::mutex mMacroMutex;
+		std::unordered_map<std::string, MacroEnvironmentEntry> mMacroEnvironments;
 
 		// Syntax highlight: lexical and declaration-based classification, full or ranged.
 		void SemanticTokensRequest(simdjson::dom::element request, std::string_view id, bool ranged);

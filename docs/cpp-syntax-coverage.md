@@ -13,7 +13,7 @@ Estas são as prioridades, porque geram erro falso em código válido. Ponto de 
 - [ ] **P1. `if constexpr` / `if consteval` / `if !consteval` / `else if constexpr`**
   - Repro: `void f() { if constexpr (a) { g(); } }`
   - Sintoma: `expected ';' before end of compound statement`, mais um segundo erro no `return` seguinte.
-- [ ] **P2. `::` global em expressão ou statement dentro de função**
+- [x] **P2. `::` global em expressão ou statement dentro de função** (corrigido; teste `MacroParseSpec.GlobalScopeQualifiedNames...`, inclui `::new`, `static_cast< ::T*>` e `foo< ::T>`)
   - Repro: `int f() { return ::g(1); }`, `void f() { ::std::stringstream ss; }`, `static_cast<char>(::tolower(c))`, `int x = ::y;`
   - Em escopo de namespace (`::std::string s;`) já passa.
 - [ ] **P3. Inicializador de membro com chaves**
@@ -39,9 +39,10 @@ Estas são as prioridades, porque geram erro falso em código válido. Ponto de 
   - `struct alignas(16) S {};` e `[[nodiscard("r")]] int f();` passam.
 - [ ] **P11. `requires` final em construtor `= default`**
   - Repro: `template <typename T> struct S { S() requires std::is_default_constructible_v<T> = default; };`
-- [ ] **P12. Macros de decoração desconhecidas**
-  - Repro: `EXPORT void f(int);`, `GTEST_API_ AssertionResult AssertionSuccess();`, `GTEST_DISABLE_MSC_WARNINGS_POP_()` (sem `;`).
-  - 108 das 269 linhas com erro em GoogleTest/Benchmark mencionam macros assim. **Não reavaliado com `-D` do `compile_commands.json`**: confirmar primeiro quanto some quando os defines do banco de compilação são usados, e só então decidir se há trabalho aqui.
+- [x] **P12. Macros de decoração e de declaração** (F4 do `macro-support-plan.md`)
+  - Com o `MacroResolver` (macros de todos os headers, `-D` e builtins, inclusive function-like): `GTEST_LOCK_EXCLUDED_(mu)` e macros de decoração aninhadas (`GUARDED_BY(x)` -> `ATTRIBUTE(guarded_by(x))`) somem da visão significativa; `TEST(a, b) { ... }`, `DECLARE_FLAG(x);`, `FRIEND_TEST(a, b);` e `BENCHMARK(f)->Arg(1);` viram `MacroInvocation`; macros cujo corpo é só uma expressão entre parênteses (`errno`, `LONG_MIN`) deixaram de ser confundidas com decoração.
+  - Medido com `heimdall lint --compile-commands build/compile_commands.json` em `googletest/{src,include}` e `benchmark/{src,include}`: 293 erros de `syntax/parse-error` antes, 12 depois (95,9%). Sem `--compile-commands` nada muda.
+  - Restam 12, sem relação com macros: `typename` no lado direito de `using X = typename ...` e em retorno final (`-> typename std::is_same<...>::type`), parâmetro de template anônimo (`template <typename>`, `template <size_t>`) e diretiva `#ifdef` no meio de uma lista de inicialização de construtor.
 
 ## 2. Formatter: bugs de espaçamento
 

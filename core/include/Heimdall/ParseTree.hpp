@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Heimdall/MacroResolver.hpp>
 #include <Heimdall/Preprocessor.hpp>
 #include <Heimdall/SyntaxTree.hpp>
 #include <Heimdall/TypeNames.hpp>
@@ -81,7 +82,12 @@ namespace heimdall
 		// the operand. Only produced when `T` is certainly a type (see TypeNameOracle).
 		CastExpression,
 		StaticAssertDeclaration,
-		SpliceExpression
+		SpliceExpression,
+		// `NAME(args)` of a function-like macro, or an object-like macro that expands to whole
+		// declarations, at the start of a declaration or statement. A trailing `;` is part of
+		// the node; a `{ ... }` that completes the expansion (`TEST(a, b) { ... }`) is a
+		// CompoundStatement child. Arguments are not parsed.
+		MacroInvocation
 	};
 
 	// AoS layout (kept for backward compatibility)
@@ -229,6 +235,9 @@ namespace heimdall
 		std::shared_ptr<const Preprocessor::MacroMap> shared_macros;
 		// Type names declared by the headers the file includes; may be null.
 		std::shared_ptr<const TypeNameOracle> type_names;
+		// Resolves macros of the whole translation unit (headers, -D, builtins), function-like
+		// ones included; may be null, and then only `Macros()` and the file's own #defines count.
+		std::shared_ptr<const MacroResolver> macro_resolver;
 
 		const Preprocessor::MacroMap& Macros() const noexcept
 		{
@@ -362,6 +371,24 @@ namespace heimdall
 		{
             return mPreprocessing.directives;
         }
+
+		/// Source ranges outside inactive conditional groups.
+		const std::vector<ActiveSourceRange>& ActiveRanges() const noexcept
+		{
+			return mPreprocessing.active_ranges;
+		}
+
+		/// Active `#define` / `#undef` of the file in source order, function-like included.
+		const std::vector<MacroEvent>& MacroEvents() const noexcept
+		{
+			return mPreprocessing.macro_events;
+		}
+
+		/// The macro resolver the file was parsed with; null when none was given.
+		const std::shared_ptr<const MacroResolver>& MacroResolverRef() const noexcept
+		{
+			return m_macro_resolver;
+		}
 
 		// Header type oracle the file was parsed with (may be null): later layers
 		// consult it for names declared in headers, which the local model never binds.
@@ -553,6 +580,7 @@ namespace heimdall
 		GrammarNodeSoA m_nodes_soa; // SoA layout (primary)
 		std::vector<GrammarDiagnostic> m_diagnostics;
         PreprocessorResult                        mPreprocessing;
+        std::shared_ptr<const MacroResolver>      m_macro_resolver;
         bool                                      m_cancelled = false;
         std::vector<bool> m_decoration;
 		std::vector<TopLevelItem> m_items;

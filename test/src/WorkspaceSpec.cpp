@@ -264,8 +264,11 @@ namespace
         auto before  = workspace.Snapshot();
         auto summary = before.Summary(*id);
         ASSERT_TRUE(summary);
-        EXPECT_EQ(summary->ExportCount(), 1);
+        // Declarations first, then the macros the header leaves defined.
+        EXPECT_EQ(summary->ExportCount(), 2);
         EXPECT_EQ(summary->ExportName(0), "S");
+        EXPECT_EQ(summary->ExportName(1), "SIZE");
+        EXPECT_EQ(summary->Kind(1), ExportKind::Macro);
         EXPECT_EQ(before.Metrics().parse_count, 1);
         EXPECT_EQ(before.Metrics().bind_count, 1);
         EXPECT_EQ(before.Summary(*id), summary);

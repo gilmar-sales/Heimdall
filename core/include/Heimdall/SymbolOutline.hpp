@@ -27,7 +27,8 @@ namespace heimdall
         Field,
         Variable,
         TypeAlias,
-        Concept
+        Concept,
+        Macro
     };
 
     inline constexpr std::uint32_t kNoOutlineParent = std::numeric_limits<std::uint32_t>::max();
@@ -56,7 +57,8 @@ namespace heimdall
     /// Syntactic declaration inventory of a `ParseTree` (core, STL only). Works on incomplete
     /// code and needs neither a compile database nor semantic analysis. Block-local names and
     /// function parameters are not listed; forward declarations and `friend` declarations are
-    /// skipped because they do not introduce a member of their scope.
+    /// skipped because they do not introduce a member of their scope. Active `#define`s are listed
+    /// as `Macro` symbols at global scope, whichever scope their line sits in.
     class SymbolOutline
     {
     public:

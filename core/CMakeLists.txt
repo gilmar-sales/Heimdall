@@ -28,6 +28,9 @@ add_library(heimdall_core STATIC
   src/Navigation.cpp
   src/SymbolOutline.cpp
   src/SyntaxHighlight.cpp
+  src/MacroTable.cpp
+  src/MacroExpander.cpp
+  src/MacroScanner.cpp
 )
 add_library(heimdall::core ALIAS heimdall_core)
 

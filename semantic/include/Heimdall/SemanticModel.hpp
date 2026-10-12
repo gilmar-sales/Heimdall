@@ -65,7 +65,10 @@ namespace heimdall
 		Variable,
 		Parameter,
 		TypeAlias,
-		TemplateParameter
+		TemplateParameter,
+		// A `#define`d name. Only the index creates these (never the binder): a macro is not
+		// part of any scope, but names every use of itself across files.
+		Macro
 	};
 
 	enum class AccessLevel : std::uint8_t
