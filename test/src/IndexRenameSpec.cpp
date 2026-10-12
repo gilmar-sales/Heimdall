@@ -44,7 +44,10 @@ namespace
             return mTable.Find(name);
         }
 
-        std::uint64_t Fingerprint() const noexcept override { return mTable.Size(); }
+        std::uint64_t Fingerprint() const noexcept override
+        {
+            return mTable.Size();
+        }
 
     private:
         heimdall::MacroTable mTable;
@@ -110,7 +113,7 @@ namespace
             auto result = files;
             for (const auto& document : plan.documents)
             {
-                auto& text = result[document.path];
+                auto& text = result[document.path.string()];
                 for (auto edit = document.edits.rbegin(); edit != document.edits.rend(); ++edit)
                 {
                     text.replace(edit->offset, edit->length, edit->replacement);
@@ -121,6 +124,25 @@ namespace
         }
     };
 } // namespace
+
+TEST(IndexRename, AppliesFilesystemPathEditsToStringKeyedFiles)
+{
+    const Project project({
+            {
+                "widget.hpp", "struct Widget {};\n"
+    }});
+    heimdall::DocumentEdits document;
+    document.path = "widget.hpp";
+    document.edits.push_back({7, 6, "Widget", "Gadget"});
+    heimdall::RefactoringPlan plan;
+    plan.documents.push_back(std::move(document));
+
+    const auto result = project.Apply(plan);
+
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.at("widget.hpp"), "struct Gadget {};\n");
+    EXPECT_EQ(project.files.at("widget.hpp"), "struct Widget {};\n");
+}
 
 TEST(IndexRename, ClassIsRenamedEverywhereIncludingConstructorsAndQualifiers)
 {
@@ -290,7 +312,8 @@ TEST(IndexRename, RenamesVirtualFunctionsAsACompleteFamily)
     const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Run"), "Execute");
 
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
-    EXPECT_EQ(project.Apply(*plan).at("a.hpp"), "struct A { virtual int Execute(); };\nstruct B : A { int Execute() override; };\n");
+    EXPECT_EQ(project.Apply(*plan).at("a.hpp"),
+        "struct A { virtual int Execute(); };\nstruct B : A { int Execute() override; };\n");
 }
 
 TEST(IndexRename, RefusesToMergeWithAnExistingDeclaration)
@@ -708,316 +731,379 @@ TEST(IndexRename, PreviewHonorsPreRequestedCancellation)
 
 TEST(IndexRename, PrepareAndRenameShareTheConstructorClassTarget)
 {
-	Project project({
-		{"a.hpp", "struct A { A(); ~A(); };\n"},
-		{"a.cpp", "#include \"a.hpp\"\nA::A() {}\nA::~A() {}\n"},
-	});
-	const auto offset = project.At("a.hpp", "A", 1);
+    Project project({
+            {
+                "a.hpp", "struct A { A(); ~A(); };\n"
+        },
+            {"a.cpp", "#include \"a.hpp\"\nA::A() {}\nA::~A() {}\n"},
+    });
+    const auto offset = project.At("a.hpp", "A", 1);
 
-	const auto prepared = heimdall::IndexRename::Prepare(*project.snapshot, "a.hpp", offset, project.context);
-	const auto renamed = project.Rename("a.hpp", offset, "B");
+    const auto prepared = heimdall::IndexRename::Prepare(*project.snapshot, "a.hpp", offset,
+        project.context);
+    const auto renamed = project.Rename("a.hpp", offset, "B");
 
-	ASSERT_TRUE(prepared.has_value()) << prepared.error().message;
-	ASSERT_TRUE(renamed.has_value()) << renamed.error().message;
-	EXPECT_EQ(prepared->name, "A");
-	EXPECT_EQ(prepared->offset, offset);
-	EXPECT_EQ(project.Apply(*renamed).at("a.cpp"), "#include \"a.hpp\"\nB::B() {}\nB::~B() {}\n");
+    ASSERT_TRUE(prepared.has_value()) << prepared.error().message;
+    ASSERT_TRUE(renamed.has_value()) << renamed.error().message;
+    EXPECT_EQ(prepared->name, "A");
+    EXPECT_EQ(prepared->offset, offset);
+    EXPECT_EQ(project.Apply(*renamed).at("a.cpp"), "#include \"a.hpp\"\nB::B() {}\nB::~B() {}\n");
 }
 
 TEST(IndexRename, RenamesNamespaceReopeningsAndContainedQualifiers)
 {
-	Project project({
-		{"a.hpp", "namespace original { struct A {}; int Run(); }\n"},
-		{"a.cpp", "#include \"a.hpp\"\nnamespace original { int Run() { return 0; } }\n"},
-		{"use.cpp", "#include \"a.hpp\"\noriginal::A object;\nint f() { return original::Run(); }\n"},
-	});
+    Project project({
+            {
+                "a.hpp", "namespace original { struct A {}; int Run(); }\n"
+        },
+            {"a.cpp", "#include \"a.hpp\"\nnamespace original { int Run() { return 0; } }\n"},
+            {"use.cpp", "#include \"a.hpp\"\noriginal::A object;\nint f() { return original::Run(); }\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "original"), "renamed");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "original"), "renamed");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto result = project.Apply(*plan);
-	EXPECT_EQ(result.at("a.cpp"), "#include \"a.hpp\"\nnamespace renamed { int Run() { return 0; } }\n");
-	EXPECT_EQ(result.at("use.cpp"), "#include \"a.hpp\"\nrenamed::A object;\nint f() { return renamed::Run(); }\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("a.cpp"),
+        "#include \"a.hpp\"\nnamespace renamed { int Run() { return 0; } }\n");
+    EXPECT_EQ(result.at("use.cpp"),
+        "#include \"a.hpp\"\nrenamed::A object;\nint f() { return renamed::Run(); }\n");
 }
 
 TEST(IndexRename, ExactIncludeVisibilityIsPreservedDuringSpeculativeReindexing)
 {
-	Project project({
-		{"first/widget.hpp", "namespace first { struct Widget {}; }\n"},
-		{"second/widget.hpp", "namespace second { struct Widget {}; }\n"},
-		{"use.cpp", "#include \"widget.hpp\"\nsecond::Widget value;\n"},
-	});
-	std::vector<std::shared_ptr<const idx::FileShard>> shards;
-	for (const auto& [path, text] : project.files)
-	{
-		const auto tree = heimdall::ParseTree::Parse(text);
-		const auto model = heimdall::Binder::Bind(tree);
-		shards.push_back(idx::ShardBuilder::Build(model, path, 0,
-			[](std::string_view, bool, std::uint32_t) -> std::optional<std::string>
-			{
-				return "second/widget.hpp";
-			}));
-	}
-	project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
-	project.context.requireExactIncludes = true;
+    Project project({
+            {
+                "first/widget.hpp", "namespace first { struct Widget {}; }\n"
+        },
+            {"second/widget.hpp", "namespace second { struct Widget {}; }\n"},
+            {"use.cpp", "#include \"widget.hpp\"\nsecond::Widget value;\n"},
+    });
+    std::vector<std::shared_ptr<const idx::FileShard>> shards;
+    for (const auto& [path, text] : project.files)
+    {
+        const auto tree = heimdall::ParseTree::Parse(text);
+        const auto model = heimdall::Binder::Bind(tree);
+        shards.push_back(idx::ShardBuilder::Build(model, path, 0,
+                                                  [](std::string_view, bool, std::uint32_t)->std::optional<std::string>
+            {
+                return "second/widget.hpp";
+        }));
+    }
 
-	const auto plan = project.Rename("second/widget.hpp", project.At("second/widget.hpp", "Widget"), "Gadget");
+    project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
+    project.context.requireExactIncludes = true;
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto result = project.Apply(*plan);
-	EXPECT_EQ(result.at("first/widget.hpp"), project.files.at("first/widget.hpp"));
-	EXPECT_EQ(result.at("use.cpp"), "#include \"widget.hpp\"\nsecond::Gadget value;\n");
+    const auto plan = project.Rename("second/widget.hpp", project.At("second/widget.hpp", "Widget"),
+        "Gadget");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("first/widget.hpp"), project.files.at("first/widget.hpp"));
+    EXPECT_EQ(result.at("use.cpp"), "#include \"widget.hpp\"\nsecond::Gadget value;\n");
 }
 
 TEST(IndexRename, ExactModeIgnoresUnresolvedIncludesInInactiveBranches)
 {
-	Project project({
-		{"a.hpp", "int Compute();\n"},
-		{"use.cpp", "#include \"a.hpp\"\n#if defined(_WIN32)\n#include <windows.h>\n#endif\nint f() { return Compute(); }\n"},
-	});
-	std::vector<std::shared_ptr<const idx::FileShard>> shards;
-	for (const auto& [path, text] : project.files)
-	{
-		const auto tree = heimdall::ParseTree::Parse(text);
-		const auto model = heimdall::Binder::Bind(tree);
-		shards.push_back(idx::ShardBuilder::Build(model, path, 0,
-			[](std::string_view spelling, bool, std::uint32_t) -> std::optional<std::string>
-			{
-				return spelling == "a.hpp" ? std::optional<std::string>("a.hpp") : std::nullopt;
-			}));
-	}
-	project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
-	project.context.requireExactIncludes = true;
+    Project project({
+            {
+                "a.hpp", "int Compute();\n"
+        },
+            {"use.cpp",
+                "#include \"a.hpp\"\n#if defined(_WIN32)\n#include <windows.h>\n#endif\nint f() { return Compute(); }\n"},
+    });
+    std::vector<std::shared_ptr<const idx::FileShard>> shards;
+    for (const auto& [path, text] : project.files)
+    {
+        const auto tree = heimdall::ParseTree::Parse(text);
+        const auto model = heimdall::Binder::Bind(tree);
+        shards.push_back(idx::ShardBuilder::Build(model, path, 0,
+                                                  [](std::string_view spelling, bool, std::uint32_t)->std::optional<std::string>
+            {
+                return spelling == "a.hpp" ? std::optional<std::string>("a.hpp") : std::nullopt;
+        }));
+    }
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+    project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
+    project.context.requireExactIncludes = true;
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
 }
 
 TEST(IndexRename, ExactModeIgnoresIncludeTargetsOutsideTheEditableWorkspace)
 {
-	Project project({
-		{"a.hpp", "int Compute();\n"},
-		{"use.cpp", "#include \"a.hpp\"\n#include <vector>\nint f() { return Compute(); }\n"},
-	});
-	std::vector<std::shared_ptr<const idx::FileShard>> shards;
-	for (const auto& [path, text] : project.files)
-	{
-		const auto tree = heimdall::ParseTree::Parse(text);
-		const auto model = heimdall::Binder::Bind(tree);
-		shards.push_back(idx::ShardBuilder::Build(model, path, 0,
-			[](std::string_view spelling, bool, std::uint32_t) -> std::optional<std::string>
-			{
-				return spelling == "a.hpp" ? "a.hpp" : "/usr/include/c++/16/vector";
-			}));
-	}
-	project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
-	project.context.requireExactIncludes = true;
-	project.context.editable = [](const std::string& path)
-	{
-		return !path.starts_with("/usr/");
-	};
+    Project project({
+            {
+                "a.hpp", "int Compute();\n"
+        },
+            {"use.cpp", "#include \"a.hpp\"\n#include <vector>\nint f() { return Compute(); }\n"},
+    });
+    std::vector<std::shared_ptr<const idx::FileShard>> shards;
+    for (const auto& [path, text] : project.files)
+    {
+        const auto tree = heimdall::ParseTree::Parse(text);
+        const auto model = heimdall::Binder::Bind(tree);
+        shards.push_back(idx::ShardBuilder::Build(model, path, 0,
+                                                  [](std::string_view spelling, bool, std::uint32_t)->std::optional<std::string>
+            {
+                return spelling == "a.hpp" ? "a.hpp" : "/usr/include/c++/16/vector";
+        }));
+    }
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+    project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
+    project.context.requireExactIncludes = true;
+    project.context.editable =[](const std::string& path)
+    {
+        return !path.starts_with("/usr/");
+    };
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
 }
 
 TEST(IndexRename, ExactModeRefusesHeuristicIncludeVisibility)
 {
-	Project project({
-		{"a.hpp", "int Compute();\n"},
-		{"use.cpp", "#include \"a.hpp\"\nint f() { return Compute(); }\n"},
-	});
-	project.context.requireExactIncludes = true;
+    Project project({
+            {
+                "a.hpp", "int Compute();\n"
+        },
+            {"use.cpp", "#include \"a.hpp\"\nint f() { return Compute(); }\n"},
+    });
+    project.context.requireExactIncludes = true;
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
 
-	ASSERT_FALSE(plan.has_value());
-	EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::IncompleteAnalysis);
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::IncompleteAnalysis);
 }
 
 TEST(IndexRename, RenamesImplicitVirtualOverridesAcrossFilesFromTheDerivedDeclaration)
 {
-	Project project({
-		{"base.hpp", "struct A { virtual int Run(); };\n"},
-		{"derived.hpp", "#include \"base.hpp\"\nstruct B : A { int Run(); };\n"},
-		{"most.hpp", "#include \"derived.hpp\"\nstruct C : B { int Run(); };\n"},
-		{"impl.cpp", "#include \"most.hpp\"\nint A::Run() { return 1; }\nint B::Run() { return 2; }\nint C::Run() { return 3; }\n"},
-		{"use.cpp", "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Run() + b.Run() + c.Run(); }\n"},
-	});
+    Project project({
+            {
+                "base.hpp", "struct A { virtual int Run(); };\n"
+        },
+            {"derived.hpp", "#include \"base.hpp\"\nstruct B : A { int Run(); };\n"},
+            {"most.hpp", "#include \"derived.hpp\"\nstruct C : B { int Run(); };\n"},
+            {"impl.cpp",
+                "#include \"most.hpp\"\nint A::Run() { return 1; }\nint B::Run() { return 2; }\nint C::Run() { return 3; }\n"},
+            {"use.cpp",
+                "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Run() + b.Run() + c.Run(); }\n"},
+    });
 
-	const auto plan = project.Rename("most.hpp", project.At("most.hpp", "Run"), "Execute");
+    const auto plan = project.Rename("most.hpp", project.At("most.hpp", "Run"), "Execute");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto result = project.Apply(*plan);
-	EXPECT_EQ(result.at("base.hpp"), "struct A { virtual int Execute(); };\n");
-	EXPECT_EQ(result.at("derived.hpp"), "#include \"base.hpp\"\nstruct B : A { int Execute(); };\n");
-	EXPECT_EQ(result.at("use.cpp"), "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Execute() + b.Execute() + c.Execute(); }\n");
-	EXPECT_EQ(result.at("impl.cpp"), "#include \"most.hpp\"\nint A::Execute() { return 1; }\nint B::Execute() { return 2; }\nint C::Execute() { return 3; }\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("base.hpp"), "struct A { virtual int Execute(); };\n");
+    EXPECT_EQ(result.at("derived.hpp"), "#include \"base.hpp\"\nstruct B : A { int Execute(); };\n");
+    EXPECT_EQ(result.at("use.cpp"),
+        "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Execute() + b.Execute() + c.Execute(); }\n");
+    EXPECT_EQ(result.at("impl.cpp"),
+        "#include \"most.hpp\"\nint A::Execute() { return 1; }\nint B::Execute() { return 2; }\nint C::Execute() { return 3; }\n");
 }
 
 TEST(IndexRename, VirtualFamilyLeavesUnrelatedVirtualMethodsUntouched)
 {
-	Project project({
-		{"a.hpp", "struct A { virtual int Run(); };\nstruct B : A { int Run(); };\nstruct Unrelated { virtual int Run(); };\n"},
-		{"use.cpp", "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Run() + other.Run(); }\n"},
-	});
+    Project project({
+            {
+                "a.hpp",
+                "struct A { virtual int Run(); };\nstruct B : A { int Run(); };\nstruct Unrelated { virtual int Run(); };\n"
+        },
+            {"use.cpp",
+                "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Run() + other.Run(); }\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Run"), "Execute");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Run"), "Execute");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	EXPECT_EQ(project.Apply(*plan).at("use.cpp"), "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Execute() + other.Run(); }\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
+        "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Execute() + other.Run(); }\n");
 }
 
 TEST(IndexRename, VirtualFamilyRefusesNonEditableOverrides)
 {
-	Project project({
-		{"base.hpp", "struct A { virtual int Run(); };\n"},
-		{"derived.hpp", "#include \"base.hpp\"\nstruct B : A { int Run(); };\n"},
-	});
-	project.context.editable = [](const std::string& path) { return path != "derived.hpp"; };
+    Project project({
+            {
+                "base.hpp", "struct A { virtual int Run(); };\n"
+        },
+            {"derived.hpp", "#include \"base.hpp\"\nstruct B : A { int Run(); };\n"},
+    });
+    project.context.editable =[](const std::string& path)
+    {
+        return path != "derived.hpp";
+    };
 
-	const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Execute");
+    const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Execute");
 
-	ASSERT_FALSE(plan.has_value());
-	EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::UnsupportedSymbol);
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::UnsupportedSymbol);
 }
 
 TEST(IndexRename, PreservesDoxygenReferencesAndDeclarationBriefsAcrossFiles)
 {
-	Project project({
-		{"a.hpp", "/** @brief Widget represents a widget. */\nstruct Widget {};\n"},
-		{"use.cpp", "#include \"a.hpp\"\n/** @ref Widget */\nWidget value;\n"},
-	});
+    Project project({
+            {
+                "a.hpp", "/** @brief Widget represents a widget. */\nstruct Widget {};\n"
+        },
+            {"use.cpp", "#include \"a.hpp\"\n/** @ref Widget */\nWidget value;\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget", 1), "Gadget");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget", 1), "Gadget");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto result = project.Apply(*plan);
-	EXPECT_EQ(result.at("a.hpp"), "/** @brief Gadget represents a widget. */\nstruct Gadget {};\n");
-	EXPECT_EQ(result.at("use.cpp"), "#include \"a.hpp\"\n/** @ref Gadget */\nGadget value;\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto result = project.Apply(*plan);
+    EXPECT_EQ(result.at("a.hpp"), "/** @brief Gadget represents a widget. */\nstruct Gadget {};\n");
+    EXPECT_EQ(result.at("use.cpp"), "#include \"a.hpp\"\n/** @ref Gadget */\nGadget value;\n");
 }
 
 TEST(IndexRename, RenamesInheritedVirtualCallsAndBareUsesAcrossFiles)
 {
-	Project project({
-		{"base.hpp", "struct Base { virtual int Run(); };\n"},
-		{"derived.hpp", "#include \"base.hpp\"\nstruct Derived : Base { int Call(); };\n"},
-		{"use.cpp", "#include \"derived.hpp\"\nint Derived::Call() { return Run(); }\nint f(Derived& value) { return value.Run(); }\n"},
-	});
+    Project project({
+            {
+                "base.hpp", "struct Base { virtual int Run(); };\n"
+        },
+            {"derived.hpp", "#include \"base.hpp\"\nstruct Derived : Base { int Call(); };\n"},
+            {"use.cpp",
+                "#include \"derived.hpp\"\nint Derived::Call() { return Run(); }\nint f(Derived& value) { return value.Run(); }\n"},
+    });
 
-	const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Execute");
+    const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Execute");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	EXPECT_EQ(project.Apply(*plan).at("use.cpp"), "#include \"derived.hpp\"\nint Derived::Call() { return Execute(); }\nint f(Derived& value) { return value.Execute(); }\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
+        "#include \"derived.hpp\"\nint Derived::Call() { return Execute(); }\nint f(Derived& value) { return value.Execute(); }\n");
 }
 
 TEST(IndexRename, RefusesInheritedNewNameCaptureEvenWhenTheLocalBinderBoundAGlobal)
 {
-	Project project({
-		{"base.hpp", "struct Base { virtual int Run(); };\nstruct Derived : Base { int Call(); };\n"},
-		{"use.cpp", "#include \"base.hpp\"\nint Helper();\nint Derived::Call() { return Run() + Helper(); }\n"},
-	});
+    Project project({
+            {
+                "base.hpp", "struct Base { virtual int Run(); };\nstruct Derived : Base { int Call(); };\n"
+        },
+            {"use.cpp",
+                "#include \"base.hpp\"\nint Helper();\nint Derived::Call() { return Run() + Helper(); }\n"},
+    });
 
-	const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Helper");
+    const auto plan = project.Rename("base.hpp", project.At("base.hpp", "Run"), "Helper");
 
-	ASSERT_FALSE(plan.has_value());
-	EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::SemanticChange);
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::SemanticChange);
 }
 
 TEST(IndexRename, UnrelatedSyntaxErrorFixtureDoesNotBlockProjectRename)
 {
-	Project project({
-		{"a.hpp", "struct Widget {};\n"},
-		{"test/fixtures/parse_syntax_error.cpp", "int broken(\n"},
-	});
-	project.context.requireExactIncludes = true;
-	const auto invalid = project.snapshot->ShardFor("test/fixtures/parse_syntax_error.cpp");
-	ASSERT_FALSE(project.snapshot->Shards()[invalid]->SyntaxComplete());
+    Project project({
+            {
+                "a.hpp", "struct Widget {};\n"
+        },
+            {"test/fixtures/parse_syntax_error.cpp", "int broken(\n"},
+    });
+    project.context.requireExactIncludes = true;
+    const auto invalid = project.snapshot->ShardFor("test/fixtures/parse_syntax_error.cpp");
+    ASSERT_FALSE(project.snapshot->Shards()[invalid]->SyntaxComplete());
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget"), "Gadget");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget"), "Gadget");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	EXPECT_EQ(project.Apply(*plan).at("test/fixtures/parse_syntax_error.cpp"), "int broken(\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("test/fixtures/parse_syntax_error.cpp"), "int broken(\n");
 }
 
 TEST(IndexRename, SyntaxErrorFixtureMentioningTheNewNameBlocksTheProof)
 {
-	Project project({
-		{"a.hpp", "struct Widget {};\n"},
-		{"test/fixtures/parse_syntax_error.cpp", "int Gadget(\n"},
-	});
+    Project project({
+            {
+                "a.hpp", "struct Widget {};\n"
+        },
+            {"test/fixtures/parse_syntax_error.cpp", "int Gadget(\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget"), "Gadget");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Widget"), "Gadget");
 
-	ASSERT_FALSE(plan.has_value());
-	EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::IncompleteAnalysis);
+    ASSERT_FALSE(plan.has_value());
+    EXPECT_EQ(plan.error().code, heimdall::RefactoringErrorCode::IncompleteAnalysis);
 }
 
 TEST(IndexRename, BuiltinArgumentTypesChooseAnExactSameArityOverload)
 {
-	Project project({
-		{"a.hpp", "int Add(long);\nint Add(int);\n"},
-		{"use.cpp", "#include \"a.hpp\"\nint f() { return Add(1) + Add(1L); }\n"},
-	});
+    Project project({
+            {
+                "a.hpp", "int Add(long);\nint Add(int);\n"
+        },
+            {"use.cpp", "#include \"a.hpp\"\nint f() { return Add(1) + Add(1L); }\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Add", 1), "Sum");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Add", 1), "Sum");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	EXPECT_EQ(project.Apply(*plan).at("a.hpp"), "int Add(long);\nint Sum(int);\n");
-	EXPECT_EQ(project.Apply(*plan).at("use.cpp"), "#include \"a.hpp\"\nint f() { return Sum(1) + Add(1L); }\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("a.hpp"), "int Add(long);\nint Sum(int);\n");
+    EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
+        "#include \"a.hpp\"\nint f() { return Sum(1) + Add(1L); }\n");
 }
 
 TEST(IndexRename, RenamesFunctionCalledInNamespaceScopeVariableInitializer)
 {
-	Project project({
-		{"a.cpp", "int CreateList() { return 1; }\n\nauto list = CreateList();\n"},
-	});
+    Project project({
+            {
+                "a.cpp", "int CreateList() { return 1; }\n\nauto list = CreateList();\n"
+        },
+    });
 
-	const auto plan = project.Rename("a.cpp", project.At("a.cpp", "CreateList"), "MakeList");
+    const auto plan = project.Rename("a.cpp", project.At("a.cpp", "CreateList"), "MakeList");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	EXPECT_EQ(project.Apply(*plan).at("a.cpp"), "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_EQ(project.Apply(*plan).at("a.cpp"),
+        "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
 }
 
 TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThis)
 {
-	Project project({
-		{"a.cpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n};\n\nstruct B\n{\n\tint m_x;\n};\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n"},
-	});
+    Project project({
+            {
+                "a.cpp",
+                "struct A\n{\n\tint m_x;\n\tvoid F();\n};\n\nstruct B\n{\n\tint m_x;\n};\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n"
+        },
+    });
 
-	const auto plan = project.Rename("a.cpp", project.At("a.cpp", "m_x"), "x");
+    const auto plan = project.Rename("a.cpp", project.At("a.cpp", "m_x"), "x");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto text = project.Apply(*plan).at("a.cpp");
-	EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
-	EXPECT_NE(text.find("int x;\n\tvoid F"), std::string::npos) << text;
-	EXPECT_NE(text.find("int m_x;\n};\n\nvoid A::F"), std::string::npos) << text;
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto text = project.Apply(*plan).at("a.cpp");
+    EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
+    EXPECT_NE(text.find("int x;\n\tvoid F"), std::string::npos) << text;
+    EXPECT_NE(text.find("int m_x;\n};\n\nvoid A::F"), std::string::npos) << text;
 }
 
 TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThisInOutOfLineDefinition)
 {
-	Project project({
-		{"a.hpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n\tvoid G();\n};\n"},
-		{"b.hpp", "struct B\n{\n\tint m_x;\n};\n"},
-		{"a.cpp", "#include \"a.hpp\"\n#include \"b.hpp\"\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n\nvoid A::G()\n{\n\tthis->m_x = 2;\n}\n"},
-	});
+    Project project({
+            {
+                "a.hpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n\tvoid G();\n};\n"
+        },
+            {"b.hpp", "struct B\n{\n\tint m_x;\n};\n"},
+            {"a.cpp",
+                "#include \"a.hpp\"\n#include \"b.hpp\"\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n\nvoid A::G()\n{\n\tthis->m_x = 2;\n}\n"},
+    });
 
-	const auto plan = project.Rename("a.hpp", project.At("a.hpp", "m_x"), "x");
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "m_x"), "x");
 
-	ASSERT_TRUE(plan.has_value()) << plan.error().message;
-	const auto text = project.Apply(*plan).at("a.cpp");
-	EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
-	EXPECT_NE(text.find("this->x = 2"), std::string::npos) << text;
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    const auto text = project.Apply(*plan).at("a.cpp");
+    EXPECT_NE(text.find("self.x = 1"), std::string::npos) << text;
+    EXPECT_NE(text.find("this->x = 2"), std::string::npos) << text;
 }
 
 TEST(IndexRename, MacroIsRenamedAtItsDefinitionsUsesAndConditions)
 {
     Project project({
-        {"config.h", "#pragma once\n#define LIMIT 8\n#define DOUBLE_LIMIT (LIMIT * 2)\n"},
-        {"use.cpp", "#include \"config.h\"\n#ifdef LIMIT\nint a = LIMIT;\n#endif\n"
-                    "#if defined(LIMIT) && LIMIT > 1\nint b = DOUBLE_LIMIT;\n#endif\n"},
+            {
+                "config.h", "#pragma once\n#define LIMIT 8\n#define DOUBLE_LIMIT (LIMIT * 2)\n"
+        },
+            {"use.cpp", "#include \"config.h\"\n#ifdef LIMIT\nint a = LIMIT;\n#endif\n"
+                "#if defined(LIMIT) && LIMIT > 1\nint b = DOUBLE_LIMIT;\n#endif\n"},
     });
 
     const auto plan = project.Rename("config.h", project.At("config.h", "LIMIT"), "MAXIMUM");
@@ -1028,14 +1114,16 @@ TEST(IndexRename, MacroIsRenamedAtItsDefinitionsUsesAndConditions)
               "#pragma once\n#define MAXIMUM 8\n#define DOUBLE_LIMIT (MAXIMUM * 2)\n");
     EXPECT_EQ(result.at("use.cpp"),
               "#include \"config.h\"\n#ifdef MAXIMUM\nint a = MAXIMUM;\n#endif\n"
-              "#if defined(MAXIMUM) && MAXIMUM > 1\nint b = DOUBLE_LIMIT;\n#endif\n");
+        "#if defined(MAXIMUM) && MAXIMUM > 1\nint b = DOUBLE_LIMIT;\n#endif\n");
 }
 
 TEST(IndexRename, RenamingAMacroFromAUseWorksToo)
 {
     Project project({
-        {"config.h", "#define SQUARE(x) ((x) * (x))\n"},
-        {"use.cpp", "#include \"config.h\"\nint a = SQUARE(2);\n"},
+            {
+                "config.h", "#define SQUARE(x) ((x) * (x))\n"
+        },
+            {"use.cpp", "#include \"config.h\"\nint a = SQUARE(2);\n"},
     });
 
     const auto plan = project.Rename("use.cpp", project.At("use.cpp", "SQUARE"), "SQR");
@@ -1048,7 +1136,10 @@ TEST(IndexRename, RenamingAMacroFromAUseWorksToo)
 
 TEST(IndexRename, IncludeGuardMacrosAreRenamedAtIfndefDefineAndEndifComments)
 {
-    Project project({{"a.h", "#ifndef A_H\n#define A_H\nint a;\n#endif\n"}});
+    Project project({
+            {
+                "a.h", "#ifndef A_H\n#define A_H\nint a;\n#endif\n"
+    }});
 
     const auto plan = project.Rename("a.h", project.At("a.h", "A_H", 1), "ALPHA_H");
 
@@ -1059,8 +1150,10 @@ TEST(IndexRename, IncludeGuardMacrosAreRenamedAtIfndefDefineAndEndifComments)
 TEST(IndexRename, MacroRenameRefusesANewNameAlreadyInUse)
 {
     Project project({
-        {"config.h", "#define LIMIT 8\n"},
-        {"use.cpp", "#include \"config.h\"\nint MAXIMUM = LIMIT;\n"},
+            {
+                "config.h", "#define LIMIT 8\n"
+        },
+            {"use.cpp", "#include \"config.h\"\nint MAXIMUM = LIMIT;\n"},
     });
 
     const auto plan = project.Rename("config.h", project.At("config.h", "LIMIT"), "MAXIMUM");
@@ -1072,20 +1165,26 @@ TEST(IndexRename, MacroRenameRefusesANewNameAlreadyInUse)
 TEST(IndexRename, MacroRenameRefusesWhenTheNameIsStringifiedOrPasted)
 {
     Project stringified({
-        {"a.h", "#define LIMIT 8\n#define STR(x) #x\n"},
-        {"use.cpp", "#include \"a.h\"\nconst char* s = STR(LIMIT);\n"},
+            {
+                "a.h", "#define LIMIT 8\n#define STR(x) #x\n"
+        },
+            {"use.cpp", "#include \"a.h\"\nconst char* s = STR(LIMIT);\n"},
     });
     Project pasted({
-        {"a.h", "#define LIMIT 8\n#define CAT(a, b) a##b\n"},
-        {"use.cpp", "#include \"a.h\"\nint x = CAT(LIMIT, 1);\n"},
+            {
+                "a.h", "#define LIMIT 8\n#define CAT(a, b) a##b\n"
+        },
+            {"use.cpp", "#include \"a.h\"\nint x = CAT(LIMIT, 1);\n"},
     });
     Project inBody({
-        {"a.h", "#define LIMIT 8\n#define NAME LIMIT##_X\n"},
+            {
+                "a.h", "#define LIMIT 8\n#define NAME LIMIT##_X\n"
+        },
     });
 
-    const auto first  = stringified.Rename("a.h", stringified.At("a.h", "LIMIT"), "MAXIMUM");
+    const auto first = stringified.Rename("a.h", stringified.At("a.h", "LIMIT"), "MAXIMUM");
     const auto second = pasted.Rename("a.h", pasted.At("a.h", "LIMIT"), "MAXIMUM");
-    const auto third  = inBody.Rename("a.h", inBody.At("a.h", "LIMIT"), "MAXIMUM");
+    const auto third = inBody.Rename("a.h", inBody.At("a.h", "LIMIT"), "MAXIMUM");
 
     ASSERT_FALSE(first.has_value());
     EXPECT_EQ(first.error().code, heimdall::RefactoringErrorCode::MacroContext);
@@ -1098,8 +1197,10 @@ TEST(IndexRename, MacroRenameRefusesWhenTheNameIsStringifiedOrPasted)
 TEST(IndexRename, MacroRenameRefusesWhenTheNameAlsoAppearsInInactiveCode)
 {
     Project project({
-        {"a.h", "#define LIMIT 8\n"},
-        {"use.cpp", "#include \"a.h\"\n#if 0\nint dead = LIMIT;\n#endif\nint a = LIMIT;\n"},
+            {
+                "a.h", "#define LIMIT 8\n"
+        },
+            {"use.cpp", "#include \"a.h\"\n#if 0\nint dead = LIMIT;\n#endif\nint a = LIMIT;\n"},
     });
 
     const auto plan = project.Rename("a.h", project.At("a.h", "LIMIT"), "MAXIMUM");
@@ -1110,7 +1211,10 @@ TEST(IndexRename, MacroRenameRefusesWhenTheNameAlsoAppearsInInactiveCode)
 
 TEST(IndexRename, MacroRenameRefusesAReservedNewName)
 {
-    Project project({{"a.h", "#define LIMIT 8\n"}});
+    Project project({
+            {
+                "a.h", "#define LIMIT 8\n"
+    }});
 
     const auto plan = project.Rename("a.h", project.At("a.h", "LIMIT"), "class");
 
