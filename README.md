@@ -27,7 +27,62 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ./build/bench/CoreBench
 ./build/bench/MacroBench                       # macro expansion, environment, resolver cost
 python3 bench/LspMacroLatency.py build/lsp/heimdall-lsp   # highlight latency through the LSP
+python3 bench/LspComparison.py --heimdall build/lsp/heimdall-lsp --clangd clangd \
+  --lines 1000 5000 --iterations 20 --repeats 3 --output /tmp/opencode/lsp-comparison.json
 ```
+
+### Heimdall vs clangd
+
+`bench/LspComparison.py` runs the servers sequentially against equivalent fresh workspaces,
+including a header under `build/_deps/*-src`, using the same C++20 compile commands.
+Each size generates that many one-line functions. Server order alternates between repeats.
+It reports process startup/initialize, first open-to-completion, and warm median/p95 latency
+for completion, hover, document symbols, semantic tokens and incremental edit-to-completion.
+The JSON output retains individual samples, response counts/bytes, executable hashes and settings.
+
+Both servers retain background indexing; Heimdall enables semantic analysis and workspace diagnostics, while
+clangd runs without clang-tidy. These are real LSP workloads, not equivalent analysis engines:
+token counts, diagnostic coverage and completion quality can differ. Empty/null responses are
+reported in the counts, not assumed to be equivalent results. Cold means a fresh process and
+workspace, **not** cleared OS filesystem caches. Warm-up requests precede each measured operation;
+background index completion is not a measurement barrier. Use comparable optimized builds and
+avoid other CPU-heavy work when interpreting results. Python transport/JSON overhead is included.
+
+Linux RSS/high-water memory is sampled every 10 ms; memory is reported as unavailable on other
+platforms. `--memory-limit-mib` (default 1024) kills a server if sampled RSS exceeds the limit;
+this is a safety monitor, not a hard allocation cap. `--timeout` bounds response waits (default
+30 seconds). The comparison benchmark is manual-only: it is not registered with CTest or CI.
+Harness tests can also be run manually with `python3 test/LspComparisonSpec.py`.
+
+#### Baseline — 2026-10-12
+
+Local run on Linux x86-64 / Intel Xeon E5-2697 v3, comparing Heimdall's existing
+Release build (`GCC 16.2.1`, `-O3 -DNDEBUG`) with installed clangd `22.1.8`.
+Settings: 1,000/5,000 generated functions, 3 warm-ups and 20 measured requests per
+operation per process, 3 fresh processes per server/size. Values below are pooled
+median latency in milliseconds; lower is better **for this workload only**.
+
+| Operation | Heimdall 1k | clangd 1k | Heimdall 5k | clangd 5k |
+|---|---:|---:|---:|---:|
+| Completion | 1.09 | 8.97 | 4.94 | 26.37 |
+| Hover | 2.30 | 0.57 | 13.08 | 0.82 |
+| Document symbols | 3.41 | 23.59 | 17.93 | 205.34 |
+| Semantic tokens | 2.63 | 1.34 | 13.19 | 6.39 |
+| Edit → completion | 1.99 | 9.18 | 7.84 | 27.06 |
+
+At 5k, edit-to-completion p95 was **8.98 ms / 29.25 ms** (Heimdall / clangd).
+Peak sampled RSS across runs was **112.6–115.2 MiB / 368.5–376.9 MiB**;
+process-start-to-initialize median was **2.37 ms / 15.71 ms**, and first
+open-to-completion median was **43.12 ms / 14.56 ms**. First completion is not
+proof that all analysis or background indexing has finished.
+
+Both returned one completion item and non-null hover results; both returned 5,001
+document symbols. Semantic token counts differed: **20,006 / 5,005**, so those
+latencies do not represent equivalent highlighting coverage. This synthetic
+single-document benchmark does not establish large-project indexing performance
+or semantic correctness. For future updates, repeat the command above, retain its
+JSON output, and add a dated baseline with toolchain/settings and response counts;
+do not compare runs with different inputs/options as a speedup.
 
 ## CLI
 
