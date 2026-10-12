@@ -8,6 +8,7 @@
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
+#include <Heimdall/IncludeInsertion.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -244,6 +245,8 @@ namespace heimdall::lsp
 						rename_capability +
 						","
 						"\"inlayHintProvider\":true,"
+						"\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\",\"{\"],"
+						"\"retriggerCharacters\":[\")\"]},"
 						"\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\","
 						"\"#\",\"/\",\"<\",\"\\\"\"],"
 						"\"resolveProvider\":false}},"
@@ -360,6 +363,14 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							GotoDocument(request, id, true);
+					});
+				}
+				else if (method == "textDocument/signatureHelp")
+				{
+					Dispatch(body, request, id_json,
+						[this](simdjson::dom::element request, std::string_view id)
+						{
+							SignatureHelpDocument(request, id);
 					});
 				}
 				else if (method == "textDocument/hover")
@@ -2901,8 +2912,7 @@ namespace heimdall::lsp
 		const Position start     = lines->ToPosition(offset - prefix.size());
 		const Position end       = lines->ToPosition(offset);
 
-		std::string response = headers.complete ? "{\"isIncomplete\":false,\"items\":["
-		: "{\"isIncomplete\":true,\"items\":[";
+		std::string response;
 		// Items arrive ranked (exact prefix, case-insensitive prefix, fuzzy);
 		// `sortText` keeps that order instead of the client's alphabetical one.
 		constexpr std::size_t kSortTextWidth = 6;
@@ -2948,8 +2958,172 @@ namespace heimdall::lsp
 			response += "}}";
 		}
 
-		response += "]}";
-		Respond(id, response);
+		const bool truncated = AppendIncludeInsertionItems(uri_string, *text, offset, command,
+			headers, items, *lines, rank, response);
+		const bool incomplete = !headers.complete || truncated;
+		Respond(id, (incomplete ? "{\"isIncomplete\":true,\"items\":["
+			: "{\"isIncomplete\":false,\"items\":[") + response + "]}");
+	}
+
+	bool LanguageServer::AppendIncludeInsertionItems(
+		const std::string& uri,
+		const std::string& text,
+		std::size_t offset,
+		const heimdall::CompileCommand* command,
+		const HeaderView& headers,
+		const std::vector<heimdall::CompletionItem>& items,
+		const LineIndex& lines,
+		std::size_t& rank,
+		std::string& response)
+	{
+		const heimdall::CompletionContext context =
+			heimdall::CompletionEngine::ContextAt(text, offset);
+		const bool qualified = context.kind == heimdall::CompletionContextKind::Qualified;
+		if (context.kind == heimdall::CompletionContextKind::Other ||
+			(!qualified && context.prefix.empty()))
+		{
+			return false;
+		}
+
+		std::string scope;
+		for (const auto& part : context.qualifier)
+		{
+			scope += scope.empty() ? part : "::" + part;
+		}
+
+		constexpr std::size_t kIncludeCandidates = 100;
+		const std::string query = scope.empty() ? context.prefix : scope + "::" + context.prefix;
+		const auto hits = m_symbol_index.Query(query, kIncludeCandidates, CurrentStop());
+
+		const std::filesystem::path file = PathFromUri(uri).lexically_normal();
+		std::vector<std::filesystem::path> visible {file};
+		if (headers.index)
+		{
+			for (const auto& header : headers.index->Files())
+			{
+				visible.push_back(header.lexically_normal());
+			}
+		}
+
+		const auto is_header =[](const std::filesystem::path& path)
+		{
+			const std::string extension = path.extension().string();
+			return extension == ".h" || extension == ".hh" || extension == ".hpp" ||
+				extension == ".hxx" || extension == ".h++" || extension == ".inl" ||
+				extension == ".ipp" || extension == ".tpp";
+		};
+		const auto starts_folded =[](std::string_view name, std::string_view prefix)
+		{
+			return name.size() >= prefix.size() &&
+				std::equal(prefix.begin(), prefix.end(), name.begin(),[](char a, char b)
+				{
+					return std::tolower(static_cast<unsigned char>(a)) ==
+						std::tolower(static_cast<unsigned char>(b));
+			});
+		};
+
+		const std::size_t replace_start = offset - context.prefix.size();
+		std::vector<std::string> offered;
+		for (const auto& hit : hits)
+		{
+			const SymbolView symbol = hit.Symbol();
+			int kind                = 0;
+			switch (symbol.kind)
+			{
+			case heimdall::OutlineKind::Class:
+			case heimdall::OutlineKind::Union:
+			case heimdall::OutlineKind::TypeAlias:
+				kind = 7; // Class
+				break;
+			case heimdall::OutlineKind::Struct:
+				kind = 22; // Struct
+				break;
+			case heimdall::OutlineKind::Enum:
+				kind = 13; // Enum
+				break;
+			case heimdall::OutlineKind::Function:
+				kind = 3; // Function
+				break;
+			case heimdall::OutlineKind::Variable:
+				kind = 6; // Variable
+				break;
+			case heimdall::OutlineKind::Concept:
+				kind = 8; // Interface
+				break;
+			default:
+				break;
+			}
+
+			if (kind == 0 || symbol.name.find("::") != std::string_view::npos ||
+				!starts_folded(symbol.name, context.prefix) ||
+				(qualified && symbol.container != scope))
+			{
+				continue;
+			}
+
+			const std::filesystem::path header = PathFromUri(hit.file->uri).lexically_normal();
+			if (!is_header(header) ||
+				std::find(visible.begin(), visible.end(), header) != visible.end())
+			{
+				continue;
+			}
+
+			std::string qualified_name(symbol.name);
+			if (!symbol.container.empty())
+			{
+				qualified_name = std::string(symbol.container) + "::" + qualified_name;
+			}
+
+			// Already visible through the file itself, or already offered.
+			const bool known = std::any_of(items.begin(), items.end(),[&](const auto& item)
+				{
+					return item.label == symbol.name && symbol.container.empty();
+			});
+			if (known || std::find(offered.begin(), offered.end(), qualified_name) != offered.end())
+			{
+				continue;
+			}
+
+			const std::string spelled = heimdall::IncludeIndex::SpellHeader(header, file, command);
+			const auto edit           = heimdall::PlanIncludeInsertion(text, spelled);
+			if (!edit)
+			{
+				continue;
+			}
+
+			offered.push_back(qualified_name);
+			std::string sort_text = std::to_string(rank++);
+			constexpr std::size_t kSortTextWidth = 6;
+			sort_text.insert(0, kSortTextWidth - std::min(kSortTextWidth, sort_text.size()), '0');
+			if (!response.empty())
+			{
+				response += ',';
+			}
+
+			response += "{\"label\":";
+			QuoteJson(std::string(symbol.name), response);
+			response += ",\"kind\":" + std::to_string(kind) + ",\"detail\":";
+			QuoteJson(qualified_name + "  (#include " + spelled + ")", response);
+			response += ",\"sortText\":";
+			QuoteJson(sort_text, response);
+			response += ",\"filterText\":";
+			QuoteJson(std::string(symbol.name), response);
+			response += ",\"textEdit\":{\"range\":{\"start\":";
+			AppendPosition(lines.ToPosition(replace_start), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(offset), response);
+			response += "},\"newText\":";
+			QuoteJson(qualified ? std::string(symbol.name) : qualified_name, response);
+			response += "},\"additionalTextEdits\":[{\"range\":{\"start\":";
+			AppendPosition(lines.ToPosition(edit->offset), response);
+			response += ",\"end\":";
+			AppendPosition(lines.ToPosition(edit->offset), response);
+			response += "},\"newText\":";
+			QuoteJson(edit->text, response);
+			response += "}]}";
+		}
+
+		return hits.size() >= kIncludeCandidates;
 	}
 
 	void LanguageServer::TouchGlobalIndex(const std::string& key)
@@ -3380,6 +3554,88 @@ namespace heimdall::lsp
 		const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
 		const auto found = m_documents.find(uri);
 		return found != m_documents.end() && found->second.version == version;
+	}
+
+	void LanguageServer::SignatureHelpDocument(simdjson::dom::element request, std::string_view id)
+	{
+		simdjson::dom::object params;
+		simdjson::dom::object text_document;
+		simdjson::dom::object position;
+		std::string_view uri;
+		if (!GetObject(request, "params", params) ||
+			!GetObject(params, "textDocument", text_document) ||
+			!GetString(text_document, "uri", uri) ||!GetObject(params, "position", position))
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		const std::string uri_string(uri);
+		const auto document = GetDocument(uri_string);
+		if (!document)
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		const std::shared_ptr<const std::string> text = document->text;
+		const std::shared_ptr<const LineIndex> lines  = document->lines;
+		const Position cursor = {static_cast<std::size_t>(PositionNumber(position, "line")),
+			static_cast<std::size_t>(PositionNumber(position, "character"))};
+		const std::size_t offset = lines->OffsetFromPosition(cursor);
+
+		const heimdall::CompileCommand* command      = CommandFor(uri_string);
+		const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
+		const HeaderView headers                     = HeaderScopes(uri_string, text, command);
+		const auto tree = CachedParse(uri_string, text, document->version, command);
+		if (!tree || RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		const heimdall::SignatureHelp help = heimdall::AnalysisFeatures::Signatures(
+			AnalysisFor(uri_string, tree, parser_options), offset,
+			headers.index ? &headers.index->Scopes() : nullptr);
+		if (help.signatures.empty())
+		{
+			Respond(id, "null");
+			return;
+		}
+
+		// Parameter ranges are byte offsets into the label; LSP counts UTF-16 units.
+		const auto utf16 =[](std::string_view label, std::uint32_t byte)
+		{
+			return std::to_string(ToPosition(label, byte).character);
+		};
+		std::string response = "{\"signatures\":[";
+		for (std::size_t i = 0; i < help.signatures.size(); ++i)
+		{
+			const heimdall::SignatureInfo& signature = help.signatures[i];
+			response += i == 0 ? "{\"label\":" : ",{\"label\":";
+			QuoteJson(signature.label, response);
+			if (!signature.documentation.empty())
+			{
+				response += ",\"documentation\":{\"kind\":\"markdown\",\"value\":";
+				QuoteJson(signature.documentation, response);
+				response += '}';
+			}
+
+			response += ",\"parameters\":[";
+			for (std::size_t p = 0; p < signature.parameters.size(); ++p)
+			{
+				const auto [begin, end] = signature.parameters[p];
+				response += p == 0 ? "{\"label\":[" : ",{\"label\":[";
+				response += utf16(signature.label, begin) + "," + utf16(signature.label, end);
+				response += "]}";
+			}
+
+			response += "]}";
+		}
+
+		response += "],\"activeSignature\":" + std::to_string(help.active_signature) +
+			",\"activeParameter\":" + std::to_string(help.active_parameter) + "}";
+		Respond(id, response);
 	}
 
 	void LanguageServer::HoverDocument(simdjson::dom::element request, std::string_view id)

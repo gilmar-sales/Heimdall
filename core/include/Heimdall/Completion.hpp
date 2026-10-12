@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace heimdall
@@ -83,6 +84,8 @@ namespace heimdall
 		bool is_virtual = false;
 		// Member functions taking an explicit object parameter (`this Self& self`).
 		bool explicit_object = false;
+		// Functions defined `= delete`: not callable, so signature help skips them.
+		bool deleted = false;
 	};
 
 	// One named scope and its direct members. `path` is the qualified path from
@@ -107,6 +110,43 @@ namespace heimdall
 
 	using ScopeIndex = std::vector<IndexedScope>;
 
+	// One callable offered by signature help. `label` reads like
+	// `add(int left, int right = 0) -> int`; each parameter is a [begin, end) byte
+	// range of the label.
+	struct SignatureInfo
+	{
+		std::string label;
+		std::vector<std::pair<std::uint32_t, std::uint32_t>> parameters;
+		std::string documentation;
+	};
+
+	// What the word at the cursor completes, for frontends that add candidates of
+	// their own (workspace symbols with include insertion).
+	enum class CompletionContextKind : std::uint8_t
+	{
+		Unqualified, // `na|`
+		Qualified,   // `ns::na|`, `::na|`
+		Other        // member access, preprocessor, comments, new names
+	};
+
+	struct CompletionContext
+	{
+		CompletionContextKind kind = CompletionContextKind::Other;
+		// Qualified: the written scope path (`{"ns"}`); empty for `::na`.
+		std::vector<std::string> qualifier;
+		std::string prefix;
+	};
+
+	// Overloads of the call around the cursor and the argument being typed.
+	struct SignatureHelp
+	{
+		std::vector<SignatureInfo> signatures;
+		std::uint32_t active_signature = 0;
+		std::uint32_t active_parameter = 0;
+		// Offset of the call's opening `(` or `{`; npos when the cursor is in no call.
+		std::size_t call_open = std::string_view::npos;
+	};
+
 	// Lexical + local ParseTree completion engine (core, STL only).
 	// Works on incomplete code: ParseTree diagnostics are ignored, candidates
 	// are collected from lexer identifiers, DeclaredName nodes and macros,
@@ -115,6 +155,8 @@ namespace heimdall
 	{
 	public:
 		static std::string PrefixAt(std::string_view source, std::size_t offset);
+
+		static CompletionContext ContextAt(std::string_view source, std::size_t offset);
 
 		static std::vector<CompletionItem> Complete(std::string_view source, std::size_t offset);
 
@@ -141,6 +183,20 @@ namespace heimdall
 		static ScopeIndex IndexScopes(std::string_view source, const ParserOptions& options);
 
 		static ScopeIndex IndexScopes(const ParseTree& tree);
+
+		// Signatures of the function, constructor or aggregate whose argument list
+		// contains `offset` (`f(1, |`, `obj.m(|`, `S s{|`, `new S(|`).
+		static SignatureHelp Signatures(
+			std::string_view source,
+			const ParserOptions& options,
+			std::size_t offset,
+			const ScopeIndex* external = nullptr);
+
+		static SignatureHelp Signatures(
+			const ParseTree& tree,
+			const ParserOptions& options,
+			std::size_t offset,
+			const ScopeIndex* external = nullptr);
 
 		static std::optional<CompletionItem> Hover(
 			std::string_view source,

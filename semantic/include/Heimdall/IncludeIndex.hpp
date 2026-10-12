@@ -128,6 +128,14 @@ namespace heimdall
                                   const Limits&                limits  = Limits {},
                                   const SourceOverlay*         overlay = nullptr);
 
+        // How `file` should name `header` in an `#include`, delimiters included: the
+        // shortest path below the file's own directory, an -iquote or an -I directory
+        // (quoted), or a compiler system directory (angled). Falls back to a path
+        // relative to the file's directory. Empty when `header` is empty.
+        static std::string SpellHeader(const std::filesystem::path& header,
+                                       const std::filesystem::path& file,
+                                       const CompileCommand*        command);
+
         // Default compiler system include directories, cached per compiler
         // executable. Empty when undiscoverable (unknown driver, spawn failure).
         static std::vector<std::filesystem::path> SystemIncludes(std::string_view compiler);

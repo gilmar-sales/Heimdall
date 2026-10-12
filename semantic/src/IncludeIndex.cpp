@@ -528,6 +528,76 @@ namespace heimdall
 
     } // namespace
 
+    std::string IncludeIndex::SpellHeader(const std::filesystem::path& header,
+                                          const std::filesystem::path& file,
+                                          const CompileCommand*        command)
+    {
+        if (header.empty())
+        {
+            return {};
+        }
+
+        const std::filesystem::path target = header.lexically_normal();
+        std::string                 best;
+        bool                        best_angled = false;
+        const auto consider = [&](const std::filesystem::path& directory, bool angled)
+        {
+            if (directory.empty())
+            {
+                return;
+            }
+
+            const std::filesystem::path relative =
+                target.lexically_relative(directory.lexically_normal());
+            const std::string spelled = relative.generic_string();
+            if (relative.empty() || spelled.starts_with("..") || relative.is_absolute())
+            {
+                return;
+            }
+
+            if (best.empty() || spelled.size() < best.size())
+            {
+                best        = spelled;
+                best_angled = angled;
+            }
+        };
+
+        consider(file.parent_path(), false);
+        if (command != nullptr)
+        {
+            for (const auto& directory : command->quote_directories)
+            {
+                consider(directory.is_absolute() ? directory : command->directory / directory,
+                         false);
+            }
+
+            for (const auto& directory : command->include_directories)
+            {
+                consider(directory.is_absolute() ? directory : command->directory / directory,
+                         false);
+            }
+        }
+
+        if (best.empty())
+        {
+            for (const auto& directory : SystemIncludes(DriverOf(command)))
+            {
+                consider(directory, true);
+            }
+        }
+
+        if (best.empty())
+        {
+            best = target.lexically_relative(file.parent_path().lexically_normal()).generic_string();
+            if (best.empty())
+            {
+                best = target.generic_string();
+            }
+        }
+
+        return best_angled ? "<" + best + ">" : "\"" + best + "\"";
+    }
+
     std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view compiler)
     {
         // Thread-safe memoization: previously a bare static map (data race as

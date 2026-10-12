@@ -187,6 +187,20 @@ namespace heimdall::lsp
 
 		void CompleteDocument(simdjson::dom::element request, std::string_view id);
 
+		// Workspace symbols declared in headers `uri` does not include yet, each with
+		// the `#include` that makes it visible. True when the symbol query was cut by
+		// its limit (more candidates may match a longer prefix).
+		bool AppendIncludeInsertionItems(
+			const std::string& uri,
+			const std::string& text,
+			std::size_t offset,
+			const heimdall::CompileCommand* command,
+			const HeaderView& headers,
+			const std::vector<heimdall::CompletionItem>& items,
+			const LineIndex& lines,
+			std::size_t& rank,
+			std::string& response);
+
 		// `#include "` / `#include <` path completion; quoted and angled
 		// includes search different directories.
 		void RespondIncludeCompletion(
@@ -199,6 +213,8 @@ namespace heimdall::lsp
 			const heimdall::CompileCommand* command);
 
 		void HoverDocument(simdjson::dom::element request, std::string_view id);
+
+		void SignatureHelpDocument(simdjson::dom::element request, std::string_view id);
 
 		void InlayHints(simdjson::dom::element request, std::string_view id);
 

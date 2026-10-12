@@ -86,10 +86,12 @@ int main()
 
 	list.Push(2);
 
-	auto node = new Node<float>();
-	auto test = node;
+	auto node  = new Node<float>();
+	auto test  = node;
+	auto test2 = test;
 
-	test.value = 2.0f;
+	test.value  = 2.0f;
+	auto test2v = test.value;
 
 	return 0;
 }

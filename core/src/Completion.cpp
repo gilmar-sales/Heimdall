@@ -1183,6 +1183,7 @@ namespace heimdall
 		{
 			std::string_view type; // as written, without the name or default
 			std::string_view name; // empty when unnamed
+			std::string_view text; // the whole parameter, default included
 		};
 
 		// Parameters of a function detail (`int add(int left, int right = 0)`),
@@ -1230,8 +1231,9 @@ namespace heimdall
 			};
 			const auto add =[&](std::string_view parameter)
 			{
-				int depth          = 0;
-				std::size_t equals = parameter.size();
+				const std::string_view whole = trim(parameter);
+				int depth                    = 0;
+				std::size_t equals           = parameter.size();
 				for (std::size_t i = 0; i < parameter.size(); ++i)
 				{
 					const char c = parameter[i];
@@ -1261,11 +1263,11 @@ namespace heimdall
 				const std::string_view rest = trim(parameter.substr(0, word));
 				const bool named = !last.empty() && !rest.empty() && rest != "this" &&
 					!IsKeyword(last) && !IsBuiltinType(last) && rest.back() != ':';
-				parameters.push_back(named ? DetailParameter {rest, last}
-					: DetailParameter
-					{
-						parameter, {}
-				});
+				DetailParameter entry;
+				entry.type = named ? rest : parameter;
+				entry.name = named ? last : std::string_view {};
+				entry.text = whole;
+				parameters.push_back(entry);
 			};
 			int depth         = 0;
 			std::size_t start = open + 1;
@@ -1306,6 +1308,28 @@ namespace heimdall
 			}
 
 			return named;
+		}
+
+		// `(int,constchar*)c`: parameter types without names or defaults, plus the
+		// const qualifier, identifying an overload.
+		std::string ParameterTypesKey(const CompletionItem& function)
+		{
+			std::string key = "(";
+			for (const auto& parameter : DetailParameters(function.detail, function.label))
+			{
+				for (const char c : parameter.type)
+				{
+					if (c != ' ' && c != '\t')
+					{
+						key += c;
+					}
+				}
+
+				key += ',';
+			}
+
+			key += function.is_const ? ")c" : ")";
+			return key;
 		}
 
 		// InsertItem for FlatHashMap with StringInterner
@@ -3572,6 +3596,50 @@ namespace heimdall
 				(HasWord(self, "const") || self.find('&') == std::string_view::npos));
 		}
 
+		// `f() = delete;` after the declared name, at the declaration's top level.
+		bool DeclaredDeleted(const ParseTree& tree, std::size_t node)
+		{
+			const auto& tokens          = tree.Tokens();
+			const std::size_t name      = tree.NodesSoA().FirstToken(node);
+			int depth                   = 0;
+			bool after_equals           = false;
+			constexpr std::size_t kScan = 64;
+			for (std::size_t t = name + 1; t < tokens.size() && t < name + kScan; ++t)
+			{
+				if (tokens[t].kind == TokenKind::Whitespace ||
+					tokens[t].kind == TokenKind::LineComment ||
+					tokens[t].kind == TokenKind::BlockComment)
+				{
+					continue;
+				}
+
+				const std::string_view text = tree.Text(tokens[t]);
+				if (after_equals)
+				{
+					return text == "delete";
+				}
+
+				if (text == "(" || text == "[")
+				{
+					++depth;
+				}
+				else if (text == ")" || text == "]")
+				{
+					--depth;
+				}
+				else if (depth == 0 && (text == ";" || text == "{"))
+				{
+					return false;
+				}
+				else if (depth == 0 && text == "=")
+				{
+					after_equals = true;
+				}
+			}
+
+			return false;
+		}
+
 		// `[[deprecated]]`, `[[deprecated("...")]]` or `__attribute__((deprecated))`
 		// written before the declared name, including the attribute list right
 		// before the declaration.
@@ -3738,6 +3806,7 @@ namespace heimdall
 				}
 
 				ApplyFunctionQualifiers(item);
+				item.deleted = DeclaredDeleted(tree, node);
 			}
 
 			item.deprecated = DeclaredDeprecated(tree, node);
@@ -4908,7 +4977,8 @@ namespace heimdall
 		}
 		for (auto& entry : index)
 		{
-			std::sort(entry.members.begin(), entry.members.end(),
+			// Stable: redeclarations keep their source order, so the later one wins ties.
+			std::stable_sort(entry.members.begin(), entry.members.end(),
 				[](const CompletionItem& left, const CompletionItem& right)
 				{
 					if (left.label != right.label)
@@ -4918,34 +4988,59 @@ namespace heimdall
 
 					return static_cast<int>(left.kind) < static_cast<int>(right.kind);
 			});
-			// Merge same (label, kind) duplicates, keeping documentation.
+			// Merge same (label, kind) duplicates, keeping documentation. Function
+			// overloads (different parameter types) stay separate entries.
 			std::vector<CompletionItem> merged;
+			std::size_t run_start = 0;
 			for (auto& member : entry.members)
 			{
-				if (!merged.empty() && merged.back().label == member.label &&
-					merged.back().kind == member.kind)
+				if (merged.empty() || merged.back().label != member.label ||
+					merged.back().kind != member.kind)
 				{
-					if (merged.back().documentation.empty() && !member.documentation.empty())
+					run_start = merged.size();
+				}
+
+				CompletionItem* same = nullptr;
+				for (std::size_t k = run_start; k < merged.size(); ++k)
+				{
+					if (member.kind != CompletionKind::Function ||
+						ParameterTypesKey(merged[k]) == ParameterTypesKey(member))
 					{
-						merged.back().documentation = std::move(member.documentation);
+						same = &merged[k];
+						break;
+					}
+				}
+
+				if (same != nullptr)
+				{
+					if (same->documentation.empty() && !member.documentation.empty())
+					{
+						same->documentation = std::move(member.documentation);
 					}
 
-					if (merged.back().type_text.empty() && !member.type_text.empty())
+					if (same->type_text.empty() && !member.type_text.empty())
 					{
-						merged.back().type_text = std::move(member.type_text);
+						same->type_text = std::move(member.type_text);
 					}
 
-					if (merged.back().layout_type.empty() && !member.layout_type.empty())
+					if (same->layout_type.empty() && !member.layout_type.empty())
 					{
-						merged.back().layout_type = std::move(member.layout_type);
+						same->layout_type = std::move(member.layout_type);
 					}
 
-					if (merged.back().detail == KindDetail(merged.back().kind) &&
+					if (same->detail == KindDetail(same->kind) &&
 						member.detail != KindDetail(member.kind))
 					{
-						merged.back().detail = std::move(member.detail);
+						same->detail = std::move(member.detail);
+					}
+					else if (member.kind == CompletionKind::Function &&
+						NamedParameterCount(member.detail) >= NamedParameterCount(same->detail) &&
+						NamedParameterCount(member.detail) > 0)
+					{
+						same->detail = std::move(member.detail);
 					}
 
+					same->deprecated = same->deprecated || member.deprecated;
 					continue;
 				}
 
@@ -6308,6 +6403,108 @@ namespace heimdall
 				return found;
 			}
 
+			// Accessible overloads named `name` declared in `path`; when it declares
+			// none, those of its bases (a derived declaration hides the base's).
+			[[nodiscard]] std::vector<CompletionItem> FunctionsNamed(
+				const std::vector<std::string>& path,
+				std::string_view name,
+				bool walk_bases,
+				int depth = 0) const
+			{
+				constexpr int kMaxFunctionDepth = 16;
+				std::vector<CompletionItem> found;
+				if (depth > kMaxFunctionDepth)
+				{
+					return found;
+				}
+
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind == CompletionKind::Function && member.label == name &&
+							CanAccess(member, path))
+						{
+							found.push_back(member);
+						}
+					}
+				}
+
+				if (!found.empty() ||!walk_bases)
+				{
+					return found;
+				}
+
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& written : scope->bases)
+					{
+						const Resolved base = ResolveType(ParseTypeName(written), Parent(path), 0);
+						if (base.ok)
+						{
+							auto inherited = FunctionsNamed(base.path, name, true, depth + 1);
+							found.insert(found.end(), inherited.begin(), inherited.end());
+						}
+					}
+				}
+
+				return found;
+			}
+
+			// Functions an unqualified call `name(` can reach: members of the
+			// enclosing classes first (they hide outer names), else the enclosing
+			// namespaces, the global scope and using-directive targets.
+			[[nodiscard]] std::vector<CompletionItem> VisibleFunctions(std::string_view name) const
+			{
+				for (const auto& record : m_records)
+				{
+					auto members = FunctionsNamed(record, name, true);
+					if (!members.empty())
+					{
+						return members;
+					}
+				}
+
+				std::vector<CompletionItem> found;
+				for (const auto& prefix : Prefixes(m_hint))
+				{
+					auto declared = FunctionsNamed(prefix, name, false);
+					found.insert(found.end(), declared.begin(), declared.end());
+				}
+
+				return found;
+			}
+
+			// Non-static data members of a record in declaration order (aggregates).
+			[[nodiscard]] std::vector<CompletionItem> FieldsInOrder(
+				const std::vector<std::string>& path) const
+			{
+				std::vector<CompletionItem> fields;
+				for (const IndexedScope* scope : ScopesAt(path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind == CompletionKind::Variable && member.has_location &&
+							!member.layout_type.starts_with("static "))
+						{
+							fields.push_back(member);
+						}
+					}
+				}
+
+				std::stable_sort(fields.begin(), fields.end(),[](const auto& left, const auto& right)
+					{
+						return left.offset < right.offset;
+				});
+				return fields;
+			}
+
+			// Record path a type spelled at the cursor names.
+			[[nodiscard]] Resolved ResolveTypeText(std::string_view text) const
+			{
+				return ResolveType(ParseTypeName(text), m_hint, 0);
+			}
+
 			// Private members are reachable from their own class, protected ones also
 			// from classes deriving from it (friendship is not modeled).
 			[[nodiscard]] bool CanAccess(const CompletionItem& member,
@@ -6675,22 +6872,7 @@ namespace heimdall
 
 			static std::string OverrideKey(const CompletionItem& function)
 			{
-				std::string key = function.label + "(";
-				for (const auto& parameter : DetailParameters(function.detail, function.label))
-				{
-					for (const char c : parameter.type)
-					{
-						if (c != ' ' && c != '\t')
-						{
-							key += c;
-						}
-					}
-
-					key += ',';
-				}
-
-				key += function.is_const ? ")c" : ")";
-				return key;
+				return function.label + ParameterTypesKey(function);
 			}
 
 			void CollectVirtuals(
@@ -7772,6 +7954,520 @@ namespace heimdall
 			}
 		}
 
+		// `{` that opens a namespace, class or block body rather than a braced
+		// initializer.
+		bool IsScopeBrace(const ParseTree& tree, std::size_t brace)
+		{
+			const auto& tokens = tree.Tokens();
+			for (std::size_t n = 1; n < tree.NodesSoA().size(); ++n)
+			{
+				const GrammarKind kind = tree.NodesSoA().Kind(n);
+				if ((kind == GrammarKind::CompoundStatement || kind == GrammarKind::LambdaExpression) &&
+					tree.NodesSoA().FirstToken(n) == brace)
+				{
+					return true;
+				}
+
+				if (kind != GrammarKind::RecordDefinition && kind != GrammarKind::NamespaceDefinition)
+				{
+					continue;
+				}
+
+				const auto grammar = tree.NodesSoA()[n];
+				const std::size_t end =
+					std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
+					tokens.size());
+				for (std::size_t t = grammar.GetFirstToken(); t < end; ++t)
+				{
+					if (tokens[t].kind == TokenKind::Punctuation && tree.Text(tokens[t]) == "{")
+					{
+						if (t == brace)
+						{
+							return true;
+						}
+
+						break;
+					}
+				}
+			}
+
+			return false;
+		}
+
+		// The argument list around the cursor: its opening bracket and the index of
+		// the argument being typed.
+		struct CallSite
+		{
+			std::size_t open     = NoIndex;
+			std::size_t argument = 0;
+			// Designators already written (`.c = 3`), with the argument index each holds.
+			std::vector<std::pair<std::string, std::size_t>> designators;
+			bool ok = false;
+		};
+
+		CallSite FindCallSite(const ParseTree& tree, std::size_t offset)
+		{
+			CallSite site;
+			const auto& tokens            = tree.Tokens();
+			const std::string_view source = tree.Source();
+			std::size_t k                 = TokenBefore(tokens, offset);
+			if (k >= tokens.size())
+			{
+				return site;
+			}
+
+			std::vector<std::size_t> commas;
+			int depth = 0;
+			for (++k; k > 0;)
+			{
+				--k;
+				const Token& token = tokens[k];
+				if (token.kind != TokenKind::Punctuation)
+				{
+					continue;
+				}
+
+				const std::string_view text = TokenText(source, token);
+				if (text == ")" || text == "]" || text == "}")
+				{
+					++depth;
+				}
+				else if (text == "(" || text == "[" || text == "{")
+				{
+					if (depth > 0)
+					{
+						--depth;
+						continue;
+					}
+
+					if (text == "[" ||(text == "{" && IsScopeBrace(tree, k)))
+					{
+						return site;
+					}
+
+					site.open = k;
+					break;
+				}
+				else if (text == ";" && depth == 0)
+				{
+					return site;
+				}
+				else if (text == "," && depth == 0)
+				{
+					commas.push_back(k);
+				}
+			}
+
+			if (site.open == NoIndex)
+			{
+				return site;
+			}
+
+			site.argument = commas.size();
+			// `.name =` at the start of an argument: a designated initializer.
+			std::vector<std::size_t> starts {site.open};
+			starts.insert(starts.end(), commas.rbegin(), commas.rend());
+			for (std::size_t index = 0; index < starts.size(); ++index)
+			{
+				const std::size_t dot = NextSignificantToken(tokens, starts[index]);
+				const std::size_t name =
+					dot < tokens.size() ? NextSignificantToken(tokens, dot) : tokens.size();
+				if (name < tokens.size() && tokens[dot].offset < offset &&
+					TokenText(source, tokens[dot]) == "." &&
+					tokens[name].kind == TokenKind::Identifier)
+				{
+					site.designators.emplace_back(std::string(TokenText(source, tokens[name])),
+						index);
+				}
+			}
+
+			site.ok = true;
+			return site;
+		}
+
+		// `<...>` before `close` (a `>` or `>>`): index of the opening `<`.
+		std::size_t MatchAngleBefore(const std::vector<Token>& tokens, std::string_view source,
+			std::size_t close)
+		{
+			int depth = 0;
+			for (std::size_t k = close + 1; k > 0;)
+			{
+				--k;
+				if (tokens[k].kind != TokenKind::Punctuation)
+				{
+					continue;
+				}
+
+				const std::string_view text = TokenText(source, tokens[k]);
+				depth += text == ">" ? 1 : text == ">>" ? 2 : text == "<" ? -1 : 0;
+				if (text == ";" || text == "{" || text == "}")
+				{
+					return NoIndex;
+				}
+
+				if (depth <= 0 && text == "<")
+				{
+					return k;
+				}
+			}
+
+			return NoIndex;
+		}
+
+		// What the argument list belongs to.
+		struct Callee
+		{
+			std::vector<CompletionItem> functions;
+			// Constructors / aggregate initialization of this record.
+			std::vector<std::string> record;
+			bool construct = false;
+		};
+
+		Callee ResolveCallee(
+			const ParseTree& tree,
+			const MemberResolver& resolver,
+			std::size_t open,
+			std::string_view bracket)
+		{
+			Callee callee;
+			const auto& tokens            = tree.Tokens();
+			const std::string_view source = tree.Source();
+			std::size_t name              = PreviousSignificant(tokens, open, source);
+			if (name < tokens.size() && tokens[name].kind == TokenKind::Punctuation &&
+				(TokenText(source, tokens[name]) == ">" || TokenText(source, tokens[name]) == ">>"))
+			{
+				const std::size_t angle = MatchAngleBefore(tokens, source, name);
+				name                    = angle == NoIndex ? tokens.size() : PreviousSignificant(tokens, angle, source);
+			}
+
+			const auto construct =[&](std::string_view type_text)
+			{
+				const Resolved type = resolver.ResolveTypeText(type_text);
+				if (type.ok)
+				{
+					callee.record    = type.path;
+					callee.construct = true;
+					callee.functions = resolver.FunctionsNamed(type.path, type.path.back(), false);
+				}
+			};
+			const auto text_between =[&](std::size_t first, std::size_t last)
+			{
+				return std::string_view(source).substr(
+					tokens[first].offset, tokens[last].offset + tokens[last].length -
+					tokens[first].offset);
+			};
+
+			// `S s = {`: the declared variable's type.
+			if (name < tokens.size() && bracket == "{" && TokenText(source, tokens[name]) == "=")
+			{
+				const std::size_t variable = PreviousSignificant(tokens, name, source);
+				const std::size_t type =
+					variable < tokens.size() ? PreviousSignificant(tokens, variable, source)
+				: tokens.size();
+				if (type < tokens.size() && tokens[type].kind == TokenKind::Identifier)
+				{
+					construct(TokenText(source, tokens[type]));
+				}
+
+				return callee;
+			}
+
+			if (name >= tokens.size() || tokens[name].kind != TokenKind::Identifier)
+			{
+				return callee;
+			}
+
+			const std::string_view word = TokenText(source, tokens[name]);
+			std::size_t head            = name;
+			std::vector<std::string> qualifier;
+			bool global      = false;
+			std::size_t lead = PreviousSignificant(tokens, name, source);
+			while (lead < tokens.size() && TokenText(source, tokens[lead]) == "::")
+			{
+				const std::size_t part = PreviousSignificant(tokens, lead, source);
+				if (part >= tokens.size() || tokens[part].kind != TokenKind::Identifier)
+				{
+					global = true;
+					lead   = part;
+					break;
+				}
+
+				qualifier.insert(qualifier.begin(), std::string(TokenText(source, tokens[part])));
+				head = part;
+				lead = PreviousSignificant(tokens, part, source);
+			}
+
+			const std::string_view lead_text =
+				lead < tokens.size() ? TokenText(source, tokens[lead]) : std::string_view {};
+			const std::string_view spelled = text_between(head, name);
+
+			// `obj.f(` / `ptr->f(`.
+			if (qualifier.empty() && !global && (lead_text == "." || lead_text == "->"))
+			{
+				const Chain chain   = resolver.ParseReceiver(lead);
+				const Resolved type = resolver.ResolveChain(chain);
+				if (type.ok)
+				{
+					callee.functions = resolver.FunctionsNamed(type.path, word, true);
+				}
+
+				return callee;
+			}
+
+			// `new S(` and `S s(` / `S s{` / `const ns::S& s(`: constructors of the type.
+			if (lead_text == "new")
+			{
+				construct(spelled);
+				return callee;
+			}
+
+			if (qualifier.empty() && !global && lead < tokens.size() &&
+				(tokens[lead].kind == TokenKind::Identifier || lead_text == ">" ||
+				lead_text == ">>") && !IsKeyword(lead_text))
+			{
+				std::size_t type_end = lead;
+				std::size_t first    = lead;
+				if (lead_text == ">" || lead_text == ">>")
+				{
+					const std::size_t angle = MatchAngleBefore(tokens, source, lead);
+					first                   = angle == NoIndex ? lead : PreviousSignificant(tokens, angle, source);
+				}
+
+				while (first < tokens.size())
+				{
+					const std::size_t colons = PreviousSignificant(tokens, first, source);
+					if (colons >= tokens.size() || TokenText(source, tokens[colons]) != "::")
+					{
+						break;
+					}
+
+					const std::size_t part = PreviousSignificant(tokens, colons, source);
+					if (part >= tokens.size() || tokens[part].kind != TokenKind::Identifier)
+					{
+						break;
+					}
+
+					first = part;
+				}
+
+				construct(text_between(first, type_end));
+				return callee;
+			}
+
+			// `B() : member(` / `, member{`: constructors of the member's type.
+			if (qualifier.empty() && !global && (lead_text == ":" || lead_text == ",") &&
+				!resolver.EnclosingRecords().empty())
+			{
+				for (const auto& field : resolver.FieldsInOrder(resolver.EnclosingRecords().front()))
+				{
+					if (field.label == word && !field.type_text.empty())
+					{
+						construct(field.type_text);
+						return callee;
+					}
+				}
+			}
+
+			// `S(` / `S{` / `ns::S(`: a type names its constructors.
+			std::vector<std::string> path = qualifier;
+			path.emplace_back(word);
+			const Resolved type = resolver.ResolveTypeText(spelled);
+			if (type.ok && !type.path.empty() && type.path.back() == word)
+			{
+				callee.record    = type.path;
+				callee.construct = true;
+				callee.functions = resolver.FunctionsNamed(type.path, word, false);
+				return callee;
+			}
+
+			if (qualifier.empty() && !global)
+			{
+				callee.functions = resolver.VisibleFunctions(word);
+			}
+			else
+			{
+				const Resolved scope = resolver.ResolveTypeText(text_between(head, name));
+				callee.functions     = resolver.FunctionsNamed(qualifier, word, false);
+				if (callee.functions.empty() && scope.ok)
+				{
+					callee.functions = resolver.FunctionsNamed(
+						std::vector<std::string>(scope.path.begin(), scope.path.end() - 1), word,
+						false);
+				}
+			}
+
+			return callee;
+		}
+
+		SignatureInfo MakeSignature(
+			const CompletionItem& function,
+			std::string_view name,
+			std::string_view bracket,
+			bool construct)
+		{
+			SignatureInfo signature;
+			signature.label = std::string(name);
+			signature.label += bracket == "{" ? "{" : "(";
+			auto parameters = DetailParameters(function.detail, function.label);
+			if (function.explicit_object && !parameters.empty())
+			{
+				parameters.erase(parameters.begin()); // `this Self& self` is the object
+			}
+
+			for (std::size_t i = 0; i < parameters.size(); ++i)
+			{
+				if (i != 0)
+				{
+					signature.label += ", ";
+				}
+
+				const auto begin = static_cast<std::uint32_t>(signature.label.size());
+				signature.label += parameters[i].text;
+				signature.parameters.emplace_back(begin,
+					static_cast<std::uint32_t>(signature.label.size()));
+			}
+
+			signature.label += bracket == "{" ? "}" : ")";
+			if (!construct && !function.type_text.empty())
+			{
+				signature.label += " -> ";
+				signature.label += function.type_text;
+			}
+
+			signature.documentation = function.documentation;
+			return signature;
+		}
+
+		bool IsVariadicSignature(const SignatureInfo& signature)
+		{
+			if (signature.parameters.empty())
+			{
+				return false;
+			}
+
+			const auto[begin, end] = signature.parameters.back();
+			return std::string_view(signature.label).substr(begin, end - begin).find("...") !=
+				std::string_view::npos;
+		}
+
+		SignatureHelp ComputeSignatures(const ParseTree& tree, std::size_t offset,
+			const ScopeIndex* external)
+		{
+			SignatureHelp help;
+			const CallSite site = FindCallSite(tree, offset);
+			if (!site.ok)
+			{
+				return help;
+			}
+
+			const auto& tokens             = tree.Tokens();
+			const std::string_view bracket = TokenText(tree.Source(), tokens[site.open]);
+			const MemberResolver resolver(tree, external, offset);
+			const Callee callee = ResolveCallee(tree, resolver, site.open, bracket);
+			const std::string_view name =
+				callee.construct ? std::string_view(callee.record.back()) : std::string_view {};
+
+			// One signature per overload; redeclarations keep the one naming its parameters.
+			std::vector<CompletionItem> overloads;
+			for (const auto& function : callee.functions)
+			{
+				if (function.deleted)
+				{
+					continue;
+				}
+
+				const std::string key = ParameterTypesKey(function);
+				auto same = std::find_if(overloads.begin(), overloads.end(),[&](const auto& other)
+					{
+						return ParameterTypesKey(other) == key;
+				});
+				if (same == overloads.end())
+				{
+					overloads.push_back(function);
+				}
+				else if (NamedParameterCount(function.detail) > NamedParameterCount(same->detail))
+				{
+					*same = function;
+				}
+			}
+
+			for (const auto& function : overloads)
+			{
+				help.signatures.push_back(MakeSignature(function,
+					callee.construct ? name : std::string_view(function.label), bracket,
+					callee.construct));
+			}
+
+			std::size_t argument = site.argument;
+			if (callee.construct && bracket == "{" && callee.functions.empty())
+			{
+				// Aggregate initialization: one parameter per field, in order.
+				const auto fields = resolver.FieldsInOrder(callee.record);
+				if (!fields.empty())
+				{
+					SignatureInfo aggregate;
+					aggregate.label = std::string(name) + "{";
+					for (std::size_t i = 0; i < fields.size(); ++i)
+					{
+						if (i != 0)
+						{
+							aggregate.label += ", ";
+						}
+
+						const auto begin = static_cast<std::uint32_t>(aggregate.label.size());
+						aggregate.label += fields[i].detail + " " + fields[i].label;
+						aggregate.parameters.emplace_back(begin,
+							static_cast<std::uint32_t>(aggregate.label.size()));
+					}
+
+					aggregate.label += "}";
+					help.signatures.push_back(std::move(aggregate));
+					if (!site.designators.empty())
+					{
+						const auto& [field, index] = site.designators.back();
+						for (std::size_t i = 0; i < fields.size(); ++i)
+						{
+							if (fields[i].label == field)
+							{
+								argument = i +(site.argument - index);
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			if (help.signatures.empty())
+			{
+				return help;
+			}
+
+			// Overloads that cannot take the argument being typed are dropped while
+			// another one can.
+			const auto viable =[&](const SignatureInfo& signature)
+			{
+				return argument < signature.parameters.size() || IsVariadicSignature(signature) ||
+					(argument == 0 && signature.parameters.empty());
+			};
+			if (std::any_of(help.signatures.begin(), help.signatures.end(), viable))
+			{
+				std::erase_if(help.signatures,[&](const SignatureInfo& signature)
+					{
+						return !viable(signature);
+				});
+			}
+
+			const SignatureInfo& active = help.signatures.front();
+			if (IsVariadicSignature(active) && argument >= active.parameters.size())
+			{
+				argument = active.parameters.size() - 1;
+			}
+
+			help.active_parameter = static_cast<std::uint32_t>(argument);
+			help.call_open        = tokens[site.open].offset;
+			return help;
+		}
+
 		// `auto x = f();` hovers as the type `f` returns instead of `auto`. Only the
 		// spelling of `auto` is replaced, so `const auto&` stays `const T&`; a plain
 		// `auto` drops the reference and top-level const the function declared.
@@ -8681,6 +9377,80 @@ namespace heimdall
 		}
 
 		return std::nullopt;
+	}
+
+	SignatureHelp CompletionEngine::Signatures(
+		std::string_view source,
+		const ParserOptions& options,
+		std::size_t offset,
+		const ScopeIndex* external)
+	{
+		const ParseTree tree = ParseTree::Parse(source, options);
+		return Signatures(tree, options, offset, external);
+	}
+
+	SignatureHelp CompletionEngine::Signatures(
+		const ParseTree& tree,
+		const ParserOptions& options,
+		std::size_t offset,
+		const ScopeIndex* external)
+	{
+		(void) options;
+		const std::string_view source = tree.Source();
+		if (offset > source.size())
+		{
+			return {};
+		}
+
+		// Inside a comment or a string literal there is no call to describe.
+		const std::size_t at = TokenBefore(tree.Tokens(), offset);
+		if (at < tree.Tokens().size())
+		{
+			const Token& token = tree.Tokens()[at];
+			const bool inside = offset < token.offset + token.length ||
+				(token.kind == TokenKind::LineComment) ||
+				(token.kind == TokenKind::BlockComment && !TokenText(source, token).ends_with("*/"));
+			if (inside && (token.kind == TokenKind::LineComment ||
+				token.kind == TokenKind::BlockComment || token.kind == TokenKind::StringLiteral ||
+				token.kind == TokenKind::CharacterLiteral ||
+				token.kind == TokenKind::RawStringLiteral))
+			{
+				return {};
+			}
+		}
+
+		if (InDisabledBranch(source, tree.Tokens(), offset))
+		{
+			return {};
+		}
+
+		return ComputeSignatures(tree, offset, external);
+	}
+
+	CompletionContext CompletionEngine::ContextAt(std::string_view source, std::size_t offset)
+	{
+		CompletionContext result;
+		offset                          = std::min(offset, source.size());
+		result.prefix                   = PrefixAt(source, offset);
+		const std::vector<Token> tokens = Lexer(source).Lex();
+		const CursorContext context     = ClassifyContext(source, tokens, offset, result.prefix);
+		if (context == CursorContext::Expression &&
+			!NamesNewDeclarator(source, tokens, offset, result.prefix))
+		{
+			result.kind = CompletionContextKind::Unqualified;
+		}
+		else if (context == CursorContext::ScopeAccess)
+		{
+			const std::size_t scope_op = AccessOperatorBefore(source, tokens, offset, result.prefix);
+			const Qualifier qualifier  = QualifierBefore(source, tokens, scope_op);
+			if (!qualifier.unresolved)
+			{
+				result.kind      = CompletionContextKind::Qualified;
+				result.qualifier = qualifier.path;
+			}
+		}
+
+		return result;
 	}
 
 } // namespace heimdall

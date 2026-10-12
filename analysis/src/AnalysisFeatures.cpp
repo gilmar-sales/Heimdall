@@ -25,6 +25,15 @@ namespace heimdall
             context.Syntax(), context.Snapshot().Options(context.Document()), offset, external);
     }
 
+    SignatureHelp AnalysisFeatures::Signatures(
+        const AnalysisContext& context, std::size_t offset, const ScopeIndex* external)
+    {
+        if (!context.Valid())
+            return {};
+        return CompletionEngine::Signatures(
+            context.Syntax(), context.Snapshot().Options(context.Document()), offset, external);
+    }
+
     std::vector<NavTarget> AnalysisFeatures::Definition(
         const AnalysisContext& context, std::size_t offset, const ScopeIndex* external)
     {

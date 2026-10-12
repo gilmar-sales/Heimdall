@@ -20,6 +20,10 @@ namespace heimdall
                                                    std::size_t            offset,
                                                    const ScopeIndex*      external = nullptr);
 
+        static SignatureHelp Signatures(const AnalysisContext& context,
+                                        std::size_t            offset,
+                                        const ScopeIndex*      external = nullptr);
+
         static std::vector<NavTarget> Definition(const AnalysisContext& context, std::size_t offset,
                                                  const ScopeIndex* external = nullptr);
 

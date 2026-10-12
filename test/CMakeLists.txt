@@ -47,6 +47,8 @@ add_executable(Tests_run
   src/ReturnValidationSpec.cpp
   src/CompletionSpec.cpp
   src/CompletionParitySpec.cpp
+  src/SignatureHelpSpec.cpp
+  src/IncludeInsertionSpec.cpp
   src/NavigationSpec.cpp
   src/SymbolOutlineSpec.cpp
   src/SymbolProtocolSpec.cpp
@@ -158,6 +160,16 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspTypeHierarchySmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspTypeHierarchySmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspIncludeInsertionSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncludeInsertionSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspSignatureHelpSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspSignatureHelpSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
