@@ -63,14 +63,23 @@ namespace heimdall::lsp
 				break;
 			}
 
+			const auto name       = it->path().filename().string();
+			const auto parentName = it->path().parent_path().filename().string();
+			const bool buildParent = parentName.starts_with("build") ||
+				parentName.starts_with("cmake-build") || parentName == "out";
 			if (it->is_directory(error))
 			{
-				if (IsSkippedDirectory(it->path().filename().string()))
+				const bool buildDirectory = name.starts_with("build") ||
+					name.starts_with("cmake-build") || name == "out";
+				const bool dependencyDirectory = name == "_deps";
+				if ((buildParent && !dependencyDirectory) ||
+					(parentName == "_deps" && !name.ends_with("-src")) ||
+					(IsSkippedDirectory(name) && !buildDirectory && !dependencyDirectory))
 				{
 					it.disable_recursion_pending();
 				}
 			}
-			else if (IsWorkspaceSource(it->path()))
+			else if (!buildParent && parentName != "_deps" && IsWorkspaceSource(it->path()))
 			{
 				if (files.size() == maxFiles)
 				{

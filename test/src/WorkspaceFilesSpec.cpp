@@ -144,6 +144,40 @@ TEST_F(WorkspaceFilesSpec, DiscoveryHonorsTheFileLimit)
     EXPECT_EQ(files.size(), 4u);
 }
 
+TEST_F(WorkspaceFilesSpec, DiscoversDependencySourcesInsideBuildDirectories)
+{
+    Write("build/_deps/freyr-src/src/Core.cpp");
+    Write("cmake-build-debug/_deps/skirnir-src/include/Services.hpp");
+    Write("_deps/library-src/include/Library.hpp");
+    Write("build/_deps/freyr-build/generated.cpp");
+    Write("build/_deps/freyr-subbuild/probe.cpp");
+    Write("build/generated.cpp");
+
+    const auto files = heimdall::lsp::DiscoverWorkspaceSources(mRoot, {});
+
+    EXPECT_EQ(Relative(files), (std::vector<std::string> {
+            "_deps/library-src/include/Library.hpp",
+            "build/_deps/freyr-src/src/Core.cpp",
+            "cmake-build-debug/_deps/skirnir-src/include/Services.hpp"}));
+}
+
+TEST_F(WorkspaceFilesSpec, DependencyDiscoveryHonorsLimitsAndCancellation)
+{
+    Write("build/_deps/library-src/First.cpp");
+    Write("build/_deps/library-src/Second.cpp");
+
+    const auto limited = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, {}, 1);
+    std::stop_source stop;
+    stop.request_stop();
+    const auto cancelled = heimdall::lsp::DiscoverWorkspaceSourcesDetailed(mRoot, stop.get_token());
+
+    EXPECT_EQ(limited.files.size(), 1u);
+    EXPECT_TRUE(limited.truncated);
+    EXPECT_FALSE(limited.complete);
+    EXPECT_TRUE(cancelled.files.empty());
+    EXPECT_TRUE(cancelled.cancelled);
+}
+
 TEST_F(WorkspaceFilesSpec, DiscoveryStopsWhenCancelled)
 {
     for (int i = 0; i < 10; ++i)
