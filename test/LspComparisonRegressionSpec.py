@@ -153,6 +153,37 @@ class RegressionCase(unittest.TestCase):
 class SyntheticRegressions(RegressionCase):
     widget = "#pragma once\nstruct Widget { int Value() const { return 42; } };\n"
 
+    def test_references_keep_source_arguments_even_when_macro_discards_or_stringizes_them(self):
+        text = self.start("#define TEXT(x) #x\n#define PASTE(x) prefix##x\n"
+                          "#define DISCARD(x) 0\n#define CHECK(x) (x)\n"
+                          "int prefixvalue;\n"
+                          "void Run() { int $value = 1; TEXT(value); PASTE(value); DISCARD(value); CHECK(value); }\n")
+
+        result = self.query("textDocument/references", context={"includeDeclaration": False})
+
+        start = text.index("int value =")
+        body = text[start:]
+        ranges = [occurrence(body, "value", index) for index in range(1, 5)]
+        prefix = text[:start]
+        for item in ranges:
+            item["start"]["line"] += prefix.count("\n")
+            item["end"]["line"] += prefix.count("\n")
+        column = len(prefix.rsplit("\n", 1)[-1])
+        for item in ranges:
+            item["start"]["character"] += column
+            item["end"]["character"] += column
+        self.assert_locations(result, [{"uri": self.session.source.as_uri(), "range": item}
+                                       for item in ranges])
+
+    def test_generated_pasted_symbol_references_are_mapped_to_the_macro_call(self):
+        text = self.start("#define PASTE(x) prefix##x\nint $prefixvalue;\n"
+                          "void Run() { PASTE(value); }\n")
+
+        result = self.query("textDocument/references", context={"includeDeclaration": True})
+
+        self.assert_locations(result, [self.location("Main.cpp", text, "prefixvalue"),
+                                       self.location("Main.cpp", text, "PASTE", 1)])
+
     def test_dependency_member_definition_after_header_index_is_ready(self):
         self.start('#include "Widget.hpp"\nint main() { Widget object; return object.$Value(); }\n',
                    {"build/_deps/widget-src/include/Widget.hpp": self.widget})
@@ -697,7 +728,7 @@ def main():
     parser.add_argument("--heimdall", default=str(Path(__file__).resolve().parents[1] /
                                                  "build/lsp" / executable))
     parser.add_argument("--compiler", default="c++",
-                        help="compiler name recorded in the fixture database; never executed")
+                        help="driver name recorded in the fixture database; source compilation is not required")
     parser.add_argument("--filter", default="", help="substring of a test ID")
     args = parser.parse_args()
     server = shutil.which(args.heimdall)

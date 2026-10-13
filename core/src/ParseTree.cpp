@@ -1,4 +1,5 @@
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/MacroTable.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
 #include <algorithm>
@@ -15,6 +16,42 @@
 namespace heimdall
 {
 	using ParseClock = std::chrono::steady_clock;
+
+	std::string ParseTree::ObjectReplacement(std::string_view name, std::size_t offset) const
+	{
+		if (m_macro_resolver)
+		{
+			const auto* macro = m_macro_resolver->Find(name, offset);
+			return macro && !macro->functionLike ? macro->body : std::string {};
+		}
+
+		std::string replacement(PredefinedReplacement(name));
+		for (const auto& event : mPreprocessing.macro_events)
+		{
+			if (event.offset > offset)
+			{
+				break;
+			}
+
+			if (!event.define)
+			{
+				if (event.text == name)
+				{
+					replacement.clear();
+				}
+
+				continue;
+			}
+
+			const auto macro = MacroTable::ParseDefinition(event.text);
+			if (macro && macro->name == name)
+			{
+				replacement = macro->functionLike ? std::string {}: macro->body;
+			}
+		}
+
+		return replacement;
+	}
 
 	ParseTree ParseTree::Parse(std::string_view source, CppStandard standard)
 	{

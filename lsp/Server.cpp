@@ -1307,7 +1307,6 @@ namespace heimdall::lsp
 			return true;
 		}
 
-		// Incremental sync (textDocumentSync = 2): splice the range.
 		simdjson::dom::object start_object;
 		simdjson::dom::object end_object;
 		if (!GetObject(range, "start", start_object) ||!GetObject(range, "end", end_object))
@@ -2205,7 +2204,7 @@ namespace heimdall::lsp
 			context.Snapshot(), context.Document(), offset, include_declaration,
 			CurrentStop());
 		if (!refs && (mode != 0 ||
-			refs.error().code != heimdall::RefactoringErrorCode::UnsupportedSymbol))
+			refs.error().code == heimdall::RefactoringErrorCode::Cancelled))
 		{
 			fail(refs.error());
 			return;
@@ -2251,6 +2250,52 @@ namespace heimdall::lsp
 		}
 
 		std::set<std::pair<std::string, std::size_t>> emitted;
+		const auto appendWritten =[&](std::string& response)
+		{
+			const HeaderView headers = AwaitHeaderScopes(uri_string, document->text, command);
+			const auto* scopes       = headers.index ? &headers.index->Scopes() : nullptr;
+			const auto written = heimdall::Navigation::References(*tree, offset,
+				include_declaration, scopes, CurrentStop());
+			for (const auto& occurrence : written)
+			{
+				std::string otherUri = uri_string;
+				auto lines           = document->lines;
+				if (occurrence.file >= 0)
+				{
+					if (!headers.index || static_cast<std::size_t>(occurrence.file) >= headers.index->Files().size())
+					{
+						continue;
+					}
+
+					otherUri          = UriFromPath(headers.index->Files()[occurrence.file]);
+					const auto source = headers.index->Source(occurrence.file);
+					if (!source)
+					{
+						continue;
+					}
+
+					auto built = std::make_shared<LineIndex>();
+					built->Build(*source);
+					lines = std::move(built);
+				}
+
+				if (!emitted.emplace(otherUri, occurrence.offset).second)
+				{
+					continue;
+				}
+
+				if (response.size() > 1)
+				{
+					response += ',';
+				}
+
+				response += "{\"uri\":";
+				QuoteJson(otherUri, response);
+				response += ",\"range\":";
+				range(lines, occurrence.offset, occurrence.length, response);
+				response += '}';
+			}
+		};
 		const auto appendIndexed =[&](std::string& response)
 		{
 			const auto snapshot  = mIndexStore.Snapshot();
@@ -2332,7 +2377,7 @@ namespace heimdall::lsp
 		{
 			// Locals and fields resolve in a single tree; free functions and
 			// globals resolve across the workspace instead.
-			if (!refs && refs.error().code == heimdall::RefactoringErrorCode::UnsupportedSymbol)
+			if (!refs)
 			{
 				auto workspace_refs = heimdall::RefactoringService::WorkspaceReferences(
 					context.Snapshot(), context.Document(), offset, include_declaration,
@@ -2395,6 +2440,13 @@ namespace heimdall::lsp
 					}
 				}
 
+				appendWritten(response);
+				if (RequestCancelled())
+				{
+					RespondCancelled(id);
+					return;
+				}
+
 				appendIndexed(response);
 				response += ']';
 				Respond(id, response);
@@ -2416,6 +2468,13 @@ namespace heimdall::lsp
 				response += ",\"range\":";
 				range(document->lines, tree->Tokens()[token].offset, tree->Tokens()[token].length, response);
 				response += '}';
+			}
+
+			appendWritten(response);
+			if (RequestCancelled())
+			{
+				RespondCancelled(id);
+				return;
 			}
 
 			appendIndexed(response);

@@ -257,12 +257,13 @@ and mature template semantics are different capabilities, and both matter to the
 > user-defined `operator->`, template member substitution, definition deduplication,
 > public-header macro ownership and the `auto` hover guard. The dated observations above
 > remain the original evidence; the implementation status lives in the isolated-regression
-> section. Still open: template instantiation, template/member references and
-> macro-argument semantics.
+> section. The subsequent gap-closure implementation below closes the remaining eight
+> isolated failures; it does not claim arbitrary C++ semantic parity with clangd.
 
 #### Isolated regression tests for the comparison findings
 
-`test/LspComparisonRegressionSpec.py` contains 45 strict end-to-end regressions using
+`test/LspComparisonRegressionSpec.py` contains the original 45 strict end-to-end regressions
+plus two macro source-occurrence regressions, using
 small, self-owned C++ fixtures. Every test creates its own temporary workspace, headers,
 configuration and compilation database, and starts a fresh Heimdall LSP process.
 **No Hana/Freyr checkout, clangd, installed Boost/Skirnir, compiler invocation or network
@@ -274,6 +275,7 @@ forwarding headers, pointer wrappers and reflection syntax; they do not import t
 python3 test/LspComparisonRegressionSpec.py --heimdall build/lsp/heimdall-lsp
 python3 test/LspComparisonRegressionSpec.py --heimdall build/lsp/heimdall-lsp --filter tuple
 python3 test/LspComparisonSpec.py
+ctest --test-dir build --output-on-failure -R 'LspComparison'
 ```
 
 The suite checks exact definition/reference ranges, duplicate definitions, shadow-safe
@@ -283,11 +285,14 @@ comment-only edit invalidation. Each test waits for its document's versioned dia
 and completion-index readiness instead of assuming that a first response means analysis
 has finished. Failure to reach readiness is an error, not a passing empty response.
 
-Current isolated run: **37 passed, 8 failed**, with no skipped or expected-failure tests
-(implemented 2026-10-13; was 26 passed before the fixes below). The standalone strict
-suite returns a nonzero status while these gaps exist and is manual-only, not registered
-with the ordinary CTest/CI suite. Do not weaken assertions or add `skip`/`expectedFailure`
-to make it green. `LspComparisonSpec.py` separately tests the harness helpers
+Current isolated run: **47 passed, 0 failed**, with no skipped or expected-failure tests.
+The original 45 assertions remain intact: progress was 26/45 → 37/45 → 45/45, followed
+by two additional checks for the intentionally broader macro-reference behavior.
+The suite is now registered as `LspComparisonRegressions` in CTest, with a 180-second
+timeout. Do not weaken assertions or add `skip`/`expectedFailure` to make it green.
+CTest records a deliberately nonexistent fixture driver, proving that these cases do not
+depend on a compiler or its installed standard-library headers at runtime.
+`LspComparisonSpec.py`, also registered with CTest, separately tests the harness helpers
 (21 passing tests), including UTF-16 positions and stale diagnostic rejection.
 
 Implemented from the comparison findings (each with focused `test/src` regressions):
@@ -318,16 +323,38 @@ Implemented from the comparison findings (each with focused `test/src` regressio
 - **`auto` hover guard**: a deduction that still spells `auto` keeps the declared text
   instead of duplicating qualifiers (`constexpr constexpr auto`).
 
-Still open (failing acceptance tests, architectural work, not regressions):
+##### Remaining-gap implementation plan — executed 2026-10-13
 
-- **Template instantiation**: deduced factory returns (`make_tuple` → `Tuple<int, char,
-  double>`), substituted `decltype(auto)` hovers (`at_c<0>` → `const int&`).
-- **References for templates/members**: the workspace index honestly supports neither
-  yet (`at_c` uses, `transform` calls, `IsRunning` calls).
-- **Macro-argument semantics**: occurrences inside function-like macro arguments are
-  invisible to local references/rename (`get_age` in `RUNTIME_CHECK`).
-- **Reflected-operand references**: `^^Entity` hover/definition work; cross-header
-  reflected-operand navigation does not.
+| Phase | Implementation and invariants | Acceptance criterion |
+|---|---|---|
+| 1. Own deduction metadata | `core/TemplateDeduction`: capture formal parameter types/names, return expressions and enclosing `if constexpr` conditions. Cold metadata is shared by indexed completion items and owns its strings; it does not retain parse-tree views. Nested lambda/class/function returns are excluded. Expression size, return count, nesting and call recursion are bounded. | Header-backed factories retain enough information after the header parse is destroyed. |
+| 2. Bind template arguments | Combine explicit arguments with structural deductions from actual argument types. Substitute record arguments recursively; reject conflicting deductions. Preserve integer/floating/character literal types rather than assuming every number is `int`. | `make_tuple(0, '1', 2.0)` hovers as `Tuple<int, char, double>`; `GetAge<Person>()` hovers as `AgeAccessor<Person>`. |
+| 3. Deduce return types | Select supported constexpr branches from known conditions, walking outer conditions before inner ones. Resolve constructed records and parameter/member expressions. Parenthesized lvalues preserve cv/reference for `decltype(auto)`; unparenthesized members use their declared type. Unsupported expressions, unresolved conditions, differing returns or ambiguous factories remain unknown. | `at_c<0/1/2>` yields `const int&`, `const char&`, `const double&`; unknown conditions do not invent a type. The original comment-edit regression keeps the deduced hover. |
+| 4. Resolve reference identities | `Navigation::References` reuses one lexical model and compares resolved declaration identities, with aliases, local scopes and receiver-specific member lookup. Scan written identifiers inside macro arguments and filter inactive branches, directives, comments and strings. Expansion provenance additionally maps unqualified generated identifiers (including token pasting) to the macro invocation. Cancellation yields no partial result. | `at_c`, `transform`, `get_age` and `IsRunning` references cover their written calls, without adding a shadowing local or another receiver's same-named member. |
+| 5. Integrate and enforce | The LSP merges written/header occurrences with existing workspace-index results, deduplicates ranges and checks cancellation. This read-only fallback does not relax prepareRename/rename validation. Add independent C++ positive/negative tests and register the isolated suite in CTest. | All original 45 regressions pass without altered expectations, external project dependencies or expected-failure annotations. |
+
+The compiler-free run also exposed a hidden dependency in namespace-macro indexing:
+header lookup had relied on compiler-probed final macros. `ParseTree::ObjectReplacement`
+now resolves the live replacement from the macro resolver or the file's local directive
+timeline (including redefine/undef), and both completion and navigation use it. Header
+namespace aliases therefore resolve without an installed compiler, rather than accidentally
+working only when a probe supplies the header's macros.
+
+**Intentional difference from clangd:** References is a source-occurrence query in Heimdall.
+It retains an identifier written in a macro argument even if the macro stringizes, pastes
+or discards that argument. For example, references to `value` include `TEXT(value)` and
+`DISCARD(value)`, not only evaluated variable accesses. References to a generated
+`prefixvalue` also include the invocation of `PASTE(value)`, at the macro-name range.
+This is deliberate broader editor behavior, not a compiler-semantic use claim, and does
+not imply that automatically renaming those occurrences is safe.
+
+The **measured gap is closed**, not the whole compiler feature gap. Return deduction is
+structural, not a general constexpr interpreter or overload/specialization engine.
+The reference fallback covers the requested document and its header declaration; it is
+not exhaustive workspace-wide template-instantiation indexing. Generated qualified/member
+identifiers without a direct source spelling, arbitrary callbacks/expressions, concepts,
+specializations, general reflection evaluation and large-project completeness remain future
+work. Do not describe 45/45 as 100% overall clangd compatibility.
 
 Some reduced cases already pass even though the original project probe failed; this narrows
 the missing behavior to combinations of features or readiness rather than pretending that

@@ -1,11 +1,15 @@
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/Doxygen.hpp>
+#include <Heimdall/MacroExpander.hpp>
+#include <Heimdall/MacroScanner.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <climits>
 #include <cstddef>
+#include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -799,11 +803,8 @@ namespace heimdall
 							break;
 						}
 
-						const auto& resolver = m_tree.MacroResolverRef();
-						const auto* macro = is_namespace && resolver
-						? resolver->Find(word, tokens[cursor].offset) : nullptr;
-						const auto replacement = macro && !macro->functionLike
-						? std::string_view(macro->body) : m_tree.PredefinedReplacement(word);
+						const auto replacement = is_namespace
+						? m_tree.ObjectReplacement(word, tokens[cursor].offset) : std::string {};
 						const bool identifierReplacement = is_namespace && !replacement.empty() &&
 							std::all_of(replacement.begin(), replacement.end(),[](char character)
 							{
@@ -2620,6 +2621,288 @@ namespace heimdall
 		}
 
 		return targets;
+	}
+
+	std::vector<NavTarget> Navigation::References(
+		const ParseTree& tree,
+		std::size_t offset,
+		bool includeDeclaration,
+		const ScopeIndex* external,
+		std::stop_token stop)
+	{
+		const Model model(tree, external);
+		struct GeneratedOccurrence
+		{
+			std::string name;
+			std::size_t token = 0;
+		};
+
+		std::vector<GeneratedOccurrence> generated;
+		std::vector<std::pair<std::size_t, MacroTable>> checkpoints;
+		if (!tree.MacroResolverRef())
+		{
+			MacroTable local;
+			checkpoints.emplace_back(0, local.Freeze());
+			MacroScanCallbacks callbacks;
+			callbacks.checkpoint =[&](std::size_t position)
+			{
+				checkpoints.emplace_back(position, local.Freeze());
+			};
+			const auto scan = MacroScanner::Scan(tree.Source(), {}, local, callbacks, stop);
+			if (scan.cancelled)
+			{
+				return {};
+			}
+		}
+
+		for (std::size_t first = 0; first < tree.Tokens().size(); ++first)
+		{
+			if (stop.stop_requested())
+			{
+				return {};
+			}
+
+			if (tree.Tokens()[first].kind != TokenKind::Identifier)
+			{
+				continue;
+			}
+
+			const auto position = tree.Tokens()[first].offset;
+			const bool active = std::any_of(tree.ActiveRanges().begin(), tree.ActiveRanges().end(),
+				[&](const auto& range)
+				{
+					return position >= range.offset && position < range.offset + range.length;
+			});
+			const bool directive = std::any_of(tree.Directives().begin(), tree.Directives().end(),
+				[&](const auto& range)
+				{
+					return position >= range.offset && position < range.offset + range.length;
+			});
+			if (!active || directive)
+			{
+				continue;
+			}
+
+			std::optional<MacroTable> table;
+			if (const auto & resolver = tree.MacroResolverRef())
+			{
+				const auto* definition = resolver->Find(tree.Text(tree.Tokens()[first]),
+					tree.Tokens()[first].offset);
+				if (!definition ||!definition->functionLike)
+				{
+					continue;
+				}
+
+				table = resolver->TableAt(tree.Tokens()[first].offset);
+			}
+			else
+			{
+				const auto found = std::upper_bound(checkpoints.begin(), checkpoints.end(),
+					tree.Tokens()[first].offset,
+					[](std::size_t position, const auto& checkpoint)
+					{
+						return position < checkpoint.first;
+				});
+				table = std::prev(found) -> second;
+			}
+
+			if (!table)
+			{
+				return {};
+			}
+
+			const auto* definition = table->Find(tree.Text(tree.Tokens()[first]));
+			if (!definition ||!definition->functionLike)
+			{
+				continue;
+			}
+
+			const auto open = model.NextSig(first);
+			if (open == kNone || model.Text(open) != "(")
+			{
+				continue;
+			}
+
+			std::size_t depth = 1;
+			auto end          = open + 1;
+			for (; end < tree.Tokens().size(); ++end)
+			{
+				if (model.Text(end) == "(")
+				{
+					++depth;
+				}
+				else if (model.Text(end) == ")" && --depth == 0)
+				{
+					break;
+				}
+			}
+
+			if (end == tree.Tokens().size())
+			{
+				return {};
+			}
+
+			const auto count                                = end - first + 1;
+			constexpr std::size_t kReferenceExpansionTokens = 65536;
+			constexpr std::size_t kReferenceExpansionDepth  = 64;
+			const auto expanded = MacroExpander(*table, {kReferenceExpansionTokens, kReferenceExpansionDepth})
+			.Expand(tree.Source(), std::span(tree.Tokens()).subspan(first, count), false, stop);
+			if (expanded.truncated)
+			{
+				return {};
+			}
+
+			for (std::size_t index = 0; index < expanded.tokens.size(); ++index)
+			{
+				const auto& token = expanded.tokens[index];
+				if (token.kind == TokenKind::Identifier && token.spelled == kNoToken &&
+					token.invocation < count)
+				{
+					const auto previous = index > 0 ? expanded.tokens[index - 1].text : std::string_view {};
+					const auto next     = index + 1 < expanded.tokens.size() ? expanded.tokens[index + 1].text : std::string_view {};
+					if (previous != "." && previous != "->" && previous != "::" && next != "::")
+					{
+						generated.push_back({std::string(token.text), first + token.invocation});
+					}
+				}
+			}
+
+			first = end;
+		}
+
+		const auto resolve =[&](std::size_t position)
+		{
+			bool ambiguous   = false;
+			auto found       = ResolveAt(model, position, ambiguous);
+			const auto token = model.IdentifierAt(position);
+			if (token != kNone && QualificationOf(model, token).member_access)
+			{
+				const auto member = CompletionEngine::Hover(tree, {}, position, external);
+				if (!member ||!member->has_location)
+				{
+					return std::vector<NavTarget> {};
+				}
+
+				std::erase_if(found,[&](const auto& candidate)
+					{
+						const auto target = model.ToTarget(candidate);
+						return target.file != member->file || target.offset != member->offset;
+				});
+			}
+
+			found = PreferDefinitions(model, std::move(found));
+			RankOverloads(model, token, found);
+			return ambiguous ? std::vector<NavTarget> {}: ToTargets(model, found);
+		};
+		const auto selected = resolve(offset);
+		if (selected.size() != 1)
+		{
+			return {};
+		}
+
+		const auto& anchor = selected.front();
+		std::vector<NavTarget> result;
+		if (includeDeclaration)
+		{
+			AppendUnique(result, anchor);
+		}
+
+		for (const auto token : tree.IdentifierTokens())
+		{
+			if (stop.stop_requested())
+			{
+				return {};
+			}
+
+			const auto& identifier = tree.Tokens()[token];
+			if (tree.Text(identifier) != anchor.name)
+			{
+				continue;
+			}
+
+			const auto active = std::any_of(tree.ActiveRanges().begin(), tree.ActiveRanges().end(),
+				[&](const auto& range)
+				{
+					return identifier.offset >= range.offset && identifier.offset < range.offset + range.length;
+			});
+			if (!active)
+			{
+				continue;
+			}
+
+			const auto directive = std::any_of(tree.Directives().begin(), tree.Directives().end(),
+				[&](const auto& range)
+				{
+					return identifier.offset >= range.offset && identifier.offset < range.offset + range.length;
+			});
+			if (directive)
+			{
+				continue;
+			}
+
+			const bool declaring = std::any_of(model.Decls().begin(), model.Decls().end(),
+				[&](const auto& declaration)
+				{
+					return declaration.offset == identifier.offset;
+			});
+			if (declaring && !includeDeclaration)
+			{
+				continue;
+			}
+
+			const auto targets = resolve(identifier.offset);
+			if (targets.size() != 1)
+			{
+				continue;
+			}
+
+			const auto& target = targets.front();
+			if (target.file != anchor.file || target.offset != anchor.offset || target.scope != anchor.scope)
+			{
+				continue;
+			}
+
+			auto occurrence   = anchor;
+			occurrence.file   = -1;
+			occurrence.offset = identifier.offset;
+			occurrence.length = identifier.length;
+			AppendUnique(result, std::move(occurrence));
+		}
+
+		for (const auto& occurrence : generated)
+		{
+			if (stop.stop_requested())
+			{
+				return {};
+			}
+
+			if (occurrence.name != anchor.name)
+			{
+				continue;
+			}
+
+			const auto& invocation = tree.Tokens()[occurrence.token];
+			auto lookup            = LookupUnqualified(model, occurrence.name, invocation.offset);
+			if (lookup.ambiguous)
+			{
+				continue;
+			}
+
+			const auto targets = ToTargets(model, PreferDefinitions(model, std::move(lookup.found)));
+			if (targets.size() != 1 || targets.front().file != anchor.file ||
+				targets.front().offset != anchor.offset || targets.front().scope != anchor.scope)
+			{
+				continue;
+			}
+
+			auto reference   = anchor;
+			reference.file   = -1;
+			reference.offset = invocation.offset;
+			reference.length = invocation.length;
+			AppendUnique(result, std::move(reference));
+		}
+
+		return result;
 	}
 
 	std::vector<NavTarget> Navigation::Implementation(const ParseTree& tree, std::size_t offset,

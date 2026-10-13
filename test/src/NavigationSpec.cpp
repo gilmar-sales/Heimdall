@@ -52,13 +52,13 @@ TEST(NavigationSpec, CollectsUsingDirectivesWithTheirScope)
         "namespace a { int x; }\n"
         "using namespace a;\n"
         "namespace n { using namespace ::a; void f() { using namespace a; } }\n";
-    const heimdall::ParseTree tree       = heimdall::ParseTree::Parse(source);
-    const auto                directives = heimdall::Navigation::UsingDirectives(tree);
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto directives = heimdall::Navigation::UsingDirectives(tree);
     ASSERT_EQ(directives.size(), 3u);
     EXPECT_TRUE(directives[0].scope.empty());
-    EXPECT_EQ(directives[0].target, (std::vector<std::string> { "a" }));
-    EXPECT_EQ(directives[1].scope, (std::vector<std::string> { "n" }));
-    EXPECT_EQ(directives[1].target, (std::vector<std::string> { "a" }));
+    EXPECT_EQ(directives[0].target, (std::vector<std::string> {"a"}));
+    EXPECT_EQ(directives[1].scope, (std::vector<std::string> {"n"}));
+    EXPECT_EQ(directives[1].target, (std::vector<std::string> {"a"}));
 }
 
 TEST(NavigationSpec, DefinitionOfLocalsParametersAndGlobals)
@@ -166,7 +166,7 @@ TEST(NavigationSpec, ReportsAmbiguousNameFromTwoDirectives)
     ASSERT_EQ(ambiguities.size(), 1u);
     EXPECT_EQ(ambiguities[0].name, "x");
     EXPECT_EQ(ambiguities[0].offset, Find(source, "x; }", 2));
-    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> { "a::x", "b::x" }));
+    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> {"a::x", "b::x"}));
     // Go-to-definition offers both candidates.
     EXPECT_EQ(DefinitionOf(source, "x; }", 2).size(), 2u);
 }
@@ -204,7 +204,7 @@ TEST(NavigationSpec, DirectiveVersusGlobalDeclaration)
         "int f() { return x; }\n";
     const auto ambiguities = AmbiguitiesIn(source);
     ASSERT_EQ(ambiguities.size(), 1u);
-    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> { "a::x", "x" }));
+    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> {"a::x", "x"}));
 }
 
 TEST(NavigationSpec, DirectiveInsideNamespaceNominatesAtCommonAncestor)
@@ -299,20 +299,20 @@ TEST(NavigationSpec, InheritedMembersResolveThroughBaseClasses)
 TEST(NavigationSpec, FindDefinitionsMatchesScopeNameAndArity)
 {
     constexpr std::string_view source = "namespace a { void run(int) {} void run(int, int) {} }\n";
-    const heimdall::ParseTree  tree   = heimdall::ParseTree::Parse(source);
-    const auto one = heimdall::Navigation::FindDefinitions(tree, { "a" }, "run", true, 1);
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto one = heimdall::Navigation::FindDefinitions(tree, {"a"}, "run", true, 1);
     ASSERT_EQ(one.size(), 1u);
     EXPECT_EQ(one[0].offset, Find(source, "run(int)"));
-    const auto two = heimdall::Navigation::FindDefinitions(tree, { "a" }, "run", true, 2);
+    const auto two = heimdall::Navigation::FindDefinitions(tree, {"a"}, "run", true, 2);
     ASSERT_EQ(two.size(), 1u);
     EXPECT_EQ(two[0].offset, Find(source, "run(int, int)"));
-    EXPECT_TRUE(heimdall::Navigation::FindDefinitions(tree, { "b" }, "run", true, 1).empty());
+    EXPECT_TRUE(heimdall::Navigation::FindDefinitions(tree, {"b"}, "run", true, 1).empty());
 }
 
 TEST(NavigationSpec, ExternalIndexSuppliesHeaderDeclarationsWithFiles)
 {
     constexpr std::string_view header = "namespace lib { int answer; void greet(); }\n";
-    heimdall::ScopeIndex       index  = heimdall::CompletionEngine::IndexScopes(header, {});
+    heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
     for (auto& scope : index)
     {
         for (auto& member : scope.members)
@@ -322,13 +322,13 @@ TEST(NavigationSpec, ExternalIndexSuppliesHeaderDeclarationsWithFiles)
     }
 
     constexpr std::string_view source = "using namespace lib;\nint f() { return answer; }\n";
-    const heimdall::ParseTree  tree   = heimdall::ParseTree::Parse(source);
-    const auto                 targets =
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto targets =
         heimdall::Navigation::Definition(tree, Find(source, "answer; }") + 1, &index);
     ASSERT_EQ(targets.size(), 1u);
     EXPECT_EQ(targets[0].file, 7);
     EXPECT_EQ(targets[0].offset, Find(header, "answer"));
-    EXPECT_EQ(targets[0].scope, (std::vector<std::string> { "lib" }));
+    EXPECT_EQ(targets[0].scope, (std::vector<std::string> {"lib"}));
 }
 
 TEST(NavigationSpec, AmbiguityAcrossHeaderNamespaces)
@@ -337,10 +337,10 @@ TEST(NavigationSpec, AmbiguityAcrossHeaderNamespaces)
         "namespace one { int size; }\nnamespace two { int size; }\n", {});
     constexpr std::string_view source =
         "using namespace one;\nusing namespace two;\nint f() { return size; }\n";
-    const heimdall::ParseTree tree        = heimdall::ParseTree::Parse(source);
-    const auto                ambiguities = heimdall::Navigation::FindAmbiguities(tree, &index);
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto ambiguities = heimdall::Navigation::FindAmbiguities(tree, &index);
     ASSERT_EQ(ambiguities.size(), 1u);
-    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> { "one::size", "two::size" }));
+    EXPECT_EQ(ambiguities[0].candidates, (std::vector<std::string> {"one::size", "two::size"}));
 }
 
 TEST(NavigationSpec, DefinitionSiteJumpsBackToItsDeclaration)
@@ -396,10 +396,13 @@ TEST(NavigationSpec, EnumDefinitionPointsAtTheNameInSourceAndHeaders)
 
     // Same through the header index: one result, aimed at the name token.
     constexpr std::string_view header = "namespace n {\n    enum class Mode { Fast, Slow };\n}\n";
-    heimdall::ScopeIndex       index  = heimdall::CompletionEngine::IndexScopes(header, {});
-    constexpr std::string_view user   = "using namespace n;\nMode value;\nauto x = Mode::Fast;\n";
-    const heimdall::ParseTree  tree   = heimdall::ParseTree::Parse(user);
-    for (const std::size_t at : { Find(user, "Mode value"), Find(user, "Mode::Fast") })
+    heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
+    constexpr std::string_view user = "using namespace n;\nMode value;\nauto x = Mode::Fast;\n";
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(user);
+    for (const std::size_t at :
+        {
+            Find(user, "Mode value"), Find(user, "Mode::Fast")
+    })
     {
         const auto external = heimdall::Navigation::Definition(tree, at, &index);
         ASSERT_EQ(external.size(), 1u);
@@ -459,7 +462,7 @@ TEST(NavigationSpec, ResolvesPrivateMemberDeclaredInAHeaderIndex)
         "private:\n"
         "    static int Utf16Width(int text, int stop) noexcept;\n"
         "};\n";
-    heimdall::ScopeIndex       index = heimdall::CompletionEngine::IndexScopes(header, {});
+    heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
     constexpr std::string_view source =
         "int LineIndex::Utf16Width(int text, int stop) noexcept { return text + stop; }\n";
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
@@ -511,6 +514,42 @@ TEST(NavigationSpec, DefinitionThroughNamespaceAlias)
     EXPECT_EQ(targets[0].offset, Find(source, "target;"));
 }
 
+TEST(NavigationSpec, HeaderNamespaceMacroResolvesWithoutCompilerPredefinedMacros)
+{
+    const std::string header =
+        "#define LIB_NAMESPACE library\n"
+        "namespace LIB_NAMESPACE { using Entity = unsigned int; }\n";
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
+    const std::string source = "namespace library { Entity object; }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto targets = heimdall::Navigation::Definition(tree, source.find("Entity object"), &index);
+
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, header.find("Entity ="));
+}
+
+TEST(NavigationSpec, NamespaceMacroReplacementFollowsLocalRedefinitionAndUndef)
+{
+    const std::string source =
+        "int padding;\n#define LIB_NAMESPACE first\n"
+        "namespace LIB_NAMESPACE { int one; }\n"
+        "#undef LIB_NAMESPACE\nint boundary;\n"
+        "#define LIB_NAMESPACE second\n"
+        "namespace LIB_NAMESPACE { int two; }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto before = tree.ObjectReplacement("LIB_NAMESPACE", source.find("padding"));
+    const auto first = tree.ObjectReplacement("LIB_NAMESPACE", source.find("int one"));
+    const auto undefined = tree.ObjectReplacement("LIB_NAMESPACE", source.find("boundary"));
+    const auto second = tree.ObjectReplacement("LIB_NAMESPACE", source.find("int two"));
+
+    EXPECT_TRUE(before.empty());
+    EXPECT_EQ(first, "first");
+    EXPECT_TRUE(undefined.empty());
+    EXPECT_EQ(second, "second");
+}
+
 TEST(NavigationSpec, MemberDefinitionThroughSmartPointerOperatorArrow)
 {
     constexpr std::string_view header =
@@ -535,4 +574,149 @@ TEST(NavigationSpec, MemberDefinitionThroughSmartPointerOperatorArrow)
         heimdall::Navigation::Definition(tree, Find(source, "IsRunning();"), &index);
     ASSERT_EQ(targets.size(), 1u);
     EXPECT_EQ(targets[0].offset, Find(header, "IsRunning"));
+}
+
+TEST(NavigationSpec, ReferencesInsideNestedMacroArgumentsPreserveOriginalRanges)
+{
+    const std::string source =
+        "#define INNER(...) (__VA_ARGS__)\n"
+        "#define CHECK(...) INNER(__VA_ARGS__)\n"
+        "void Run() { int value = 1; CHECK(value); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("value ="), true);
+
+    ASSERT_EQ(references.size(), 2u);
+    EXPECT_EQ(references[0].offset, source.find("value ="));
+    EXPECT_EQ(references[1].offset, source.find("value);"));
+    EXPECT_EQ(references[1].length, std::string_view("value").size());
+}
+
+TEST(NavigationSpec, ReferencesRetainStringizedPastedAndDiscardedSourceArguments)
+{
+    const std::string source =
+        "#define TEXT(x) #x\n"
+        "#define PASTE(x) prefix##x\n"
+        "#define DISCARD(x) 0\n"
+        "#define CHECK(x) (x)\n"
+        "void Run() { int value = 1; TEXT(value); PASTE(value); DISCARD(value); CHECK(value); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("value ="), true);
+    const auto stringized = heimdall::Navigation::References(tree, source.find("TEXT(value)") + 5,
+        true);
+
+    ASSERT_EQ(references.size(), 5u);
+    EXPECT_EQ(references[1].offset, source.find("TEXT(value)") + 5);
+    EXPECT_EQ(references[2].offset, source.find("PASTE(value)") + 6);
+    EXPECT_EQ(references[3].offset, source.find("DISCARD(value)") + 8);
+    EXPECT_EQ(references[4].offset, source.find("CHECK(value)") + 6);
+    EXPECT_EQ(stringized.size(), references.size());
+}
+
+TEST(NavigationSpec, PastedIdentifiersAlsoReferenceTheGeneratedSymbolAtMacroInvocation)
+{
+    const std::string source =
+        "#define PASTE(x) prefix##x\n"
+        "int prefixvalue;\n"
+        "void Run() { PASTE(value); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("prefixvalue;"), true);
+
+    ASSERT_EQ(references.size(), 2u);
+    EXPECT_EQ(references[1].offset, source.find("PASTE(value)"));
+    EXPECT_EQ(references[1].length, std::string_view("PASTE").size());
+}
+
+TEST(NavigationSpec, GeneratedReferencesExcludeInactiveMacroInvocations)
+{
+    const std::string source =
+        "#define PASTE(x) prefix##x\n"
+        "int prefixvalue;\n"
+        "#if 0\nvoid Ignored() { PASTE(value); }\n#endif\n"
+        "void Run() { PASTE(value); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("prefixvalue;"), false);
+
+    ASSERT_EQ(references.size(), 1u);
+    EXPECT_EQ(references[0].offset, source.rfind("PASTE(value)"));
+}
+
+TEST(NavigationSpec, ReferencesInsideMacroArgumentsExcludeShadowingLocals)
+{
+    const std::string source =
+        "#define CHECK(x) (x)\n"
+        "void Run() { int value = 1; { int value = 2; CHECK(value); } CHECK(value); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("value = 1"), true);
+
+    ASSERT_EQ(references.size(), 2u);
+    EXPECT_EQ(references[1].offset, source.rfind("CHECK(value)") + 6);
+}
+
+TEST(NavigationSpec, MemberReferencesDoNotIncludeSameNameOnAnotherReceiver)
+{
+    const std::string source =
+        "struct First { void Run(); }; struct Second { void Run(); };\n"
+        "void Use() { First first; Second second; first.Run(); second.Run(); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("first.Run") + 6, false);
+
+    ASSERT_EQ(references.size(), 1u);
+    EXPECT_EQ(references[0].offset, source.find("first.Run") + 6);
+}
+
+TEST(NavigationSpec, UnknownReceiverDoesNotAcquireUnrelatedMemberReferences)
+{
+    const std::string source =
+        "struct First { void Run(); };\n"
+        "void Use() { unknown.Run(); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("unknown.Run") + 8,
+        true);
+
+    EXPECT_TRUE(references.empty());
+}
+
+TEST(NavigationSpec, ReferencesIgnoreInactiveBranchesCommentsAndStrings)
+{
+    const std::string source =
+        "int value;\n#if 0\nint unused = value;\n#endif\n"
+        "void Run() { value = 1; /* value */ const char* text = \"value\"; }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("value;"), false);
+
+    ASSERT_EQ(references.size(), 1u);
+    EXPECT_EQ(references[0].offset, source.find("value = 1"));
+}
+
+TEST(NavigationSpec, AmbiguousTemplateReferencesRemainUnknown)
+{
+    const std::string source =
+        "template<class T> void Run(T value); template<class T> void Run(T* value);\n"
+        "void Use() { Run(unknown); }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    const auto references = heimdall::Navigation::References(tree, source.find("Run(unknown)"), true);
+
+    EXPECT_TRUE(references.empty());
+}
+
+TEST(NavigationSpec, CancelledReferencesYieldNoPartialResults)
+{
+    const std::string source = "int value; void Run() { value = 1; }\n";
+    const auto tree = heimdall::ParseTree::Parse(source);
+    std::stop_source cancellation;
+    cancellation.request_stop();
+
+    const auto references = heimdall::Navigation::References(tree, source.find("value;"), true,
+        nullptr, cancellation.get_token());
+
+    EXPECT_TRUE(references.empty());
 }

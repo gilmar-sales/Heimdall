@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <stop_token>
 #include <vector>
 
 namespace heimdall
@@ -74,6 +75,17 @@ namespace heimdall
 		// known, else the declaration). An ambiguous name yields every candidate.
 		static std::vector<NavTarget> Definition(const ParseTree& tree, std::size_t offset,
 			const ScopeIndex* external = nullptr);
+
+		/// Resolves written occurrences in this document, including macro arguments.
+		/// Written arguments are retained even when stringized, pasted or discarded.
+		/// This source-occurrence query does not authorize a rename of those arguments.
+		/// Header declarations are included when requested; ambiguous identities yield no result.
+		[[nodiscard]] static std::vector<NavTarget> References(
+			const ParseTree& tree,
+			std::size_t offset,
+			bool includeDeclaration,
+			const ScopeIndex* external = nullptr,
+			std::stop_token stop = {});
 
 		// Where the symbol under `offset` is implemented: overriders / derived
 		// types, else out-of-line definitions, else the definition itself.

@@ -1757,12 +1757,9 @@ namespace heimdall
 				std::vector<std::string> names;
 				while (pos < significant.size() && is_identifier(significant[pos]))
 				{
-					const auto spelling  = text(significant[pos]);
-					const auto& resolver = tree.MacroResolverRef();
-					const auto* macro = resolver ? resolver->Find(spelling,
-						tree.Tokens()[significant[pos]].offset) : nullptr;
-					const auto replacement = macro && !macro->functionLike
-					? std::string_view(macro->body) : tree.PredefinedReplacement(spelling);
+					const auto spelling = text(significant[pos]);
+					const auto replacement = tree.ObjectReplacement(spelling,
+						tree.Tokens()[significant[pos]].offset);
 					if (!replacement.empty() && std::ranges::all_of(replacement, IsIdentChar))
 					{
 						names.emplace_back(replacement);
@@ -3861,6 +3858,21 @@ namespace heimdall
 			return false;
 		}
 
+		bool HasAutoPlaceholder(std::string_view type)
+		{
+			for (auto position = type.find("auto"); position != std::string_view::npos;
+				position = type.find("auto", position + 4))
+			{
+				if ((position == 0 ||!IsIdentChar(type[position - 1])) &&
+					(position + 4 == type.size() ||!IsIdentChar(type[position + 4])))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		CompletionItem DescribeDeclared(
 			const ParseTree& tree,
 			std::string_view source,
@@ -3918,6 +3930,10 @@ namespace heimdall
 			{
 				item.type_text      = ReturnTypeText(tree, node);
 				item.templateParams = TemplateParamNames(tree, node);
+				if (HasAutoPlaceholder(item.type_text))
+				{
+					item.deduction = TemplateDeduction::Capture(tree, node);
+				}
 			}
 			else if (kind == CompletionKind::Type)
 			{
@@ -6372,6 +6388,8 @@ namespace heimdall
 			std::string name;
 			std::vector<std::string> targs;
 			std::string post; // '(' call/construct, '[' subscript, in source order
+			std::size_t callOpen  = NoIndex;
+			std::size_t callClose = NoIndex;
 		};
 
 		struct Chain
@@ -6472,7 +6490,13 @@ namespace heimdall
 						post_reversed += p == "]" ? '[' : '(';
 						group_open  = open;
 						group_close = pos;
-						pos         = PreviousSignificant(m_tokens, open, m_source);
+						if (p == ")")
+						{
+							segment.callOpen  = open;
+							segment.callClose = pos;
+						}
+
+						pos = PreviousSignificant(m_tokens, open, m_source);
 						// `f<T>(...)`: keep the template arguments.
 						if (post_reversed.back() == '(' && pos < m_tokens.size() &&
 							m_tokens[pos].kind == TokenKind::Punctuation &&
@@ -6670,6 +6694,90 @@ namespace heimdall
 				}
 
 				return written;
+			}
+
+			void RefineFunctionAt(std::size_t endOffset, CompletionItem& item) const
+			{
+				if (!item.deduction)
+				{
+					return;
+				}
+
+				const auto name = TokenBefore(m_tokens, endOffset);
+				if (name >= m_tokens.size())
+				{
+					return;
+				}
+
+				ChainSegment segment;
+				segment.name = item.label;
+				auto open    = NextSignificant(name);
+				if (open < m_tokens.size() && IsPunct(open, "<"))
+				{
+					const auto close = SplitTemplateArgs(m_source, m_tokens, open, segment.targs);
+					open             = close < m_tokens.size() ? NextSignificant(close) : m_tokens.size();
+				}
+
+				if (open >= m_tokens.size() ||!IsPunct(open, "("))
+				{
+					return;
+				}
+
+				std::size_t nesting = 1;
+				auto close          = open + 1;
+				for (; close < m_tokens.size(); ++close)
+				{
+					if (IsPunct(close, "("))
+					{
+						++nesting;
+					}
+					else if (IsPunct(close, ")") && --nesting == 0)
+					{
+						break;
+					}
+				}
+
+				segment.callOpen  = open;
+				segment.callClose = close;
+				for (const auto& [key, scopes] : m_by_path)
+				{
+					for (const auto* scope : scopes)
+					{
+						const auto found = std::find_if(scope->members.begin(), scope->members.end(),
+							[&](const auto& member)
+							{
+								return member.file == item.file && member.offset == item.offset && member.label == item.label;
+						});
+						if (found == scope->members.end())
+						{
+							continue;
+						}
+
+						const auto overloads = FunctionsNamed(scope->path, item.label, false);
+						if (std::any_of(overloads.begin(), overloads.end(),[&](const auto& candidate)
+							{
+								return candidate.file != item.file || candidate.offset != item.offset;
+						}))
+						{
+							return;
+						}
+
+						const auto type = DeducedReturn(item, segment, scope->path, 0);
+						if (type.empty())
+						{
+							return;
+						}
+
+						const auto at = item.detail.find(item.type_text);
+						if (at != std::string::npos)
+						{
+							item.detail.replace(at, item.type_text.size(), type);
+						}
+
+						item.type_text = type;
+						return;
+					}
+				}
 			}
 
 			std::string VariableTypeText(std::size_t token) const
@@ -7765,6 +7873,19 @@ namespace heimdall
 						FindDeep(record, name, CompletionKind::Variable, visited, 0);
 					if (found.item != nullptr)
 					{
+						if (found.item->file < 0 && HasAutoPlaceholder(found.item->type_text))
+						{
+							const auto token = std::lower_bound(m_tokens.begin(), m_tokens.end(), found.item->offset,
+								[](const Token& candidate, std::uint32_t offset)
+								{
+									return candidate.offset < offset;
+							});
+							if (token != m_tokens.end() && token->offset == found.item->offset)
+							{
+								return ResolveInitializerAfter(static_cast<std::size_t>(token - m_tokens.begin()), depth + 1);
+							}
+						}
+
 						return FromText(found.item->type_text, found.owner, 0);
 					}
 				}
@@ -7777,6 +7898,19 @@ namespace heimdall
 						FindDeep(prefix, name, CompletionKind::Variable, visited, 0);
 					if (found.item != nullptr)
 					{
+						if (found.item->file < 0 && HasAutoPlaceholder(found.item->type_text))
+						{
+							const auto token = std::lower_bound(m_tokens.begin(), m_tokens.end(), found.item->offset,
+								[](const Token& candidate, std::uint32_t offset)
+								{
+									return candidate.offset < offset;
+							});
+							if (token != m_tokens.end() && token->offset == found.item->offset)
+							{
+								return ResolveInitializerAfter(static_cast<std::size_t>(token - m_tokens.begin()), depth + 1);
+							}
+						}
+
 						return FromText(found.item->type_text, found.owner, 0);
 					}
 				}
@@ -7822,8 +7956,9 @@ namespace heimdall
 				}
 
 				// Find the end of the initializer, then parse the chain that ends there.
-				std::size_t end = t + 1;
-				int nest        = 0;
+				std::size_t end   = t + 1;
+				int nest          = 0;
+				int templateDepth = 0;
 				for (; end < m_tokens.size(); ++end)
 				{
 					if (m_tokens[end].kind != TokenKind::Punctuation)
@@ -7832,6 +7967,19 @@ namespace heimdall
 					}
 
 					const std::string_view p = TokenText(m_source, m_tokens[end]);
+					if (p == "<")
+					{
+						++templateDepth;
+					}
+					else if (p == ">" && templateDepth > 0)
+					{
+						--templateDepth;
+					}
+					else if (p == ">>" && templateDepth > 0)
+					{
+						templateDepth = std::max(0, templateDepth - 2);
+					}
+
 					if (p == "(" || p == "[" || p == "{")
 					{
 						++nest;
@@ -7843,7 +7991,7 @@ namespace heimdall
 							break;
 						}
 					}
-					else if ((p == ";" || p == ",") && nest <= 0)
+					else if ((p == ";" ||(p == "," && templateDepth == 0)) && nest <= 0)
 					{
 						break;
 					}
@@ -7920,7 +8068,7 @@ namespace heimdall
 				}
 				else if (segment.qualifier.empty() || call)
 				{
-					value = ResolveCallOrConstruct(segment, new_expression);
+					value = ResolveCallOrConstruct(segment, new_expression, depth);
 				}
 
 				if (!value.ok && !segment.qualifier.empty() && !call)
@@ -7948,7 +8096,7 @@ namespace heimdall
 				return {};
 			}
 
-			Resolved ResolveCallOrConstruct(const ChainSegment& segment, bool new_expression) const
+			Resolved ResolveCallOrConstruct(const ChainSegment& segment, bool new_expression, int depth) const
 			{
 				(void) new_expression;
 				// `std::make_unique<T>(...)` and friends.
@@ -8005,11 +8153,168 @@ namespace heimdall
 						FindDeep(scope, segment.name, CompletionKind::Function, visited, 0);
 					if (found.item != nullptr && !found.item->type_text.empty())
 					{
+						if (found.item->deduction)
+						{
+							const auto overloads = FunctionsNamed(scope, segment.name, true);
+							if (std::any_of(overloads.begin(), overloads.end(),[&](const auto& candidate)
+								{
+									return candidate.file != found.item->file || candidate.offset != found.item->offset;
+							}))
+							{
+								return {};
+							}
+
+							const auto deduced = DeducedReturn(*found.item, segment, found.owner, depth + 1);
+							return deduced.empty() ? Resolved {}: FromText(deduced, found.owner, depth);
+						}
+
 						return FromText(found.item->type_text, found.owner, 0);
 					}
 				}
 
 				return {};
+			}
+
+			std::string ArgumentType(std::size_t begin, std::size_t end, int depth) const
+			{
+				constexpr int kMaxDeductionDepth = 8;
+				while (begin < end && IsTrivia(m_tokens[begin].kind))
+				{
+					++begin;
+				}
+
+				while (end > begin && IsTrivia(m_tokens[end - 1].kind))
+				{
+					--end;
+				}
+
+				if (begin == end || depth >= kMaxDeductionDepth) return {};
+				const auto text = TokenText(m_source, m_tokens[begin]);
+				if ((text == "-" || text == "+") && begin + 1 < end)
+				{
+					return ArgumentType(begin + 1, end, depth + 1);
+				}
+
+				if (begin + 1 == end)
+				{
+					if (m_tokens[begin].kind == TokenKind::Number)
+					{
+						const bool hexadecimal = text.starts_with("0x") || text.starts_with("0X");
+						const bool floating    = text.find_first_of(hexadecimal ? ".pP" : ".eE") != std::string_view::npos;
+						if (floating)
+						{
+							if (text.ends_with('f') || text.ends_with('F'))
+							{
+								return "float";
+							}
+
+							if (text.ends_with('l') || text.ends_with('L'))
+							{
+								return "long double";
+							}
+
+							return "double";
+						}
+
+						const auto suffix        = text.find_last_not_of("uUlL");
+						const auto ending        = suffix == std::string_view::npos ? text : text.substr(suffix + 1);
+						const bool unsignedValue = ending.find_first_of("uU") != std::string_view::npos;
+						const auto longs = std::count_if(ending.begin(), ending.end(),[](char character)
+							{
+								return character == 'l' || character == 'L';
+						});
+						return std::string(unsignedValue ? "unsigned " : "") +(longs >= 2 ? "long long" : longs == 1 ? "long" : "int");
+					}
+
+					if (m_tokens[begin].kind == TokenKind::CharacterLiteral)
+					{
+						if (text.starts_with("u8"))
+						{
+							return "char8_t";
+						}
+
+						if (text.starts_with('u'))
+						{
+							return "char16_t";
+						}
+
+						if (text.starts_with('U'))
+						{
+							return "char32_t";
+						}
+
+						if (text.starts_with('L'))
+						{
+							return "wchar_t";
+						}
+
+						return "char";
+					}
+
+					if (m_tokens[begin].kind == TokenKind::StringLiteral)
+					{
+						return "const char*";
+					}
+
+					if (text == "true" || text == "false")
+					{
+						return "bool";
+					}
+
+					if (m_tokens[begin].kind == TokenKind::Identifier)
+					{
+						return ResolveVariable(std::string(text), depth + 1).text;
+					}
+				}
+
+				const auto chain = ParseReceiver(end);
+				if (!chain.ok || chain.head_token < begin) return {};
+				return ResolveChain(chain, depth + 1).text;
+			}
+
+			std::string DeducedReturn(
+				const CompletionItem& function,
+				const ChainSegment& segment,
+				const std::vector<std::string>& owner,
+				int depth) const
+			{
+				constexpr int kMaxDeductionDepth = 8;
+				if (!function.deduction || depth >= kMaxDeductionDepth ||
+					segment.callOpen >= segment.callClose || segment.callClose >= m_tokens.size()) return {};
+				std::vector<std::string> arguments;
+				std::size_t begin = NextSignificant(segment.callOpen);
+				int nesting       = 0;
+				for (std::size_t token = begin; token <= segment.callClose; ++token)
+				{
+					const auto word = TokenText(m_source, m_tokens[token]);
+					if (token == segment.callClose ||(word == "," && nesting == 0))
+					{
+						if (begin < token)
+						{
+							arguments.push_back(ArgumentType(begin, token, depth + 1));
+						}
+
+						begin = NextSignificant(token);
+					}
+					else if (word == "(" || word == "[" || word == "{" || word == "<")
+					{
+						++nesting;
+					}
+					else if (word == ")" || word == "]" || word == "}" || word == ">")
+					{
+						--nesting;
+					}
+				}
+
+				std::vector<const IndexedScope*> scopes;
+				for (const auto& [key, entries] : m_by_path)
+				{
+					scopes.insert(scopes.end(), entries.begin(), entries.end());
+				}
+
+				return TemplateDeduction::Instantiate(*function.deduction, function.templateParams,
+					segment.targs, arguments, scopes, ExpandNamespaceAlias(m_aliases, owner, m_offset),
+					function.type_text.find("decltype") != std::string::npos);
 			}
 
 			Resolved ResolveMember(const Resolved& owner, const ChainSegment& segment,
@@ -10043,6 +10348,12 @@ namespace heimdall
 			{
 				auto hovered = item;
 				RefineAutoDetail(tree, external, end, hovered);
+				if (hovered.kind == CompletionKind::Function)
+				{
+					const MemberResolver resolver(tree, external, end);
+					resolver.RefineFunctionAt(end, hovered);
+				}
+
 				AttachLayout(tree, options, external, hovered);
 				return hovered;
 			}

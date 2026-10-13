@@ -48,6 +48,7 @@ add_executable(Tests_run
   src/UnreachableCodeSpec.cpp
   src/ReturnValidationSpec.cpp
   src/CompletionSpec.cpp
+  src/TemplateDeductionSpec.cpp
   src/CompletionParitySpec.cpp
   src/SignatureHelpSpec.cpp
   src/IncludeInsertionSpec.cpp
@@ -155,6 +156,16 @@ add_test(
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME LspComparisonRegressions
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspComparisonRegressionSpec.py"
+            --heimdall "$<TARGET_FILE:heimdall-lsp>" --compiler heimdall-fixture-compiler
+  )
+  set_tests_properties(LspComparisonRegressions PROPERTIES TIMEOUT 180 LABELS "lsp;parity")
+  add_test(
+    NAME LspComparisonHarnessSpec
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspComparisonSpec.py"
+  )
   add_test(
     NAME LspDoxygenFlowSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspDoxygenFlowSmoke.py"

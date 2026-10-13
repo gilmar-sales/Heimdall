@@ -402,6 +402,10 @@ namespace heimdall
 			return found == mPredefinedMacros->end() ? std::string_view {}: found->second;
 		}
 
+		/// Returns the live object-like replacement from the resolver or local directive timeline.
+		/// The returned text is owned; undefined and function-like macros return an empty string.
+		[[nodiscard]] std::string ObjectReplacement(std::string_view name, std::size_t offset) const;
+
 		// Header type oracle the file was parsed with (may be null): later layers
 		// consult it for names declared in headers, which the local model never binds.
 		std::shared_ptr<const TypeNameOracle> TypeNames() const noexcept

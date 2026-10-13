@@ -1,159 +1,245 @@
 # Heimdall for VS Code
 
-Independent C/C++ language tooling powered by the Heimdall Language Server. It
-provides diagnostics, quick fixes for supported lint rules, brace-depth
-formatting, and scope-aware code completion (visible locals/parameters plus
-`ns::`, `Type::` and `::global` qualified lookup, including namespaces from
-`#include`d headers such as `std::`, with signature details, `///`/`/**`
-documentation popups, and hover information). It does not currently provide
-debugging, build-system integration, or full C++ navigation (member completion
-after `.`/`->` is not yet modeled).
+Heimdall helps you spot problems and keep your C++ code consistent while you work.
+It adds warnings, quick fixes, formatting, code suggestions, and symbol search to
+VS Code, powered by the Heimdall language server.
 
-## Language server: automatic install
+[Official repository](https://github.com/gilmar-sales/Heimdall) ·
+[Report an issue](https://github.com/gilmar-sales/Heimdall/issues) ·
+[Releases](https://github.com/gilmar-sales/Heimdall/releases)
 
-With the local development server, **Rename Symbol** supports modeled local
-variables and parameters. The **Refactor** menu offers restricted integral/boolean
-extract/inline actions when their preconditions hold. Extract/inline require
-a document without preprocessor directives/macros. Local rename can accept includes
-with GCC/Clang and `compile_commands.json` when compiler preprocessing preserves
-the written tokens before and after the edit; dirty included headers are blocked.
-All operations decline templates, captures, ambiguous/unmodeled uses and global symbols.
-They use versioned edits
-and reanalysis before returning a plan. This support is not available in older
-downloaded server binaries; use a local build to try it.
+**You do not need to build Heimdall to get started.** The extension automatically
+installs its matching language server when needed.
 
-On activation the extension resolves `heimdall-lsp` in this order:
+## Get started
 
-1. `heimdall.serverPath`, when set to something other than the default.
-2. The versioned install in the extension global storage
-   (`bin/heimdall-<version>/`), downloaded from the GitHub release matching
-   `heimdall.serverVersion` (default: the extension's own version).
-3. A local workspace build (`build/lsp/`, `build/`, `build/Debug/`), then
-   `heimdall-lsp` on `PATH` (dev loop).
-4. Otherwise it downloads the matching release zip
-   (`heimdall-<platform>-<arch>.zip`) and installs it — unless
-   `heimdall.autoInstallServer` is `false`.
+1. Install **Heimdall - C++ Lint and Format** in VS Code.
+2. Open your project with **File → Open Folder**, then open a C++ source or header file.
+3. Allow the language server installation to finish. Automatic installation downloads
+   the matching release from GitHub, so it needs an internet connection and an
+   available release for your platform.
+4. Start editing. Warnings appear in the editor and the **Problems** panel.
 
-Run the `Heimdall: Install Language Server` command to (re)install on demand.
-Run `Heimdall: Initialize Config File` (`heimdall init`) from the command
-palette (`Ctrl+Shift+P`) to create a `.heimdall.json` in the open folder
-(it asks before overwriting an existing one).
-Before launching, the extension copies the server into its global storage and
-runs the copy, so rebuilding while VS Code is open never hits a Windows file
-lock — just rebuild and Reload Window to pick the new binary up.
+Heimdall indexes your project in the background. The status bar shows its progress;
+workspace symbol search may return only some results until indexing finishes.
 
-## Dev loop: `npm run package:dev`
+If installation does not start or you want to reinstall, open the Command Palette
+and run **Heimdall: Install Language Server**.
 
-```powershell
-cd vscode-extension
-npm run package:dev
+> Open the Command Palette with `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P`
+> on macOS. You can find all the actions below there by name, without memorizing shortcuts.
+
+## Use Heimdall day to day
+
+### Find problems and apply fixes
+
+Open **View → Problems** to see diagnostics, then select one to jump to its location.
+Hover over an underline to read the message. When a fix is available, use the
+lightbulb or **Quick Fix** action to review and apply it.
+
+- Checks run as you edit. Background workspace diagnostics are also enabled by
+  default, so the Problems panel can include files you have not opened.
+- Not every warning has an automatic fix.
+- Dependency folders such as `_deps`, `third_party`, `external`, and `vendor` are
+  excluded from background linting.
+
+Heimdall's checks complement your compiler; a clean Problems panel is **not** a
+guarantee that your program will compile or behave correctly.
+
+### Format your code
+
+Run **Format Document** in a C++ file. If VS Code asks which formatter to use,
+choose Heimdall. To make that choice permanent, run
+**Format Document With… → Configure Default Formatter**.
+
+For automatic formatting when you save, add this to your workspace
+`.vscode/settings.json`:
+
+```json
+{
+    "[cpp]": {
+        "editor.defaultFormatter": "gilmar-sales.heimdall-vscode",
+        "editor.formatOnSave": true
+    }
+}
 ```
 
-This builds `heimdall-lsp` from the repo root (configuring `../build` on first
-run) and packages `heimdall-vscode-<version>-dev.vsix`. The dev vsix carries a
-`.heimdall-dev` marker so the extension runs in dev mode: it resolves the
-server from `serverPath` → local build (`build/lsp/`, `build/`, `build/Debug/`)
-→ `PATH` → installed copy, and **never downloads** from GitHub releases.
-The same local-first order applies automatically under the F5 Extension
-Development Host. Install it with
-`code --install-extension heimdall-vscode-<version>-dev.vsix`.
+Formatting follows your project's `.heimdall.json`. The default brace style is
+Allman, with opening braces on their own line. Expect brace-depth indentation and
+supported style adjustments, **not a general-purpose line-reflow engine**.
 
-| Setting | Default | Description |
+### Get code suggestions and hover details
+
+Use **Trigger Suggest** while typing to see completion candidates. Heimdall supports
+visible local variables and parameters, plus qualified names such as `ns::`,
+`Type::`, and `::global`. This includes namespaces from included headers, such as
+`std::`, when those headers can be resolved.
+
+Hover over supported symbols to see information about them. Completion details can
+include signatures and documentation written with `///` or `/** ... */` comments.
+Inlay hints show inferred types for `auto` variables and parameter names at calls.
+
+**Member completion after `.` or `->` is not currently modeled.** Do not expect the
+same completion coverage as a full compiler-backed C++ language service.
+
+### Find symbols in your project
+
+| What you want to do | VS Code feature |
+| --- | --- |
+| Browse the current file's declarations | **Outline** view or breadcrumbs |
+| Jump to a declaration listed in the current file | **Go to Symbol in Editor** |
+| Search declarations across your project | **Go to Symbol in Workspace** |
+
+These features work without a compile database or semantic diagnostics. They list
+declarations such as namespaces, types, functions, methods, fields, and aliases;
+block-local variables and function parameters are not listed.
+
+Workspace searches accept names such as `Widget::Run` and `ns::`. Unsaved changes
+in open editors are included. System/SDK headers outside the workspace and
+macro-expanded declarations are not indexed. Build folders, hidden folders, and
+other excluded locations are skipped; indexing is limited to 20,000 files, with
+files larger than 2 MiB skipped.
+
+### Rename and refactor: local-build preview
+
+With a current local development server, **Rename Symbol** supports modeled local
+variables and parameters. The **Refactor** menu can offer restricted extract/inline
+actions for integral and boolean expressions when their preconditions hold.
+These features are not available in older downloaded server binaries.
+
+This is deliberately limited support, not project-wide C++ refactoring:
+
+- Global symbols, templates, captures, and ambiguous or unmodeled uses are declined.
+- Extract/inline requires a document without preprocessor directives or macros.
+- Local rename with includes requires GCC/Clang and `compile_commands.json`, with
+  compiler preprocessing that preserves the written tokens before and after the edit.
+  Unsaved changes in included headers block the operation.
+
+## Configure your project
+
+### Choose lint and formatting rules
+
+Run **Heimdall: Initialize Config File** from the Command Palette to create a
+`.heimdall.json` in your project folder. The command asks before overwriting an
+existing file. Edit this file to customize the project's lint and formatting rules.
+
+The command requires the Heimdall CLI, which is included in the release installation.
+If it reports that the CLI is missing, install the language server first.
+
+A vertical editor guide follows the configuration's `format.column-limit` (100 by
+default). A value of `0` removes the guide. Heimdall respects an explicit
+`editor.rulers` setting; you can also disable this behavior with
+`heimdall.dynamicRulers`.
+
+### Give Heimdall your compiler settings
+
+Semantic diagnostics are enabled by default. Local checks, including argument-count
+checks for functions declared in the same file, work without extra setup.
+
+For project-specific compiler options, include paths, macros, and the C++ language
+version, provide a **compilation database**: a `compile_commands.json` file describing
+how your source files are compiled.
+
+Heimdall looks for `build/compile_commands.json` by default. If yours is elsewhere,
+set its path in `.vscode/settings.json`:
+
+```json
+{
+    "heimdall.compileCommands": "out/build/compile_commands.json"
+}
+```
+
+Relative paths are resolved from the first workspace folder. Absolute paths also
+work. For CMake projects using Ninja, you can generate the database by enabling
+`CMAKE_EXPORT_COMPILE_COMMANDS` in your existing configuration.
+
+### Useful settings
+
+Open **Settings** and search for `heimdall`, or edit `.vscode/settings.json`.
+
+| Setting | Default | What it controls |
 | --- | --- | --- |
-| `heimdall.serverPath` | `heimdall-lsp` | Explicit server path. Overrides everything when changed. |
-| `heimdall.serverVersion` | `""` (= extension version) | Release version to download, e.g. `"0.3.1"`. Tags are `v<version>`. |
-| `heimdall.autoInstallServer` | `true` | Download the server from GitHub releases when none is found. |
+| `heimdall.enableSemantic` | `true` | Enable semantic diagnostics. |
+| `heimdall.workspaceDiagnostics` | `true` | Check project files in the background, not just open files. |
+| `heimdall.workspaceSymbols` | `true` | Enable project-wide symbol indexing. Turning it off keeps the current file's Outline available. |
+| `heimdall.inlayHints` | `true` | Show inferred types and parameter name hints. |
+| `heimdall.compileCommands` | `"build/compile_commands.json"` | Locate your compilation database. |
+| `heimdall.dynamicRulers` | `true` | Follow the configured column limit with an editor guide. |
+| `heimdall.autoInstallServer` | `true` | Download a matching server when none is found. |
+| `heimdall.serverPath` | `"heimdall-lsp"` | Use an explicit server executable when changed from the default. |
+| `heimdall.serverVersion` | `""` | Choose a release version; empty uses the extension's version. |
+| `heimdall.trace.server` | `"off"` | Log language-server traffic (`"messages"` or `"verbose"`) for troubleshooting. |
 
-## Symbol navigation
+## What to expect—and what not to expect
 
-The server answers the standard VS Code symbol features; the extension adds no commands
-or shortcuts of its own, so the native ones apply.
+Heimdall focuses on linting, formatting, and the supported editing features above.
+It does **not** provide a debugger, build-system integration, or full C++ navigation.
+Its parser and symbol model may not understand every C++ construct; unsupported
+constructs can be skipped, and refactorings can be refused rather than risk an
+incorrect edit.
 
-| Feature | Default shortcut | Scope |
-| --- | --- | --- |
-| Outline view, Explorer *Symbols*, breadcrumbs | `Ctrl+Shift+O` for the current file | The open file, as a tree: namespaces → types → members, enumerators under their enum. |
-| Go to Symbol in Workspace | `Ctrl+T` | Every C/C++ source and header below the workspace folder. |
+You can keep your existing build and debugging tools. If you also use another C++
+language extension, overlapping features may show duplicate diagnostics or
+suggestions. Choose your default formatter explicitly and adjust the extensions'
+settings to keep only the features you want.
 
-Both are **syntactic**: they work with `heimdall.enableSemantic` off and without a
-`compile_commands.json`.
+## Troubleshooting
 
-What is listed: namespaces (including `inline` and anonymous ones), classes, structs,
-unions, enums and their enumerators, functions and methods (each overload separately,
-out-of-line definitions as `Type::Member`), constructors, destructors, operators, fields,
-variables, `using` aliases, `typedef`s and concepts. Block-local variables and function
-parameters are not listed, nor are forward declarations and `friend` declarations.
+| Problem | What to try |
+| --- | --- |
+| The server does not start or download | Open **View → Output**, select **Heimdall**, and read the error. Run **Heimdall: Install Language Server**. If automatic installation is disabled, install manually or set `heimdall.serverPath`. |
+| No diagnostics appear | Make sure the file is recognized as C/C++ and check the Heimdall Output channel. Confirm the relevant rules are enabled in `.heimdall.json`. |
+| Compiler-dependent checks lack project context | Check that `heimdall.compileCommands` points to an existing, up-to-date database. |
+| Formatting uses another extension | Run **Format Document With…** and select Heimdall as the default formatter. |
+| Workspace symbol results are missing | Wait for indexing to finish and confirm `heimdall.workspaceSymbols` is enabled. Check whether the file is outside the workspace or excluded from indexing. |
+| Background checks are too noisy | Customize `.heimdall.json`, or set `heimdall.workspaceDiagnostics` to `false` to limit diagnostics to open files. |
+| The column guide is unexpected | Check `format.column-limit`, your language-specific `editor.rulers`, and `heimdall.dynamicRulers`. |
+| A rebuilt server is not being used | Set `heimdall.serverPath` to the rebuilt executable's absolute path, then run **Developer: Reload Window**. |
 
-Workspace symbols come from an index built in the background after start-up. VS Code shows
-it as a progress notification (*Heimdall: indexing symbols*, with the file count), and the
-status bar reads *Heimdall: starting language server* until the server is up. A search typed
-before the indexing ends sees the files indexed so far.
+## Advanced: use a local server or develop the extension
 
-- Files under `build*`, `cmake-build*`, `out`, `node_modules`, `_deps`, `vcpkg_installed` and
-  hidden folders are skipped, as are files over 2 MiB and anything past 20 000 files.
-- Open editors win over disk: unsaved edits are searchable, and closing an editor shows what
-  is on disk again. Files changed outside the editor are re-read through VS Code's file
-  watcher.
-- Results are case-insensitive, best match first (exact name, prefix, substring, subsequence;
-  `Widget::Run` and `ns::` qualified queries work), at most 200 per search.
-- Headers outside the workspace folder (system or SDK headers) and generated or
-  macro-expanded declarations are not indexed; a construct the parser cannot recover is
-  skipped.
-- Set `heimdall.workspaceSymbols` to `false` to turn the workspace index off (the Outline
-  keeps working).
-- Inferred type inlay hints for `auto` variables and parameter name hints at call
-  arguments are enabled by default; set
-  `heimdall.inlayHints` to `false` to disable them.
+Most users can skip this section.
 
-Measured on a Release build with 40 symbols per file: indexing runs at roughly 1–2 ms per file on
-a few helper threads (28-core Windows machine), 20 000 files (the cap) take about 35 s in the background and 90 MB;
-a search over them answers in 6–60 ms, and over 1 000 files in under 3 ms.
+### Use a server you built yourself
 
-## Build the server
+Build with a supported C++ toolchain from the repository root. Reuse your existing
+CMake build directory and options; for a new Ninja build:
 
-From the repository root:
-
-```powershell
+```sh
 cmake -G Ninja -S . -B build
-cmake --build build --target heimdall-lsp --config Debug
+cmake --build build --target heimdall-lsp heimdall
 ```
 
-The extension searches `build/` and `build/Debug/` in the opened workspace, then
-falls back to `heimdall-lsp` on `PATH`. Override the path with the VS Code setting
-`heimdall.serverPath`. Before launching, the extension copies the server into its
-global storage and runs the copy, so rebuilding while VS Code is open never hits
-a Windows file lock — just rebuild and Reload Window to pick the new binary up.
+Set `heimdall.serverPath` to the absolute path of the resulting `heimdall-lsp`
+executable (usually `build/lsp/heimdall-lsp`, or `heimdall-lsp.exe` on Windows),
+then run **Developer: Reload Window**. Building the `heimdall` CLI also enables
+configuration initialization.
 
-Semantic diagnostics are enabled by default. Set `heimdall.enableSemantic` to `false`
-to disable them. Local checks, including argument-count errors for functions declared
-in the same file, work without a compile database.
-Set `heimdall.compileCommands` to the database path (default:
-`build/compile_commands.json`); the extension passes it to the server during
-initialization.
+An explicit server path takes priority. Otherwise, the regular extension prefers
+the matching installed release, then a local workspace build or a server on `PATH`,
+and finally downloads a release if automatic installation is enabled.
 
-To test an unreleased server fix, set `heimdall.serverPath` to the absolute path of
-your rebuilt `build/lsp/heimdall-lsp` and Reload Window. Otherwise, a release install
-can take precedence over the local build. An explicitly saved
-`heimdall.enableSemantic: false` still disables semantic diagnostics.
+The extension runs a staged copy of the server, so you can rebuild without locking
+the original binary on Windows. Reload the window after rebuilding to use the new copy.
 
-A vertical ruler follows the workspace `.heimdall.json` `format.column-limit`
-(the nearest definition wins; a `"root": true` file stops the lookup, and `0`
-clears the guide since wrapping is disabled). When the repo has a
-`.heimdall.json` without a limit, the ruler shows the formatter default of
-column 100 explicitly; with no config file at all, the packaged default of 100
-applies. The ruler is only written when you have not set `editor.rulers`
-yourself, is updated live when `.heimdall.json` changes, and is withdrawn when
-the config goes away — set `heimdall.dynamicRulers` to `false` to turn this off.
-To move or remove the guide manually, set `editor.rulers` for `[cpp]`
-(e.g. `"[cpp]": { "editor.rulers": [120] }`). If the guide does not appear,
-check the Output panel (Heimdall channel) for the `Heimdall rulers ...` lines.
+### Develop or package the extension
 
-## Build the extension
-
-```powershell
+```sh
 cd vscode-extension
 npm install
 npm run compile
 ```
 
-Open this folder in VS Code and press F5 to launch an Extension Development Host.
-The server communicates over the standard LSP JSON-RPC stdio transport.
+Open the extension folder in VS Code and press **F5** to launch an Extension
+Development Host.
+
+To build the local server and package a development `.vsix`, run:
+
+```sh
+npm run package:dev
+code --install-extension heimdall-vscode-<version>-dev.vsix
+```
+
+The development package and F5 host prefer a local server and never download one
+from GitHub. Their lookup order is explicit `serverPath`, local build, `PATH`, then
+an already installed server.

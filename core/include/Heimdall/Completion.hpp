@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/TemplateDeduction.hpp>
 
 #include <Heimdall/TypeNames.hpp>
 #include <cstddef>
@@ -88,6 +89,8 @@ namespace heimdall
 		bool deleted = false;
 		/// Template parameter names used to substitute explicit call and alias arguments.
 		std::vector<std::string> templateParams;
+		/// Shared return metadata, populated only for functions with deduced return types.
+		std::shared_ptr<const FunctionDeduction> deduction;
 	};
 
 	// One named scope and its direct members. `path` is the qualified path from

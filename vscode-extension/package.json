@@ -2,9 +2,17 @@
   "name": "heimdall-vscode",
   "displayName": "Heimdall - C++ Lint and Format",
   "description": "C++ diagnostics, quick fixes, formatting, and code completion powered by Heimdall.",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "publisher": "gilmar-sales",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gilmar-sales/Heimdall.git"
+  },
+  "homepage": "https://github.com/gilmar-sales/Heimdall#readme",
+  "bugs": {
+    "url": "https://github.com/gilmar-sales/Heimdall/issues"
+  },
   "engines": {
     "vscode": "^1.135.0"
   },
