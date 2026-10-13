@@ -338,8 +338,11 @@ namespace heimdall::lsp
 			const heimdall::CompileCommand* command);
 
 		// Workspace-wide linting: after `initialized`, a background pass publishes
-		// diagnostics for every C++ source under the workspace root that is not
+		// diagnostics for every project C++ source under the workspace root that is not
 		// open in the editor, so the Problems panel shows the project total.
+		// Dependency sources (`_deps`, `third_party`, `external`, `vendor`) are
+		// skipped here but stay in the symbol index, so navigation and
+		// completion still see them.
 		void WorkspaceScanMain(std::stop_token stop);
 
 		// Returns the number of diagnostics published, or -1 when the file was

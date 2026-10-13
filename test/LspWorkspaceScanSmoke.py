@@ -59,9 +59,14 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_scan_") as temporary:
     (workspace / "src" / "bad.cpp").write_text("auto p = NULL;\n", encoding="utf-8")
     (workspace / "build" / "skipped.cpp").write_text("auto p = NULL;\n", encoding="utf-8")
     (workspace / "notes.txt").write_text("auto p = NULL;\n", encoding="utf-8")
+    # Dependency sources stay indexed for navigation but are not linted.
+    (workspace / "build" / "_deps" / "dep-src").mkdir(parents=True)
+    (workspace / "build" / "_deps" / "dep-src" / "dep.cpp").write_text("auto p = NULL;\n", encoding="utf-8")
+    (workspace / "third_party").mkdir()
+    (workspace / "third_party" / "vendor.cpp").write_text("auto p = NULL;\n", encoding="utf-8")
 
     responses = run(workspace, {})
     result = published(responses)
     bad_uri = (workspace / "src" / "bad.cpp").as_uri()
     assert any(item["code"] == "cpp/no-null" for item in result.get(bad_uri, [])), result
-    assert len(result) == 1, f"build/ and non-C++ files must be skipped: {list(result)}"
+    assert len(result) == 1, f"build/, _deps/, third_party/ and non-C++ files must be skipped: {list(result)}"

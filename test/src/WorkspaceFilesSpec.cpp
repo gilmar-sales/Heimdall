@@ -161,6 +161,87 @@ TEST_F(WorkspaceFilesSpec, DiscoversDependencySourcesInsideBuildDirectories)
             "cmake-build-debug/_deps/skirnir-src/include/Services.hpp"}));
 }
 
+TEST_F(WorkspaceFilesSpec, RecognizesDependencyDirectories)
+{
+    using heimdall::lsp::IsDependencyDirectory;
+
+    for (const char* name :
+        {
+            "_deps", "third_party", "thirdparty", "external", "extern", "vendor"
+    })
+    {
+        EXPECT_TRUE(IsDependencyDirectory(name)) << name;
+    }
+
+    for (const char* name :
+        {
+            "src", "include", "build", "out", "deps", "third-party", "externals"
+    })
+    {
+        EXPECT_FALSE(IsDependencyDirectory(name)) << name;
+    }
+}
+
+TEST_F(WorkspaceFilesSpec, RecognizesDependencySourcesBelowTheRoot)
+{
+    using heimdall::lsp::IsDependencySource;
+
+    EXPECT_TRUE(IsDependencySource(mRoot, mRoot / "build" / "_deps" / "simdjson-src" / "simdjson.cpp"));
+    EXPECT_TRUE(IsDependencySource(mRoot, mRoot / "_deps" / "library-src" / "Library.hpp"));
+    EXPECT_TRUE(IsDependencySource(mRoot, mRoot / "third_party" / "simdjson" / "simdjson.cpp"));
+    EXPECT_TRUE(IsDependencySource(mRoot, mRoot / "libs" / "external" / "widget" / "Widget.hpp"));
+    EXPECT_TRUE(IsDependencySource(mRoot, mRoot / "vendor" / "json.hpp"));
+
+    EXPECT_FALSE(IsDependencySource(mRoot, mRoot / "src" / "Core.cpp"));
+    EXPECT_FALSE(IsDependencySource(mRoot, mRoot / "src" / "deps" / "Helper.cpp"));
+    EXPECT_FALSE(IsDependencySource(mRoot / "project", mRoot / "other" / "a.cpp"));
+    EXPECT_FALSE(IsDependencySource(mRoot, mRoot));
+    EXPECT_FALSE(IsDependencySource(fs::path {}, mRoot / "_deps" / "a.cpp"));
+}
+
+TEST_F(WorkspaceFilesSpec, ProjectDiscoverySkipsDependenciesButKeepsThemIndexed)
+{
+    Write("src/Core.cpp");
+    Write("build/_deps/simdjson-src/simdjson.cpp");
+    Write("_deps/library-src/include/Library.hpp");
+    Write("third_party/fmt/format.cpp");
+    Write("external/widget/Widget.hpp");
+    Write("vendor/json.hpp");
+
+    const auto full = heimdall::lsp::DiscoverWorkspaceSources(mRoot, {});
+    const auto project = heimdall::lsp::DiscoverProjectSources(mRoot, {});
+
+    // Navigation and completion still see every source, including dependencies.
+    EXPECT_EQ(Relative(full), (std::vector<std::string> {
+            "_deps/library-src/include/Library.hpp",
+            "build/_deps/simdjson-src/simdjson.cpp",
+            "external/widget/Widget.hpp",
+            "src/Core.cpp",
+            "third_party/fmt/format.cpp",
+            "vendor/json.hpp"}));
+
+    // Background diagnostics cover the open project only.
+    EXPECT_EQ(Relative(project), (std::vector<std::string> {"src/Core.cpp"}));
+}
+
+TEST_F(WorkspaceFilesSpec, ProjectDiscoveryHonorsLimitsAndCancellation)
+{
+    Write("src/First.cpp");
+    Write("src/Second.cpp");
+    Write("build/_deps/library-src/Third.cpp");
+
+    const auto limited = heimdall::lsp::DiscoverProjectSourcesDetailed(mRoot, {}, 1);
+    std::stop_source stop;
+    stop.request_stop();
+    const auto cancelled = heimdall::lsp::DiscoverProjectSourcesDetailed(mRoot, stop.get_token());
+
+    EXPECT_EQ(limited.files.size(), 1u);
+    EXPECT_TRUE(limited.truncated);
+    EXPECT_FALSE(limited.complete);
+    EXPECT_TRUE(cancelled.files.empty());
+    EXPECT_TRUE(cancelled.cancelled);
+}
+
 TEST_F(WorkspaceFilesSpec, DependencyDiscoveryHonorsLimitsAndCancellation)
 {
     Write("build/_deps/library-src/First.cpp");

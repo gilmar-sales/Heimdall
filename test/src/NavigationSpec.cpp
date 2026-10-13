@@ -467,3 +467,72 @@ TEST(NavigationSpec, ResolvesPrivateMemberDeclaredInAHeaderIndex)
     ASSERT_EQ(targets.size(), 1u);
     EXPECT_EQ(targets[0].offset, Find(header, "Utf16Width"));
 }
+
+TEST(NavigationSpec, DefinitionSelectsIntOverloadFromIntegerLiteral)
+{
+    constexpr std::string_view source =
+        "int Select(int value) { return value; }\n"
+        "double Select(double value) { return value; }\n"
+        "int main() { return Select(1); }\n";
+    const auto targets = DefinitionOf(source, "Select(1)");
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, Find(source, "Select(int value)"));
+}
+
+TEST(NavigationSpec, DefinitionSelectsDoubleOverloadFromFloatingLiteral)
+{
+    constexpr std::string_view source =
+        "int Select(int value) { return value; }\n"
+        "double Select(double value) { return value; }\n"
+        "int main() { return Select(1.5); }\n";
+    const auto targets = DefinitionOf(source, "Select(1.5)");
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, Find(source, "Select(double value)"));
+}
+
+TEST(NavigationSpec, DefinitionKeepsTiedOverloadsWhenArgumentsAreUnknown)
+{
+    constexpr std::string_view source =
+        "int Select(int value) { return value; }\n"
+        "double Select(double value) { return value; }\n"
+        "int main(int argc) { return Select(argc); }\n";
+    const auto targets = DefinitionOf(source, "Select(argc)");
+    EXPECT_EQ(targets.size(), 2u);
+}
+
+TEST(NavigationSpec, DefinitionThroughNamespaceAlias)
+{
+    constexpr std::string_view source =
+        "namespace library { namespace hana { int target; } }\n"
+        "namespace hana = library::hana;\n"
+        "int main() { return hana::target; }\n";
+    const auto targets = DefinitionOf(source, "target;", 1);
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, Find(source, "target;"));
+}
+
+TEST(NavigationSpec, MemberDefinitionThroughSmartPointerOperatorArrow)
+{
+    constexpr std::string_view header =
+        "namespace skr {\n"
+        "template<class T> struct Arc {\n"
+        "    T* operator->() const;\n"
+        "};\n"
+        "}\n"
+        "namespace fr {\n"
+        "struct ThreadPool { bool IsRunning() const; };\n"
+        "}\n";
+    heimdall::ScopeIndex index = heimdall::CompletionEngine::IndexScopes(header, {});
+    constexpr std::string_view source =
+        "namespace fr {\n"
+        "struct Registry {\n"
+        "    skr::Arc<ThreadPool> mThreadPool;\n"
+        "    void ExecuteTasks() { mThreadPool->IsRunning(); }\n"
+        "};\n"
+        "}\n";
+    const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
+    const auto targets =
+        heimdall::Navigation::Definition(tree, Find(source, "IsRunning();"), &index);
+    ASSERT_EQ(targets.size(), 1u);
+    EXPECT_EQ(targets[0].offset, Find(header, "IsRunning"));
+}

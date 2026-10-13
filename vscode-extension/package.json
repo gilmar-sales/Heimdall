@@ -14,6 +14,8 @@
     "Linters"
   ],
   "activationEvents": [
+    "onCommand:heimdall.installServer",
+    "onCommand:heimdall.initConfig",
     "onLanguage:c",
     "onLanguage:cpp",
     "onLanguage:cuda",
@@ -54,6 +56,11 @@
         "command": "heimdall.installServer",
         "title": "Heimdall: Install Language Server",
         "category": "Heimdall"
+      },
+      {
+        "command": "heimdall.initConfig",
+        "title": "Heimdall: Initialize Config File (`heimdall init`)",
+        "category": "Heimdall"
       }
     ],
     "menus": {
@@ -61,6 +68,9 @@
         {
           "command": "heimdall.installServer",
           "when": "editorLangId == c || editorLangId == cpp || editorLangId == cuda || editorLangId == objective-c || editorLangId == objective-cpp"
+        },
+        {
+          "command": "heimdall.initConfig"
         }
       ]
     },
@@ -100,7 +110,7 @@
         "heimdall.workspaceDiagnostics": {
           "type": "boolean",
           "default": true,
-          "description": "Lint every C++ file in the workspace in the background (not only open files), so the Problems panel shows the project-wide warning count."
+          "description": "Lint every project C++ file in the workspace in the background (not only open files), so the Problems panel shows the project-wide warning count. Dependency sources (_deps, third_party, external, vendor) are skipped; they stay indexed for navigation and completion."
         },
         "heimdall.workspaceSymbols": {
           "type": "boolean",

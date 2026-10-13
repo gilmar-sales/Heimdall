@@ -35,6 +35,9 @@ On activation the extension resolves `heimdall-lsp` in this order:
    `heimdall.autoInstallServer` is `false`.
 
 Run the `Heimdall: Install Language Server` command to (re)install on demand.
+Run `Heimdall: Initialize Config File` (`heimdall init`) from the command
+palette (`Ctrl+Shift+P`) to create a `.heimdall.json` in the open folder
+(it asks before overwriting an existing one).
 Before launching, the extension copies the server into its global storage and
 runs the copy, so rebuilding while VS Code is open never hits a Windows file
 lock — just rebuild and Reload Window to pick the new binary up.

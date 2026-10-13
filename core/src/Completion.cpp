@@ -702,6 +702,21 @@ namespace heimdall
 				: std::string_view(item.filter_text), prefix);
 		}
 
+		// Overloaded operators live in the index (smart-pointer dereference
+		// resolves through `operator->`) but are noise in member lists unless
+		// the user is already typing the name. Plain identifiers that merely
+		// start with the word (`operator_of`) are unaffected.
+		bool OfferMember(const CompletionItem& item, std::string_view prefix)
+		{
+			if (!prefix.empty() ||!item.label.starts_with("operator"))
+			{
+				return true;
+			}
+
+			const std::string_view rest = std::string_view(item.label).substr(8);
+			return !rest.empty() && IsIdentChar(rest.front());
+		}
+
 		// Candidate label for filtering: override suggestions are labeled with the
 		// whole signature but filtered by the function name.
 		std::string_view FilterTextOf(const CompletionItem& item)
@@ -1923,6 +1938,134 @@ namespace heimdall
 			bool global     = false; // leading `::` with no names (`::name`)
 			bool unresolved = false; // modeled as nothing (`A<int>::x`, `call()::y`)
 		};
+
+		// `namespace alias = a::b::c;` has no grammar node of its own: it is
+		// found by a token scan. Aliases are visible after their definition;
+		// nesting (an alias declared inside a namespace) is not modeled, so
+		// same-named aliases keep the last definition.
+		struct NamespaceAlias
+		{
+			std::string name;
+			std::vector<std::string> target;
+			std::size_t offset = 0; // byte offset of the alias name
+		};
+
+		std::size_t NextSignificantToken(const std::vector<Token>& tokens, std::size_t token);
+
+		std::vector<NamespaceAlias> CollectNamespaceAliases(const ParseTree& tree)
+		{
+			std::vector<NamespaceAlias> out;
+			const std::string_view source    = tree.Source();
+			const std::vector<Token>& tokens = tree.Tokens();
+			for (std::size_t t = 0; t < tokens.size(); ++t)
+			{
+				if (tokens[t].kind != TokenKind::Identifier ||
+					tree.Text(tokens[t]) != "namespace")
+				{
+					continue;
+				}
+
+				const std::size_t name = NextSignificantToken(tokens, t);
+				if (name >= tokens.size() || tokens[name].kind != TokenKind::Identifier ||
+					tree.Text(tokens[name]) == "namespace")
+				{
+					continue;
+				}
+
+				const std::size_t equals = NextSignificantToken(tokens, name);
+				if (equals >= tokens.size() || tokens[equals].kind != TokenKind::Punctuation ||
+					TokenText(source, tokens[equals]) != "=")
+				{
+					continue; // a definition (`{`) or nested name (`::`), not an alias
+				}
+
+				NamespaceAlias alias;
+				alias.name          = std::string(tree.Text(tokens[name]));
+				alias.offset        = tokens[name].offset;
+				std::size_t current = equals;
+				while (true)
+				{
+					const std::size_t part = NextSignificantToken(tokens, current);
+					if (part >= tokens.size() || tokens[part].kind != TokenKind::Identifier)
+					{
+						break;
+					}
+
+					alias.target.emplace_back(tree.Text(tokens[part]));
+					const std::size_t separator = NextSignificantToken(tokens, part);
+					if (separator < tokens.size() &&
+						tokens[separator].kind == TokenKind::Punctuation &&
+						TokenText(source, tokens[separator]) == "::")
+					{
+						current = separator;
+						continue;
+					}
+
+					current = part;
+					break;
+				}
+
+				if (alias.target.empty())
+				{
+					continue;
+				}
+
+				const std::size_t end = NextSignificantToken(tokens, current);
+				if (end >= tokens.size() || tokens[end].kind != TokenKind::Punctuation ||
+					TokenText(source, tokens[end]) != ";")
+				{
+					continue;
+				}
+
+				std::erase_if(out,[&](const NamespaceAlias& existing)
+					{
+						return existing.name == alias.name;
+				});
+				out.push_back(std::move(alias));
+				t = end;
+			}
+
+			return out;
+		}
+
+		// Rewrites a qualifier spelled through a namespace alias
+		// (`hana::x` -> `library::hana::x`). Up to one alias chain is followed;
+		// unknown aliases leave the path untouched.
+		std::vector<std::string> ExpandNamespaceAlias(
+			const std::vector<NamespaceAlias>& aliases,
+			const std::vector<std::string>& path,
+			std::size_t offset)
+		{
+			if (path.empty())
+			{
+				return path;
+			}
+
+			std::vector<std::string> expanded = path;
+			for (int depth = 0; depth < 4; ++depth)
+			{
+				bool rewritten = false;
+				for (const auto& alias : aliases)
+				{
+					if (alias.name == expanded.front() && alias.offset <= offset &&
+						!alias.target.empty())
+					{
+						expanded.erase(expanded.begin());
+						expanded.insert(expanded.begin(), alias.target.begin(),
+							alias.target.end());
+						rewritten = true;
+						break;
+					}
+				}
+
+				if (!rewritten)
+				{
+					break;
+				}
+			}
+
+			return expanded;
+		}
 
 		// Names in `a::b::` before the final `::` at scope_op.
 		Qualifier QualifierBefore(std::string_view source, const std::vector<Token>& tokens,
@@ -4568,6 +4711,87 @@ namespace heimdall
 		return BuildScopeIndex(tree, true);
 	}
 
+	// `operator->`, `operator==`, `operator()` and conversion operators name the
+	// function `operator` in the DeclaredName node; the operator itself follows.
+	// Returns the full label (`operator->`) or empty when this is not an
+	// operator declaration.
+	std::string OperatorFunctionName(const ParseTree& tree, std::size_t name_token)
+	{
+		const std::vector<Token>& tokens = tree.Tokens();
+		if (name_token >= tokens.size() || tree.Text(tokens[name_token]) != "operator")
+		{
+			return {};
+		}
+
+		auto significant =[&](std::size_t t)
+		{
+			while (++t < tokens.size())
+			{
+				const TokenKind kind = tokens[t].kind;
+				if (kind != TokenKind::Whitespace && kind != TokenKind::LineComment &&
+					kind != TokenKind::BlockComment)
+				{
+					return t;
+				}
+			}
+
+			return tokens.size();
+		};
+
+		constexpr std::size_t kMaxOperatorTokens = 8;
+		std::string label                        = "operator";
+		std::size_t current                      = name_token;
+		for (std::size_t count = 0; count < kMaxOperatorTokens; ++count)
+		{
+			const std::size_t next = significant(current);
+			if (next >= tokens.size())
+			{
+				return {};
+			}
+
+			const Token& token          = tokens[next];
+			const std::string_view text = tree.Text(token);
+			if (token.kind == TokenKind::Punctuation)
+			{
+				if (text == "(")
+				{
+					// `(` directly after `operator` can only be the call
+					// operator itself (`operator()`); anywhere else it starts
+					// the parameter list, ending the operator spelling.
+					if (label == "operator")
+					{
+						return "operator()";
+					}
+
+					return label;
+				}
+
+				if (text == ";" || text == "{" || text == "}" || text == ",")
+				{
+					return {};
+				}
+
+				label += text;
+				current = next;
+				continue;
+			}
+
+			// A conversion operator (`operator bool`, `operator ns::Type`).
+			if (label == "operator" && text != "operator" &&
+				token.kind == TokenKind::Identifier)
+			{
+				label += ' ';
+				label += text;
+				current = next;
+				continue;
+			}
+
+			return label == "operator" ? std::string {}: label;
+		}
+
+		return {};
+	}
+
 	// `for_header` drops `_`-leading variables (implementation detail of a
 	// header); the buffer's own index keeps them so `obj.` offers `_field`.
 	static ScopeIndex BuildScopeIndex(const ParseTree& tree, bool for_header)
@@ -4665,8 +4889,21 @@ namespace heimdall
 				continue;
 			}
 
-			const std::string_view name = tree.Text(tree.Tokens()[token_index]);
-			if (name.empty() || IsKeyword(name))
+			std::string name_storage;
+			std::string_view name = tree.Text(tree.Tokens()[token_index]);
+			if (name == "operator")
+			{
+				// Overloaded and conversion operators are indexed under their full
+				// spelling (`operator->`) so smart-pointer dereference resolves.
+				name_storage = OperatorFunctionName(tree, token_index);
+				if (name_storage.empty())
+				{
+					continue;
+				}
+
+				name = name_storage;
+			}
+			else if (name.empty() || IsKeyword(name))
 			{
 				continue;
 			}
@@ -5575,6 +5812,50 @@ namespace heimdall
 			}
 		}
 
+		// A qualifier written inside a scope also resolves against its enclosing
+		// scopes (`meta::detail::` inside `namespace fr`). Candidates run from the
+		// written qualifier to progressively shorter enclosing prefixes.
+		std::vector<std::vector<std::string>> QualifierCandidates(
+			const ParseTree& tree,
+			const std::vector<std::vector<std::string>>& scope_paths,
+			std::size_t offset,
+			const std::vector<std::string>& qualifier)
+		{
+			std::vector<std::vector<std::string>> out
+			{
+				qualifier
+			};
+			std::vector<std::string> enclosing;
+			for (std::size_t n = 0; n < scope_paths.size(); ++n)
+			{
+				const GrammarKind kind = tree.NodesSoA().Kind(n);
+				if (kind != GrammarKind::NamespaceDefinition &&
+					kind != GrammarKind::RecordDefinition)
+				{
+					continue;
+				}
+
+				const auto[start, end] = NodeRange(tree, n);
+				if (start <= offset && offset <= end && scope_paths[n].size() > enclosing.size())
+				{
+					enclosing = scope_paths[n];
+				}
+			}
+
+			for (std::size_t length = enclosing.size(); length > 0; --length)
+			{
+				std::vector<std::string> candidate(enclosing.begin(),
+					enclosing.begin() + static_cast<std::ptrdiff_t>(length));
+				candidate.insert(candidate.end(), qualifier.begin(), qualifier.end());
+				if (candidate != qualifier)
+				{
+					out.push_back(std::move(candidate));
+				}
+			}
+
+			return out;
+		}
+
 		void CompleteQualified(
 			const ParseTree& tree,
 			std::string_view source,
@@ -5708,14 +5989,24 @@ namespace heimdall
 
 			// `ns::` lists the members of ns, plus what its using-directives nominate
 			// and what its using-declarations bring in.
-			if (!CollectQualifiedMembers(tree, source, tokens, scope_paths, qualifier.path, prefix,
-				external, interner, best))
+			const std::vector<std::string> expanded_qualifier = ExpandNamespaceAlias(
+				CollectNamespaceAliases(tree), qualifier.path, tokens[scope_op].offset);
+			for (const auto& candidate : QualifierCandidates(tree, scope_paths, offset, expanded_qualifier))
 			{
-				return;
-			}
+				const std::size_t before = best.Size();
+				if (!CollectQualifiedMembers(tree, source, tokens, scope_paths, candidate,
+					prefix, external, interner, best))
+				{
+					continue;
+				}
 
-			CollectUsingMembers(tree, source, tokens, scope_paths, qualifier.path, prefix, external,
-				interner, best, 0);
+				CollectUsingMembers(tree, source, tokens, scope_paths, candidate, prefix,
+					external, interner, best, 0);
+				if (best.Size() != before)
+				{
+					break;
+				}
+			}
 		}
 
 		// Members of the scope named by `path` (namespace or record), from the tree
@@ -5747,7 +6038,7 @@ namespace heimdall
 					saw_external = true;
 					for (const auto& member : scope.members)
 					{
-						if (!MatchesItem(member, prefix))
+						if (!OfferMember(member, prefix) ||!MatchesItem(member, prefix))
 						{
 							continue;
 						}
@@ -5828,6 +6119,13 @@ namespace heimdall
 
 				const std::string_view name = tree.Text(tree.Tokens()[token_index]);
 				if (!MatchesPrefix(name, prefix))
+				{
+					continue;
+				}
+
+				// `operator->` and friends are indexed under their full spelling;
+				// the raw `operator` name is never offered.
+				if (name == "operator")
 				{
 					continue;
 				}
@@ -6114,7 +6412,8 @@ namespace heimdall
 			MemberResolver(const ParseTree& tree, const ScopeIndex* external, std::size_t offset) :
 			m_tree(tree), m_source(tree.Source()), m_tokens(tree.Tokens()), m_offset(offset)
 			{
-				m_local = BuildScopeIndex(tree, false);
+				m_aliases = CollectNamespaceAliases(tree);
+				m_local   = BuildScopeIndex(tree, false);
 				for (const auto& scope : m_local)
 				{
 					m_by_path[PathKey(scope.path)].push_back(&scope);
@@ -6620,10 +6919,35 @@ namespace heimdall
 				std::string_view prefix,
 				StringInterner& interner,
 				FlatHashMap<CompletionItem>& best,
-				MemberFilter filter = {}) const
+				MemberFilter filter = {},
+				const std::vector<std::string>& arguments = {}) const
 			{
 				std::unordered_set<std::string> visited;
 				CollectInto(path, prefix, interner, best, visited, 0, filter);
+				if (arguments.empty())
+				{
+					return;
+				}
+
+				for (const auto* scope : ScopesAt(path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind != CompletionKind::Variable ||!MatchesItem(member, prefix))
+						{
+							continue;
+						}
+
+						const auto key = interner.GetOrAssign(member.label);
+						if (auto * entry = best.Find(key))
+						{
+							auto& item       = entry->value;
+							item.type_text   = SubstituteText(member.type_text, scope->template_params, arguments);
+							item.detail      = SubstituteText(item.detail, scope->template_params, arguments);
+							item.layout_type = SubstituteText(item.layout_type, scope->template_params, arguments);
+						}
+					}
+				}
 			}
 
 			// Virtual member functions inherited by `path` that it does not override
@@ -7044,7 +7368,9 @@ namespace heimdall
 				const std::vector<std::string>& path) const
 			{
 				static const std::vector<const IndexedScope*> none;
-				const auto found = m_by_path.find(PathKey(path));
+				const std::vector<std::string> expanded =
+					ExpandNamespaceAlias(m_aliases, path, m_offset);
+				const auto found = m_by_path.find(PathKey(expanded));
 				return found == m_by_path.end() ? none : found->second;
 			}
 
@@ -7241,7 +7567,7 @@ namespace heimdall
 							continue; // constructor
 						}
 
-						if (!MatchesItem(member, prefix) ||
+						if (!OfferMember(member, prefix) ||!MatchesItem(member, prefix) ||
 							(!filter.ignore_access && !CanAccess(member, path)))
 						{
 							continue;
@@ -7344,13 +7670,41 @@ namespace heimdall
 
 			Resolved Dereference(Resolved value, const std::string& op) const
 			{
-				if (op != "->" || value.path.empty() ||!IsPointerLike(value.path.back()) ||
-					value.args.empty())
+				if (op != "->" || value.path.empty())
 				{
 					return value;
 				}
 
-				return FromText(value.args.front(), value.hint.empty() ? m_hint : value.hint, 0);
+				if (IsPointerLike(value.path.back()) && !value.args.empty())
+				{
+					return FromText(value.args.front(), value.hint.empty() ? m_hint : value.hint, 0);
+				}
+
+				for (const auto* scope : ScopesAt(value.path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (member.kind != CompletionKind::Function || member.label != "operator->" ||
+							member.type_text.empty())
+						{
+							continue;
+						}
+
+						// The substituted pointee (`ThreadPool` for `Arc<ThreadPool>`)
+						// is spelled at the use site, not in the wrapper's scope.
+						// `operator->` must return a pointer or a proxy, so any
+						// resolvable substitution is followed.
+						const Resolved pointee = FromText(SubstituteText(member.type_text,
+							scope->template_params, value.args),
+							value.hint.empty() ? m_hint : value.hint, 0);
+						if (pointee.ok)
+						{
+							return pointee;
+						}
+					}
+				}
+
+				return value;
 			}
 
 			// Declared type of the variable `name` as visible at the cursor.
@@ -7781,6 +8135,7 @@ namespace heimdall
 			std::string_view m_source;
 			const std::vector<Token>& m_tokens;
 			std::size_t m_offset;
+			std::vector<NamespaceAlias> m_aliases;
 			ScopeIndex m_local;
 			std::unordered_map<std::string, std::vector<const IndexedScope * >> m_by_path;
 			std::vector<std::vector<std::string>> m_using;
@@ -8085,7 +8440,7 @@ namespace heimdall
 			MemberFilter filter;
 			filter.const_receiver = !for_hover && ReceiverIsConst(tree, offset, chain, type, op_text);
 			filter.ignore_access  = for_hover;
-			resolver.CollectMembers(type.path, prefix, interner, best, filter);
+			resolver.CollectMembers(type.path, prefix, interner, best, filter, type.args);
 		}
 
 		// Unqualified names inside a class body or an out-of-line member definition
@@ -8791,6 +9146,20 @@ namespace heimdall
 			if (deduced.empty())
 			{
 				return;
+			}
+
+			// A deduction that still spells `auto` learned nothing (the
+			// initializer resolved back to the declared text): substituting it
+			// would duplicate qualifiers (`constexpr constexpr auto`).
+			for (std::size_t found = deduced.find("auto"); found != std::string::npos;
+				found = deduced.find("auto", found + 4))
+			{
+				const bool left_ok  = found == 0 ||!IsIdentChar(deduced[found - 1]);
+				const bool right_ok = found + 4 >= deduced.size() ||!IsIdentChar(deduced[found + 4]);
+				if (left_ok && right_ok)
+				{
+					return;
+				}
 			}
 
 			// `auto` never deduces a reference; it keeps the function's const only when

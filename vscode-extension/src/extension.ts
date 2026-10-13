@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import {
     LanguageClient,
@@ -72,6 +73,144 @@ function findOnPath(executable: string): string | undefined {
         // not on PATH
     }
     return undefined;
+}
+
+// Locally built CLI (dev loop): workspace build output, then PATH. Mirrors
+// findLocalServer but for the `heimdall` CLI (`build/src/`, `build/`, ...)
+// instead of `heimdall-lsp` (`build/lsp/`, ...).
+function findLocalCli(extensionPath: string): string | undefined {
+    const executable = cliExecutableName();
+    const roots = [
+        ...(vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),
+        path.dirname(extensionPath),
+    ];
+    for (const root of [...new Set(roots)]) {
+        const candidates = [
+            path.join(root, 'build', 'src', executable),
+            path.join(root, 'build', executable),
+            path.join(root, 'build', 'Debug', executable),
+            path.join(root, 'out', 'build', executable),
+        ];
+        const found = candidates.find(candidate => fs.existsSync(candidate));
+        if (found) {
+            return found;
+        }
+    }
+    return findOnPath(executable);
+}
+
+function cliExecutableName(platform: string = process.platform): string {
+    return platform === 'win32' ? 'heimdall.exe' : 'heimdall';
+}
+
+// Resolves the `heimdall` CLI used by `heimdall init`. Order: sibling of an
+// explicitly configured server binary (release zips ship both), versioned
+// install dir, local build output, PATH. Never triggers a server download.
+function findCliBinary(context: vscode.ExtensionContext, serverPath?: string): string | undefined {
+    const executable = cliExecutableName();
+    if (serverPath) {
+        const sibling = path.join(path.dirname(serverPath), executable);
+        if (fs.existsSync(sibling)) {
+            return sibling;
+        }
+    }
+    const version = serverVersion(context);
+    if (version) {
+        const installed = findInstalledServer(context.globalStorageUri.fsPath, version);
+        if (installed) {
+            const sibling = path.join(path.dirname(installed), executable);
+            if (fs.existsSync(sibling)) {
+                return sibling;
+            }
+        }
+    }
+    return findLocalCli(context.extensionPath);
+}
+
+async function runInitConfig(context: vscode.ExtensionContext): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    if (folders.length === 0) {
+        void vscode.window.showErrorMessage('Heimdall: open a folder first, then run "Heimdall: Initialize Config File".');
+        return;
+    }
+    let folder: vscode.WorkspaceFolder | undefined = folders[0];
+    if (folders.length > 1) {
+        const picked = await vscode.window.showQuickPick(
+            folders.map(item => ({ label: item.name, description: item.uri.fsPath, folder: item })),
+            { placeHolder: 'Select the folder to create .heimdall.json in' },
+        );
+        if (!picked) {
+            return;
+        }
+        folder = picked.folder;
+    }
+    if (!folder) {
+        return;
+    }
+    const targetDir = folder.uri.fsPath;
+    const configPath = path.join(targetDir, '.heimdall.json');
+
+    let hint: string | undefined;
+    const configuredPath = vscode.workspace.getConfiguration('heimdall').get<string>('serverPath', 'heimdall-lsp');
+    if (configuredPath && configuredPath !== 'heimdall-lsp') {
+        try {
+            if (fs.statSync(configuredPath).isFile()) {
+                hint = configuredPath;
+            }
+        } catch {
+            // Explicit serverPath that is not a direct file (e.g. on PATH):
+            // fall through to the install-dir / local-build / PATH lookup.
+        }
+    }
+    const cli = findCliBinary(context, hint);
+    if (!cli) {
+        const message = 'Heimdall CLI not found. Build it (`cmake --build build --target heimdall`), put `heimdall` on PATH, or install the language server first.';
+        output.appendLine(message);
+        void vscode.window.showErrorMessage(message);
+        return;
+    }
+
+    let force = false;
+    if (fs.existsSync(configPath)) {
+        const overwrite = 'Overwrite';
+        const openExisting = 'Open existing file';
+        const choice = await vscode.window.showWarningMessage(
+            `Heimdall: ${configPath} already exists.`,
+            overwrite,
+            openExisting,
+        );
+        if (choice === openExisting) {
+            void vscode.window.showTextDocument(vscode.Uri.file(configPath));
+            return;
+        }
+        if (choice !== overwrite) {
+            return;
+        }
+        force = true;
+    }
+
+    const args = ['init', targetDir];
+    if (force) {
+        args.push('--force');
+    }
+    output.appendLine(`Running ${cli} ${args.join(' ')}`);
+    const execFileAsync = promisify(execFile);
+    try {
+        const { stdout } = await execFileAsync(cli, args);
+        const created = stdout.trim() || `created ${configPath}`;
+        output.appendLine(created);
+        syncRulers();
+        const openFile = 'Open File';
+        const choice = await vscode.window.showInformationMessage(`Heimdall: ${created}`, openFile);
+        if (choice === openFile) {
+            void vscode.window.showTextDocument(vscode.Uri.file(configPath));
+        }
+    } catch (error) {
+        const stderr = (error as { stderr?: unknown })?.stderr;
+        const message = `Heimdall init failed: ${String(stderr ?? error)}`;
+        output.appendLine(message);
+        void vscode.window.showErrorMessage(message);
+    }
 }
 
 // Locally built server (dev loop): workspace build output, then PATH.
@@ -409,6 +548,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             output.appendLine(message);
             void vscode.window.showErrorMessage(message);
         }
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('heimdall.initConfig', async () => {
+        await runInitConfig(context);
     }));
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {

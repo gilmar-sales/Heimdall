@@ -32,11 +32,49 @@ namespace heimdall::lsp
 			name == "out";
 	}
 
-	WorkspaceDiscovery DiscoverWorkspaceSourcesDetailed(
-		const std::filesystem::path& root,
-		std::stop_token stop,
-		std::size_t maxFiles)
+	bool IsDependencyDirectory(std::string_view name)
 	{
+		return name == "_deps" || name == "third_party" || name == "thirdparty" ||
+			name == "external" || name == "extern" || name == "vendor";
+	}
+
+	bool IsDependencySource(const std::filesystem::path& root, const std::filesystem::path& file)
+	{
+		if (root.empty())
+		{
+			return false;
+		}
+
+		std::error_code error;
+		const auto relative = std::filesystem::relative(file, root, error);
+		if (error)
+		{
+			return false;
+		}
+
+		const std::string text = relative.generic_string();
+		if (text.empty() || text == ".." || text.starts_with("../"))
+		{
+			return false;
+		}
+
+		for (const auto& component : relative)
+		{
+			if (IsDependencyDirectory(component.generic_string()))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	namespace
+	{
+
+		WorkspaceDiscovery DiscoverSourcesDetailed(const std::filesystem::path& root,
+			std::stop_token stop, std::size_t maxFiles, bool skipDependencies)
+		{
 		WorkspaceDiscovery result;
 		auto& files = result.files;
 		if (stop.stop_requested())
@@ -72,14 +110,19 @@ namespace heimdall::lsp
 				const bool buildDirectory = name.starts_with("build") ||
 					name.starts_with("cmake-build") || name == "out";
 				const bool dependencyDirectory = name == "_deps";
-				if ((buildParent && !dependencyDirectory) ||
+				if (skipDependencies && IsDependencyDirectory(name))
+				{
+					it.disable_recursion_pending();
+				}
+				else if ((buildParent && !dependencyDirectory) ||
 					(parentName == "_deps" && !name.ends_with("-src")) ||
 					(IsSkippedDirectory(name) && !buildDirectory && !dependencyDirectory))
 				{
 					it.disable_recursion_pending();
 				}
 			}
-			else if (!buildParent && parentName != "_deps" && IsWorkspaceSource(it->path()))
+			else if (!buildParent && parentName != "_deps" && IsWorkspaceSource(it->path()) &&
+				!(skipDependencies && IsDependencySource(root, it->path())))
 			{
 				if (files.size() == maxFiles)
 				{
@@ -97,10 +140,30 @@ namespace heimdall::lsp
 		return result;
 	}
 
+	} // namespace
+
+	WorkspaceDiscovery DiscoverWorkspaceSourcesDetailed(
+		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+	{
+		return DiscoverSourcesDetailed(root, stop, maxFiles, false);
+	}
+
+	WorkspaceDiscovery DiscoverProjectSourcesDetailed(
+		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+	{
+		return DiscoverSourcesDetailed(root, stop, maxFiles, true);
+	}
+
 	std::vector<std::filesystem::path> DiscoverWorkspaceSources(
 		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
 	{
 		return DiscoverWorkspaceSourcesDetailed(root, stop, maxFiles).files;
+	}
+
+	std::vector<std::filesystem::path> DiscoverProjectSources(
+		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+	{
+		return DiscoverProjectSourcesDetailed(root, stop, maxFiles).files;
 	}
 
 	std::optional<std::string> ReadWorkspaceFile(const std::filesystem::path& file)

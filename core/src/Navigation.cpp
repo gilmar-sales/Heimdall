@@ -2,6 +2,8 @@
 #include <Heimdall/Doxygen.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <climits>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -25,6 +27,16 @@ namespace heimdall
 		constexpr std::size_t kMaxBaseDepth          = 4;
 
 		using Path = std::vector<std::string>;
+
+		// `namespace alias = a::b::c;` has no grammar node of its own: it is
+		// found by a token scan. Visible after its definition; nesting is not
+		// modeled, so same-named aliases keep the last definition.
+		struct NamespaceAlias
+		{
+			std::string name;
+			Path target;
+			std::size_t offset = 0; // byte offset of the alias name
+		};
 
 		std::string PathKey(const Path& path)
 		{
@@ -67,6 +79,10 @@ namespace heimdall
 			CompletionKind kind       = CompletionKind::Variable;
 			bool is_definition        = false;
 			std::uint32_t param_count = 0;
+			// First type word of each parameter (`int` for `unsigned n`, `bool`
+			// for `bool flag = true`); used to rank overloads at call sites.
+			// Bounded to the first few parameters.
+			std::vector<std::string> param_types;
 			// Block-local names are only visible in [local_begin, local_end).
 			bool local              = false;
 			std::size_t local_begin = 0;
@@ -116,6 +132,7 @@ namespace heimdall
 			ExternalRef external;
 			bool is_definition        = false;
 			std::uint32_t param_count = 0;
+			std::vector<std::string> param_types;
 		};
 
 		class Model
@@ -128,6 +145,7 @@ namespace heimdall
 				CollectScopes();
 				CollectDecls();
 				BuildExternal();
+				CollectAliases();
 			}
 
 			const ParseTree& Tree() const noexcept
@@ -529,6 +547,7 @@ namespace heimdall
 				candidate.decl          = index;
 				candidate.is_definition = decl.is_definition;
 				candidate.param_count   = decl.param_count;
+				candidate.param_types   = decl.param_types;
 				return candidate;
 			}
 
@@ -576,6 +595,11 @@ namespace heimdall
 			const std::vector<UsingDecl>& UsingDecls() const noexcept
 			{
 				return m_using_decls;
+			}
+
+			const std::vector<NamespaceAlias>& Aliases() const noexcept
+			{
+				return m_aliases;
 			}
 
 		private:
@@ -775,7 +799,19 @@ namespace heimdall
 							break;
 						}
 
-						out.written.emplace_back(word);
+						const auto& resolver = m_tree.MacroResolverRef();
+						const auto* macro = is_namespace && resolver
+						? resolver->Find(word, tokens[cursor].offset) : nullptr;
+						const auto replacement = macro && !macro->functionLike
+						? std::string_view(macro->body) : m_tree.PredefinedReplacement(word);
+						const bool identifierReplacement = is_namespace && !replacement.empty() &&
+							std::all_of(replacement.begin(), replacement.end(),[](char character)
+							{
+								return (character >= 'a' && character <= 'z') ||
+								(character >= 'A' && character <= 'Z') ||
+								(character >= '0' && character <= '9') || character == '_';
+						});
+						out.written.emplace_back(identifierReplacement ? replacement : word);
 						out.name_token        = cursor;
 						const std::size_t sep = NextSig(cursor);
 						if (sep != kNone && sep < limit && Text(sep) == "::")
@@ -1129,6 +1165,51 @@ namespace heimdall
 						{
 							count = 0;
 						}
+						else
+						{
+							// First type word of each parameter for overload ranking
+							// at call sites (`int` for `unsigned n`).
+							constexpr std::size_t kMaxOverloadParams = 8;
+							for (const std::size_t param : m_tree.DirectChildren(suffix_node))
+							{
+								if (nodes.Kind(param) != GrammarKind::ParameterDeclaration ||
+									decl.param_types.size() >= kMaxOverloadParams)
+								{
+									continue;
+								}
+
+								std::size_t type = kNone;
+								for (const std::size_t child : m_tree.DirectChildren(param))
+								{
+									if (nodes.Kind(child) == GrammarKind::TypeSpecifier)
+									{
+										type = child;
+										break;
+									}
+								}
+
+								if (type == kNone)
+								{
+									continue;
+								}
+
+								std::string word;
+								const auto grammar = nodes[type];
+								for (std::uint32_t k = 0; k < grammar.GetTokenCount(); ++k)
+								{
+									const std::size_t token = grammar.GetFirstToken() + k;
+									if (m_tree.Tokens()[token].kind == TokenKind::Identifier)
+									{
+										word = std::string(Text(token));
+									}
+								}
+
+								if (!word.empty())
+								{
+									decl.param_types.push_back(std::move(word));
+								}
+							}
+						}
 
 						decl.param_count = count;
 					}
@@ -1300,6 +1381,73 @@ namespace heimdall
 				}
 			}
 
+			void CollectAliases()
+			{
+				const auto& tokens = m_tree.Tokens();
+				for (std::size_t t = 0; t < tokens.size(); ++t)
+				{
+					if (tokens[t].kind != TokenKind::Identifier || Text(t) != "namespace")
+					{
+						continue;
+					}
+
+					const std::size_t name = NextSig(t);
+					if (name == kNone || tokens[name].kind != TokenKind::Identifier ||
+						Text(name) == "namespace")
+					{
+						continue;
+					}
+
+					const std::size_t equals = NextSig(name);
+					if (equals == kNone || Text(equals) != "=")
+					{
+						continue; // a definition (`{`) or nested name (`::`)
+					}
+
+					NamespaceAlias alias;
+					alias.name          = std::string(Text(name));
+					alias.offset        = tokens[name].offset;
+					std::size_t current = equals;
+					while (true)
+					{
+						const std::size_t part = NextSig(current);
+						if (part == kNone || tokens[part].kind != TokenKind::Identifier)
+						{
+							break;
+						}
+
+						alias.target.emplace_back(Text(part));
+						const std::size_t separator = NextSig(part);
+						if (separator != kNone && Text(separator) == "::")
+						{
+							current = separator;
+							continue;
+						}
+
+						current = part;
+						break;
+					}
+
+					if (alias.target.empty())
+					{
+						continue;
+					}
+
+					const std::size_t end = NextSig(current);
+					if (end == kNone || Text(end) != ";")
+					{
+						continue;
+					}
+
+					std::erase_if(m_aliases,[&](const NamespaceAlias& existing)
+						{
+							return existing.name == alias.name;
+					});
+					m_aliases.push_back(std::move(alias));
+					t = end;
+				}
+			}
+
 			void BuildExternal()
 			{
 				if (m_external == nullptr)
@@ -1361,6 +1509,7 @@ namespace heimdall
 			std::unordered_set<std::string> m_record_scopes;
 			std::vector<UsingDirective> m_directives;
 			std::vector<UsingDecl> m_using_decls;
+			std::vector<NamespaceAlias> m_aliases;
 			std::vector<std::string> m_external_keys;
 			std::unordered_map<std::string, std::vector<ExternalRef>> m_external_by_name;
 		};
@@ -1596,6 +1745,39 @@ namespace heimdall
 				return model.KnownScope(elements) ? std::optional<Path>(elements) : std::nullopt;
 			}
 
+			// First qualifier spelled through a namespace alias
+			// (`hana::x` with `namespace hana = library::hana;`).
+			if (!elements.empty())
+			{
+				Path expanded = elements;
+				for (int depth = 0; depth < 4; ++depth)
+				{
+					bool rewritten = false;
+					for (const NamespaceAlias& alias : model.Aliases())
+					{
+						if (!alias.target.empty() && alias.name == expanded.front() &&
+							alias.offset <= pos)
+						{
+							expanded.erase(expanded.begin());
+							expanded.insert(expanded.begin(), alias.target.begin(),
+								alias.target.end());
+							rewritten = true;
+							break;
+						}
+					}
+
+					if (!rewritten)
+					{
+						break;
+					}
+				}
+
+				if (expanded != elements && model.KnownScope(expanded))
+				{
+					return expanded;
+				}
+			}
+
 			Path level = model.ScopeAt(pos);
 			while (true)
 			{
@@ -1750,6 +1932,260 @@ namespace heimdall
 			}
 
 			out.push_back(std::move(target));
+		}
+
+		// Coarse kind of a call argument for overload ranking (`1` is an int,
+		// `1.5` a double, `"s"` a string, `'c'` a char, `true` a bool).
+		// Anything else (identifiers, nested calls) is unknown.
+		std::string CallArgumentKind(const Model& model, std::size_t token)
+		{
+			const auto& tokens = model.Tree().Tokens();
+			if (token >= tokens.size())
+			{
+				return {};
+			}
+
+			const std::string_view text = model.Text(token);
+			if (text == "-" || text == "+")
+			{
+				return CallArgumentKind(model, model.NextSig(token));
+			}
+
+			if (tokens[token].kind == TokenKind::Number)
+			{
+				return text.find_first_of(".eE") == std::string_view::npos ? "int" : "double";
+			}
+
+			if (tokens[token].kind == TokenKind::CharacterLiteral)
+			{
+				return "char";
+			}
+
+			if (tokens[token].kind == TokenKind::StringLiteral)
+			{
+				return "string";
+			}
+
+			if (tokens[token].kind == TokenKind::Identifier &&
+				(text == "true" || text == "false"))
+			{
+				return "bool";
+			}
+
+			return {};
+		}
+
+		// Coarse kind of a parameter's first type word (`unsigned` is an int,
+		// `string` (as in `std::string`) a string). Anything else is unknown.
+		std::string ParameterKind(std::string_view word)
+		{
+			std::string lower(word);
+			for (char& character : lower)
+			{
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+			}
+
+			if (lower == "float" || lower == "double")
+			{
+				return "double";
+			}
+
+			if (lower == "bool")
+			{
+				return "bool";
+			}
+
+			if (lower == "char" || lower == "char8_t" || lower == "char16_t" ||
+				lower == "char32_t" || lower == "wchar_t")
+			{
+				return "char";
+			}
+
+			if (lower == "string")
+			{
+				return "string";
+			}
+
+			if (lower == "int" || lower == "long" || lower == "short" || lower == "signed" ||
+				lower == "unsigned" || lower == "size_t" || lower.starts_with("int") ||
+				lower.starts_with("uint") || lower.starts_with("long"))
+			{
+				return "int";
+			}
+
+			return {};
+		}
+
+		int OverloadScore(const Candidate& candidate, const std::vector<std::string>& args)
+		{
+			// Arity is soft: default arguments are unknown, so a mismatch costs
+			// but never eliminates on its own.
+			int score = 2 *
+				std::abs(static_cast<int>(candidate.param_count) - static_cast<int>(args.size()));
+			for (std::size_t i = 0;
+				i < args.size() && i < candidate.param_types.size(); ++i)
+			{
+				const std::string parameter = ParameterKind(candidate.param_types[i]);
+				if (args[i].empty() || parameter.empty())
+				{
+					score += 1;
+				}
+				else if (args[i] == parameter)
+				{
+					continue;
+				}
+				else if ((args[i] == "int" || args[i] == "double" || args[i] == "bool") &&
+					(parameter == "int" || parameter == "double" || parameter == "bool"))
+				{
+					score += 1; // numeric/bool conversion
+				}
+				else
+				{
+					score += 2;
+				}
+			}
+
+			return score;
+		}
+
+		// At a call site with several same-name overloads, keep only the best
+		// argument-compatible overload. Ties (including calls with no usable
+		// argument information) keep every candidate.
+		void RankOverloads(const Model& model, std::size_t cursor_token,
+			std::vector<Candidate>& found)
+		{
+			if (found.size() < kMinAmbiguousScopes || cursor_token == kNone)
+			{
+				return;
+			}
+
+			for (const Candidate& candidate : found)
+			{
+				if (candidate.kind != CompletionKind::Function || candidate.name != found.front().name ||
+					candidate.scope != found.front().scope)
+				{
+					return;
+				}
+			}
+
+			std::size_t next = model.NextSig(cursor_token);
+			if (next != kNone && model.Text(next) == "<")
+			{
+				// Skip an explicit template argument list (`f<T>(...)`).
+				int depth = 0;
+				while (next != kNone)
+				{
+					const std::string_view text = model.Text(next);
+					if (text == "<")
+					{
+						++depth;
+					}
+					else if (text == ">" || text == ">>")
+					{
+						depth -= text.size();
+						if (depth <= 0)
+						{
+							next = model.NextSig(next);
+							break;
+						}
+					}
+
+					next = model.NextSig(next);
+				}
+			}
+
+			if (next == kNone || model.Text(next) != "(")
+			{
+				return; // not a call site
+			}
+
+			std::vector<std::string> args;
+			int depth          = 0;
+			bool element       = true;
+			std::size_t token  = next;
+			const auto& tokens = model.Tree().Tokens();
+			while (token != kNone && token < tokens.size())
+			{
+				token = model.NextSig(token);
+				if (token == kNone || token >= tokens.size())
+				{
+					return;
+				}
+
+				const std::string_view text = model.Text(token);
+				if (text == "(" || text == "[" || text == "{")
+				{
+					++depth;
+					element = false;
+				}
+				else if (text == ")" || text == "]" || text == "}")
+				{
+					if (depth == 0)
+					{
+						break;
+					}
+
+					--depth;
+				}
+				else if (depth == 0 && text == ",")
+				{
+					element = true;
+				}
+				else if (depth == 0 && element)
+				{
+					args.push_back(CallArgumentKind(model, token));
+					element = false;
+				}
+			}
+
+			if (token == kNone)
+			{
+				return;
+			}
+
+			bool informative = false;
+			for (const Candidate& candidate : found)
+			{
+				if (candidate.param_count != args.size())
+				{
+					informative = true;
+					break;
+				}
+			}
+
+			if (!informative)
+			{
+				informative = std::any_of(args.begin(), args.end(),
+					[](const std::string& kind)
+					{
+						return !kind.empty();
+				});
+			}
+
+			if (!informative)
+			{
+				return;
+			}
+
+			int best = INT_MAX;
+			for (const Candidate& candidate : found)
+			{
+				best = std::min(best, OverloadScore(candidate, args));
+			}
+
+			std::vector<Candidate> ranked;
+			for (Candidate& candidate : found)
+			{
+				if (OverloadScore(candidate, args) == best)
+				{
+					ranked.push_back(std::move(candidate));
+				}
+			}
+
+			if (!ranked.empty() && ranked.size() < found.size())
+			{
+				found = std::move(ranked);
+			}
 		}
 
 		std::vector<NavTarget> ToTargets(const Model& model,
@@ -2115,14 +2551,15 @@ namespace heimdall
 		}
 
 		const Model model(tree, external);
-		bool ambiguous               = false;
-		std::vector<Candidate> found = ResolveAt(model, offset, ambiguous);
-		found                        = PreferDefinitions(model, std::move(found));
+		bool ambiguous                 = false;
+		std::vector<Candidate> found   = ResolveAt(model, offset, ambiguous);
+		found                          = PreferDefinitions(model, std::move(found));
+		const std::size_t cursor_token = model.IdentifierAt(offset);
+		RankOverloads(model, cursor_token, found);
 		// A declaration site with a definition elsewhere in the buffer jumps to it;
 		// a definition site (`void C::m() {}`) jumps back to its declaration.
 		std::vector<Candidate> refined;
-		bool jumped_back               = false;
-		const std::size_t cursor_token = model.IdentifierAt(offset);
+		bool jumped_back = false;
 		const std::size_t cursor_offset =
 			cursor_token == kNone ? kNone : model.Tree().Tokens()[cursor_token].offset;
 		for (const Candidate& candidate : found)

@@ -803,7 +803,9 @@ namespace heimdall
                 }
 
                 const HeaderSummary& summary = *m_index.Summaries()[matches.front().summary];
-                if (summary.IsPrivate() || summary.IsTextual() || SatisfiedBy(summary.Path()))
+                if (summary.IsPrivate() || summary.IsTextual() || SatisfiedBy(summary.Path()) ||
+                    (summary.Kind(matches.front().index) == ExportKind::Macro &&
+                     PublicHeaderProvidesMacro(summary.Path())))
                 {
                     return std::nullopt;
                 }
@@ -819,6 +821,33 @@ namespace heimdall
 
             // The file includes `header` itself, gets it through the header it is
             // the implementation of, or a direct include re-exports it.
+            // A public header that includes a `detail/` header owns the macros
+            // that header defines: includers must not reach into `detail/`.
+            bool PublicHeaderProvidesMacro(const std::filesystem::path& header) const
+            {
+                for (const auto& entry : m_profile.entries)
+                {
+                    if (entry.header.empty() || entry.conditional)
+                    {
+                        continue;
+                    }
+
+                    const auto relative = header.lexically_relative(entry.header.parent_path());
+                    if (relative.empty() || *relative.begin() != "detail")
+                    {
+                        continue;
+                    }
+
+                    if (std::any_of(entry.closure.begin(), entry.closure.end(),
+                                    [&](const auto& included) { return Key(included) == Key(header); }))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
             bool SatisfiedBy(const std::filesystem::path& header) const
             {
                 const std::string key = Key(header);

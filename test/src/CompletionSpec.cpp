@@ -1955,3 +1955,72 @@ TEST(CompletionSpec, HoversIndexedRegistrationMethodsBeforeTemplateArguments)
     ASSERT_TRUE(transient);
     EXPECT_EQ(transient->label, "AddTransient");
 }
+
+TEST(CompletionSpec, QualifiedCompletionThroughNamespaceAlias)
+{
+    const auto labels = MemberLabels(
+        "namespace library { namespace hana { int target; void run(); } }\n"
+        "namespace hana = library::hana;\n"
+        "int main() { return hana::| }\n");
+    EXPECT_TRUE(Has(labels, "target"));
+    EXPECT_TRUE(Has(labels, "run"));
+}
+
+TEST(CompletionSpec, QualifiedHoverThroughNamespaceAlias)
+{
+    const std::string source =
+        "namespace library { namespace hana { int target; } }\n"
+        "namespace hana = library::hana;\n"
+        "int main() { return hana::target; }\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("hana::target") + 6, nullptr);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "target");
+    EXPECT_NE(hovered->detail.find("int"), std::string::npos);
+}
+
+TEST(CompletionSpec, MemberAccessThroughCustomSmartPointerArrow)
+{
+    const auto labels = MemberLabels(
+        "template<class T> struct Arc { T* operator->() const; };\n"
+        "struct Pool { bool IsRunning() const; };\n"
+        "struct Registry { Arc<Pool> pool; };\n"
+        "void f(Registry& r) { r.pool->| }\n");
+    EXPECT_TRUE(Has(labels, "IsRunning"));
+}
+
+TEST(CompletionSpec, HoverThroughCustomSmartPointerArrow)
+{
+    const std::string source =
+        "template<class T> struct Arc { T* operator->() const; };\n"
+        "struct Pool { bool IsRunning() const; };\n"
+        "struct Registry { Arc<Pool> pool; };\n"
+        "void f(Registry& r) { r.pool->IsRunning(); }\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("IsRunning();"), nullptr);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "IsRunning");
+    EXPECT_NE(hovered->detail.find("bool"), std::string::npos);
+}
+
+TEST(CompletionSpec, OperatorArrowIsIndexedButNotOfferedAsAMember)
+{
+    const auto labels = MemberLabels(
+        "template<class T> struct Arc { T* operator->() const; int id; };\n"
+        "void f(Arc<int>& a) { a.| }\n");
+    EXPECT_TRUE(Has(labels, "id"));
+    EXPECT_FALSE(Has(labels, "operator->"));
+}
+
+TEST(CompletionSpec, EnclosingScopeQualifiersResolveInHover)
+{
+    const std::string source =
+        "namespace fr {\n"
+        "namespace meta::detail { int ComponentsTupleInfo(); }\n"
+        "int use = meta::detail::ComponentsTupleInfo();\n"
+        "}\n";
+    const auto hovered = heimdall::CompletionEngine::Hover(
+        source, {}, source.find("ComponentsTupleInfo();"), nullptr);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "ComponentsTupleInfo");
+}

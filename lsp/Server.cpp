@@ -1589,6 +1589,11 @@ namespace heimdall::lsp
 			}
 		}
 		const std::filesystem::path closed_path = PathFromUri(uri);
+		std::filesystem::path root;
+		{
+			const std::lock_guard<std::mutex> lock(m_init_mu);
+			root = mWorkspaceRoot;
+		}
 		{
 			// The buffer stops shadowing its file: serve what is on disk if the workspace owns it.
 			{
@@ -1596,11 +1601,6 @@ namespace heimdall::lsp
 				mSymbolIndex.ClearOpen(FileKey(closed_path));
 			}
 			mIndexStore.ClearOpen(closed_path.generic_string());
-			std::filesystem::path root;
-			{
-				const std::lock_guard<std::mutex> lock(m_init_mu);
-				root = mWorkspaceRoot;
-			}
 			if (IsWorkspaceSource(closed_path) && IsUnderRoot(closed_path, root))
 			{
 				mPool.Submit(ThreadPool::Task([this, closed_path]()
@@ -1611,9 +1611,11 @@ namespace heimdall::lsp
 			}
 		}
 
-		if (mWorkspaceScan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path))
+		if (mWorkspaceScan.load(std::memory_order_relaxed) && IsWorkspaceSource(closed_path) &&
+			!IsDependencySource(root, closed_path))
 		{
 			// The file stays part of the workspace: show what is on disk instead of clearing.
+			// Dependency sources are not linted, so closing one clears its diagnostics below.
 			mPool.Submit(ThreadPool::Task([this, closed_path]()
 				{
 					PublishWorkspaceFile(closed_path, std::stop_token {});
@@ -1739,7 +1741,10 @@ namespace heimdall::lsp
 			return;
 		}
 
-		const std::vector<std::filesystem::path> files = DiscoverWorkspaceSources(root, stop);
+		// Diagnostics cover the open project only: dependency sources
+		// (`_deps`, `third_party`, `external`, `vendor`) stay indexed for
+		// navigation and completion but are not linted.
+		const std::vector<std::filesystem::path> files = DiscoverProjectSources(root, stop);
 		if (stop.stop_requested())
 		{
 			return;
@@ -5548,9 +5553,12 @@ namespace heimdall::lsp
 		std::vector<Resolved> resolved;
 		auto add_resolved =[&](LoadedFile* file, std::size_t at, std::size_t length)
 		{
+			// The same header can be loaded twice (indexed bytes vs. bytes read
+			// from disk), so deduplicate by URI, not by loader pointer.
 			for (const Resolved& existing : resolved)
 			{
-				if (existing.file == file && existing.offset == at)
+				if (existing.file->uri == file->uri && existing.offset == at &&
+					existing.length == length)
 				{
 					return;
 				}

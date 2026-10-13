@@ -312,6 +312,21 @@ TEST(IncludeWhatYouUseSpec, ReportsProjectHeaderReachedOnlyThroughAnotherInclude
               "Core value;\n");
 }
 
+TEST(IncludeWhatYouUseSpec, AcceptsPublicHeaderOwningADetailMacro)
+{
+    Project project;
+    project.Header("library/detail/struct_macros.hpp",
+                   "#pragma once\n#define DEFINE_STRUCT(Name) struct Name { int age; }\n");
+    project.Header("library/define_struct.hpp",
+                   "#pragma once\n#include <library/detail/struct_macros.hpp>\n");
+    const auto diagnostics =
+        project.Iwyu("#include <library/define_struct.hpp>\nDEFINE_STRUCT(Person);\n");
+    for (const auto& diagnostic : diagnostics)
+    {
+        EXPECT_NE(diagnostic.rule, heimdall::RuleId::IncludeWhatYouUse) << diagnostic.message;
+    }
+}
+
 TEST(IncludeWhatYouUseSpec, SilentWhenTheHeaderIsIncludedDirectly)
 {
     Project project;
