@@ -1,8 +1,5 @@
 #include <Heimdall/IncludeIndex.hpp>
 
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/ParseTree.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -15,6 +12,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {
@@ -250,7 +250,9 @@ namespace heimdall
 			return "c++";
 		}
 
-		std::string ReadFile(const std::filesystem::path& path, std::size_t max_bytes,
+		std::string ReadFile(
+			const std::filesystem::path& path,
+			std::size_t max_bytes,
 			const SourceOverlay* overlay = nullptr)
 		{
 			if (overlay)
@@ -367,7 +369,8 @@ namespace heimdall
 		// so without this every `#if __cplusplus >= ...` guard in the standard
 		// library selects nothing and the class bodies never reach the index.
 		// Object-like macros only; empty when the compiler cannot be run.
-		Preprocessor::MacroMap CompilerMacros(const CompileCommand* command,
+		Preprocessor::MacroMap CompilerMacros(
+			const CompileCommand* command,
 			const std::vector<std::filesystem::path>& headers,
 			const SourceOverlay* overlay)
 		{
@@ -533,7 +536,8 @@ namespace heimdall
 
 	} // namespace
 
-	std::string IncludeIndex::SpellHeader(const std::filesystem::path& header,
+	std::string IncludeIndex::SpellHeader(
+		const std::filesystem::path& header,
 		const std::filesystem::path& file,
 		const CompileCommand* command)
 	{
@@ -933,7 +937,9 @@ namespace heimdall
 			: NormalizedAbsolute(root.path / typed_directory);
 			std::error_code ec;
 			std::filesystem::directory_iterator iterator(
-				directory, std::filesystem::directory_options::skip_permission_denied, ec);
+				directory,
+				std::filesystem::directory_options::skip_permission_denied,
+				ec);
 			if (ec)
 			{
 				continue;
@@ -986,7 +992,8 @@ namespace heimdall
 		return result;
 	}
 
-	std::optional<IncludeContext> IncludeIndex::IncludeContextAt(std::string_view text,
+	std::optional<IncludeContext> IncludeIndex::IncludeContextAt(
+		std::string_view text,
 		std::size_t offset)
 	{
 		offset                       = std::min(offset, text.size());
@@ -1065,7 +1072,9 @@ namespace heimdall
 	}
 
 	std::string IncludeIndex::IncludeFingerprint(
-		const std::filesystem::path& base_dir, std::string_view text, const CompileCommand* command)
+		const std::filesystem::path& base_dir,
+		std::string_view text,
+		const CompileCommand* command)
 	{
 		// Raw line scan: no lexer, no filesystem access. Only the file's own
 		// include lines matter; nested headers are covered by CacheKey's mtimes.
@@ -1146,8 +1155,10 @@ namespace heimdall
 		return fingerprint;
 	}
 
-	std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
-		const CompileCommand* command, const SourceOverlay* overlay)
+	std::string IncludeIndex::CacheKey(
+		const std::vector<std::filesystem::path>& headers,
+		const CompileCommand* command,
+		const SourceOverlay* overlay)
 	{
 		std::string key;
 		for (const auto& header : headers)

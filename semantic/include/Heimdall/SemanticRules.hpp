@@ -3,17 +3,16 @@
 #include <filesystem>
 #include <vector>
 
+#include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/FlowModel.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticModel.hpp>
+#include <Heimdall/TypeModel.hpp>
 
 namespace heimdall
 {
-	class FlowModel;
-	struct IncludeProfile;
-	struct CompileCommand;
-	class TypeModel;
-
 	// What the project-level rules (F3) know beyond the one bound file: where it
 	// lives and, when a compile command was available, the headers it includes.
 	// Without a profile the rules still run but see no header: a name or base
