@@ -1253,7 +1253,8 @@ namespace heimdall
 				}
 				else
 				{
-					++op;
+					const auto conversionEnd = ReflectionTypeEnd(op, end);
+					op                       = conversionEnd > op ? conversionEnd : op + 1;
 				}
 
 				if (op < end && Is(op, "<"))
@@ -1304,10 +1305,26 @@ namespace heimdall
 				}
 
 				const auto text = Text(i);
+				if (text == "operator")
+				{
+					break;
+				}
+
 				if (text == "decltype" && i + 1 < end && Is(i + 1, "(") &&
 					m_match[i + 1] != Invalid)
 				{
 					i        = m_match[i + 1] + 1;
+					saw_type = true;
+					continue;
+				}
+
+				if (text == "[" && Is(i + 1, ":") && m_match[i] != Invalid &&
+					m_match[i] < end && Is(m_match[i] - 1, ":"))
+				{
+					const auto close  = m_match[i];
+					const auto splice = Add(GrammarKind::SpliceExpression, i, close + 1, parent);
+					ParseExpression(i + kTwo, close - 1, splice);
+					i        = close + 1;
 					saw_type = true;
 					continue;
 				}
@@ -2961,19 +2978,16 @@ namespace heimdall
 			{
 				root = Add(GrammarKind::UnaryExpression, begin, begin + 1, parent);
 				++pos;
-				if (first == "^^" && pos < end &&
-					(IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile") ||
-					Is(pos, "signed") || Is(pos, "unsigned")))
+				if (first == "^^" && Is(pos, "::") &&
+					(pos + 1 == end ||!IsIdentifierToken(pos + 1)))
+				{
+					Add(GrammarKind::IdentifierExpression, pos, pos + 1, root);
+					++pos;
+				}
+				else if (first == "^^" && ReflectionTypeEnd(pos, end) > pos)
 				{
 					const auto type_begin = pos;
-					while (pos < end &&
-						(IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile") ||
-						Is(pos, "signed") || Is(pos, "unsigned") || Is(pos, "*") ||
-						Is(pos, "&") || Is(pos, "&&")))
-					{
-						++pos;
-					}
-
+					pos                   = ReflectionTypeEnd(pos, end);
 					Add(GrammarKind::TypeSpecifier, type_begin, pos, root);
 				}
 				else
@@ -3014,6 +3028,16 @@ namespace heimdall
 				root        = node;
 				prefix_kind = GrammarKind::ParenthesizedExpression;
 				(void) node;
+			}
+			else if ((first == "template" || first == "typename") && Is(pos + 1, "[") && Is(pos + kTwo, ":") &&
+				m_match[pos + 1] != Invalid && m_match[pos + 1] < end &&
+				Is(m_match[pos + 1] - 1, ":"))
+			{
+				const auto close = m_match[pos + 1];
+				root             = Add(GrammarKind::SpliceExpression, pos, close + 1, parent);
+				ParseExpression(pos + kThree, close - 1, root);
+				pos         = close + 1;
+				prefix_kind = GrammarKind::SpliceExpression;
 			}
 			else if (first == "[" && Is(pos + 1, ":") && m_match[pos] != Invalid &&
 				m_match[pos] < end && Is(m_match[pos] - 1, ":"))
@@ -3296,6 +3320,21 @@ namespace heimdall
 						++memberBegin;
 					}
 
+					if (Is(memberBegin, "[") && Is(memberBegin + 1, ":") &&
+						m_match[memberBegin] != Invalid && m_match[memberBegin] < end &&
+						Is(m_match[memberBegin] - 1, ":"))
+					{
+						const auto close                = m_match[memberBegin];
+						const auto node                 = Add(GrammarKind::MemberExpression, begin, close + 1, parent);
+						m_tree.m_nodes_soa.parent[root] = static_cast<std::uint32_t>(node);
+						m_tree.m_nodes_aos_dirty        = true;
+						const auto splice               = Add(GrammarKind::SpliceExpression, memberBegin, close + 1, node);
+						ParseExpression(memberBegin + kTwo, close - 1, splice);
+						pos  = close + 1;
+						root = node;
+						continue;
+					}
+
 					if (memberBegin >= end ||!IsIdentifierToken(memberBegin))
 					{
 						break;
@@ -3321,7 +3360,9 @@ namespace heimdall
 					static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
 					GrammarKind::MemberExpression ||
 					static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
-					GrammarKind::TemplateIdExpression))
+					GrammarKind::TemplateIdExpression ||
+					(first == "template" && static_cast<GrammarKind>(m_tree.m_nodes_soa.kind[root]) ==
+					GrammarKind::SpliceExpression)))
 				{
 					const auto close = FindTemplateClose(pos,
 						end < m_sig.size() && Is(end, ">>") ? end + 1 : end);
@@ -3583,6 +3624,22 @@ namespace heimdall
 			return close + kTwo;
 		}
 
+		bool ParseConstevalBlock(std::size_t& pos, std::size_t end, std::size_t parent)
+		{
+			if (!Is(pos, "consteval") ||!Is(pos + 1, "{"))
+			{
+				return false;
+			}
+
+			const auto begin    = pos;
+			const auto close    = m_match[pos + 1];
+			const auto blockEnd = close != Invalid && close < end ? close + 1 : end;
+			const auto node     = Add(GrammarKind::ConstevalBlock, begin, blockEnd, parent);
+			++pos;
+			ParseCompound(pos, blockEnd, node);
+			return true;
+		}
+
 		void ParseStatement(std::size_t& pos, std::size_t end, std::size_t parent)
 		{
 			while (IsAttributeStart(pos, end))
@@ -3634,6 +3691,11 @@ namespace heimdall
 			{
 				Add(GrammarKind::EmptyStatement, pos, pos + 1, parent);
 				++pos;
+				return;
+			}
+
+			if (ParseConstevalBlock(pos, end, parent))
+			{
 				return;
 			}
 
@@ -4606,6 +4668,81 @@ namespace heimdall
 		// `(begin, end)` read as a type-id whose head is certainly a type: a builtin
 		// (`unsigned long`) or a name the file or its headers declare as a type, then
 		// any `*`, `&`, `const`.
+		std::size_t ReflectionTypeEnd(std::size_t begin, std::size_t end) const
+		{
+			auto pos = begin;
+			while (pos < end && (Is(pos, "const") || Is(pos, "volatile")))
+			{
+				++pos;
+			}
+
+			if (Is(pos, "decltype") && Is(pos + 1, "(") && m_match[pos + 1] != Invalid &&
+				m_match[pos + 1] < end)
+			{
+				pos = m_match[pos + 1] + 1;
+			}
+			else if (pos < end && IsBuiltinType(Text(pos)))
+			{
+				while (pos < end && (IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile")))
+				{
+					++pos;
+				}
+			}
+			else
+			{
+				if (Is(pos, "::"))
+				{
+					++pos;
+				}
+
+				std::string_view last;
+				while (pos < end && IsIdentifierToken(pos) && m_sig_tok[pos] == Tok::None)
+				{
+					last = Text(pos++);
+					if (Is(pos, "<"))
+					{
+						const auto close = FindTemplateClose(pos, end);
+						if (close == Invalid)
+						{
+							return begin;
+						}
+
+						pos = close + 1;
+					}
+
+					if (!Is(pos, "::"))
+					{
+						break;
+					}
+
+					++pos;
+				}
+
+				if (last.empty() || ClassOf(last) != kNameType)
+				{
+					return begin;
+				}
+			}
+
+			while (pos < end)
+			{
+				if (Is(pos, "*") || Is(pos, "&") || Is(pos, "&&") || Is(pos, "const") || Is(pos, "volatile"))
+				{
+					++pos;
+				}
+				else if (Is(pos, "[") && m_match[pos] != Invalid && m_match[pos] < end)
+				{
+					pos = m_match[pos] + 1;
+				}
+				else
+				{
+					break;
+				}
+			}
+
+			return pos;
+		}
+
 		bool IsCastTypeId(std::size_t begin, std::size_t end) const
 		{
 			std::size_t i = begin;
@@ -5708,6 +5845,11 @@ namespace heimdall
 						{token.offset, "'" + std::string(name) + "' has not been declared"});
 				}
 
+				if (ParseConstevalBlock(pos, end, parent))
+				{
+					continue;
+				}
+
 				if (Is(pos, "static_assert"))
 				{
 					const auto next = ParseStaticAssert(pos, end, parent);
@@ -6031,7 +6173,13 @@ namespace heimdall
 						{
 							for (auto i = declaration_start + 1; i < semi; ++i)
 							{
-								if (Is(i, "=") && Is(i + 1, "[") && Is(i + 2, ":"))
+								auto operand = i + 1;
+								if (Is(operand, "template") || Is(operand, "typename"))
+								{
+									++operand;
+								}
+
+								if (Is(i, "=") && Is(operand, "[") && Is(operand + 1, ":"))
 								{
 									ParseExpression(i + 1, semi, declaration);
 									break;

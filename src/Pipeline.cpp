@@ -143,6 +143,8 @@ namespace heimdall::cli
 			return "StaticAssertDeclaration";
 		case GrammarKind::SpliceExpression:
 			return "SpliceExpression";
+		case GrammarKind::ConstevalBlock:
+			return "ConstevalBlock";
 		case GrammarKind::MacroInvocation:
 			return "MacroInvocation";
 		}

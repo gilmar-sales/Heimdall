@@ -87,7 +87,9 @@ namespace heimdall
 		// declarations, at the start of a declaration or statement. A trailing `;` is part of
 		// the node; a `{ ... }` that completes the expansion (`TEST(a, b) { ... }`) is a
 		// CompoundStatement child. Arguments are not parsed.
-		MacroInvocation
+		MacroInvocation,
+		/// An immediate compound statement introduced by consteval.
+		ConstevalBlock
 	};
 
 	// Classification of one `...;` inside a `requires { ... }` body, by first

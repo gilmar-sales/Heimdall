@@ -1613,7 +1613,7 @@ namespace heimdall
 			{
 				const GrammarKind kind = tree.NodesSoA().Kind(current);
 				if (kind == GrammarKind::FunctionDefinition ||
-					kind == GrammarKind::LambdaExpression)
+					kind == GrammarKind::LambdaExpression || kind == GrammarKind::ConstevalBlock)
 				{
 					if (!info.is_local)
 					{
@@ -2198,7 +2198,7 @@ namespace heimdall
 			{
 				const GrammarKind kind = tree.NodesSoA().Kind(n);
 				if (kind != GrammarKind::FunctionDefinition &&
-					kind != GrammarKind::LambdaExpression)
+					kind != GrammarKind::LambdaExpression && kind != GrammarKind::ConstevalBlock)
 				{
 					continue;
 				}
@@ -3998,6 +3998,30 @@ namespace heimdall
 					detail = signature;
 				}
 
+				if (name.starts_with("operator "))
+				{
+					auto function = tree.NodesSoA().Parent(node);
+					for (std::size_t depth = 0; depth < kMaxParentWalkDepth &&
+						function < tree.NodesSoA().size(); ++depth)
+					{
+						const auto parentKind = tree.NodesSoA().Kind(function);
+						if (parentKind == GrammarKind::FunctionDefinition || parentKind == GrammarKind::FunctionDeclaration)
+						{
+							const auto first      = tree.NodesSoA().FirstToken(function);
+							const auto nameToken  = tree.NodesSoA().FirstToken(node);
+							const auto qualifiers = CompactWs(SliceRange(tree, first, nameToken - first), kMaxDetailLen);
+							if (!qualifiers.empty())
+							{
+								detail = qualifiers + " " + detail;
+							}
+
+							break;
+						}
+
+						function = tree.NodesSoA().Parent(function);
+					}
+				}
+
 				// Associated constraints belong to the signature: show the
 				// requires-clause (leading or trailing) with the function.
 				const std::size_t clause = FindInSubtree(tree, node, GrammarKind::RequiresClause);
@@ -5004,10 +5028,14 @@ namespace heimdall
 			}
 
 			// A conversion operator (`operator bool`, `operator ns::Type`).
-			if (label == "operator" && text != "operator" &&
+			if ((label == "operator" || label.starts_with("operator ")) && text != "operator" &&
 				token.kind == TokenKind::Identifier)
 			{
-				label += ' ';
+				if (label.back() != ':')
+				{
+					label += ' ';
+				}
+
 				label += text;
 				current = next;
 				continue;
@@ -7056,6 +7084,156 @@ namespace heimdall
 				return {};
 			}
 
+			[[nodiscard]] Resolved CompletionValueType(const CompletionItem& item) const
+			{
+				if (item.kind == CompletionKind::Variable && item.file < 0)
+				{
+					const auto value = ResolveVariable(item.label, 0);
+					if (value.ok ||!value.text.empty())
+					{
+						return value;
+					}
+				}
+
+				for (const auto& [key, scopes] : m_by_path)
+				{
+					for (const auto* scope : scopes)
+					{
+						for (const auto& member : scope->members)
+						{
+							if (member.label == item.label && member.file == item.file &&
+								member.offset == item.offset && member.kind == item.kind)
+							{
+								if (item.deduction && item.deduction->parameterTypes.empty())
+								{
+									std::vector<const IndexedScope*> allScopes;
+									for (const auto& [scopeKey, entries] : m_by_path)
+									{
+										allScopes.insert(allScopes.end(), entries.begin(), entries.end());
+									}
+
+									const auto type = TemplateDeduction::Instantiate(*item.deduction,
+										item.templateParams, {}, {}, allScopes, scope->path, false);
+									return FromText(type, scope->path, 0);
+								}
+
+								return FromText(item.type_text, scope->path, 0);
+							}
+						}
+					}
+				}
+
+				return FromText(item.type_text, m_hint, 0);
+			}
+
+			[[nodiscard]] bool HasImplicitReflectionConversion(const Resolved& value) const
+			{
+				constexpr std::string_view kConversionPrefix = "operator ";
+				if (!value.ok || HasReflectionIndirection(value))
+				{
+					return false;
+				}
+
+				for (const auto* scope : ScopesAt(value.path))
+				{
+					for (const auto& member : scope->members)
+					{
+						if (!member.label.starts_with(kConversionPrefix) || member.deleted ||
+							member.access != MemberAccess::Public || member.detail.find("explicit") != std::string::npos)
+						{
+							continue;
+						}
+
+						const auto target = FromText(std::string_view(member.label).substr(kConversionPrefix.size()),
+							scope->path, 0);
+						if (target.path == std::vector<std::string> {"std", "meta", "info"} &&
+							!HasReflectionIndirection(target))
+						{
+							return true;
+						}
+					}
+				}
+
+				return false;
+			}
+
+			[[nodiscard]] bool HasReflectionIndirection(const Resolved& value) const
+			{
+				auto text                            = value.text;
+				auto hint                            = value.hint.empty() ? m_hint : value.hint;
+				constexpr std::size_t kMaxAliasDepth = 8;
+				for (std::size_t depth = 0; depth < kMaxAliasDepth; ++depth)
+				{
+					if (text.find('*') != std::string::npos || text.find('[') != std::string::npos)
+					{
+						return true;
+					}
+
+					const auto type = ParseTypeName(text);
+					if (!type.ok)
+					{
+						return false;
+					}
+
+					Found alias;
+					for (const auto& prefix : Prefixes(hint))
+					{
+						const auto full = Join(prefix, type.path);
+						alias           = FindAlias(Parent(full), full.back());
+						if (alias.item)
+						{
+							break;
+						}
+					}
+
+					if (!alias.item)
+					{
+						return false;
+					}
+
+					text = SubstituteText(alias.item->type_text, alias.item->templateParams, type.args);
+					hint = alias.owner;
+				}
+
+				return true;
+			}
+
+			[[nodiscard]] bool IsReflectionNamespace(std::string_view name) const
+			{
+				const std::vector<std::string> metaPath
+				{
+					"std", "meta"
+				};
+				for (const auto& [key, scopes] : m_by_path)
+				{
+					for (const auto* scope : scopes)
+					{
+						if (scope->kind != CompletionKind::Namespace || scope->path.empty() || scope->path.back() != name)
+						{
+							continue;
+						}
+
+						if (scope->path.size() <= metaPath.size() &&
+							std::equal(scope->path.begin(), scope->path.end(), metaPath.begin()))
+						{
+							return true;
+						}
+
+						for (const auto& member : scope->members)
+						{
+							const auto value = FromText(member.type_text, scope->path, 0);
+							if ((member.kind == CompletionKind::Variable || member.kind == CompletionKind::Function) &&
+								value.path == std::vector<std::string> {"std", "meta", "info"} && !HasReflectionIndirection(value))
+							{
+								return true;
+							}
+						}
+					}
+				}
+
+				return false;
+			}
+
 			static std::string SubstituteText(
 				std::string_view text,
 				const std::vector<std::string>& parameters,
@@ -8225,6 +8403,26 @@ namespace heimdall
 				if (end >= m_tokens.size() || end <= t + 1)
 				{
 					return {};
+				}
+
+				const auto first = NextSignificant(t);
+				if (first < end && TokenText(m_source, m_tokens[first]) == "^^")
+				{
+					const auto last   = PreviousSignificant(m_tokens, end, m_source);
+					const auto& nodes = m_tree.NodesSoA();
+					for (std::size_t node = 0; node < nodes.size(); ++node)
+					{
+						if (nodes.Kind(node) == GrammarKind::UnaryExpression &&
+							nodes.FirstToken(node) == first &&
+							nodes.FirstToken(node) + nodes.TokenCount(node) == last + 1)
+						{
+							Resolved reflection;
+							reflection.path = {"std", "meta", "info"};
+							reflection.text = "std::meta::info";
+							reflection.ok   = true;
+							return reflection;
+						}
+					}
 				}
 
 				Chain chain = ParseChainEndingAt(end, t);
@@ -10103,6 +10301,122 @@ namespace heimdall
 		const ScopeIndex* external,
 		bool for_hover);
 
+	namespace
+	{
+		bool RequiresReflectionValue(
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			std::size_t offset)
+		{
+			struct Frame
+			{
+				std::string_view close;
+				bool splice   = false;
+				bool ordinary = false;
+			};
+
+			std::vector<Frame> frames;
+			std::string_view previous;
+			for (std::size_t token = 0; token < tokens.size() && tokens[token].offset < offset; ++token)
+			{
+				if (IsTrivia(tokens[token].kind))
+				{
+					continue;
+				}
+
+				const auto word = TokenText(source, tokens[token]);
+				if (word == "[")
+				{
+					const auto next = std::find_if(tokens.begin() + token + 1, tokens.end(),
+						[](const Token& candidate)
+						{
+							return !IsTrivia(candidate.kind);
+					});
+					const bool splice = next != tokens.end() && TokenText(source, *next) == ":";
+					frames.emplace_back("]", splice, !splice);
+				}
+				else if (word == "(" || word == "{")
+				{
+					const bool argument = word == "{" ||(!previous.empty() &&
+						(IsIdentChar(previous.back()) || previous == ")" || previous == ">"));
+					frames.emplace_back(word == "(" ? ")" : "}", false, argument);
+				}
+				else if (!frames.empty() && word == frames.back().close)
+				{
+					frames.pop_back();
+				}
+				else if (word == "^^" && !frames.empty())
+				{
+					frames.back().ordinary = true;
+				}
+
+				previous = word;
+			}
+
+			bool ordinary = false;
+			for (auto frame = frames.rbegin(); frame != frames.rend(); ++frame)
+			{
+				ordinary = ordinary || frame->ordinary;
+				if (frame->splice)
+				{
+					return !ordinary;
+				}
+			}
+
+			return false;
+		}
+
+		bool IsReflectionValueType(std::string_view text, const MemberResolver& resolver)
+		{
+			const auto written  = ParseTypeName(text);
+			const auto resolved = resolver.ResolveTypeText(text);
+			const std::vector<std::string> reflectionPath
+			{
+				"std", "meta", "info"
+			};
+			return written.args.empty() && text.find('*') == std::string_view::npos &&
+				text.find('[') == std::string_view::npos &&
+				(written.path == reflectionPath ||(resolved.ok && resolved.path == reflectionPath));
+		}
+
+		void RestrictReflectionItems(
+			const ParseTree& tree,
+			const ScopeIndex* external,
+			std::size_t offset,
+			std::vector<CompletionItem>& items)
+		{
+			const MemberResolver resolver(tree, external, offset);
+			std::erase_if(items,[&](const CompletionItem& item)
+				{
+					if (item.kind == CompletionKind::Namespace ||
+					(item.kind == CompletionKind::Variable && !item.has_location && item.type_text.empty()))
+					{
+						return !resolver.IsReflectionNamespace(item.label);
+				}
+
+					if (item.kind != CompletionKind::Variable && item.kind != CompletionKind::Function)
+					{
+						return true;
+				}
+
+					const auto value = resolver.CompletionValueType(item);
+					if (resolver.HasReflectionIndirection(value))
+					{
+						return true;
+				}
+
+					const std::vector<std::string> reflectionPath
+					{
+						"std", "meta", "info"
+				};
+					const auto& text = value.text.empty() ? item.type_text : value.text;
+					return !(IsReflectionValueType(text, resolver) || resolver.HasImplicitReflectionConversion(value) ||
+					(value.ok && value.path == reflectionPath && value.args.empty() &&
+					text.find('*') == std::string::npos && text.find('[') == std::string::npos));
+			});
+		}
+	}
+
 	std::vector<CompletionItem> CompletionEngine::Complete(
 		const ParseTree& tree,
 		const ParserOptions& options,
@@ -10219,7 +10533,13 @@ namespace heimdall
 			}
 		}
 
-		return RankItems(CollectAndSort(best, interner), prefix);
+		auto items = CollectAndSort(best, interner);
+		if (!for_hover && RequiresReflectionValue(source, tokens, offset))
+		{
+			RestrictReflectionItems(tree, external, offset, items);
+		}
+
+		return RankItems(std::move(items), prefix);
 	}
 
 	namespace
@@ -10672,6 +10992,11 @@ namespace heimdall
 		result.prefix                   = PrefixAt(source, offset);
 		const std::vector<Token> tokens = Lexer(source).Lex();
 		const CursorContext context     = ClassifyContext(source, tokens, offset, result.prefix);
+		if (RequiresReflectionValue(source, tokens, offset))
+		{
+			return result;
+		}
+
 		if (context == CursorContext::Expression &&
 			!NamesNewDeclarator(source, tokens, offset, result.prefix))
 		{

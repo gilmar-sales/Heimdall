@@ -9,6 +9,7 @@ namespace mylib
     struct Base
     {
         int base_value;
+
         void base_run();
     };
 

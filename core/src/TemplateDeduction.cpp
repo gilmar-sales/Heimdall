@@ -325,6 +325,43 @@ namespace heimdall
 				return {};
 			}
 
+			if (words.front() == "^^")
+			{
+				constexpr std::string_view kPrefix = "auto reflection = ";
+				constexpr std::size_t kSuffixBytes = std::string_view(" ;").size();
+				std::string reflectedSource(kPrefix);
+				std::for_each(words.begin(), words.end(),[&](const auto& word)
+					{
+						reflectedSource += word;
+						reflectedSource += ' ';
+				});
+
+				reflectedSource += ';';
+				ParserOptions options;
+				options.standard         = CppStandard::Cpp26;
+				const auto reflectedTree = ParseTree::Parse(reflectedSource, options);
+				const auto& nodes        = reflectedTree.NodesSoA();
+				const auto& tokens       = reflectedTree.Tokens();
+				for (std::size_t node = 0; node < nodes.size(); ++node)
+				{
+					if (nodes.Kind(node) != GrammarKind::UnaryExpression || nodes.TokenCount(node) == 0)
+					{
+						continue;
+					}
+
+					const auto first = nodes.FirstToken(node);
+					const auto last  = first + nodes.TokenCount(node) - 1;
+					if (tokens[first].offset == kPrefix.size() &&
+						tokens[last].offset + tokens[last].length + kSuffixBytes == reflectedSource.size() &&
+						reflectedTree.Diagnostics().empty())
+					{
+						return "std::meta::info";
+					}
+				}
+
+				return {};
+			}
+
 			const auto brace = expression.find('{');
 			if (brace != std::string_view::npos)
 			{

@@ -25,7 +25,8 @@ namespace
         return false;
     }
 
-    const heimdall::CompletionItem* Find(const std::vector<heimdall::CompletionItem>& items,
+    const heimdall::CompletionItem* Find(
+        const std::vector<heimdall::CompletionItem>& items,
         std::string_view label)
     {
         for (const auto& item : items)
@@ -56,6 +57,139 @@ TEST(CompletionSpec, ExtractsIdentifierPrefixBeforeCursor)
     EXPECT_EQ(heimdall::CompletionEngine::PrefixAt("a+b", 3), "b");
     EXPECT_EQ(heimdall::CompletionEngine::PrefixAt("a", 99), "a");
     EXPECT_EQ(heimdall::CompletionEngine::PrefixAt("", 0), "");
+}
+
+TEST(CompletionSpec, SpliceCompletionRequiresReflectionTypes)
+{
+    constexpr std::string_view source =
+        "namespace std::meta { struct info {}; consteval info type_of(info); "
+        "consteval bool is_type(info); }\n"
+        "using Reflection = std::meta::info; using Pointer = Reflection*;\n"
+        "consteval Reflection Select(int); consteval int Ordinary();\n"
+        "consteval auto Deduced() { return ^^int; }\n"
+        "void Test() { int unrelated; Pointer pointer; Reflection reflected; auto inferred = ^^int; "
+        "using Type = [: :]; }";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.find("[:") + 3);
+
+    EXPECT_TRUE(Contains(items, "reflected"));
+    EXPECT_TRUE(Contains(items, "inferred"));
+    EXPECT_TRUE(Contains(items, "Select"));
+    EXPECT_TRUE(Contains(items, "Deduced"));
+    EXPECT_TRUE(Contains(items, "std"));
+    EXPECT_FALSE(Contains(items, "unrelated"));
+    EXPECT_FALSE(Contains(items, "pointer"));
+    EXPECT_FALSE(Contains(items, "Ordinary"));
+    EXPECT_FALSE(Contains(items, "int"));
+    EXPECT_FALSE(Contains(items, "return"));
+}
+
+TEST(CompletionSpec, ReflectionComparisonIsNotDeducedAsMetaInfo)
+{
+    constexpr std::string_view source =
+        "void Test() { auto comparison = ^^int == ^^int; using Type = [: comp :]; }";
+
+    const auto items = heimdall::CompletionEngine::Complete(source, OffsetAfter(source, "[: comp"));
+
+    EXPECT_FALSE(Contains(items, "comparison"));
+}
+
+TEST(CompletionSpec, SpliceCompletionAcceptsOnlyImplicitReflectionConversions)
+{
+    constexpr std::string_view source =
+        "namespace std::meta { struct info {}; } "
+        "struct Implicit { consteval operator std::meta::info() const; }; "
+        "struct Explicit { explicit consteval operator std::meta::info() const; }; "
+        "void Test() { Implicit reflected; Explicit ordinary; using Type = [: :]; }";
+
+    const auto items = heimdall::CompletionEngine::Complete(source, source.find("[:") + 3);
+
+    EXPECT_TRUE(Contains(items, "reflected"));
+    EXPECT_FALSE(Contains(items, "ordinary"));
+}
+
+TEST(CompletionSpec, QualifiedSpliceCompletionRejectsNonReflectionResults)
+{
+    constexpr std::string_view source =
+        "namespace std::meta { struct info {}; consteval info type_of(info); "
+        "consteval bool is_type(info); consteval int size_of(info); }\n"
+        "using Type = [: std::meta:: :];";
+    const auto items = heimdall::CompletionEngine::Complete(
+        source, OffsetAfter(source, "[: std::meta::"));
+
+    EXPECT_TRUE(Contains(items, "type_of"));
+    EXPECT_FALSE(Contains(items, "is_type"));
+    EXPECT_FALSE(Contains(items, "size_of"));
+    EXPECT_FALSE(Contains(items, "info"));
+}
+
+TEST(CompletionSpec, ReflectionOperandsAndCallArgumentsKeepOrdinaryCompletion)
+{
+    constexpr std::string_view source =
+        "struct Sample {}; int argument; consteval auto Select(int); "
+        "using Type = [: ^^Sam :]; using Other = [: Select(arg) :];";
+
+    const auto operands = heimdall::CompletionEngine::Complete(source, OffsetAfter(source, "^^Sam"));
+    const auto arguments = heimdall::CompletionEngine::Complete(source,
+        OffsetAfter(source, "Select(arg"));
+
+    EXPECT_TRUE(Contains(operands, "Sample"));
+    EXPECT_TRUE(Contains(arguments, "argument"));
+    EXPECT_EQ(heimdall::CompletionEngine::ContextAt(source, source.find("[:") + 3).kind,
+              heimdall::CompletionContextKind::Other);
+}
+
+TEST(CompletionSpec, SpliceContextIgnoresStringsCommentsAndClosedSplices)
+{
+    constexpr std::string_view source =
+        "int ordinary; const char* text = \"[:\"; /* [: */ "
+        "using Type = [: ^^int :]; void Test() { ord; }";
+
+    const auto items = heimdall::CompletionEngine::Complete(source, OffsetAfter(source, "ord; }") - 3);
+
+    EXPECT_TRUE(Contains(items, "ordinary"));
+}
+
+TEST(CompletionSpec, SpliceCompletionUsesIndexedReflectionAliasesAndRejectsLookalikes)
+{
+    const auto index = heimdall::CompletionEngine::IndexScopes(
+        "namespace std::meta { struct info {}; consteval info type_of(info); } "
+        "namespace library { using Reflection = std::meta::info; "
+        "consteval Reflection Select(); struct info {}; consteval info Fake(); }", {});
+    constexpr std::string_view source = "using Type = [: library:: :];";
+
+    const auto items = heimdall::CompletionEngine::Complete(
+        source, {}, OffsetAfter(source, "library::"), &index);
+
+    EXPECT_TRUE(Contains(items, "Select"));
+    EXPECT_FALSE(Contains(items, "Fake"));
+    EXPECT_FALSE(Contains(items, "info"));
+}
+
+TEST(CompletionSpec, NestedIncompleteSpliceRestoresReflectionContext)
+{
+    constexpr std::string_view source =
+        "namespace std::meta { struct info {}; } std::meta::info reflected; int unrelated; "
+        "auto value = [: Choose([: ref";
+
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size());
+
+    EXPECT_TRUE(Contains(items, "reflected"));
+    EXPECT_FALSE(Contains(items, "unrelated"));
+    EXPECT_EQ(heimdall::CompletionEngine::ContextAt(source, source.size()).kind,
+              heimdall::CompletionContextKind::Other);
+}
+
+TEST(CompletionSpec, ConstevalBlockReflectionLocalsDoNotEscapeTheirScope)
+{
+    constexpr std::string_view source =
+        "consteval { auto localReflection = ^^int; using Type = [: local :]; } "
+        "void Test() { loc; }";
+
+    const auto inside = heimdall::CompletionEngine::Complete(source, OffsetAfter(source, "[: local"));
+    const auto outside = heimdall::CompletionEngine::Complete(source, source.rfind("loc;") + 3);
+
+    EXPECT_TRUE(Contains(inside, "localReflection"));
+    EXPECT_FALSE(Contains(outside, "localReflection"));
 }
 
 TEST(CompletionSpec, SuggestsLocalVariablesAndFunctionsByPrefix)
@@ -699,8 +833,9 @@ namespace
 {
 
     // `|` marks the cursor. Returns the labels offered there.
-    std::vector<std::string> MemberLabels(std::string source,
-                                          const heimdall::ScopeIndex* external = nullptr)
+    std::vector<std::string> MemberLabels(
+        std::string source,
+        const heimdall::ScopeIndex* external = nullptr)
     {
         const std::size_t cursor = source.find('|');
         source.erase(cursor, 1);
@@ -1463,8 +1598,10 @@ namespace
     };
 
     // Hovers the last occurrence of `name` in `source`.
-    HoverLayout LayoutAtHover(std::string_view source, std::string_view name,
-                              const heimdall::ScopeIndex* external = nullptr)
+    HoverLayout LayoutAtHover(
+        std::string_view source,
+        std::string_view name,
+        const heimdall::ScopeIndex* external = nullptr)
     {
         const auto hovered = heimdall::CompletionEngine::Hover(
             source, heimdall::ParserOptions {}, source.rfind(name) + 1, external);
@@ -1868,8 +2005,10 @@ namespace
         std::uint64_t offset = 0;
     };
 
-    HoverOffset OffsetAtHover(std::string_view source, std::string_view name,
-                              std::size_t occurrence_from_end = 0)
+    HoverOffset OffsetAtHover(
+        std::string_view source,
+        std::string_view name,
+        std::size_t occurrence_from_end = 0)
     {
         std::size_t at = std::string_view::npos;
         for (std::size_t n = 0; n <= occurrence_from_end; ++n)

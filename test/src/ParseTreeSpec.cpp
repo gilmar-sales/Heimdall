@@ -381,7 +381,7 @@ TEST(ParseTreeSpec, ConstrainedPlaceholdersKeepTheDeclaredName)
 
     // No stray `auto`: every declared entity keeps its own name.
     EXPECT_EQ(names,
-        (std::vector<std::string_view> {"x", "rx", "p", "z", "k", "b"}));
+              (std::vector<std::string_view> {"x", "rx", "p", "z", "k", "b"}));
 }
 
 TEST(ParseTreeSpec, RequiresClauseBeforeDefaultedDefinitionParses)
@@ -415,7 +415,7 @@ TEST(ParseTreeSpec, ClassifiesRequirementKinds)
     }
 
     EXPECT_EQ(kinds,
-        (std::vector<heimdall::RequirementKind> {heimdall::RequirementKind::Simple,
+              (std::vector<heimdall::RequirementKind> {heimdall::RequirementKind::Simple,
             heimdall::RequirementKind::Type, heimdall::RequirementKind::Compound,
             heimdall::RequirementKind::Nested}));
     EXPECT_EQ(tree.RequirementKindOf(0), heimdall::RequirementKind::Simple);
@@ -499,7 +499,9 @@ TEST(ParseTreeSpec, ReflectionProbeStaticAssertionsAndTypeSpliceAreNotFunctions)
     const auto path = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "test/src/ReflectionProbe.cpp";
     std::ifstream file(path);
     ASSERT_TRUE(file.is_open());
-    const std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const std::string source(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
     heimdall::ParserOptions options;
     options.standard = heimdall::CppStandard::Cpp26;
 
@@ -510,6 +512,60 @@ TEST(ParseTreeSpec, ReflectionProbeStaticAssertionsAndTypeSpliceAreNotFunctions)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::SpliceExpression), 1);
     EXPECT_GE(Count(tree, heimdall::GrammarKind::UnaryExpression), 7);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
+}
+
+TEST(ParseTreeSpec, ReflectionMemberSplicesPreservePostfixExpressions)
+{
+    constexpr std::string_view source =
+        "void Test() { object.[:member:] = 42; pointer->[:member:](); "
+        "auto address = &[:member:]; auto value = array[[:index:]]; "
+        "auto result = template [:function:]<int>(); auto global = ^^::; }";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::SpliceExpression), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::MemberExpression), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::SubscriptExpression), 1);
+}
+
+TEST(ParseTreeSpec, ReflectionTypeTemplateAndNamespaceSplices)
+{
+    constexpr std::string_view source =
+        "namespace Original {} namespace Alias = [: ^^Original :]; "
+        "using Type = [: ^^int :]; typename [:type:] object; "
+        "using Specialized = template [:primary:]<int>; "
+        "struct Generated; consteval { define_aggregate(^^Generated, {data_member_spec(^^int)}); } "
+        "void Test() { auto nested = [: [:reflection:] :]; auto global = ^^::; }";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::SpliceExpression), 6);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ConstevalBlock), 1);
+}
+
+TEST(ParseTreeSpec, ReflectionTypeOperandsConsumeCvPointersArraysAndDecltype)
+{
+    constexpr std::string_view source =
+        "struct Sample {}; void Test() { Sample sample; "
+        "auto pointer = ^^Sample*; auto qualified = ^^const Sample&; "
+        "auto array = ^^Sample[3]; auto deduced = ^^decltype(sample); "
+        "auto builtin = ^^unsigned long; }";
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp26;
+
+    const auto tree = heimdall::ParseTree::Parse(source, options);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::UnaryExpression), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::BinaryExpression), 0);
 }
 
 TEST(ParseTreeSpec, ConstructorParametersUseFunctionSuffixWithoutLosingPointerReturnTypes)
@@ -1394,7 +1450,8 @@ namespace
     {
     public:
         FakeTypeNames(std::initializer_list<std::string_view> names,
-                      std::uint64_t fingerprint = 1) : m_names(names), m_fingerprint(fingerprint) {}
+            std::uint64_t fingerprint = 1) : m_names(names),
+            m_fingerprint(fingerprint) {}
 
         bool IsType(std::string_view name) const noexcept override
         {
@@ -1411,8 +1468,9 @@ namespace
         std::uint64_t m_fingerprint;
     };
 
-    heimdall::ParseTree ParseWith(std::string_view source,
-                                  std::shared_ptr<const heimdall::TypeNameOracle> names = {})
+    heimdall::ParseTree ParseWith(
+        std::string_view source,
+        std::shared_ptr<const heimdall::TypeNameOracle> names = {})
     {
         heimdall::ParserOptions options;
         options.type_names = std::move(names);
