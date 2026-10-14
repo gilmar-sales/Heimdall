@@ -559,7 +559,7 @@ namespace heimdall
 				return candidate;
 			}
 
-			Candidate FromExternal(ExternalRef ref) const
+			[[nodiscard]] Candidate FromExternal(const ExternalRef& ref) const
 			{
 				const IndexedScope& scope  = (*m_external)[ref.scope];
 				const CompletionItem& item = scope.members[ref.member];

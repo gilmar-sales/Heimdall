@@ -405,7 +405,8 @@ TEST(ApiMissingNodiscard, SilentForVoidArithmeticQueryNamesAndAnnotatedFunctions
 
 TEST(ApiPassByValue, ReportsAConstReferenceThatIsCopiedIntoAMember)
 {
-    const Typed typed("struct Holder {\n"
+    const Typed typed(
+        "struct Holder {\n"
         "    std::string name_;\n"
         "    Holder(const std::string& name) : name_(name) {}\n"
         "};\n");
@@ -464,28 +465,28 @@ TEST(ApiPassByConstReference, SilentForConstructorsIncludingOutOfLineDefinitions
     // In-class definition: the binder flags the constructor.
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
         Typed("struct Tracer { int x; };\nstruct Holder {\n"
-              "    int copy_;\n"
-              "    Holder(Tracer tracer) { copy_ = tracer.x; }\n"
-              "};\n")
+        "    int copy_;\n"
+        "    Holder(Tracer tracer) { copy_ = tracer.x; }\n"
+        "};\n")
         .flow)
         .empty());
     // Out-of-line definition: `Holder::Holder` carries no constructor flag,
     // but the sink still owns its argument.
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
         Typed("struct Tracer { int x; };\nstruct Holder {\n"
-              "    int copy_;\n"
-              "    Holder(Tracer tracer);\n"
-              "};\n"
-              "Holder::Holder(Tracer tracer) { copy_ = tracer.x; }\n")
+        "    int copy_;\n"
+        "    Holder(Tracer tracer);\n"
+        "};\n"
+        "Holder::Holder(Tracer tracer) { copy_ = tracer.x; }\n")
         .flow)
         .empty());
     // Moved through the member-initializer list (the AnalysisContext shape).
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
         Typed("struct Snapshot { int x; };\nstruct Context {\n"
-              "    Snapshot snapshot_;\n"
-              "    Context(Snapshot snapshot);\n"
-              "};\n"
-              "Context::Context(Snapshot snapshot) : snapshot_(std::move(snapshot)) {}\n")
+        "    Snapshot snapshot_;\n"
+        "    Context(Snapshot snapshot);\n"
+        "};\n"
+        "Context::Context(Snapshot snapshot) : snapshot_(std::move(snapshot)) {}\n")
         .flow)
         .empty());
 }
@@ -512,7 +513,8 @@ TEST(ApiConstCorrectness, ReportsAReferenceParameterThatIsNeverModified)
 {
     // Routed through a `const Foo&` callee so the flow model sees a pure read
     // (returning a member directly escapes in the flow model: it may move).
-    const Typed typed("struct Foo { int x; };\n"
+    const Typed typed(
+        "struct Foo { int x; };\n"
         "int area(const Foo& f) { return f.x; }\n"
         "int peek(Foo& foo) { return area(foo); }\n");
     const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
@@ -597,7 +599,8 @@ TEST(ApiConstCorrectness, ReportsReaderCallingConstTemplateMember)
 
 TEST(ApiUnsafeDowncast, ReportsAnUncheckedDowncast)
 {
-    const Typed typed("struct Base { int x; };\n"
+    const Typed typed(
+        "struct Base { int x; };\n"
         "struct Derived : Base { int y; };\n"
         "void f(Base* base) { Derived* derived = static_cast<Derived*>(base); }\n");
     const auto diagnostics = heimdall::SemanticRules::AnalyzeUnsafeDowncast(typed.types);
@@ -629,7 +632,8 @@ TEST(ApiUnsafeDowncast, SilentForUpcastsUnrelatedCastsAndDynamicCast)
 
 TEST(ApiSlicing, ReportsACopyInitializationThatSlices)
 {
-    const Typed typed("struct Base { int x; };\n"
+    const Typed typed(
+        "struct Base { int x; };\n"
         "struct Derived : Base { int y; };\n"
         "void f(Derived derived) { Base base = derived; }\n");
     const auto diagnostics = heimdall::SemanticRules::AnalyzeSlicing(typed.types);
@@ -641,12 +645,14 @@ TEST(ApiSlicing, ReportsACopyInitializationThatSlices)
 
 TEST(ApiSlicing, ReportsAssignmentsAndReturnsByValue)
 {
-    const Typed assigned("struct Base { int x; };\n"
+    const Typed assigned(
+        "struct Base { int x; };\n"
         "struct Derived : Base { int y; };\n"
         "void f(Derived derived) { Base base; base = derived; }\n");
     EXPECT_EQ(heimdall::SemanticRules::AnalyzeSlicing(assigned.types).size(), 1u);
 
-    const Typed returned("struct Base { int x; };\n"
+    const Typed returned(
+        "struct Base { int x; };\n"
         "struct Derived : Base { int y; };\n"
         "Base f(Derived derived) { return derived; }\n");
     EXPECT_EQ(heimdall::SemanticRules::AnalyzeSlicing(returned.types).size(), 1u);

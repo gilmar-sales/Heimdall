@@ -66,7 +66,7 @@ namespace heimdall::lsp
 	/// far) when `stop` is requested.
 	[[nodiscard]] std::vector<std::filesystem::path> DiscoverWorkspaceSources(
 		const std::filesystem::path& root,
-		std::stop_token stop,
+		const std::stop_token& stop,
 		std::size_t maxFiles = kMaxWorkspaceFiles);
 
 	/// Sorted project sources below `root` (dependency sources excluded),
@@ -74,7 +74,7 @@ namespace heimdall::lsp
 	/// `stop` is requested.
 	[[nodiscard]] std::vector<std::filesystem::path> DiscoverProjectSources(
 		const std::filesystem::path& root,
-		std::stop_token stop,
+		const std::stop_token& stop,
 		std::size_t maxFiles = kMaxWorkspaceFiles);
 
 	/// Whole file, or nothing when it is unreadable or larger than `kMaxWorkspaceFileBytes`.

@@ -7422,7 +7422,7 @@ namespace heimdall
 				std::string_view prefix,
 				StringInterner& interner,
 				FlatHashMap<CompletionItem>& best,
-				MemberFilter filter = {},
+				const MemberFilter& filter = {},
 				const std::vector<std::string>& arguments = {}) const
 			{
 				std::unordered_set<std::string> visited;

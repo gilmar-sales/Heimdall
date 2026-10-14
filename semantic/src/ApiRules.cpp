@@ -1,10 +1,3 @@
-#include <Heimdall/LineTable.hpp>
-#include <Heimdall/SemanticRules.hpp>
-
-#include "detail/ClassHead.hpp"
-#include "detail/RuleSupport.hpp"
-#include "detail/TokenView.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <optional>
@@ -14,6 +7,13 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/SemanticRules.hpp>
+
+#include "detail/ClassHead.hpp"
+#include "detail/RuleSupport.hpp"
+#include "detail/TokenView.hpp"
 
 namespace heimdall
 {
@@ -163,7 +163,9 @@ namespace heimdall
 			// First token of the member declaration whose name is at `name`, after
 			// any `template<...>` header: where a specifier or a using-declaration
 			// can be inserted. `has_template` tells a template header was skipped.
-			std::size_t DeclarationStart(const ClassBody& body, std::size_t name,
+			std::size_t DeclarationStart(
+				const ClassBody& body,
+				std::size_t name,
 				bool& has_template) const
 			{
 				std::size_t start = name;
@@ -361,7 +363,7 @@ namespace heimdall
 		private:
 			// Yes when the destructor is virtual (written, or inherited from a base
 			// whose destructor is); Unknown when a base does not resolve.
-			Tri HasVirtualDestructor(SymbolId klass, std::size_t depth) const
+			[[nodiscard]] Tri HasVirtualDestructor(SymbolId klass, std::size_t depth) const
 			{
 				const auto& symbols = m_analysis.Symbols();
 				if (depth > kMaxDepth)
@@ -407,7 +409,9 @@ namespace heimdall
 
 		// The parameters of the list that opens at `open`: [begin, end) positions
 		// of each one. False when the list does not close.
-		bool SplitParameters(const detail::TokenView& view, std::size_t open,
+		bool SplitParameters(
+			const detail::TokenView& view,
+			std::size_t open,
 			std::vector<std::pair<std::size_t, std::size_t>>& parameters)
 		{
 			const auto close = view.Match(open, view.Size());
@@ -444,7 +448,9 @@ namespace heimdall
 			return true;
 		}
 
-		bool HasToken(const detail::TokenView& view, std::pair<std::size_t, std::size_t> range,
+		bool HasToken(
+			const detail::TokenView& view,
+			std::pair<std::size_t, std::size_t> range,
 			Tok tok)
 		{
 			for (auto i = range.first; i < range.second; ++i)
@@ -460,7 +466,8 @@ namespace heimdall
 
 		// The parameter refers to the class itself by reference (copy/move
 		// constructor) or is a braced-list type: conversions there are intended.
-		bool IsCopyMoveOrListParameter(const detail::TokenView& view,
+		bool IsCopyMoveOrListParameter(
+			const detail::TokenView& view,
 			std::pair<std::size_t, std::size_t> range,
 			std::string_view class_name)
 		{
@@ -569,7 +576,9 @@ namespace heimdall
 		// api/overload-hiding
 
 		// The class body names `using ...::name;`.
-		bool HasUsingFor(const detail::TokenView& view, const ClassBody& body,
+		bool HasUsingFor(
+			const detail::TokenView& view,
+			const ClassBody& body,
 			std::string_view name)
 		{
 			for (auto i = body.open + 1; i < body.close; ++i)
@@ -827,7 +836,8 @@ namespace heimdall
 			// nothing when there is none. Anything before the `:` (return type,
 			// parameter list, default arguments) belongs to the caller.
 			std::optional<std::pair<std::size_t, std::size_t>> MemInitRange(
-				std::uint32_t node, std::pair<std::size_t, std::size_t> body) const
+				std::uint32_t node,
+				std::pair<std::size_t, std::size_t> body) const
 			{
 				const auto& view       = m_analysis.View();
 				const auto[begin, end] = view.Range(node);
@@ -978,7 +988,9 @@ namespace heimdall
 				name == "byte";
 		}
 
-		void FindClassesByName(const SemanticModel& model, std::string_view name,
+		void FindClassesByName(
+			const SemanticModel& model,
+			std::string_view name,
 			std::vector<SymbolId>& out)
 		{
 			const auto& symbols = model.Symbols();
@@ -1040,7 +1052,8 @@ namespace heimdall
 		// nothing. Anything before the `:` (return type, parameter list and its
 		// default arguments) is evaluated by the caller and stays out.
 		std::optional<std::pair<std::size_t, std::size_t>> MemInitRangeOf(
-			const detail::TokenView& view, std::pair<std::size_t, std::size_t> function,
+			const detail::TokenView& view,
+			std::pair<std::size_t, std::size_t> function,
 			std::pair<std::size_t, std::size_t> body)
 		{
 			const std::size_t stop = std::min(body.first, function.second);
@@ -1069,7 +1082,9 @@ namespace heimdall
 
 		// Range of the function body (`{...}`) of the definition `node`.
 		std::optional<std::pair<std::size_t, std::size_t>> FunctionBodyOf(
-			const SemanticModel& model, const detail::TokenView& view, std::uint32_t node)
+			const SemanticModel& model,
+			const detail::TokenView& view,
+			std::uint32_t node)
 		{
 			for (const auto child : model.ChildrenOf(node))
 			{
@@ -1138,7 +1153,9 @@ namespace heimdall
 		// name is at `name_position`: the front of the declaration when the
 		// prefix back from the name is only type material, otherwise right
 		// before the name. Mirrors cpp/modernize-attributes.
-		std::size_t NodiscardInsert(const detail::TokenView& view, std::size_t name_position,
+		std::size_t NodiscardInsert(
+			const detail::TokenView& view,
+			std::size_t name_position,
 			bool& front)
 		{
 			std::size_t insert = name_position;
@@ -1253,7 +1270,8 @@ namespace heimdall
 		// parameter declaration through the function suffix), or kNone for
 		// lambdas and unowned nodes. Function scopes carry no owner in the
 		// Binder, so the definition node is mapped back through decl_node.
-		SymbolId EnclosingFunction(const SemanticModel& model,
+		SymbolId EnclosingFunction(
+			const SemanticModel& model,
 			const std::unordered_map<std::uint32_t, SymbolId>& function_of,
 			std::uint32_t node)
 		{
@@ -1311,7 +1329,9 @@ namespace heimdall
 		// Constructor/Destructor flag (it only marks unqualified in-class
 		// names), but they own their parameter like any sink constructor.
 		bool IsConstructorOrDestructor(
-			const SemanticModel& model, const detail::TokenView& view, SymbolId owner)
+			const SemanticModel& model,
+			const detail::TokenView& view,
+			SymbolId owner)
 		{
 			const auto& symbols = model.Symbols();
 			if (owner == kNone || symbols.name[owner] == kNone)
@@ -1631,7 +1651,9 @@ namespace heimdall
 
 		// Position of `(` for a direct `f(` or template `f<T>(` call at `name`,
 		// or `body.second` when the name is not followed by a call.
-		std::size_t CallParen(const detail::TokenView& view, std::size_t name,
+		std::size_t CallParen(
+			const detail::TokenView& view,
+			std::size_t name,
 			std::pair<std::size_t, std::size_t> body)
 		{
 			if (name + 1 >= body.second)
@@ -1667,8 +1689,7 @@ namespace heimdall
 			const detail::TokenView& view,
 			SymbolId klass,
 			SymbolId function,
-			std::pair<std::size_t, std::size_t>
-			body)
+			const std::pair<std::size_t, std::size_t>& body)
 		{
 			const auto& symbols = model.Symbols();
 			for (auto i = body.first + 1; i < body.second; ++i)

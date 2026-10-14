@@ -292,6 +292,11 @@ if (Python3_Interpreter_FOUND)
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
+    NAME LspApiParamFixSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspApiParamFixSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
     NAME LspIncludeCompletionSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncludeCompletionSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"

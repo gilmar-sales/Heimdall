@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <map>
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
@@ -71,9 +70,9 @@ namespace heimdall::lsp
 		// type surgery on their own spelling.
 		struct ParamSite
 		{
-			heimdall::SymbolId owner = heimdall::kNone;
-			std::size_t ordinal      = 0; // positional, among ParameterDeclarations
-			std::size_t paramCount   = 0;
+			heimdall::SymbolId owner    = heimdall::kNone;
+			std::size_t ordinal         = 0; // positional, among ParameterDeclarations
+			std::size_t paramCount      = 0;
 			std::uint32_t funcNameToken = heimdall::kNone;
 			std::string name;
 		};
@@ -98,7 +97,7 @@ namespace heimdall::lsp
 			const std::unordered_map<std::uint32_t, heimdall::SymbolId>& function_of,
 			std::uint32_t node)
 		{
-			const auto& soa = model.Tree().NodesSoA();
+			const auto& soa       = model.Tree().NodesSoA();
 			std::uint32_t current = node;
 			for (std::size_t steps = 0; steps <= soa.size(); ++steps)
 			{
@@ -130,7 +129,8 @@ namespace heimdall::lsp
 		// definitions and pure declarations alike. Unnamed parameters have no
 		// symbol, so the ordinal must be positional to stay aligned.
 		std::vector<std::uint32_t> SuffixParams(
-			const heimdall::SemanticModel& model, heimdall::SymbolId function)
+			const heimdall::SemanticModel& model,
+			heimdall::SymbolId function)
 		{
 			const auto& soa     = model.Tree().NodesSoA();
 			const auto& symbols = model.Symbols();
@@ -169,8 +169,8 @@ namespace heimdall::lsp
 			const heimdall::SemanticModel& model,
 			std::size_t byteOffset)
 		{
-			const auto& symbols = model.Symbols();
-			const auto& tokens  = tree.Tokens();
+			const auto& symbols      = model.Symbols();
+			const auto& tokens       = tree.Tokens();
 			heimdall::SymbolId param = heimdall::kNone;
 			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 			{
@@ -194,7 +194,7 @@ namespace heimdall::lsp
 			}
 
 			const auto function_of = ParamFunctionMap(symbols);
-			const auto owner = ParamOwner(model, function_of, symbols.decl_node[param]);
+			const auto owner       = ParamOwner(model, function_of, symbols.decl_node[param]);
 			if (owner == heimdall::kNone)
 			{
 				return {};
@@ -238,59 +238,71 @@ namespace heimdall::lsp
 		// preserving every other spelling (notably `::` qualification).
 		std::string StripConstRef(std::string_view raw)
 		{
-			std::string out;
-			std::string word;
-			const auto flush =[&]
+			const auto isWord =[](char c)
 			{
-				if (!word.empty() && word != "const")
+				return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||
+					(c >= '0' && c <= '9') || c == '_';
+			};
+			struct Piece
+			{
+				bool word = false;
+				std::string text;
+			};
+
+			std::vector<Piece> pieces;
+			std::string current;
+			bool currentWord = false;
+			const auto push =[&]
+			{
+				if (!current.empty())
 				{
-					if (!out.empty() && !IsSpace(out.back()))
-					{
-						out += ' ';
-					}
-
-					out += word;
+					pieces.push_back({currentWord, current});
+					current.clear();
 				}
-
-				word.clear();
 			};
 			for (const char c : raw)
 			{
 				if (c == '&')
 				{
-					flush();
+					push();
 					continue;
 				}
 
-				if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-					(c >= '0' && c <= '9') || c == '_')
+				if (IsSpace(c))
 				{
-					word += c;
+					push();
+					continue;
 				}
-				else
-				{
-					flush();
-					if (!IsSpace(c))
-					{
-						if (!out.empty() && !IsSpace(out.back()) && out.back() != ':' &&
-							c != ':')
-						{
-							out += ' ';
-						}
 
-						out += c;
-					}
-					else if (!out.empty() && !IsSpace(out.back()))
-					{
-						out += ' ';
-					}
+				const bool word = isWord(c);
+				if (!current.empty() && word != currentWord)
+				{
+					push();
 				}
+
+				current += c;
+				currentWord = word;
 			}
 
-			flush();
-			while (!out.empty() && IsSpace(out.back()))
+			push();
+			std::string out;
+			std::string previous;
+			for (const auto& piece : pieces)
 			{
-				out.pop_back();
+				if (piece.word && (piece.text == "const" || piece.text == "volatile"))
+				{
+					continue;
+				}
+
+				if (!out.empty() && previous != "::" && previous != "<" &&
+					piece.text != "::" && piece.text != "," && piece.text != ">" &&
+					piece.text != ">>")
+				{
+					out += ' ';
+				}
+
+				out += piece.text;
+				previous = piece.text;
 			}
 
 			return out;
@@ -328,7 +340,7 @@ namespace heimdall::lsp
 					continue;
 				}
 
-				if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				if ((c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||
 					(c >= '0' && c <= '9') || c == '_')
 				{
 					word += c;
@@ -365,8 +377,8 @@ namespace heimdall::lsp
 			std::string_view defParamName,
 			DeclEdit& edit)
 		{
-			const auto& symbols = model.Symbols();
-			const auto& tokens  = tree.Tokens();
+			const auto& symbols         = model.Symbols();
+			const auto& tokens          = tree.Tokens();
 			heimdall::SymbolId function = heimdall::kNone;
 			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 			{
@@ -432,7 +444,7 @@ namespace heimdall::lsp
 				}
 			}
 
-			const auto isPlainIdent = [&](std::uint32_t i)
+			const auto isPlainIdent =[&](std::uint32_t i)
 			{
 				return tokens[i].kind == heimdall::TokenKind::Identifier &&
 					tokens[i].tok == heimdall::Tok::None;
@@ -496,9 +508,9 @@ namespace heimdall::lsp
 				// beside a real type is a renamed parameter (`Snapshot s`);
 				// a lone identifier or one behind only cv-qualifiers is the
 				// type itself (`Snapshot`, `const Foo`) and stays unnamed.
-				std::uint32_t trailing = heimdall::kNone;
+				std::uint32_t trailing    = heimdall::kNone;
 				std::uint32_t significant = 0;
-				bool realType = false;
+				bool realType             = false;
 				for (auto i = first; i < spanEnd; ++i)
 				{
 					const auto& token = tokens[i];
@@ -602,7 +614,7 @@ namespace heimdall::lsp
 
 			// A lone qualifier (`const Foo` read as type `const`, name `Foo`)
 			// has no type to rewrite: leave it alone.
-			if (veto || typeToken == heimdall::kNone || lastSigEnd == 0 || !hasRealType)
+			if (veto || typeToken == heimdall::kNone || lastSigEnd == 0 ||!hasRealType)
 			{
 				return false;
 			}
@@ -3457,6 +3469,7 @@ namespace heimdall::lsp
 			std::string replacement;
 			std::shared_ptr<const LineIndex> lines;
 		};
+
 		const auto sibling_param_edits =[&](const heimdall::Diagnostic& diagnostic)
 		{
 			std::vector<ParamEdit> extras;
@@ -3483,7 +3496,7 @@ namespace heimdall::lsp
 			}
 
 			const heimdall::SemanticModel& model = context.Semantic();
-			const ParamSite site = FindParamSite(*tree, model, diagnostic.offset);
+			const ParamSite site                 = FindParamSite(*tree, model, diagnostic.offset);
 			if (site.owner == heimdall::kNone || site.funcNameToken == heimdall::kNone)
 			{
 				return extras;
@@ -3504,9 +3517,9 @@ namespace heimdall::lsp
 				return extras;
 			}
 
-			const auto& selfColumns = snapshot->Shards()[self_shard]->Symbols();
-			const std::uint32_t funcByte = tree->Tokens()[site.funcNameToken].offset;
-			bool have                    = false;
+			const auto& selfColumns          = snapshot->Shards()[self_shard]->Symbols();
+			const std::uint32_t funcByte     = tree->Tokens()[site.funcNameToken].offset;
+			bool have                        = false;
 			heimdall::index::SymbolHash hash = 0;
 			std::uint32_t selfSymbol         = heimdall::index::kInvalid;
 			for (std::uint32_t symbol = 0; symbol < selfColumns.Size(); ++symbol)
@@ -3533,8 +3546,7 @@ namespace heimdall::lsp
 			// same-named overloads untouched.
 			std::vector<heimdall::index::SymbolRef> candidates =
 				snapshot->Declarations(hash);
-			const std::string qualified(
-				snapshot->Shards()[self_shard]->Qualified(selfSymbol));
+			const std::string qualified(snapshot->Shards()[self_shard]->Qualified(selfSymbol));
 			for (const auto& named : snapshot->Named(qualified))
 			{
 				const auto& columns = snapshot->Shards()[named.shard]->Symbols();
@@ -3579,7 +3591,7 @@ namespace heimdall::lsp
 				}
 				else if (auto contents = ReadWorkspaceFile(shard.Path()))
 				{
-					otherText = std::make_shared<const std::string>(std::move(*contents));
+					otherText  = std::make_shared<const std::string>(std::move(*contents));
 					auto built = std::make_shared<LineIndex>();
 					built->Build(*otherText);
 					otherLines = std::move(built);
@@ -3606,7 +3618,7 @@ namespace heimdall::lsp
 
 				extras.push_back(
 					{otherUri, sibling.begin, sibling.end - sibling.begin,
-					std::move(sibling.text), std::move(otherLines)});
+						std::move(sibling.text), std::move(otherLines)});
 			}
 
 			return extras;

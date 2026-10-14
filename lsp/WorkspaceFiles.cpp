@@ -166,7 +166,7 @@ namespace heimdall::lsp
 
 	std::vector<std::filesystem::path> DiscoverWorkspaceSources(
 		const std::filesystem::path& root,
-		std::stop_token stop,
+		const std::stop_token& stop,
 		std::size_t maxFiles)
 	{
 		return DiscoverWorkspaceSourcesDetailed(root, stop, maxFiles).files;
@@ -174,7 +174,7 @@ namespace heimdall::lsp
 
 	std::vector<std::filesystem::path> DiscoverProjectSources(
 		const std::filesystem::path& root,
-		std::stop_token stop,
+		const std::stop_token& stop,
 		std::size_t maxFiles)
 	{
 		return DiscoverProjectSourcesDetailed(root, stop, maxFiles).files;
