@@ -197,6 +197,35 @@ TEST(ReturnValidationSpec, ChecksDeducedReturnConsistencyButAllowsDeducedVoid)
     ExpectReturnError("auto f(bool c) { if (c) return 1; }", "cpp/missing-return");
 }
 
+TEST(ReturnValidationSpec, AcceptsStatementMacroListFollowedByReturn)
+{
+    // Regression for `tok_detail::BuildTable` in Tok.hpp: a `;`-less
+    // statement-macro invocation followed by `#undef` and `return` keeps its
+    // return statement, so no `cpp/missing-return` is reported for it.
+    // `Broken` proves the rule still runs in the same file.
+    const std::string source =
+        "#define LIST(X) X(a, \"a\") X(b, \"b\")\n"
+        "#define APPLY(name, text) consume(text);\n"
+        "void consume(const char*);\n"
+        "int Build()\n"
+        "{\n"
+        "    LIST(APPLY)\n"
+        "#undef APPLY\n"
+        "    return 1;\n"
+        "}\n"
+        "int Broken(bool flag)\n"
+        "{\n"
+        "    if (flag)\n"
+        "        return 1;\n"
+        "}\n";
+
+    const auto diagnostics = AnalyzeReturns(source);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics.front().code, "cpp/missing-return");
+    EXPECT_GE(diagnostics.front().offset, source.find("int Broken"));
+}
+
 TEST(ReturnValidationSpec, DoesNotCountLambdaReturnsAsEnclosingFunctionReturns)
 {
     ExpectReturnError("int f() { auto callback = [] { return 1; }; callback(); }",

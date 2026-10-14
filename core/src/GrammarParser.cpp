@@ -3863,6 +3863,67 @@ namespace heimdall
 					}
 				}
 
+				// An unterminated statement cannot cross a preprocessor directive
+				// or swallow a `return`: a `;`-less statement macro (X-macro lists
+				// such as `HEIMDALL_TOK_LIST(...)`) would otherwise absorb the
+				// directive and the following `return` into one expression
+				// statement, losing the return and tripping `cpp/missing-return`.
+				// A leading `name:` is a label, whose statement runs to its own
+				// `;`, so it is not an interruption.
+				const bool labeled = IsIdentifierToken(start) && start + 1 < semicolon &&
+					Is(start + 1, ":");
+				std::size_t interrupt = semicolon;
+				if (!labeled)
+				{
+					for (auto i = start + 1; i < semicolon; ++i)
+					{
+						if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid &&
+							m_match[i] > i)
+						{
+							i = m_match[i];
+							continue;
+						}
+
+						if (Is(i, "return") || Is(i, "co_return") || IsDirective(i))
+						{
+							interrupt = i;
+							break;
+						}
+					}
+				}
+
+				if (interrupt < semicolon)
+				{
+					if (IsIdentifierToken(start) && start + 1 < interrupt && Is(start + 1, "(") &&
+						m_match[start + 1] != Invalid && m_match[start + 1] + 1 == interrupt)
+					{
+						// `NAME(args)` with no `;` before a directive or a return
+						// is a statement macro whose expansion carries its own
+						// terminators: keep it opaque so the code after it still
+						// parses instead of vanishing into an expression error.
+						Add(GrammarKind::MacroInvocation, start, interrupt, parent);
+						pos = interrupt;
+						return;
+					}
+
+					if (Is(interrupt, "return") || Is(interrupt, "co_return"))
+					{
+						m_tree.m_diagnostics.push_back(
+							{m_tree.Tokens()[m_sig[interrupt]].offset,
+								"expected ';' before return statement"});
+					}
+					else
+					{
+						m_tree.m_diagnostics.push_back(
+							{m_tree.Tokens()[m_sig[interrupt]].offset,
+								"expected ';' before directive"});
+					}
+
+					Add(GrammarKind::Error, start, interrupt, parent);
+					pos = interrupt;
+					return;
+				}
+
 				pos                   = semicolon + 1;
 				const auto kind       = StatementKind(start, pos);
 				const auto node       = Add(kind, start, pos, parent);

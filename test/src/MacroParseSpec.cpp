@@ -316,6 +316,49 @@ TEST(MacroParseSpec, UnknownNamesAreNotInvocations)
     EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
 }
 
+TEST(MacroParseSpec, LargeStatementMacroListPreservesFollowingReturn)
+{
+    // Regression for `tok_detail::BuildTable` in Tok.hpp: an X-macro list
+    // with more entries than the statement-shape expansion budget still ends
+    // at its closing parenthesis, so the `return` after it is not absorbed
+    // into an expression statement (which tripped `cpp/missing-return`).
+    std::string list("LIST(X)");
+    for (int index = 0; index < 200; ++index)
+    {
+        list += " X(a" + std::to_string(index) + ", \"t" + std::to_string(index) + "\")";
+    }
+
+    const std::string apply("APPLY(name, text) insert(text, Tok::name);");
+
+    const auto tree = Parse("int Build() { LIST(APPLY) return 1; }", {list, apply});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::ReturnStatement), 1);
+}
+
+TEST(MacroParseSpec, UnresolvedStatementMacroBeforeDirectivePreservesReturn)
+{
+    // Same shape without a macro resolver: the `;`-less `LIST(...)` line
+    // followed by `#undef` must not absorb the directive and the `return`
+    // into one expression statement.
+    constexpr std::string_view source =
+        "#define LIST(X) X(a, \"a\") X(b, \"b\")\n"
+        "int Build()\n"
+        "{\n"
+        "#define APPLY(name, text) insert(text, name);\n"
+        "    LIST(APPLY)\n"
+        "#undef APPLY\n"
+        "    return 1;\n"
+        "}\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::ReturnStatement), 1);
+}
+
 TEST(MacroParseSpec, TestStyleMacrosAreListedInTheOutlineUnderTheirSpelling)
 {
     constexpr std::string_view source =
