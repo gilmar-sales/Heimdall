@@ -1,12 +1,12 @@
 #pragma once
 
-#include <Heimdall/SemanticModel.hpp>
-
 #include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/SemanticModel.hpp>
 
 namespace heimdall::index
 {
@@ -180,7 +180,8 @@ namespace heimdall::index
 
 	/** FNV-1a over bytes; also used for content and identity hashing. */
 	[[nodiscard]] std::uint64_t HashBytes(
-		std::string_view bytes, std::uint64_t seed = 0xcbf29ce484222325ull) noexcept;
+		std::string_view bytes,
+		std::uint64_t seed = 0xcbf29ce484222325ull) noexcept;
 
 	/**
 	 * Immutable index of one file revision. Built once by ShardBuilder and shared
@@ -265,15 +266,19 @@ namespace heimdall::index
 		}
 
 		/** BuiltinType encodings, or kUnknownBuiltin, for a function's parameters. */
-		[[nodiscard]] std::span<const std::uint8_t> ParameterTypes(std::uint32_t symbol) const noexcept
+		[[nodiscard]] std::span<const std::uint8_t> ParameterTypes(
+			std::uint32_t symbol) const noexcept
 		{
-			return std::span(mParameterTypes).subspan(mSymbols.paramTypeBegin[symbol], mSymbols.paramTypeCount[symbol]);
+			return std::span(mParameterTypes).subspan(mSymbols.paramTypeBegin[symbol],
+				mSymbols.paramTypeCount[symbol]);
 		}
 
 		/** BuiltinType encodings, or kUnknownBuiltin, for a call's supplied arguments. */
-		[[nodiscard]] std::span<const std::uint8_t> ArgumentTypes(std::uint32_t occurrence) const noexcept
+		[[nodiscard]] std::span<const std::uint8_t> ArgumentTypes(
+			std::uint32_t occurrence) const noexcept
 		{
-			return std::span(mArgumentTypes).subspan(mOccurrences.argTypeBegin[occurrence], mOccurrences.argTypeCount[occurrence]);
+			return std::span(mArgumentTypes).subspan(mOccurrences.argTypeBegin[occurrence],
+				mOccurrences.argTypeCount[occurrence]);
 		}
 
 		/** Occurrence indices of a local symbol, ascending by offset. */
@@ -330,7 +335,7 @@ namespace heimdall::index
 		std::vector<StringId> mIncludes;
 		std::vector<StringId> mIncludeTargets;
 		std::vector<std::uint32_t> mIncludeOffsets;
-		bool mExactIncludes = true;
+		bool mExactIncludes  = true;
 		bool mSyntaxComplete = true;
 		std::vector<std::uint8_t> mParameterTypes;
 		std::vector<std::uint8_t> mArgumentTypes;

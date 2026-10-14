@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Heimdall/ParseTree.hpp>
-
 #include <cstddef>
 #include <memory>
 #include <stop_token>
@@ -9,30 +7,27 @@
 #include <string_view>
 #include <vector>
 
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/RuleEngine.hpp>
+
 namespace heimdall
 {
 
 	enum class PointerAlignment
 	{
-		// `int* x` (`*`/`&` bind to the type).
 		Left,
-		// `int *x` (`*`/`&` bind to the declarator name).
 		Right,
 	};
 
 	enum class ReferenceAlignment
 	{
-		// `int& x` (`&`/`&&` bind to the type).
 		Left,
-		// `int &x` (`&`/`&&` bind to the declarator name).
 		Right,
 	};
 
 	enum class BraceStyle
 	{
-		// `if (x) {` — opening brace stays on the code line.
 		Attach,
-		// `if (x)\n{` — opening brace on its own line.
 		Allman,
 	};
 
@@ -40,16 +35,9 @@ namespace heimdall
 	// with one statement and no braces) are treated.
 	enum class SingleLineStyle
 	{
-		// Leave them as written (default).
 		Keep,
-		// Collapse onto one line: `if (x) {\n    return;\n}` and
-		// `if (x)\n    return;` both become `if (x) return;`.
 		SingleLine,
-		// Body on its own indented line, no braces added:
-		// `if (x) return;` becomes `if (x)\n    return;`.
 		Indent,
-		// Braces plus indented body: `if (x) return;` becomes
-		// `if (x) {\n    return;\n}`.
 		IndentWithBraces,
 	};
 
@@ -74,6 +62,12 @@ namespace heimdall
 		// Sort contiguous `#include` runs by header name; other directives stay
 		// verbatim. Off by default: sorting reorders source lines.
 		bool sort_includes = false;
+		/** Include groups in their configured formatting order. */
+		std::vector<IncludeGroup> includeOrder = {IncludeGroup::Angle, IncludeGroup::Quote};
+		/** Compare include names without distinguishing letter case. */
+		bool includeCaseInsensitive = true;
+		/** File name being formatted ("Reporting.cpp"); its homonymous header sorts first. */
+		std::string mainFileName;
 		/** Adds a missing final newline when the corresponding lint rule is enabled. */
 		bool requireFinalNewline = false;
 		// Insert an empty line after the closing `}` of an `if`/`else`/`for`/
@@ -97,8 +91,6 @@ namespace heimdall
 		// Separate function/method declarations and definitions; in records,
 		// also separate methods from fields and access sections. Fields stay grouped.
 		bool blank_line_between_methods = true;
-		// More than this many parameters: one per line after `(`. 0 disables it.
-		std::size_t max_parameters_per_line = 3;
 	};
 
 	// One replacement hunk over the source buffer, line-oriented: lines
@@ -159,7 +151,8 @@ namespace heimdall
 
 		/** Reuses remaining passes after exact convergence, invalidating on options or dialect. */
 		[[nodiscard]] FormattingSnapshot FormatIncremental(
-			const ParseTree& tree, const FormattingSnapshot* previous = nullptr,
+			const ParseTree& tree,
+			const FormattingSnapshot* previous = nullptr,
 			std::stop_token stop = {}) const;
 
 		// Minimal line-diff between `source` and `Format(source)`: empty when the
@@ -167,17 +160,21 @@ namespace heimdall
 		std::vector<FormatEdit> FormatEdits(std::string_view source) const;
 
 		/** Computes edits using the pinned tree's tokens and parser dialect. */
-		[[nodiscard]] std::vector<FormatEdit> FormatEdits(const ParseTree& tree,
+		[[nodiscard]] std::vector<FormatEdit> FormatEdits(
+			const ParseTree& tree,
 			std::stop_token stop = {}) const;
 
 		/** Diffs a previously formatted buffer without running formatting passes again. */
-		[[nodiscard]] static std::vector<FormatEdit> ComputeEdits(std::string_view source,
+		[[nodiscard]] static std::vector<FormatEdit> ComputeEdits(
+			std::string_view source,
 			std::string_view formatted,
 			std::stop_token stop = {});
 
 		// Format the whole buffer but only apply edits overlapping
 		// [start_line, end_line); lines outside are byte-identical.
-		std::string FormatRange(std::string_view source, std::size_t start_line,
+		std::string FormatRange(
+			std::string_view source,
+			std::size_t start_line,
 			std::size_t end_line) const;
 
 	private:
@@ -188,10 +185,14 @@ namespace heimdall
 
 		std::string DeclarationLayout(const ParseTree& tree) const;
 
-		std::string FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+		std::string FormatImpl(
+			std::string_view source,
+			const std::vector<Token>& tokens,
 			const std::vector<PreprocessorDirective>& directives) const;
 
-		std::string FormatShaped(std::string_view source, const std::vector<Token>& tokens,
+		std::string FormatShaped(
+			std::string_view source,
+			const std::vector<Token>& tokens,
 			const std::vector<PreprocessorDirective>& directives) const;
 
 		FormatOptions m_options;

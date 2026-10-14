@@ -1,12 +1,12 @@
 #pragma once
 
-#include <Heimdall/IndexSnapshot.hpp>
-
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+#include <Heimdall/IndexSnapshot.hpp>
 
 namespace heimdall::index
 {

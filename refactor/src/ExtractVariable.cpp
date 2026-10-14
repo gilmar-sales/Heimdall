@@ -1,8 +1,10 @@
-#include "Support.hpp"
-#include <Heimdall/AnalysisContext.hpp>
 #include <algorithm>
 #include <map>
 #include <unordered_set>
+
+#include <Heimdall/AnalysisContext.hpp>
+
+#include "Support.hpp"
 
 namespace heimdall
 {
@@ -14,7 +16,9 @@ namespace heimdall
 		}
 
 		std::expected<AnalysisContext, RefactoringError> Context(
-			const AnalysisSnapshot& snapshot, DocumentId document, std::stop_token stop)
+			const AnalysisSnapshot& snapshot,
+			DocumentId document,
+			std::stop_token stop)
 		{
 			if (stop.stop_requested())
 			{
@@ -42,7 +46,8 @@ namespace heimdall
 		// contextual macro. Unknown header macros cannot be enumerated, so any
 		// `#include` vetoes; conditional directives veto for the same reason.
 		std::expected<void, RefactoringError> MacroFreeFunction(
-			const AnalysisContext& context, NodeId function)
+			const AnalysisContext& context,
+			NodeId function)
 		{
 			const auto& tree   = context.Syntax();
 			const auto& soa    = tree.NodesSoA();
@@ -569,7 +574,9 @@ namespace heimdall
 
 		// Checks only supported pure built-in expressions, never class operators
 		// with effects, volatile reads, unresolved names, methods or templates.
-		bool PureInputs(const AnalysisContext& context, NodeId expression,
+		bool PureInputs(
+			const AnalysisContext& context,
+			NodeId expression,
 			std::vector<PureRead>& reads)
 		{
 			const auto& tree  = context.Syntax();
@@ -698,7 +705,8 @@ namespace heimdall
 		// first-appearance order. The same spelling must carry the same value;
 		// only scalar inputs cross the boundary.
 		std::expected<std::vector<Param>, RefactoringError> BuildParams(
-			const AnalysisContext& context, const std::vector<PureRead>& reads)
+			const AnalysisContext& context,
+			const std::vector<PureRead>& reads)
 		{
 			std::vector<Param> params;
 			for (const auto& read : reads)
@@ -741,7 +749,9 @@ namespace heimdall
 		// selection (same enclosing compound, nothing else intersecting).
 		// Empty when the selection is not a statement range.
 		[[nodiscard]] std::vector<NodeId> MatchStatements(
-			const AnalysisContext& context, std::size_t offset, std::size_t length)
+			const AnalysisContext& context,
+			std::size_t offset,
+			std::size_t length)
 		{
 			const auto& tree = context.Syntax();
 			const auto& soa  = tree.NodesSoA();
@@ -1064,7 +1074,9 @@ namespace heimdall
 			return plan;
 		}
 
-		RefactoringPlan Plan(const AnalysisContext& context, std::string title,
+		RefactoringPlan Plan(
+			const AnalysisContext& context,
+			std::string title,
 			std::vector<SourceEdit> edits)
 		{
 			const auto& snapshot = context.Snapshot();
@@ -2768,7 +2780,9 @@ namespace heimdall
 	// `(){}[]` nesting; `<>` needs name resolution and stays unparsed).
 	// Returns token ranges [start, end) including trivia.
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> SplitParams(
-		const ParseTree& tree, std::uint32_t open, std::uint32_t close)
+		const ParseTree& tree,
+		std::uint32_t open,
+		std::uint32_t close)
 	{
 		std::vector<std::pair<std::uint32_t, std::uint32_t>> parts;
 		const auto& tokens = tree.Tokens();
@@ -2860,7 +2874,8 @@ namespace heimdall
 	// `( ... )` following the function name at `name_token`: scans forward
 	// for `(` (aborting on statement boundaries), then token-level matching.
 	std::expected<std::pair<std::uint32_t, std::uint32_t>, RefactoringError> ParamParens(
-		const ParseTree& tree, std::uint32_t name_token)
+		const ParseTree& tree,
+		std::uint32_t name_token)
 	{
 		const auto& tokens = tree.Tokens();
 		auto open          = name_token + 1;
@@ -2900,7 +2915,8 @@ namespace heimdall
 	}
 
 	const RefactoredSource* PreviewFor(
-		const std::vector<RefactoredSource>& preview, DocumentId document)
+		const std::vector<RefactoredSource>& preview,
+		DocumentId document)
 	{
 		for (const auto& refactored : preview)
 		{
@@ -2939,7 +2955,9 @@ namespace heimdall
 	// Anything else naming the function (address-taken, decay, mislabeled
 	// shapes) is a value use. Returns the argument children on success.
 	std::expected<std::vector<std::uint32_t>, RefactoringError> CallArguments(
-		const ParseTree& tree, const SemanticModel& model, std::uint32_t token)
+		const ParseTree& tree,
+		const SemanticModel& model,
+		std::uint32_t token)
 	{
 		const auto& soa = tree.NodesSoA();
 		auto node       = InnermostNode(tree, token);

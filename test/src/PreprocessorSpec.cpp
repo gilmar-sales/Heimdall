@@ -10,11 +10,29 @@ TEST(PreprocessorSpec, PreCancelledProcessDoesNotBuildDirectiveOrMacroStorage)
     stop.request_stop();
 
     const auto result = heimdall::Preprocessor().Process("#define X 1\n#include <vector>\n", true,
-                                                         stop.get_token());
+        stop.get_token());
 
     EXPECT_TRUE(result.directives.empty());
     EXPECT_TRUE(result.active_source.empty());
     EXPECT_TRUE(result.local_macros.empty());
+}
+
+TEST(PreprocessorSpec, IgnoresDirectivesInsideMultilineRawStrings)
+{
+    constexpr std::string_view source =
+        "const char* text = R\"cpp(\n"
+        "#include <fake.hpp>\n"
+        "#if 0\n"
+        "/* not a comment\n"
+        ")cpp\";\n"
+        "#include <real.hpp>\n";
+
+    const auto result = heimdall::Preprocessor().Process(source, true);
+
+    ASSERT_EQ(result.directives.size(), 1u);
+    EXPECT_EQ(result.directives.front().kind, heimdall::DirectiveKind::Include);
+    EXPECT_EQ(result.directives.front().offset, source.find("#include <real.hpp>"));
+    EXPECT_TRUE(result.diagnostics.empty());
 }
 
 TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
@@ -33,7 +51,7 @@ TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
     ASSERT_EQ(result.directives.size(), 5);
     EXPECT_EQ(result.directives.front().kind, heimdall::DirectiveKind::Include);
     ASSERT_TRUE(result.diagnostics.empty())
-        << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+    <<(result.diagnostics.empty() ? "" : result.diagnostics.front().message);
 }
 
 TEST(PreprocessorSpec, SupportsNestedConditionalsAndUndef)
@@ -58,7 +76,7 @@ TEST(PreprocessorSpec, SupportsNestedConditionalsAndUndef)
     const auto result = heimdall::Preprocessor().Process(source, true);
     EXPECT_EQ(result.active_source, "outer\ninner_yes\nundefined_yes\n");
     ASSERT_TRUE(result.diagnostics.empty())
-        << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+    <<(result.diagnostics.empty() ? "" : result.diagnostics.front().message);
 }
 
 TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
@@ -94,7 +112,10 @@ TEST(PreprocessorSpec, EvaluatesIntegerComparisonsInIfExpressions)
 
 TEST(PreprocessorSpec, IgnoresCommentsInConditionalExpressions)
 {
-    heimdall::Preprocessor::MacroMap macros { { "FEATURE", "202603L" } };
+    heimdall::Preprocessor::MacroMap macros {
+        {
+            "FEATURE", "202603L"
+    }};
     const auto result = heimdall::Preprocessor(macros).Process(
         "#if FEATURE >= 202506L // enabled with -freflection\n"
         "first\n"
@@ -110,7 +131,7 @@ TEST(PreprocessorSpec, IgnoresCommentsInConditionalExpressions)
 TEST(PreprocessorSpec, SkipsActiveSourceExpansionByDefault)
 {
     constexpr std::string_view source = "#define ENABLED 1\nint selected = ENABLED;\n";
-    const auto                 result = heimdall::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source);
     EXPECT_TRUE(result.active_source.empty());
     ASSERT_EQ(result.active_ranges.size(), 1);
     EXPECT_EQ(
@@ -120,8 +141,11 @@ TEST(PreprocessorSpec, SkipsActiveSourceExpansionByDefault)
 
 TEST(PreprocessorSpec, PredefinedMacrosAreReadWithoutCopying)
 {
-    heimdall::Preprocessor::MacroMap predefined { { "ENABLED", "1" } };
-    constexpr std::string_view       source = "#if ENABLED\nselected\n#else\nrejected\n#endif\n";
+    heimdall::Preprocessor::MacroMap predefined {
+        {
+            "ENABLED", "1"
+    }};
+    constexpr std::string_view source = "#if ENABLED\nselected\n#else\nrejected\n#endif\n";
     const auto result = heimdall::Preprocessor(predefined).Process(source, true);
     EXPECT_EQ(result.active_source, "selected\n");
     // The view must not have taken ownership: the caller's map is untouched.
@@ -130,7 +154,10 @@ TEST(PreprocessorSpec, PredefinedMacrosAreReadWithoutCopying)
 
 TEST(PreprocessorSpec, BackslashContinuationExtendsTheDirectiveSpan)
 {
-    for (const std::string_view eol : { "\n", "\r\n" })
+    for (const std::string_view eol :
+        {
+            "\n", "\r\n"
+    })
     {
         std::string source =
             "#define VALUE \\" + std::string(eol) + "    40 + \\" + std::string(eol) + "    2" +
@@ -177,7 +204,7 @@ TEST(PreprocessorSpec, IgnoresDirectivesInsideBlockComments)
 
     const auto result = heimdall::Preprocessor().Process(source);
     EXPECT_TRUE(result.diagnostics.empty())
-        << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+    <<(result.diagnostics.empty() ? "" : result.diagnostics.front().message);
     EXPECT_EQ(result.directives.size(), 2);
 }
 
@@ -193,7 +220,7 @@ TEST(PreprocessorSpec, ReportsLocalDefines)
 TEST(PreprocessorSpec, DeepConditionalExpressionsRecoverWithoutExhaustingTheStack)
 {
     const std::string expression = std::string(10000, '(') + "1" + std::string(10000, ')');
-    const std::string source     = "#if " + expression + "\nint skipped;\n#endif\nint kept;\n";
+    const std::string source = "#if " + expression + "\nint skipped;\n#endif\nint kept;\n";
 
     const auto result = heimdall::Preprocessor().Process(source, true);
 

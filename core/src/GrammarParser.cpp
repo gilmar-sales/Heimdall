@@ -1,14 +1,11 @@
 #include "detail/GrammarParser.hpp"
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/MacroExpander.hpp>
-#include <Heimdall/ParseTree.hpp>
 
 #include <algorithm>
-#include <functional>
 #include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory_resource>
 #include <stop_token>
 #include <string>
@@ -16,6 +13,10 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/MacroExpander.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {
@@ -65,7 +66,8 @@ namespace heimdall
 		// the significant-token view; the tokens stay in the tree.
 		// `nestedDecoration` answers for other macros named in the body (`GUARDED_BY(x)` ->
 		// `THREAD_ANNOTATION_ATTRIBUTE__(guarded_by(x))`); null when unknown.
-		bool IsDecorationText(std::string_view value,
+		bool IsDecorationText(
+			std::string_view value,
 			const std::function<bool(std::string_view) > & nestedDecoration)
 		{
 			const std::vector<Token> tokens = Lexer(value).Lex();
@@ -473,11 +475,7 @@ namespace heimdall
 				(open == Tok::LBrace && close == Tok::RBrace);
 		}
 
-		std::size_t Add(
-			GrammarKind kind,
-			std::size_t begin,
-			std::size_t end,
-			std::size_t parent)
+		std::size_t Add(GrammarKind kind, std::size_t begin, std::size_t end, std::size_t parent)
 		{
 			const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.Tokens().size();
 			const std::size_t past =
@@ -1931,7 +1929,9 @@ namespace heimdall
 
 		// Parse `( params ) [cv/ref/noexcept/attrs] [-> type] [requires ...]` at pos==open.
 		// Returns position after the suffix. Creates FunctionSuffix + children.
-		std::size_t ParseFunctionSuffix(std::size_t open, std::size_t end,
+		std::size_t ParseFunctionSuffix(
+			std::size_t open,
+			std::size_t end,
 			std::size_t declarator_node)
 		{
 			if (open >= end ||!Is(open, "(") || m_match[open] == Invalid)
@@ -3147,6 +3147,18 @@ namespace heimdall
 			// `new`/`delete` expressions take a type/operand that must not be mistaken
 			// for the start of the following declaration (e.g. `new int[5]` before `;`).
 			bool operand_pending = first == "new" || first == "delete";
+			if (first == "new" && pos < end && IsBuiltinType(Text(pos)))
+			{
+				const auto typeBegin = pos;
+				while (pos < end && (IsBuiltinType(Text(pos)) || Is(pos, "const") || Is(pos, "volatile")))
+				{
+					++pos;
+				}
+
+				Add(GrammarKind::TypeSpecifier, typeBegin, pos, root);
+				operand_pending = false;
+			}
+
 			while (pos < end)
 			{
 				if (m_stop.stop_requested())
@@ -4919,6 +4931,104 @@ namespace heimdall
 			return text == ";" || text == "}";
 		}
 
+		// Result of expanding one function-like invocation with the live table.
+		enum class MacroExpansionShape : std::uint8_t
+		{
+			// No table to expand with; only body-text heuristics apply.
+			NoTable,
+			// Expansion failed, or the expansion is not whole statements:
+			// the legacy parse applies.
+			No,
+			// The invocation expands to nothing (a disabled conditional macro).
+			Empty,
+			// The expansion ends in `;` or `}`: whole statements/declarations.
+			Whole,
+		};
+
+		// Expands the invocation [pos, after) with the resolver's table. Nested
+		// statement macros (Assimp's IMPL_STRUCT, Jolt's JPH_IF_ENABLE_ASSERTS)
+		// reach whole statements only after nested expansion, which the raw body
+		// text cannot show.
+		// Whether an expansion tail cannot end a statement on its own: a
+		// declaration/assignment prefix (`uint32 old = `), an opening bracket,
+		// or an operator or keyword awaiting its operand.
+		static bool IsIncompleteTail(std::string_view tail)
+		{
+			return tail == "=" || tail == "," || tail == "(" || tail == "[" || tail == "{" ||
+				tail == "?" || tail == ":" || tail == "..." || tail == "return" ||
+				tail == "co_return" || tail == "co_await" || tail == "." || tail == "->" ||
+				tail == "::" || Precedence(tail) != 0;
+		}
+
+		MacroExpansionShape ExpansionShape(
+			const MacroDef& macro,
+			std::size_t pos,
+			std::size_t after,
+			bool* complete = nullptr)
+		{
+			if (!macro.functionLike || after <= pos + 1)
+			{
+				return MacroExpansionShape::No;
+			}
+
+			if (m_resolver == nullptr)
+			{
+				return MacroExpansionShape::NoTable;
+			}
+
+			const Token& first = m_tree.Tokens()[m_sig[pos]];
+			const Token& last  = m_tree.Tokens()[m_sig[after - 1]];
+			if (last.offset < first.offset)
+			{
+				return MacroExpansionShape::No;
+			}
+
+			const auto table = m_resolver->TableAt(first.offset);
+			if (!table)
+			{
+				return MacroExpansionShape::NoTable;
+			}
+
+			const std::string_view invocation = m_tree.m_source.substr(
+				first.offset, last.offset + last.length - first.offset);
+			constexpr std::size_t kStatementMacroTokenLimit = 1024;
+			constexpr std::size_t kStatementMacroDepth      = 8;
+			const auto expanded = MacroExpander(
+				*table, {kStatementMacroTokenLimit, kStatementMacroDepth})
+			.Expand(invocation, false, m_stop);
+			if (expanded.truncated ||!expanded.diagnostics.empty())
+			{
+				return MacroExpansionShape::No;
+			}
+
+			bool seen = false;
+			std::string_view tail;
+			for (const auto& token : expanded.tokens)
+			{
+				if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
+					token.kind == TokenKind::BlockComment)
+				{
+					continue;
+				}
+
+				seen = true;
+				tail = token.text;
+			}
+
+			if (!seen)
+			{
+				return MacroExpansionShape::Empty;
+			}
+
+			if (complete != nullptr)
+			{
+				*complete = !IsIncompleteTail(tail);
+			}
+
+			return (tail == ";" || tail == "}") ? MacroExpansionShape::Whole
+			: MacroExpansionShape::No;
+		}
+
 		// `NAME(args)` of a macro, then `;`, a `{ body }` that completes the expansion, or
 		// nothing when the expansion is whole declarations. Returns the position after the
 		// invocation, or Invalid when this is not one (the legacy parse then applies).
@@ -4967,6 +5077,129 @@ namespace heimdall
 
 			if (blockOnly)
 			{
+				if (macro->functionLike)
+				{
+					const auto close      = after - 1;
+					const bool forwarding = macro->body == "__VA_ARGS__";
+					bool complete         = false;
+					if (forwarding && close > pos + 2)
+					{
+						complete = !IsIncompleteTail(Text(close - 1));
+					}
+
+					const auto shape = forwarding
+					? ExpansionShape(*macro, pos, after, &complete)
+					: ExpansionShape(*macro, pos, after);
+					if (forwarding && (shape == MacroExpansionShape::NoTable ||
+						shape == MacroExpansionShape::No))
+					{
+						if (!complete)
+						{
+							// A declaration/assignment prefix (`JPH_IF_ENABLE_ASSERTS(uint32 old = ) ...`):
+							// the statement continues past the invocation in ways
+							// the opaque parse cannot splice; the legacy parse
+							// applies, as before.
+							return Invalid;
+						}
+
+						// The expansion is not whole statements by itself. It either
+						// relies on the following `;` (`JPH_IF_ENABLE_ASSERTS(x.Check(1, 2));`)
+						// or is missing one (`FORWARD(value = 1) after = 3;`).
+						if (Is(after, ";"))
+						{
+							const auto node = Add(GrammarKind::MacroInvocation, pos, after + 1, parent);
+							auto cursor     = pos + 2;
+							while (cursor < close)
+							{
+								const auto semi = FindSemicolon(cursor, close);
+								if (semi >= close)
+								{
+									break;
+								}
+
+								const auto previous = cursor;
+								ParseStatement(cursor, semi + 1, node);
+								if (cursor <= previous)
+								{
+									cursor = semi + 1;
+								}
+							}
+
+							if (cursor < close)
+							{
+								ParseExpression(cursor, close, node);
+							}
+
+							return after + 1;
+						}
+
+						if (after < end &&
+							(Is(after, ".") || Is(after, "->") || Is(after, "(") || Is(after, "[") ||
+							Is(after, "::") || Is(after, ",") || Precedence(Text(after)) != 0 ||
+							(IsIdentifierToken(after) && after + 1 < end &&
+							(Is(after + 1, ".") || Is(after + 1, "->") || Is(after + 1, "(") ||
+							Is(after + 1, "[")))))
+						{
+							// The follower continues the expanded expression
+							// (`MACRO(x)(y)`, `MACRO(x).member`); the legacy parse applies.
+							return Invalid;
+						}
+
+						// No terminator: parse the arguments as statements so the
+						// missing `;` is reported where the compiler reports it.
+						const auto node = Add(GrammarKind::MacroInvocation, pos, after, parent);
+						auto statement  = pos + 2;
+						while (statement < close)
+						{
+							const auto previous = statement;
+							ParseStatement(statement, close, node);
+							if (statement <= previous)
+							{
+								break;
+							}
+						}
+
+						return after;
+					}
+
+					switch (shape)
+					{
+					case MacroExpansionShape::Empty:
+						Add(GrammarKind::MacroInvocation, pos, after, parent);
+						return after;
+					case MacroExpansionShape::Whole:
+						if (macro->body == "__VA_ARGS__")
+						{
+							// Pure forwarding with complete statements inside
+							// (`JPH_IF_ENABLE_ASSERTS(x = 1;)` when asserts are
+							// on): the arguments are real statements, so parse
+							// them instead of hiding them inside the invocation.
+							// Anything else (a call relying on the outer `;`)
+							// would not expand whole and never reaches here.
+							const auto node  = Add(GrammarKind::MacroInvocation, pos, after, parent);
+							auto statement   = pos + 2;
+							const auto close = after - 1;
+							while (statement < close)
+							{
+								const auto previous = statement;
+								ParseStatement(statement, close, node);
+								if (statement <= previous)
+								{
+									break;
+								}
+							}
+
+							return after;
+						}
+
+						Add(GrammarKind::MacroInvocation, pos, after, parent);
+						return after;
+					case MacroExpansionShape::NoTable:
+					case MacroExpansionShape::No:
+						break;
+					}
+				}
+
 				if (ExpandsToWholeDeclarations(*macro))
 				{
 					if (Is(after, ";"))
@@ -4997,6 +5230,18 @@ namespace heimdall
 				}
 
 				return Invalid;
+			}
+
+			const auto namespaceShape =
+				macro->functionLike ? ExpansionShape(*macro, pos, after) : MacroExpansionShape::No;
+			if (namespaceShape == MacroExpansionShape::Empty ||
+				namespaceShape == MacroExpansionShape::Whole)
+			{
+				// A call that expands to nothing or to whole declarations
+				// (Assimp's IMPL_STRUCT chains): consume it opaquely instead of
+				// parsing the invocation as an expression statement.
+				Add(GrammarKind::MacroInvocation, pos, after, parent);
+				return after;
 			}
 
 			if (ExpandsToWholeDeclarations(*macro) || after >= end)
@@ -5134,11 +5379,7 @@ namespace heimdall
 				text == "auto" ||(text.size() > 2 && text.ends_with("_t"));
 		}
 
-		void ParseScope(
-			std::size_t begin,
-			std::size_t end,
-			std::size_t parent,
-			bool member_scope)
+		void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
 		{
 			if (mGrammarDepth >= kMaxGrammarDepth && begin < end)
 			{
@@ -5384,9 +5625,11 @@ namespace heimdall
 					Is(declaration_start, "namespace") ||
 					(Is(declaration_start, "inline") && declaration_start + 1 < end &&
 					Is(declaration_start + 1, "namespace"));
+				const auto recordStart = Is(declaration_start,
+					"typedef") ? declaration_start + 1 : declaration_start;
 				const bool record_decl =
-					Is(declaration_start, "class") || Is(declaration_start, "struct") ||
-					Is(declaration_start, "union") || Is(declaration_start, "enum");
+					Is(recordStart, "class") || Is(recordStart, "struct") ||
+					Is(recordStart, "union") || Is(recordStart, "enum");
 				std::size_t brace            = end;
 				std::size_t constructorColon = Invalid;
 				for (auto i = declaration_start; i < end;)
@@ -5516,7 +5759,8 @@ namespace heimdall
 						ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
 					}
 
-					const auto node = Add(node_kind, declaration_start, item_end, item_parent);
+					const auto node = Add(node_kind, record_decl ? recordStart : declaration_start, item_end,
+						item_parent);
 					if (node_kind == GrammarKind::FunctionDefinition)
 					{
 						// Full declarator parsing: return type, declarator with FunctionSuffix
@@ -5546,7 +5790,7 @@ namespace heimdall
 						node_kind == GrammarKind::RecordDefinition)
 					{
 						if (node_kind == GrammarKind::RecordDefinition &&
-							Is(declaration_start, "enum"))
+							Is(recordStart, "enum"))
 						{
 							ParseEnumerators(brace + 1, close, node);
 						}
@@ -5569,6 +5813,18 @@ namespace heimdall
 					}
 
 					pos = closed ? close + 1 : end;
+					if (record_decl && recordStart != declaration_start && closed)
+					{
+						const auto semi = FindSemicolon(pos, end);
+						if (semi < end)
+						{
+							const auto alias = Add(GrammarKind::Declaration, declaration_start, semi + 1, item_parent);
+							Add(GrammarKind::TypeSpecifier, recordStart, brace, alias);
+							ParseSingleDeclarator(pos, semi, alias);
+							pos = semi;
+						}
+					}
+
 					if (Is(pos, ";"))
 					{
 						++pos;

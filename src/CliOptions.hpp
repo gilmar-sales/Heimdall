@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Heimdall/CppStandard.hpp>
-#include <Heimdall/Formatter.hpp>
-#include <Heimdall/RuleConfig.hpp>
-
 #include <cstddef>
 #include <filesystem>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/CppStandard.hpp>
+#include <Heimdall/Formatter.hpp>
+#include <Heimdall/RuleConfig.hpp>
 
 namespace heimdall::cli
 {

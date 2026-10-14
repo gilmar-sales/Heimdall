@@ -1,8 +1,8 @@
 #include "MacroProtocol.hpp"
 
-#include <Heimdall/MacroExpander.hpp>
-
 #include <filesystem>
+
+#include <Heimdall/MacroExpander.hpp>
 
 namespace heimdall::lsp
 {
@@ -12,7 +12,7 @@ namespace heimdall::lsp
 
 		constexpr std::size_t kMaxBodyChars       = 200;
 		constexpr std::size_t kMaxInvocationChars = 4096;
-		constexpr std::string_view kDefineKeyword  = "define";
+		constexpr std::string_view kDefineKeyword = "define";
 
 		bool IsWordChar(char c) noexcept
 		{
@@ -25,7 +25,9 @@ namespace heimdall::lsp
 			return c == ' ' || c == '\t';
 		}
 
-		std::string_view LineAround(std::string_view text, std::size_t offset,
+		std::string_view LineAround(
+			std::string_view text,
+			std::size_t offset,
 			std::size_t& lineBegin)
 		{
 			lineBegin = offset > text.size() ? text.size() : offset;
@@ -152,8 +154,10 @@ namespace heimdall::lsp
 
 		// End of the invocation that starts at `word`: the name, or the name and its balanced
 		// argument list. Empty when a function-like name is not called.
-		std::optional<std::size_t> InvocationEnd(std::string_view text, WordRange word,
-												 const MacroDef& macro)
+		std::optional<std::size_t> InvocationEnd(
+			std::string_view text,
+			WordRange word,
+			const MacroDef& macro)
 		{
 			if (!macro.functionLike)
 			{
@@ -196,8 +200,10 @@ namespace heimdall::lsp
 			bool clean = true;
 		};
 
-		Expanded ExpandInvocation(const MacroEnvironment& env, std::string_view invocation,
-								  std::size_t offset)
+		Expanded ExpandInvocation(
+			const MacroEnvironment& env,
+			std::string_view invocation,
+			std::size_t offset)
 		{
 			const heimdall::MacroTable table       = env.At(offset);
 			const heimdall::ExpansionResult result = heimdall::MacroExpander(table).Expand(invocation);
@@ -289,7 +295,7 @@ namespace heimdall::lsp
 			}
 		}
 
-		return MacroExpansionEdit { word.begin, *end, std::move(expanded.text) };
+		return MacroExpansionEdit {word.begin, *end, std::move(expanded.text)};
 	}
 
 	std::string MacroHoverMarkdown(const MacroDef& macro, std::string_view expansion)
@@ -316,8 +322,10 @@ namespace heimdall::lsp
 		return value;
 	}
 
-	std::optional<WordRange> DefinitionNameRange(std::string_view fileText,
-		std::size_t directiveOffset, std::string_view name)
+	std::optional<WordRange> DefinitionNameRange(
+		std::string_view fileText,
+		std::size_t directiveOffset,
+		std::string_view name)
 	{
 		if (directiveOffset >= fileText.size())
 		{

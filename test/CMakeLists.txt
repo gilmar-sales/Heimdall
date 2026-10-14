@@ -157,6 +157,11 @@ add_test(
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
   add_test(
+    NAME LspIncludeOrderSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncludeOrderSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
     NAME LspComparisonRegressions
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspComparisonRegressionSpec.py"
             --heimdall "$<TARGET_FILE:heimdall-lsp>" --compiler heimdall-fixture-compiler

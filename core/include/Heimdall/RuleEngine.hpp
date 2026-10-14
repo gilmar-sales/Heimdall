@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Heimdall/ParseTree.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {
@@ -119,13 +119,11 @@ namespace heimdall
 		std::uint32_t column;
 		bool has_fix;
 		TextEdit fix;
-		// Safe fixes preserve behavior and are applied in batch (--fix).
-		// Unsafe ones are only offered as editor quick fixes.
 		bool fix_is_safe = true;
 		std::string fix_title;
 		bool has_related_information = false;
-		std::size_t related_offset = 0;
-		std::size_t related_length = 0;
+		std::size_t related_offset   = 0;
+		std::size_t related_length   = 0;
 		std::string related_message;
 	};
 
@@ -161,7 +159,11 @@ namespace heimdall
 		std::vector<RuleOverride> overrides;
 		std::vector<IncludeGroup> include_order = {IncludeGroup::Angle, IncludeGroup::Quote};
 		bool include_case_insensitive           = true;
-		DocScope doc_scope                      = DocScope::Public;
+		// File name of the translation unit being analyzed ("Reporting.cpp").
+		// The homonymous header ("Reporting.hpp") sorts before every group.
+		// Empty disables the pinning; set per file by the caller.
+		std::string main_file_name;
+		DocScope doc_scope = DocScope::Public;
 		// Bounds of the macro environment of a translation unit (`macros` in .heimdall.json).
 		// The defaults are what GCC and Clang accept (include depth) and what the C++ standard
 		// asks implementations to support (macros defined at once).
@@ -207,7 +209,8 @@ namespace heimdall
 		// Severity overrides, disabled rules and suppression comments, for
 		// diagnostics produced outside core (for example by the semantic layer).
 		// Returns them sorted by offset.
-		std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics,
+		std::vector<Diagnostic> ApplyPolicy(
+			std::vector<Diagnostic> diagnostics,
 			const ParseTree& tree) const
 		{
 			return ApplyPolicy(std::move(diagnostics), tree.Source(), tree.Tokens());
@@ -232,9 +235,18 @@ namespace heimdall
 
 		// Applies the non-overlapping fixes. Fixes marked unsafe (editor quick fixes)
 		// are only applied when include_unsafe is set.
-		static std::string ApplyFixes(std::string_view source,
+		static std::string ApplyFixes(
+			std::string_view source,
 			const std::vector<Diagnostic>& diagnostics,
 			bool include_unsafe = false);
+
+		// Canonical include-section text: every sortable run of literal
+		// includes is ordered by the sort key and regrouped with one blank
+		// line between bands. Unlike Analyze (which only reports misordered
+		// sections), this also consolidates bands that are already ordered
+		// but scattered across stray blank lines. Only the sort-includes
+		// subset of options is read (sort flag, order, case, file name).
+		static std::string SortIncludes(std::string_view source, const RuleOptions& options);
 
 	private:
 		// Opt-in rules run when enabled in RuleOptions or through an
@@ -242,12 +254,14 @@ namespace heimdall
 		// for the code wins.
 		bool RuleEnabled(std::string_view code, bool default_enabled) const;
 
-		std::vector<Diagnostic> ApplyPolicy(std::vector<Diagnostic> diagnostics,
+		std::vector<Diagnostic> ApplyPolicy(
+			std::vector<Diagnostic> diagnostics,
 			std::string_view source,
 			const std::vector<Token>& tokens) const;
 
 		std::vector<Diagnostic> AnalyzeImpl(
-			std::string_view source, const std::vector<Token>& tokens,
+			std::string_view source,
+			const std::vector<Token>& tokens,
 			const std::vector<PreprocessorDirective>& directives) const;
 
 		RuleOptions m_options;

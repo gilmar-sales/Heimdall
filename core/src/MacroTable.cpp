@@ -10,10 +10,10 @@ namespace heimdall
 	{
 
 		constexpr std::uint64_t kFieldSeparator = 0xFF;
-		constexpr std::uint64_t kFnvBasis  = 14695981039346656037ull;
-		constexpr std::uint64_t kFnvPrime  = 1099511628211ull;
-		constexpr std::string_view kVaArgs = "__VA_ARGS__";
-		constexpr std::string_view kEllipsis = "...";
+		constexpr std::uint64_t kFnvBasis       = 14695981039346656037ull;
+		constexpr std::uint64_t kFnvPrime       = 1099511628211ull;
+		constexpr std::string_view kVaArgs      = "__VA_ARGS__";
+		constexpr std::string_view kEllipsis    = "...";
 
 		bool IsIdentStart(char c) noexcept
 		{
@@ -102,7 +102,9 @@ namespace heimdall
 			return hash;
 		}
 
-		std::expected<void, std::string> ParseParameters(std::string_view text, std::size_t& pos,
+		std::expected<void, std::string> ParseParameters(
+			std::string_view text,
+			std::size_t& pos,
 			MacroDef& def)
 		{
 			// `pos` is just past '('.
@@ -239,7 +241,8 @@ namespace heimdall
 
 	} // namespace
 
-	std::expected<MacroDef, std::string> MacroTable::ParseDefinition(std::string_view directiveText)
+	std::expected<MacroDef, std::string> MacroTable::ParseDefinition(
+		std::string_view directiveText)
 	{
 		const std::string spliced   = SpliceLines(directiveText);
 		const std::string_view text = Trim(spliced);
@@ -367,7 +370,7 @@ namespace heimdall
 			return it->second ? &it->second : nullptr;
 		}
 
-		for (const Layer* layer = mBase.get(); layer != nullptr; layer = layer->parent.get())
+		for (const Layer * layer = mBase.get(); layer != nullptr; layer = layer->parent.get())
 		{
 			if (const auto it = layer->entries.find(name); it != layer->entries.end())
 			{

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Heimdall/IndexSnapshot.hpp>
-#include <Heimdall/Refactoring.hpp>
-
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -12,6 +9,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/IndexSnapshot.hpp>
+#include <Heimdall/Refactoring.hpp>
 
 namespace heimdall
 {
@@ -73,7 +73,9 @@ namespace heimdall
 
 		/** True when the symbol at `offset` is declared or used in more than one file. */
 		[[nodiscard]] static bool SpansFiles(
-			const index::IndexSnapshot& snapshot, std::string_view path, std::size_t offset);
+			const index::IndexSnapshot& snapshot,
+			std::string_view path,
+			std::size_t offset);
 
 		[[nodiscard]] static std::expected<RefactoringPlan, RefactoringError> Rename(
 			const index::IndexSnapshot& snapshot,

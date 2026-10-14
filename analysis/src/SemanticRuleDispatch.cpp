@@ -60,7 +60,7 @@ namespace heimdall::detail
 				&SemanticRules::AnalyzeVirtualCallInConstructor},
 			Entry {RuleId::DesignatedInitOrder, &SemanticRules::AnalyzeDesignatedInitOrder},
 			Entry {RuleId::NoIntegerToPointer, &SemanticRules::AnalyzeIntegerToPointer},
-			Entry {RuleId::CallArgumentCount, &SemanticRules::AnalyzeCallArguments},
+			Entry {RuleId::CallArgumentCount, &SemanticRules::AnalyzeProjectCallArguments},
 			Entry {RuleId::CallArgumentType, &SemanticRules::AnalyzeCallArgumentTypes},
 			Entry {RuleId::DotOnPointer, &SemanticRules::AnalyzeDotOnPointer},
 			Entry {RuleId::InaccessibleMember, &SemanticRules::AnalyzeAccessControl},

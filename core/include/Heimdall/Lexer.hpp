@@ -35,10 +35,10 @@ namespace heimdall
 	};
 
 	constexpr std::size_t kExpectedTokenSize = 12;
-    constexpr std::size_t kMaxSourceBytes    = std::numeric_limits<std::uint32_t>::max();
-    static_assert(sizeof(Token) == kExpectedTokenSize);
+	constexpr std::size_t kMaxSourceBytes    = std::numeric_limits<std::uint32_t>::max();
+	static_assert(sizeof(Token) == kExpectedTokenSize);
 
-    class Lexer
+	class Lexer
 	{
 	public:
 		explicit Lexer(std::string_view source) : m_source(source) {}
@@ -73,21 +73,21 @@ namespace heimdall
 
 		std::vector<Token> Lex() const;
 
-        /** Returns a partial token buffer when cancellation is requested. */
-        [[nodiscard]] std::vector<Token> Lex(std::stop_token stop) const;
+		/** Returns a partial token buffer when cancellation is requested. */
+		[[nodiscard]] std::vector<Token> Lex(std::stop_token stop) const;
 
-        // Incremental re-lex. `tokens` must be the tokens of the text before
-        // `edit`; the lexer's source is the text after it. Only a window around
-        // the edit is re-scanned and the tokens after it are shifted, yielding
-        // exactly what Lex() would produce.
-        void Relex(std::vector<Token>& tokens, const TextEdit& edit) const;
+		// Incremental re-lex. `tokens` must be the tokens of the text before
+		// `edit`; the lexer's source is the text after it. Only a window around
+		// the edit is re-scanned and the tokens after it are shifted, yielding
+		// exactly what Lex() would produce.
+		void Relex(std::vector<Token>& tokens, const TextEdit& edit) const;
 
 		std::string_view Text(const Token& token) const noexcept;
 
 	private:
-      Token ScanToken(std::size_t start, std::stop_token stop = {}) const;
+		Token ScanToken(std::size_t start, std::stop_token stop = {}) const;
 
-      std::string_view m_source;
-    };
+		std::string_view m_source;
+	};
 
 } // namespace heimdall

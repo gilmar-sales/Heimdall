@@ -112,7 +112,8 @@ namespace heimdall
 		};
 	} // namespace
 
-	std::optional<IncludeEdit> PlanIncludeInsertion(std::string_view source,
+	std::optional<IncludeEdit> PlanIncludeInsertion(
+		std::string_view source,
 		std::string_view spelled)
 	{
 		const std::vector<Line> lines = SplitLines(source);

@@ -1,17 +1,18 @@
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/MacroTable.hpp>
 #include <Heimdall/ParseTree.hpp>
-#include <Heimdall/Preprocessor.hpp>
+
 #include <algorithm>
-
-#include "detail/GrammarParser.hpp"
-
 #include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
+
+#include "detail/GrammarParser.hpp"
 
 namespace heimdall
 {
@@ -129,7 +130,9 @@ namespace heimdall
 		return tree;
 	}
 
-	void ParseTree::Build(const ParserOptions& options, std::stop_token stop,
+	void ParseTree::Build(
+		const ParserOptions& options,
+		std::stop_token stop,
 		const ParseReuse* reuse)
 	{
 		auto& tree             = *this;

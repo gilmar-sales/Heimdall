@@ -1,6 +1,6 @@
-#include <Heimdall/Formatter.hpp>
-
 #include <algorithm>
+
+#include <Heimdall/Formatter.hpp>
 
 namespace heimdall
 {
@@ -42,13 +42,13 @@ namespace heimdall
 
 		for (std::size_t node = 0; node < nodes.size(); ++node)
 		{
-            if (mStop.stop_requested())
-            {
-                return {};
-            }
-            if (m_options.max_parameters_per_line &&
-                nodes.Kind(node) == GrammarKind::FunctionSuffix)
-            {
+			if (mStop.stop_requested())
+			{
+				return {};
+			}
+
+			if (nodes.Kind(node) == GrammarKind::FunctionSuffix)
+			{
 				std::vector<std::size_t> parameters;
 				for (const auto child : tree.DirectChildren(node))
 				{
@@ -103,13 +103,284 @@ namespace heimdall
 					}
 				}
 
-				if (parameters.size() <= m_options.max_parameters_per_line)
+				if (parameters.empty())
 				{
 					continue;
 				}
 
+				// Vertical layout is width-driven: one parameter per line only
+				// when the single-line signature exceeds column_limit, otherwise
+				// collapse to a single line. A zero limit disables the rule and
+				// preserves line breaks as written.
+				if (m_options.column_limit == 0)
+				{
+					continue;
+				}
+
+				const auto tokenText =[&](std::size_t t)->std::string_view
+				{
+					return std::string_view(source).substr(
+						tokens[t].offset, tokens[t].length);
+				};
+				const auto isWordish =[&](std::size_t t) -> bool
+				{
+					const auto kind = tokens[t].kind;
+					return kind == TokenKind::Identifier || kind == TokenKind::Number ||
+						kind == TokenKind::StringLiteral ||
+						kind == TokenKind::CharacterLiteral ||
+						kind == TokenKind::RawStringLiteral ||
+						kind == TokenKind::BlockComment;
+				};
+				const auto gapWidth =[&](std::string_view left, std::string_view right,
+					bool leftWord, bool rightWord)->std::size_t
+				{
+					if (right == "," || right == ";" || right == ")" || right == "]" ||
+						right == "}" || right == "::" || right == "." || right == "->" ||
+						right == ".*" || right == "->*")
+					{
+						return 0;
+					}
+
+					if (right == "...")
+					{
+						return left == "," ? 1 : 0;
+					}
+
+					if (left == "(" || left == "[" || left == "{" || left == "::" ||
+						left == "." || left == "->" || left == ".*" || left == "->*" ||
+						left == "!" || left == "~")
+					{
+						return 0;
+					}
+
+					if (left == ",")
+					{
+						return 1;
+					}
+
+					if (right == "(" || right == "[")
+					{
+						return 0;
+					}
+
+					if (right == "{")
+					{
+						return m_options.space_before_cpp11_braced_list ? 1 : 0;
+					}
+
+					if (right == "*" || right == "&" || right == "&&")
+					{
+						return 0;
+					}
+
+					if (left == "*" || left == "&" || left == "&&")
+					{
+						return 1;
+					}
+
+					if (left == "=" || right == "=")
+					{
+						return 1;
+					}
+
+					if (right == ":")
+					{
+						return 0;
+					}
+
+					if (left == ":" || left == "?" || right == "?")
+					{
+						return 1;
+					}
+
+					if (right == "<" || right == ">" || right == ">>" || left == "<")
+					{
+						return 0;
+					}
+
+					return (leftWord || rightWord) ? 1 : 0;
+				};
+
+				// Anchor the estimate at the nearest enclosing declaration so the
+				// return type and name count toward the line width. A suffix
+				// inside a body (call-like initializer, vexing parse) anchors
+				// at its own declarator, never at the outer function.
+				std::size_t declStart   = open;
+				std::size_t indentDepth = 0;
+				{
+					std::size_t ancestor = nodes.Parent(node);
+					bool anchored        = false;
+					for (std::size_t guard = 0;
+						guard <= nodes.size() && ancestor < nodes.size(); ++guard)
+					{
+						const auto kind = nodes.Kind(ancestor);
+						if (!anchored &&
+							(kind == GrammarKind::FunctionDeclaration ||
+							kind == GrammarKind::FunctionDefinition ||
+							kind == GrammarKind::Declaration ||
+							kind == GrammarKind::InitDeclarator))
+						{
+							declStart = nodes.FirstToken(ancestor);
+							anchored  = true;
+						}
+
+						if (kind == GrammarKind::RecordDefinition ||
+							kind == GrammarKind::NamespaceDefinition ||
+							kind == GrammarKind::CompoundStatement)
+						{
+							++indentDepth;
+						}
+
+						if (kind == GrammarKind::TranslationUnit)
+						{
+							break;
+						}
+
+						const auto parent = nodes.Parent(ancestor);
+						if (parent == ancestor)
+						{
+							break;
+						}
+
+						ancestor = parent;
+					}
+
+					if (declStart > open)
+					{
+						declStart = open;
+					}
+				}
+
+				// A line comment inside the signature forbids reshaping: joining
+				// would comment out the parameters that follow it.
+				bool hasLineComment = false;
+				std::vector<std::size_t> sig;
+				sig.reserve(close + 1 - declStart);
+				for (std::size_t t = declStart; t <= close && t < tokens.size(); ++t)
+				{
+					if (tokens[t].kind == TokenKind::Whitespace)
+					{
+						continue;
+					}
+
+					if (tokens[t].kind == TokenKind::LineComment)
+					{
+						hasLineComment = true;
+						break;
+					}
+
+					sig.push_back(t);
+				}
+
+				// Trailing qualifiers and terminator (`;`, `const`, `noexcept`,
+				// `-> T`, ` {`). Bounded so a definition body never counts.
+				std::string_view terminator {};
+				if (!hasLineComment)
+				{
+					std::size_t t     = close + 1;
+					std::size_t steps = 0;
+					while (t < tokens.size() && steps < 12)
+					{
+						if (tokens[t].kind == TokenKind::Whitespace)
+						{
+							++t;
+							continue;
+						}
+
+						if (tokens[t].kind == TokenKind::LineComment)
+						{
+							hasLineComment = true;
+							break;
+						}
+
+						const auto text = tokenText(t);
+						if (text == ";" || text == "{")
+						{
+							terminator = text;
+							break;
+						}
+
+						if (text == ":" || text == "try" || text == "catch" ||
+							text == "}" || text == ",")
+						{
+							break;
+						}
+
+						sig.push_back(t);
+						++t;
+						++steps;
+					}
+				}
+
+				if (hasLineComment)
+				{
+					continue;
+				}
+
+				std::size_t singleLine = indentDepth * m_options.indent_width;
+				for (std::size_t i = 0; i < sig.size(); ++i)
+				{
+					if (i > 0)
+					{
+						singleLine += gapWidth(tokenText(sig[i - 1]), tokenText(sig[i]),
+							isWordish(sig[i - 1]), isWordish(sig[i]));
+					}
+
+					singleLine += tokenText(sig[i]).size();
+				}
+
+				if (terminator == ";")
+				{
+					singleLine += 1;
+				}
+				else if (terminator == "{")
+				{
+					singleLine += 2;
+				}
+
 				// The parser has already distinguished parameters from arguments,
 				// template commas, nested declarators and default expressions.
+				if (singleLine <= m_options.column_limit)
+				{
+					for (const auto first : parameters)
+					{
+						auto delimiter = first;
+						while (delimiter > open &&
+							(tokens[delimiter - 1].kind == TokenKind::Whitespace ||
+							tokens[delimiter - 1].kind == TokenKind::LineComment ||
+							tokens[delimiter - 1].kind == TokenKind::BlockComment))
+						{
+							--delimiter;
+						}
+
+						if (delimiter > open && (tokens[delimiter - 1].tok == Tok::Comma ||
+							tokens[delimiter - 1].tok == Tok::LParen))
+						{
+							auto next = delimiter;
+							while (next < first && tokens[next].kind == TokenKind::Whitespace)
+							{
+								++next;
+							}
+
+							replace_gap(token_end(delimiter - 1), tokens[next].offset,
+								tokens[delimiter - 1].tok == Tok::Comma ? " " : "");
+						}
+					}
+
+					auto last = close;
+					while (last > open && tokens[last - 1].kind == TokenKind::Whitespace)
+					{
+						--last;
+					}
+
+					if (last > open && tokens[last - 1].kind != TokenKind::LineComment)
+					{
+						replace_gap(token_end(last - 1), tokens[close].offset, "");
+					}
+
+					continue;
+				}
+
 				for (const auto first : parameters)
 				{
 					auto delimiter = first;

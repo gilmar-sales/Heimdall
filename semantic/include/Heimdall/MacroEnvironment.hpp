@@ -1,11 +1,5 @@
 #pragma once
 
-#include <Heimdall/CompileDatabase.hpp>
-#include <Heimdall/MacroResolver.hpp>
-#include <Heimdall/MacroScanner.hpp>
-#include <Heimdall/MacroTable.hpp>
-#include <Heimdall/SourceOverlay.hpp>
-
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -13,6 +7,12 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/MacroResolver.hpp>
+#include <Heimdall/MacroScanner.hpp>
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/SourceOverlay.hpp>
 
 namespace heimdall
 {
@@ -23,7 +23,7 @@ namespace heimdall
 	/// Macros defined over the whole translation unit by default (the standard's minimum).
 	inline constexpr std::size_t kDefaultMaxMacros = 65536;
 	/// Largest header read by default: 16 MiB.
-	inline constexpr std::size_t kDefaultMaxFileBytes = std::size_t { 16 } * kBytesPerMebibyte;
+	inline constexpr std::size_t kDefaultMaxFileBytes = std::size_t {16} * kBytesPerMebibyte;
 
 	/// Bounds and sources of a `MacroEnvironment` build.
 	struct MacroEnvironmentOptions
@@ -33,7 +33,7 @@ namespace heimdall
 		/// Largest header read, in bytes; bigger ones count as unresolved.
 		/// Distinct macro names defined across the translation unit; past it no more headers
 		/// are entered and the environment is incomplete.
-		std::size_t maxMacros = kDefaultMaxMacros;
+		std::size_t maxMacros    = kDefaultMaxMacros;
 		std::size_t maxFileBytes = kDefaultMaxFileBytes;
 		/// Run the compiler (`-dM -E`) for builtin macros; otherwise use the built-in table.
 		bool probeCompiler = true;
@@ -127,7 +127,8 @@ namespace heimdall
 	public:
 		explicit MacroEnvironmentResolver(std::shared_ptr<const MacroEnvironment> environment);
 
-		[[nodiscard]] const MacroDef* Find(std::string_view name,
+		[[nodiscard]] const MacroDef* Find(
+			std::string_view name,
 			std::size_t offset) const noexcept override;
 
 		[[nodiscard]] std::uint64_t Fingerprint() const noexcept override

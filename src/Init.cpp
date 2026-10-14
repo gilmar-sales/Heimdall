@@ -1,9 +1,9 @@
 #include "Init.hpp"
 
-#include <Heimdall/RuleConfig.hpp>
-
 #include <fstream>
 #include <system_error>
+
+#include <Heimdall/RuleConfig.hpp>
 
 namespace heimdall::cli
 {

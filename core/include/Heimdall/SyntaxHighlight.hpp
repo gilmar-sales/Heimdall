@@ -1,15 +1,15 @@
 #pragma once
 
-#include <Heimdall/MacroTable.hpp>
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
 {
@@ -72,7 +72,8 @@ namespace heimdall
 
 		/// As above, with macros resolved through `context` (any header, any `-D`) and spans
 		/// in inactive groups marked `kHighlightInactive` and left without identifier kinds.
-		[[nodiscard]] static std::vector<HighlightSpan> Extract(const ParseTree& tree,
+		[[nodiscard]] static std::vector<HighlightSpan> Extract(
+			const ParseTree& tree,
 			const HighlightContext& context);
 	};
 

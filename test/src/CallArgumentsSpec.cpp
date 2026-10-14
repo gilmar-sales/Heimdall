@@ -92,6 +92,19 @@ TEST(CallArgumentsSpec, DoesNotUseOverloadsOrDefaultsDeclaredAfterTheCall)
         "void f(int, int = 2);").size(), 1u);
 }
 
+TEST(CallArgumentsSpec, CountsCastToUnknownTypeAsSingleArgument)
+{
+    // `Mode` is unknown without its header (as `SDL_Keymod` is without SDL):
+    // the parenthesized type must not split its operand into a second argument.
+    EXPECT_TRUE(AnalyzeCalls("struct Event { int mod; }; void Update(int); "
+        "void Test(Event* event) { Update((Mode)event->mod); }").empty());
+    EXPECT_TRUE(AnalyzeCalls("struct Event { int mod; }; void Update(int); "
+        "void Test(Event* event) { Update(event->mod); }").empty());
+    EXPECT_TRUE(AnalyzeCalls("void Update(int); void Test() { Update((int)1); }").empty());
+    // Control: a genuine second argument is still reported.
+    EXPECT_EQ(AnalyzeCalls("void Update(int); void Test() { Update(1, 2); }").size(), 1u);
+}
+
 TEST(CallArgumentsSpec, SeesClassMemberOverloadsDeclaredAfterTheCall)
 {
     EXPECT_TRUE(AnalyzeCalls("class S { void Apply(int, int); void Run() { Apply(1, 2, 3); } "
@@ -236,13 +249,13 @@ TEST(CallArgumentsSpec, RejectsIndexedWrapperPassedToRangeForFunctionReference)
         if (tree.Tokens()[token].offset == source.find("func(component)"))
         {
             EXPECT_EQ(heimdall::CompletionEngine::VariableType(tree, token, &index),
-                "std::function<void(ComponentManager&)>");
+                      "std::function<void(ComponentManager&)>");
         }
 
         if (tree.Tokens()[token].offset == source.find("component);"))
         {
             EXPECT_EQ(heimdall::CompletionEngine::VariableType(tree, token, &index),
-                "skr::Arc<ComponentManager>");
+                      "skr::Arc<ComponentManager>");
         }
     }
 

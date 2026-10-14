@@ -1672,3 +1672,42 @@ TEST(ParseTreeSpec, ParenthesesInsideTemplateArgumentsDoNotMakeAVariableAFunctio
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1u);
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 0u);
 }
+
+TEST(ParseTreeSpec, ParsesNewArrayWithCompoundBuiltinType)
+{
+    for (const std::string_view type :
+        {
+            "unsigned int", "signed int", "unsigned long long", "long double"
+    })
+    {
+        const std::string source = "void Test() { target = new " + std::string(type) + "[count()]; after = 1; }";
+
+        const auto tree = heimdall::ParseTree::Parse(source);
+
+        EXPECT_TRUE(tree.Diagnostics().empty()) << type;
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::ExpressionStatement), 2u);
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::SubscriptExpression), 1u);
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 1u);
+    }
+}
+
+TEST(ParseTreeSpec, ParsesTypedefRecordsWithAliases)
+{
+    for (const std::string_view source :
+        {
+            "typedef enum { A, B } Name; int after;",
+            "typedef enum Kind { K1, K2 } Kind; Kind value;",
+            "typedef struct { int x; } Anon; Anon value;",
+            "typedef struct Named { int x; } Named; Named value;",
+            "typedef union { int i; float f; } Choice; Choice value;"
+    })
+    {
+        const auto tree = heimdall::ParseTree::Parse(source);
+
+        EXPECT_TRUE(tree.Diagnostics().empty()) << source;
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1u) << source;
+        // The alias plus members and the trailing declaration.
+        EXPECT_GE(Count(tree, heimdall::GrammarKind::Declaration), 2u) << source;
+        EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 0u) << source;
+    }
+}

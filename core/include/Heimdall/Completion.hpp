@@ -1,18 +1,17 @@
 #pragma once
 
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/TemplateDeduction.hpp>
-
-#include <Heimdall/TypeNames.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
-
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/TemplateDeduction.hpp>
+#include <Heimdall/TypeNames.hpp>
 
 namespace heimdall
 {
@@ -164,12 +163,16 @@ namespace heimdall
 	{
 	public:
 		/// Infers an auto variable or range-for binding using local and indexed declarations.
-		[[nodiscard]] static std::string InferredType(const ParseTree& tree,
-			std::size_t nameToken, const ScopeIndex* external = nullptr);
+		[[nodiscard]] static std::string InferredType(
+			const ParseTree& tree,
+			std::size_t nameToken,
+			const ScopeIndex* external = nullptr);
 
 		/// Resolves a visible variable's type, expanding indexed aliases.
-		[[nodiscard]] static std::string VariableType(const ParseTree& tree,
-			std::size_t nameToken, const ScopeIndex* external = nullptr);
+		[[nodiscard]] static std::string VariableType(
+			const ParseTree& tree,
+			std::size_t nameToken,
+			const ScopeIndex* external = nullptr);
 
 		static std::string PrefixAt(std::string_view source, std::size_t offset);
 
@@ -178,7 +181,9 @@ namespace heimdall
 		static std::vector<CompletionItem> Complete(std::string_view source, std::size_t offset);
 
 		static std::vector<CompletionItem> Complete(
-			std::string_view source, const ParserOptions& options, std::size_t offset);
+			std::string_view source,
+			const ParserOptions& options,
+			std::size_t offset);
 
 		static std::vector<CompletionItem> Complete(
 			std::string_view source,

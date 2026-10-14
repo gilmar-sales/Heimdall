@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Heimdall/Ids.hpp>
-#include <Heimdall/TypeModel.hpp>
-
 #include <expected>
 #include <filesystem>
 #include <optional>
@@ -11,6 +8,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <Heimdall/Ids.hpp>
+#include <Heimdall/TypeModel.hpp>
 
 namespace heimdall
 {
@@ -123,7 +123,8 @@ namespace heimdall
 	{
 	public:
 		static std::expected<ProjectSymbolIndex, SymbolIndexError> Build(
-			const AnalysisSnapshot& snapshot, SymbolIndexLimits limits = {},
+			const AnalysisSnapshot& snapshot,
+			SymbolIndexLimits limits = {},
 			std::stop_token stop = {});
 
 		std::uint64_t Revision() const noexcept

@@ -1,6 +1,3 @@
-#include <Heimdall/Completion.hpp>
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/ParseTree.hpp>
 #include <Heimdall/TemplateDeduction.hpp>
 
 #include <algorithm>
@@ -9,6 +6,10 @@
 #include <optional>
 #include <string_view>
 #include <unordered_map>
+
+#include <Heimdall/Completion.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {
@@ -242,7 +243,9 @@ namespace heimdall
 			return std::nullopt;
 		}
 
-		const IndexedScope* Record(std::string_view written, std::span<const IndexedScope * const> scopes,
+		const IndexedScope* Record(
+			std::string_view written,
+			std::span<const IndexedScope * const> scopes,
 			const std::vector<std::string>& owner)
 		{
 			const auto type = Parts(written);
@@ -390,7 +393,8 @@ namespace heimdall
 	}
 
 	std::shared_ptr<const FunctionDeduction> TemplateDeduction::Capture(
-		const ParseTree& tree, std::size_t nameNode)
+		const ParseTree& tree,
+		std::size_t nameNode)
 	{
 		const auto& nodes  = tree.NodesSoA();
 		const auto& tokens = tree.Tokens();

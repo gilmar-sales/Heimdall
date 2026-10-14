@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstddef>
-#include <Heimdall/ParseTree.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {

@@ -1,9 +1,5 @@
 #pragma once
 
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/MacroTable.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,6 +8,11 @@
 #include <stop_token>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/Tok.hpp>
 
 namespace heimdall
 {
@@ -38,14 +39,10 @@ namespace heimdall
 	{
 		/// Spelling; points into the input text, a macro body or the result's pool.
 		std::string_view text;
-		TokenKind kind   = TokenKind::Unknown;
-		Tok tok          = Tok::None;
-		bool spaceBefore = false;
-		/// Index of the input token this token was copied from, or `kNoToken` when a macro body
-		/// or `#`/`##` created it.
-		std::uint32_t spelled = kNoToken;
-		/// Index of the input token naming the outermost macro whose expansion produced this
-		/// token, or `kNoToken` when no macro was involved.
+		TokenKind kind           = TokenKind::Unknown;
+		Tok tok                  = Tok::None;
+		bool spaceBefore         = false;
+		std::uint32_t spelled    = kNoToken;
 		std::uint32_t invocation = kNoToken;
 	};
 
@@ -72,7 +69,9 @@ namespace heimdall
 
 		/// Expands the whole of `text`. With `protectDefined`, the operand of `defined` in a
 		/// `#if` expression is left alone.
-		[[nodiscard]] ExpansionResult Expand(std::string_view text, bool protectDefined = false,
+		[[nodiscard]] ExpansionResult Expand(
+			std::string_view text,
+			bool protectDefined = false,
 			std::stop_token stop = {}) const;
 
 		/// Expands lexed `tokens` of `text` (trivia allowed); `spelled` indexes `tokens`.

@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <mutex>
-
 #include <simdjson.h>
 
 namespace heimdall::lsp

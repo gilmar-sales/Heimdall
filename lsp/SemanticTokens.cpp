@@ -26,7 +26,7 @@ namespace heimdall::lsp
 			for (const char c : text)
 			{
 				const auto byte = static_cast<unsigned char>(c);
-				units += (byte & kContinuationMask) == kContinuationBits ? 0 : (byte >= kFourByteLead ? kSurrogatePair : 1);
+				units +=(byte& kContinuationMask) == kContinuationBits ? 0 : (byte >= kFourByteLead ? kSurrogatePair : 1);
 			}
 
 			return units;
@@ -35,7 +35,7 @@ namespace heimdall::lsp
 		void AppendNumber(std::string& out, std::size_t value)
 		{
 			char digits[kMaxDigits];
-			const auto [end, error] = std::to_chars(std::begin(digits), std::end(digits), value);
+			const auto[end, error] = std::to_chars(std::begin(digits), std::end(digits), value);
 			out.append(digits, end);
 		}
 

@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -12,6 +9,9 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
 {
@@ -86,11 +86,13 @@ namespace heimdall
 	public:
 		/// Parses the text after `#define` (`NAME`, `NAME body`, `NAME(a, b) body`).
 		[[nodiscard]] static std::expected<MacroDef, std::string>
-		ParseDefinition(std::string_view directiveText);
+		ParseDefinition(
+			std::string_view directiveText);
 
 		/// Parses a command line `-D` argument (`NAME`, `NAME=value`); `NAME` means `1`.
 		[[nodiscard]] static std::expected<MacroDef, std::string>
-		ParseCommandLine(std::string_view argument);
+		ParseCommandLine(
+			std::string_view argument);
 
 		/// Adapts the legacy object-like `name -> replacement text` map as builtin macros.
 		[[nodiscard]] static MacroTable FromMap(const Preprocessor::MacroMap& map);
@@ -145,6 +147,7 @@ namespace heimdall
 
 		// The stored pointer itself (no reference count traffic); null when undefined.
 		[[nodiscard]] const MacroPtr* RawRef(std::string_view name) const noexcept;
+
 		[[nodiscard]] MacroPtr Raw(std::string_view name) const noexcept;
 
 		std::shared_ptr<const Layer> mBase;

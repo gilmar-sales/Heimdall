@@ -11,11 +11,13 @@
     "format/require-final-newline": "warning",
     "cpp/no-empty-catch": "warning",
     "cpp/no-duplicate-include": "warning",
+    "cpp/sort-includes": "warning",
     "cpp/modernize-using": "warning",
     "doc/require-comment": "warning",
     "doc/doxygen-style": "warning"
   },
   "format": {
+    "sort-includes": true,
     "use-tabs": true,
     "column-limit": 100,
     "pointer-alignment": "left",

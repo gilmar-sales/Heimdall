@@ -40,7 +40,8 @@ namespace heimdall
 	public:
 		/// Captures return expressions without retaining views into the parse tree.
 		[[nodiscard]] static std::shared_ptr<const FunctionDeduction> Capture(
-			const ParseTree& tree, std::size_t nameNode);
+			const ParseTree& tree,
+			std::size_t nameNode);
 
 		/// Substitutes explicit and structurally deduced template arguments.
 		[[nodiscard]] static std::string Instantiate(

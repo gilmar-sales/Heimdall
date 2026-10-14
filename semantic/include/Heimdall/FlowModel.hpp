@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Heimdall/TypeModel.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <span>
 #include <vector>
+
+#include <Heimdall/TypeModel.hpp>
 
 namespace heimdall
 {

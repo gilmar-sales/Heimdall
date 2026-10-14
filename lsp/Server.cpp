@@ -1,32 +1,5 @@
 #include "Server.hpp"
 
-#include "Document.hpp"
-#include "JsonRpc.hpp"
-#include "MacroProtocol.hpp"
-#include "SemanticTokens.hpp"
-#include "SymbolProtocol.hpp"
-#include "WorkspaceFiles.hpp"
-
-#include <Heimdall/Completion.hpp>
-#include <Heimdall/Formatter.hpp>
-#include <Heimdall/IncludeAnalyzer.hpp>
-#include <Heimdall/IncludeInsertion.hpp>
-#include <Heimdall/IndexRename.hpp>
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/Navigation.hpp>
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/Refactoring.hpp>
-#include <Heimdall/RuleConfig.hpp>
-#include <Heimdall/RuleEngine.hpp>
-#include <Heimdall/SemanticAnalyzer.hpp>
-#include <Heimdall/SemanticRules.hpp>
-#include <Heimdall/Doxygen.hpp>
-#include <Heimdall/SymbolOutline.hpp>
-#include <Heimdall/SyntaxHighlight.hpp>
-#include <Heimdall/IndexStore.hpp>
-#include <Heimdall/ShardBuilder.hpp>
-#include <Heimdall/TypeHierarchy.hpp>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -35,6 +8,33 @@
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
+
+#include <Heimdall/Completion.hpp>
+#include <Heimdall/Doxygen.hpp>
+#include <Heimdall/Formatter.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
+#include <Heimdall/IncludeInsertion.hpp>
+#include <Heimdall/IndexRename.hpp>
+#include <Heimdall/IndexStore.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Navigation.hpp>
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Refactoring.hpp>
+#include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/RuleEngine.hpp>
+#include <Heimdall/SemanticAnalyzer.hpp>
+#include <Heimdall/SemanticRules.hpp>
+#include <Heimdall/ShardBuilder.hpp>
+#include <Heimdall/SymbolOutline.hpp>
+#include <Heimdall/SyntaxHighlight.hpp>
+#include <Heimdall/TypeHierarchy.hpp>
+
+#include "Document.hpp"
+#include "JsonRpc.hpp"
+#include "MacroProtocol.hpp"
+#include "SemanticTokens.hpp"
+#include "SymbolProtocol.hpp"
+#include "WorkspaceFiles.hpp"
 
 namespace heimdall::lsp
 {
@@ -1026,7 +1026,9 @@ namespace heimdall::lsp
 	}
 
 	void LanguageServer::PublishDiagnostics(
-		const std::string& uri, std::shared_ptr<const std::string> text, std::int64_t version)
+		const std::string& uri,
+		std::shared_ptr<const std::string> text,
+		std::int64_t version)
 	{
 		// Single-pass pipeline: one lex + preprocess + grammar pass per version,
 		// shared by the rule engine, the semantic pass and the syntax errors
@@ -1194,7 +1196,9 @@ namespace heimdall::lsp
 		Send(message);
 	}
 
-	bool LanguageServer::DocumentParams(simdjson::dom::element request, std::string_view& uri,
+	bool LanguageServer::DocumentParams(
+		simdjson::dom::element request,
+		std::string_view& uri,
 		simdjson::dom::object& document)
 	{
 		simdjson::dom::object params;
@@ -1630,7 +1634,8 @@ namespace heimdall::lsp
 		Send(message);
 	}
 
-	int LanguageServer::PublishWorkspaceFile(const std::filesystem::path& file,
+	int LanguageServer::PublishWorkspaceFile(
+		const std::filesystem::path& file,
 		std::stop_token stop)
 	{
 		auto contents = ReadWorkspaceFile(file);
@@ -1775,7 +1780,8 @@ namespace heimdall::lsp
 	}
 
 	std::shared_ptr<const LanguageServer::FormattingResult> LanguageServer::CachedFormatting(
-		const std::shared_ptr<const heimdall::ParseTree>& tree, heimdall::FormatOptions options,
+		const std::shared_ptr<const heimdall::ParseTree>& tree,
+		heimdall::FormatOptions options,
 		std::stop_token stop)
 	{
 		if (stop.stop_requested())
@@ -1908,6 +1914,8 @@ namespace heimdall::lsp
 			if (*found)
 			{
 				format_options = * *found;
+
+				format_options.mainFileName = PathFromUri(uri_string).filename().string();
 			}
 		}
 		else
@@ -1945,7 +1953,8 @@ namespace heimdall::lsp
 	}
 
 	heimdall::AnalysisContext LanguageServer::AnalysisFor(
-		const std::string& uri, std::shared_ptr<const heimdall::ParseTree> tree,
+		const std::string& uri,
+		std::shared_ptr<const heimdall::ParseTree> tree,
 		heimdall::ParserOptions options)
 	{
 		auto snapshot =
@@ -1965,7 +1974,8 @@ namespace heimdall::lsp
 	}
 
 	std::vector<heimdall::Diagnostic> LanguageServer::RuleDiagnostics(
-		const std::string& uri, std::shared_ptr<const heimdall::ParseTree> parsed,
+		const std::string& uri,
+		std::shared_ptr<const heimdall::ParseTree> parsed,
 		const heimdall::CompileCommand* command)
 	{
 		const auto& tree = *parsed;
@@ -1989,6 +1999,8 @@ namespace heimdall::lsp
 			const std::lock_guard<std::mutex> lock(m_init_mu);
 			mInitializationError = per_file.error();
 		}
+
+		rule_options.main_file_name = PathFromUri(uri).filename().string();
 
 		const heimdall::RuleEngine engine(rule_options);
 		std::vector<heimdall::Diagnostic> diagnostics;
@@ -2119,7 +2131,9 @@ namespace heimdall::lsp
 		return result;
 	}
 
-	void LanguageServer::RenameDocument(simdjson::dom::element request, std::string_view id,
+	void LanguageServer::RenameDocument(
+		simdjson::dom::element request,
+		std::string_view id,
 		int mode)
 	{
 		if (mode != 0 && !mVersionedEdits)
@@ -4009,7 +4023,9 @@ namespace heimdall::lsp
 		return found != m_documents.end() && found->second.version == version;
 	}
 
-	void LanguageServer::SignatureHelpDocument(simdjson::dom::element request, std::string_view id)
+	void LanguageServer::SignatureHelpDocument(
+		simdjson::dom::element request,
+		std::string_view id)
 	{
 		simdjson::dom::object params;
 		simdjson::dom::object text_document;
@@ -5035,6 +5051,8 @@ namespace heimdall::lsp
 			if (*found)
 			{
 				format_options = * *found;
+
+				format_options.mainFileName = PathFromUri(uri_string).filename().string();
 			}
 		}
 		else
@@ -5307,7 +5325,8 @@ namespace heimdall::lsp
 						{
 							t_context = nullptr;
 						}
-					} scope(job_stop);
+					} scope(
+						job_stop);
 					try
 					{
 						PublishDiagnostics(job.uri, std::move(text), version);
@@ -5467,7 +5486,9 @@ namespace heimdall::lsp
 		Respond(id, response);
 	}
 
-	void LanguageServer::GotoDocument(simdjson::dom::element request, std::string_view id,
+	void LanguageServer::GotoDocument(
+		simdjson::dom::element request,
+		std::string_view id,
 		bool implementation)
 	{
 		simdjson::dom::object params;
@@ -6100,7 +6121,9 @@ namespace heimdall::lsp
 	}
 
 	void LanguageServer::SemanticTokensRequest(
-		simdjson::dom::element request, std::string_view id, bool ranged)
+		simdjson::dom::element request,
+		std::string_view id,
+		bool ranged)
 	{
 		std::string_view uri;
 		simdjson::dom::object textDocument;
@@ -6162,7 +6185,9 @@ namespace heimdall::lsp
 	}
 
 	void LanguageServer::TypeHierarchyRequest(
-		simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode)
+		simdjson::dom::element request,
+		std::string_view id,
+		TypeHierarchyMode mode)
 	{
 		simdjson::dom::object params;
 		std::string_view uri;
@@ -6380,8 +6405,10 @@ namespace heimdall::lsp
 
 	// Macros of the headers the open documents include (system and third-party ones are not
 	// part of the workspace index). Macros the index already lists are skipped.
-	void LanguageServer::AppendHeaderMacroSymbols(std::string_view query,
-		std::span<const SymbolHit> hits, std::string& response)
+	void LanguageServer::AppendHeaderMacroSymbols(
+		std::string_view query,
+		std::span<const SymbolHit> hits,
+		std::string& response)
 	{
 		constexpr std::size_t kMaxHeaderMacros = 50;
 		if (query.empty())
@@ -6529,7 +6556,8 @@ namespace heimdall::lsp
 	}
 
 	std::shared_ptr<const heimdall::index::FileShard> LanguageServer::IndexShard(
-		const heimdall::ParseTree& tree, const std::filesystem::path& file,
+		const heimdall::ParseTree& tree,
+		const std::filesystem::path& file,
 		const heimdall::CompileCommand* command)
 	{
 		const auto model = heimdall::Binder::Bind(tree);

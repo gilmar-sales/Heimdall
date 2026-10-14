@@ -8,795 +8,849 @@
 namespace heimdall
 {
 
-    namespace
-    {
-
-        constexpr std::string_view kDefinedKeyword         = "defined";
-        constexpr int              kDecimalBase            = 10;
-        constexpr int              kHexBase                = 16;
-        constexpr int              kOctalBase              = 8;
-        constexpr std::size_t      kHexPrefixLen           = 2;
-        constexpr std::size_t      kOctalPrefixLen         = 1;
-        constexpr std::size_t      kMaxMacroExpansionDepth = 16;
-        constexpr std::size_t      kCommentDelimLen        = 2;
-        constexpr std::size_t      kInitialMacroCapacity   = 16;
-        constexpr std::size_t      kReserveDivisor         = 2;
-
-        struct ConditionalFrame
-        {
-            bool parent_active;
-            bool branch_taken;
-            bool active;
-            bool saw_else;
-        };
-
-        bool IsIdentStart(char c)
-        {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-        }
-
-        bool IsIdentContinue(char c)
-        {
-            return IsIdentStart(c) || (c >= '0' && c <= '9');
-        }
-
-        std::string_view Trim(std::string_view text)
-        {
-            while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
-            {
-                text.remove_prefix(1);
-            }
-
-            while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
-            {
-                text.remove_suffix(1);
-            }
-
-            return text;
-        }
-
-        std::string_view ReadWord(std::string_view& text)
-        {
-            text          = Trim(text);
-            std::size_t n = 0;
-            while (n < text.size() && IsIdentContinue(text[n]))
-            {
-                ++n;
-            }
-
-            const auto word = text.substr(0, n);
-            text.remove_prefix(n);
-            return word;
-        }
-
-        // Overlay of file-local #defines over the shared predefined map: lookups
-        // check the small local map first, then a tombstone set for #undef, then the
-        // predefined map by pointer. The predefined map is never copied.
-        struct MacroScope
-        {
-            const Preprocessor::MacroMap*  local      = nullptr;
-            const Preprocessor::ErasedSet* erased     = nullptr;
-            const Preprocessor::MacroMap*  predefined = nullptr;
-
-            const std::string* Find(std::string_view name) const
-            {
-                if (local != nullptr)
-                {
-                    if (const auto it = local->find(name); it != local->end())
-                    {
-                        return &it->second;
-                    }
-                }
-
-                if (erased != nullptr && erased->find(name) != erased->end())
-                {
-                    return nullptr;
-                }
-
-                if (predefined != nullptr)
-                {
-                    if (const auto it = predefined->find(name); it != predefined->end())
-                    {
-                        return &it->second;
-                    }
-                }
-
-                return nullptr;
-            }
-
-            bool Contains(std::string_view name) const { return Find(name) != nullptr; }
-        };
-
-        class IfExpression
-        {
-          public:
-            IfExpression(std::string_view input, const MacroScope& macros, std::stop_token stop) :
-                m_input(input), m_macros(macros), mStop(stop)
-            {
-            }
-
-            bool Evaluate()
-            {
-                const long long value = ParseOr();
-                SkipSpace();
-                return !mTooComplex && !mStop.stop_requested() && value != 0 &&
-                       m_pos == m_input.size();
-            }
-
-            [[nodiscard]] bool TooComplex() const noexcept { return mTooComplex; }
-
-          private:
-            void SkipSpace()
-            {
-                while (m_pos < m_input.size() && !mStop.stop_requested())
-                {
-                    if (std::isspace(static_cast<unsigned char>(m_input[m_pos])))
-                    {
-                        ++m_pos;
-                    }
-                    else if (m_input.substr(m_pos, 2) == "//")
-                    {
-                        m_pos = m_input.size();
-                    }
-                    else if (m_input.substr(m_pos, 2) == "/*")
-                    {
-                        const auto close = m_input.find("*/", m_pos + 2);
-                        m_pos = close == std::string_view::npos ? m_input.size() : close + 2;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-            }
-
-            bool Consume(std::string_view token)
-            {
-                if (mStop.stop_requested())
-                {
-                    m_pos = m_input.size();
-                    return false;
-                }
-                SkipSpace();
-                if (m_input.substr(m_pos, token.size()) != token)
-                {
-                    return false;
-                }
-
-                m_pos += token.size();
-                return true;
-            }
-
-            long long ParseOr()
-            {
-                long long value = ParseAnd();
-                while (Consume("||"))
-                {
-                    const long long rhs = ParseAnd();
-                    value               = value != 0 || rhs != 0;
-                }
-
-                return value;
-            }
-
-            long long ParseAnd()
-            {
-                long long value = ParseCompare();
-                while (Consume("&&"))
-                {
-                    const long long rhs = ParseCompare();
-                    value               = value != 0 && rhs != 0;
-                }
-
-                return value;
-            }
-
-            long long ParseCompare()
-            {
-                const long long lhs = ParseUnary();
-                if (Consume("=="))
-                {
-                    return lhs == ParseUnary();
-                }
-
-                if (Consume("!="))
-                {
-                    return lhs != ParseUnary();
-                }
-
-                if (Consume("<="))
-                {
-                    return lhs <= ParseUnary();
-                }
-
-                if (Consume(">="))
-                {
-                    return lhs >= ParseUnary();
-                }
-
-                if (Consume("<"))
-                {
-                    return lhs < ParseUnary();
-                }
-
-                if (Consume(">"))
-                {
-                    return lhs > ParseUnary();
-                }
-
-                return lhs;
-            }
-
-            long long ParseUnary()
-            {
-                constexpr std::size_t kMaxExpressionDepth = 256;
-                if (mDepth >= kMaxExpressionDepth || mStop.stop_requested())
-                {
-                    mTooComplex = mDepth >= kMaxExpressionDepth;
-                    m_pos       = m_input.size();
-                    return 0;
-                }
-                struct DepthScope
-                {
-                    std::size_t& depth;
-                    explicit DepthScope(std::size_t& value) noexcept : depth(value) { ++depth; }
-                    ~DepthScope() { --depth; }
-                } scope(mDepth);
-                if (Consume("!"))
-                {
-                    return ParseUnary() == 0;
-                }
-
-                if (Consume("("))
-                {
-                    const long long value = ParseOr();
-                    Consume(")");
-                    return value;
-                }
-
-                SkipSpace();
-                if (m_input.substr(m_pos, kDefinedKeyword.size()) == kDefinedKeyword)
-                {
-                    m_pos += kDefinedKeyword.size();
-                    const bool paren = Consume("(");
-                    SkipSpace();
-                    const std::size_t start = m_pos;
-                    while (m_pos < m_input.size() && !mStop.stop_requested() &&
-                           IsIdentContinue(m_input[m_pos]))
-                    {
-                        ++m_pos;
-                    }
-
-                    const std::string_view name = m_input.substr(start, m_pos - start);
-                    if (paren)
-                    {
-                        Consume(")");
-                    }
-
-                    return m_macros.Contains(name) ? 1 : 0;
-                }
-
-                const std::size_t start = m_pos;
-                if (m_pos < m_input.size() &&
-                    (IsIdentStart(m_input[m_pos]) ||
-                     std::isdigit(static_cast<unsigned char>(m_input[m_pos]))))
-                {
-                    while (m_pos < m_input.size() && !mStop.stop_requested() &&
-                           (IsIdentContinue(m_input[m_pos]) || m_input[m_pos] == 'x' ||
-                            m_input[m_pos] == 'X'))
-                    {
-                        ++m_pos;
-                    }
-                }
-
-                if (start == m_pos)
-                {
-                    return 0;
-                }
-
-                std::string_view atom = m_input.substr(start, m_pos - start);
-                if (IsIdentStart(atom.front()))
-                {
-                    const std::string* replacement = m_macros.Find(atom);
-                    if (replacement == nullptr)
-                    {
-                        return 0;
-                    }
-
-                    atom = Trim(*replacement);
-                }
-
-                while (!atom.empty() && (atom.back() == 'u' || atom.back() == 'U' ||
-                                         atom.back() == 'l' || atom.back() == 'L'))
-                {
-                    atom.remove_suffix(1);
-                }
-
-                long long number = 0;
-                int       base   = kDecimalBase;
-                if (atom.size() > kHexPrefixLen && atom[0] == '0' &&
-                    (atom[1] == 'x' || atom[1] == 'X'))
-                {
-                    base = kHexBase;
-                }
-                else if (atom.size() > 1 && atom[0] == '0')
-                {
-                    base = kOctalBase;
-                }
-
-                if (base == kHexBase)
-                {
-                    atom.remove_prefix(kHexPrefixLen);
-                }
-                else if (base == kOctalBase)
-                {
-                    atom.remove_prefix(kOctalPrefixLen);
-                    if (atom.empty())
-                    {
-                        return 0;
-                    }
-                }
-
-                const auto parsed =
-                    std::from_chars(atom.data(), atom.data() + atom.size(), number, base);
-                return parsed.ec == std::errc {} && parsed.ptr == atom.data() + atom.size()
-                           ? number
-                           : 0;
-            }
-
-            std::string_view  m_input;
-            const MacroScope& m_macros;
-            std::size_t       m_pos = 0;
-            std::size_t       mDepth      = 0;
-            bool              mTooComplex = false;
-            std::stop_token   mStop;
-        };
-
-        DirectiveKind KindOf(std::string_view name)
-        {
-            if (name == "include" || name == "include_next")
-            {
-                return DirectiveKind::Include;
-            }
-
-            if (name == "define")
-            {
-                return DirectiveKind::Define;
-            }
-
-            if (name == "undef")
-            {
-                return DirectiveKind::Undef;
-            }
-
-            if (name == "if")
-            {
-                return DirectiveKind::If;
-            }
-
-            if (name == "ifdef")
-            {
-                return DirectiveKind::Ifdef;
-            }
-
-            if (name == "ifndef")
-            {
-                return DirectiveKind::Ifndef;
-            }
-
-            if (name == "elif")
-            {
-                return DirectiveKind::Elif;
-            }
-
-            if (name == "else")
-            {
-                return DirectiveKind::Else;
-            }
-
-            if (name == "endif")
-            {
-                return DirectiveKind::Endif;
-            }
-
-            if (name == "pragma")
-            {
-                return DirectiveKind::Pragma;
-            }
-
-            return DirectiveKind::Other;
-        }
-
-        std::string ExpandObjectMacros(std::string_view  line,
-                                       const MacroScope& macros,
-                                       unsigned          depth = 0)
-        {
-            if (depth >= kMaxMacroExpansionDepth)
-            {
-                return std::string(line);
-            }
-
-            std::string out;
-            out.reserve(line.size());
-            std::size_t i     = 0;
-            char        quote = '\0';
-            while (i < line.size())
-            {
-                const char c = line[i];
-                if (quote != '\0')
-                {
-                    out += c;
-                    ++i;
-                    if (c == '\\' && i < line.size())
-                    {
-                        out += line[i++];
-                    }
-                    else if (c == quote)
-                    {
-                        quote = '\0';
-                    }
-
-                    continue;
-                }
-
-                if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
-                {
-                    out.append(line.substr(i));
-                    break;
-                }
-
-                if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
-                {
-                    const auto        close = line.find("*/", i + kCommentDelimLen);
-                    const std::size_t end =
-                        close == std::string_view::npos ? line.size() : close + kCommentDelimLen;
-                    out.append(line.substr(i, end - i));
-                    i = end;
-                    continue;
-                }
-
-                if (c == '"' || c == '\'')
-                {
-                    quote = c;
-                    out += c;
-                    ++i;
-                    continue;
-                }
-
-                if (IsIdentStart(c))
-                {
-                    const std::size_t start = i++;
-                    while (i < line.size() && IsIdentContinue(line[i]))
-                    {
-                        ++i;
-                    }
-
-                    // Heterogeneous lookup: no std::string temporary per identifier.
-                    const std::string* replacement = macros.Find(line.substr(start, i - start));
-                    if (replacement == nullptr || replacement->empty())
-                    {
-                        out.append(line.substr(start, i - start));
-                    }
-                    else
-                    {
-                        out += ExpandObjectMacros(*replacement, macros, depth + 1);
-                    }
-
-                    continue;
-                }
-
-                out += c;
-                ++i;
-            }
-
-            return out;
-        }
-
-        bool EndsWithBackslash(std::string_view body)
-        {
-            return !body.empty() && body.back() == '\\';
-        }
-
-        // Advances `in_comment` over one source line: whether the next line starts
-        // inside a block comment. Strings, char literals and `//` comments are
-        // skipped so that `/*` inside them does not open a comment.
-        void AdvanceCommentState(std::string_view line, bool& in_comment)
-        {
-            for (std::size_t i = 0; i < line.size(); ++i)
-            {
-                if (in_comment)
-                {
-                    if (line[i] == '*' && i + 1 < line.size() && line[i + 1] == '/')
-                    {
-                        in_comment = false;
-                        ++i;
-                    }
-
-                    continue;
-                }
-
-                const char c = line[i];
-                if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
-                {
-                    in_comment = true;
-                    ++i;
-                }
-                else if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
-                {
-                    return;
-                }
-                else if (c == '"' || c == '\'')
-                {
-                    for (++i; i < line.size() && line[i] != c; ++i)
-                    {
-                        if (line[i] == '\\')
-                        {
-                            ++i;
-                        }
-                    }
-                }
-            }
-        }
-
-    } // namespace
-
-    PreprocessorResult Preprocessor::Process(std::string_view source,
-                                             bool             build_active_source) const
-    {
-        return Process(source, build_active_source, {});
-    }
-
-    PreprocessorResult Preprocessor::Process(std::string_view source, bool build_active_source,
-                                             std::stop_token stop) const
-    {
-        PreprocessorResult result;
-        if (stop.stop_requested())
-        {
-            return result;
-        }
-        // Local overlay: file #defines stay small; predefined macros are read
-        // through the scope pointer without copying the whole map per file.
-        MacroMap local;
-        local.reserve(kInitialMacroCapacity);
-        ErasedSet        erased;
-        const MacroScope scope { &local, &erased, m_predefined };
-        if (build_active_source)
-        {
-            result.active_source.reserve(source.size() / kReserveDivisor);
-        }
-
-        std::vector<ConditionalFrame> stack;
-        bool                          active           = true;
-        bool                          in_block_comment = false;
-        std::size_t                   offset           = 0;
-
-        while (offset < source.size())
-        {
-            if (stop.stop_requested())
-            {
-                return result;
-            }
-            const std::size_t line_start = offset;
-            std::size_t       end        = source.find('\n', offset);
-            if (end == std::string_view::npos)
-            {
-                end = source.size();
-            }
-            else
-            {
-                ++end;
-            }
-
-            std::string_view line = source.substr(line_start, end - line_start);
-            std::string_view body = line;
-            if (!body.empty() && body.back() == '\n')
-            {
-                body.remove_suffix(1);
-            }
-
-            if (!body.empty() && body.back() == '\r')
-            {
-                body.remove_suffix(1);
-            }
-
-            auto trimmed = Trim(body);
-
-            // A directive continues over lines ending in a backslash: the whole
-            // span is one directive, and its logical text joins the pieces.
-            std::string joined;
-            if (!in_block_comment && !trimmed.empty() && trimmed.front() == '#' &&
-                EndsWithBackslash(body))
-            {
-                joined.assign(body.substr(0, body.size() - 1));
-                while (end < source.size() && !stop.stop_requested())
-                {
-                    const std::size_t next_end = source.find('\n', end);
-                    const std::size_t stop =
-                        next_end == std::string_view::npos ? source.size() : next_end + 1;
-                    std::string_view piece = source.substr(end, stop - end);
-                    end                    = stop;
-                    if (!piece.empty() && piece.back() == '\n')
-                    {
-                        piece.remove_suffix(1);
-                    }
-
-                    if (!piece.empty() && piece.back() == '\r')
-                    {
-                        piece.remove_suffix(1);
-                    }
-
-                    const bool more = EndsWithBackslash(piece);
-                    joined += ' ';
-                    joined.append(piece.substr(0, more ? piece.size() - 1 : piece.size()));
-                    if (!more)
-                    {
-                        break;
-                    }
-                }
-
-                line    = source.substr(line_start, end - line_start);
-                trimmed = Trim(joined);
-            }
-
-            const bool line_in_comment = in_block_comment;
-            AdvanceCommentState(line, in_block_comment);
-            if (!line_in_comment && !trimmed.empty() && trimmed.front() == '#')
-            {
-                trimmed.remove_prefix(1);
-                trimmed                   = Trim(trimmed);
-                const auto directive_name = ReadWord(trimmed);
-                const auto kind           = KindOf(directive_name);
-                result.directives.push_back({ kind, line_start, line.size(), active });
-                const auto evaluate = [&]
-                {
-                    IfExpression expression(trimmed, scope, stop);
-                    const auto   condition = expression.Evaluate();
-                    if (expression.TooComplex())
-                    {
-                        result.diagnostics.push_back(
-                            { line_start, "maximum preprocessor expression nesting exceeded" });
-                    }
-                    return condition;
-                };
-
-                if (kind == DirectiveKind::If || kind == DirectiveKind::Ifdef ||
-                    kind == DirectiveKind::Ifndef)
-                {
-                    bool condition = false;
-                    if (kind == DirectiveKind::If)
-                    {
-                        condition = evaluate();
-                    }
-                    else
-                    {
-                        const std::string_view name(ReadWord(trimmed));
-                        condition = scope.Contains(name);
-                        if (kind == DirectiveKind::Ifndef)
-                        {
-                            condition = !condition;
-                        }
-                    }
-
-                    stack.push_back({ active, active && condition, active && condition, false });
-                    active = stack.back().active;
-                }
-                else if (kind == DirectiveKind::Elif)
-                {
-                    if (stack.empty())
-                    {
-                        result.diagnostics.push_back({ line_start, "#elif without matching #if" });
-                    }
-                    else
-                    {
-                        auto& frame = stack.back();
-                        if (frame.saw_else)
-                        {
-                            result.diagnostics.push_back({ line_start, "#elif after #else" });
-                        }
-
-                        const bool condition =
-                            frame.parent_active && !frame.branch_taken && evaluate();
-                        frame.active         = condition;
-                        frame.branch_taken |= condition;
-                        active = frame.active;
-                    }
-                }
-                else if (kind == DirectiveKind::Else)
-                {
-                    if (stack.empty())
-                    {
-                        result.diagnostics.push_back({ line_start, "#else without matching #if" });
-                    }
-                    else
-                    {
-                        auto& frame = stack.back();
-                        if (frame.saw_else)
-                        {
-                            result.diagnostics.push_back({ line_start, "duplicate #else" });
-                        }
-
-                        frame.saw_else     = true;
-                        frame.active       = frame.parent_active && !frame.branch_taken;
-                        frame.branch_taken = true;
-                        active             = frame.active;
-                    }
-                }
-                else if (kind == DirectiveKind::Endif)
-                {
-                    if (stack.empty())
-                    {
-                        result.diagnostics.push_back({ line_start, "#endif without matching #if" });
-                    }
-                    else
-                    {
-                        active = stack.back().parent_active;
-                        stack.pop_back();
-                    }
-                }
-                else if (active && kind == DirectiveKind::Define)
-                {
-                    trimmed              = Trim(trimmed);
-                    std::size_t name_len = 0;
-                    while (name_len < trimmed.size() && IsIdentContinue(trimmed[name_len]))
-                    {
-                        ++name_len;
-                    }
-
-                    if (name_len == 0)
-                    {
-                        result.diagnostics.push_back(
-                            { line_start, "#define requires a macro name" });
-                    }
-                    else
-                    {
-                        result.macro_events.push_back({ true, line_start, std::string(trimmed) });
-                        std::string name(trimmed.substr(0, name_len));
-                        // Function-like macro: retain as an opaque definition; do not expand it.
-                        if (name_len < trimmed.size() && trimmed[name_len] == '(')
-                        {
-                            local.erase(name);
-                            erased.insert(std::move(name));
-                        }
-                        else
-                        {
-                            erased.erase(name);
-                            local[std::move(name)] = std::string(Trim(trimmed.substr(name_len)));
-                            // A re-#define revives the name even if previously #undef'd.
-                        }
-                    }
-                }
-                else if (active && kind == DirectiveKind::Undef)
-                {
-                    std::string name(ReadWord(trimmed));
-                    result.macro_events.push_back({ false, line_start, name });
-                    local.erase(name);
-                    erased.insert(std::move(name));
-                }
-            }
-            else if (active)
-            {
-                result.active_ranges.push_back({ line_start, line.size() });
-                if (build_active_source)
-                {
-                    result.active_source += ExpandObjectMacros(line, scope);
-                }
-            }
-
-            offset = end;
-        }
-
-        if (!stack.empty())
-        {
-            result.diagnostics.push_back({ source.size(), "unterminated conditional directive" });
-        }
-
-        result.local_macros.reserve(local.size());
-        for (auto& [name, value] : local)
-        {
-            result.local_macros.emplace(name, std::move(value));
-        }
-
-        return result;
-    }
+	namespace
+	{
+
+		constexpr std::string_view kDefinedKeyword    = "defined";
+		constexpr int kDecimalBase                    = 10;
+		constexpr int kHexBase                        = 16;
+		constexpr int kOctalBase                      = 8;
+		constexpr std::size_t kHexPrefixLen           = 2;
+		constexpr std::size_t kOctalPrefixLen         = 1;
+		constexpr std::size_t kMaxMacroExpansionDepth = 16;
+		constexpr std::size_t kCommentDelimLen        = 2;
+		constexpr std::size_t kInitialMacroCapacity   = 16;
+		constexpr std::size_t kReserveDivisor         = 2;
+
+		struct ConditionalFrame
+		{
+			bool parent_active;
+			bool branch_taken;
+			bool active;
+			bool saw_else;
+		};
+
+		bool IsIdentStart(char c)
+		{
+			return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_';
+		}
+
+		bool IsIdentContinue(char c)
+		{
+			return IsIdentStart(c) ||(c >= '0' && c <= '9');
+		}
+
+		std::string_view Trim(std::string_view text)
+		{
+			while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+			{
+				text.remove_prefix(1);
+			}
+
+			while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+			{
+				text.remove_suffix(1);
+			}
+
+			return text;
+		}
+
+		std::string_view ReadWord(std::string_view& text)
+		{
+			text          = Trim(text);
+			std::size_t n = 0;
+			while (n < text.size() && IsIdentContinue(text[n]))
+			{
+				++n;
+			}
+
+			const auto word = text.substr(0, n);
+			text.remove_prefix(n);
+			return word;
+		}
+
+		// Overlay of file-local #defines over the shared predefined map: lookups
+		// check the small local map first, then a tombstone set for #undef, then the
+		// predefined map by pointer. The predefined map is never copied.
+		struct MacroScope
+		{
+			const Preprocessor::MacroMap* local      = nullptr;
+			const Preprocessor::ErasedSet* erased    = nullptr;
+			const Preprocessor::MacroMap* predefined = nullptr;
+
+			const std::string* Find(std::string_view name) const
+			{
+				if (local != nullptr)
+				{
+					if (const auto it = local->find(name); it != local->end())
+					{
+						return &it->second;
+					}
+				}
+
+				if (erased != nullptr && erased->find(name) != erased->end())
+				{
+					return nullptr;
+				}
+
+				if (predefined != nullptr)
+				{
+					if (const auto it = predefined->find(name); it != predefined->end())
+					{
+						return &it->second;
+					}
+				}
+
+				return nullptr;
+			}
+
+			bool Contains(std::string_view name) const
+			{
+				return Find(name) != nullptr;
+			}
+		};
+
+		class IfExpression
+		{
+		public:
+			IfExpression(std::string_view input, const MacroScope& macros, std::stop_token stop) :
+			m_input(input), m_macros(macros), mStop(stop) {}
+
+			bool Evaluate()
+			{
+				const long long value = ParseOr();
+				SkipSpace();
+				return !mTooComplex && !mStop.stop_requested() && value != 0 &&
+					m_pos == m_input.size();
+			}
+
+			[[nodiscard]] bool TooComplex() const noexcept
+			{
+				return mTooComplex;
+			}
+
+		private:
+			void SkipSpace()
+			{
+				while (m_pos < m_input.size() && !mStop.stop_requested())
+				{
+					if (std::isspace(static_cast<unsigned char>(m_input[m_pos])))
+					{
+						++m_pos;
+					}
+					else if (m_input.substr(m_pos, 2) == "//")
+					{
+						m_pos = m_input.size();
+					}
+					else if (m_input.substr(m_pos, 2) == "/*")
+					{
+						const auto close = m_input.find("*/", m_pos + 2);
+						m_pos            = close == std::string_view::npos ? m_input.size() : close + 2;
+					}
+					else
+					{
+						break;
+					}
+				}
+			}
+
+			bool Consume(std::string_view token)
+			{
+				if (mStop.stop_requested())
+				{
+					m_pos = m_input.size();
+					return false;
+				}
+
+				SkipSpace();
+				if (m_input.substr(m_pos, token.size()) != token)
+				{
+					return false;
+				}
+
+				m_pos += token.size();
+				return true;
+			}
+
+			long long ParseOr()
+			{
+				long long value = ParseAnd();
+				while (Consume("||"))
+				{
+					const long long rhs = ParseAnd();
+					value               = value != 0 || rhs != 0;
+				}
+
+				return value;
+			}
+
+			long long ParseAnd()
+			{
+				long long value = ParseCompare();
+				while (Consume("&&"))
+				{
+					const long long rhs = ParseCompare();
+					value               = value != 0 && rhs != 0;
+				}
+
+				return value;
+			}
+
+			long long ParseCompare()
+			{
+				const long long lhs = ParseUnary();
+				if (Consume("=="))
+				{
+					return lhs == ParseUnary();
+				}
+
+				if (Consume("!="))
+				{
+					return lhs != ParseUnary();
+				}
+
+				if (Consume("<="))
+				{
+					return lhs <= ParseUnary();
+				}
+
+				if (Consume(">="))
+				{
+					return lhs >= ParseUnary();
+				}
+
+				if (Consume("<"))
+				{
+					return lhs < ParseUnary();
+				}
+
+				if (Consume(">"))
+				{
+					return lhs > ParseUnary();
+				}
+
+				return lhs;
+			}
+
+			long long ParseUnary()
+			{
+				constexpr std::size_t kMaxExpressionDepth = 256;
+				if (mDepth >= kMaxExpressionDepth || mStop.stop_requested())
+				{
+					mTooComplex = mDepth >= kMaxExpressionDepth;
+					m_pos       = m_input.size();
+					return 0;
+				}
+
+				struct DepthScope
+				{
+					std::size_t& depth;
+					explicit DepthScope(std::size_t& value) noexcept: depth(value)
+					{
+						++depth;
+					}
+					~DepthScope()
+					{
+						--depth;
+					}
+				} scope(
+					mDepth);
+				if (Consume("!"))
+				{
+					return ParseUnary() == 0;
+				}
+
+				if (Consume("("))
+				{
+					const long long value = ParseOr();
+					Consume(")");
+					return value;
+				}
+
+				SkipSpace();
+				if (m_input.substr(m_pos, kDefinedKeyword.size()) == kDefinedKeyword)
+				{
+					m_pos += kDefinedKeyword.size();
+					const bool paren = Consume("(");
+					SkipSpace();
+					const std::size_t start = m_pos;
+					while (m_pos < m_input.size() && !mStop.stop_requested() &&
+						IsIdentContinue(m_input[m_pos]))
+					{
+						++m_pos;
+					}
+
+					const std::string_view name = m_input.substr(start, m_pos - start);
+					if (paren)
+					{
+						Consume(")");
+					}
+
+					return m_macros.Contains(name) ? 1 : 0;
+				}
+
+				const std::size_t start = m_pos;
+				if (m_pos < m_input.size() &&
+					(IsIdentStart(m_input[m_pos]) ||
+					std::isdigit(static_cast<unsigned char>(m_input[m_pos]))))
+				{
+					while (m_pos < m_input.size() && !mStop.stop_requested() &&
+						(IsIdentContinue(m_input[m_pos]) || m_input[m_pos] == 'x' ||
+						m_input[m_pos] == 'X'))
+					{
+						++m_pos;
+					}
+				}
+
+				if (start == m_pos)
+				{
+					return 0;
+				}
+
+				std::string_view atom = m_input.substr(start, m_pos - start);
+				if (IsIdentStart(atom.front()))
+				{
+					const std::string* replacement = m_macros.Find(atom);
+					if (replacement == nullptr)
+					{
+						return 0;
+					}
+
+					atom = Trim(*replacement);
+				}
+
+				while (!atom.empty() && (atom.back() == 'u' || atom.back() == 'U' ||
+					atom.back() == 'l' || atom.back() == 'L'))
+				{
+					atom.remove_suffix(1);
+				}
+
+				long long number = 0;
+				int base         = kDecimalBase;
+				if (atom.size() > kHexPrefixLen && atom[0] == '0' &&
+					(atom[1] == 'x' || atom[1] == 'X'))
+				{
+					base = kHexBase;
+				}
+				else if (atom.size() > 1 && atom[0] == '0')
+				{
+					base = kOctalBase;
+				}
+
+				if (base == kHexBase)
+				{
+					atom.remove_prefix(kHexPrefixLen);
+				}
+				else if (base == kOctalBase)
+				{
+					atom.remove_prefix(kOctalPrefixLen);
+					if (atom.empty())
+					{
+						return 0;
+					}
+				}
+
+				const auto parsed =
+					std::from_chars(atom.data(), atom.data() + atom.size(), number, base);
+				return parsed.ec == std::errc {} && parsed.ptr == atom.data() + atom.size()
+				? number
+				: 0;
+			}
+
+			std::string_view m_input;
+			const MacroScope& m_macros;
+			std::size_t m_pos  = 0;
+			std::size_t mDepth = 0;
+			bool mTooComplex   = false;
+			std::stop_token mStop;
+		};
+
+		DirectiveKind KindOf(std::string_view name)
+		{
+			if (name == "include" || name == "include_next")
+			{
+				return DirectiveKind::Include;
+			}
+
+			if (name == "define")
+			{
+				return DirectiveKind::Define;
+			}
+
+			if (name == "undef")
+			{
+				return DirectiveKind::Undef;
+			}
+
+			if (name == "if")
+			{
+				return DirectiveKind::If;
+			}
+
+			if (name == "ifdef")
+			{
+				return DirectiveKind::Ifdef;
+			}
+
+			if (name == "ifndef")
+			{
+				return DirectiveKind::Ifndef;
+			}
+
+			if (name == "elif")
+			{
+				return DirectiveKind::Elif;
+			}
+
+			if (name == "else")
+			{
+				return DirectiveKind::Else;
+			}
+
+			if (name == "endif")
+			{
+				return DirectiveKind::Endif;
+			}
+
+			if (name == "pragma")
+			{
+				return DirectiveKind::Pragma;
+			}
+
+			return DirectiveKind::Other;
+		}
+
+		std::string ExpandObjectMacros(
+			std::string_view line,
+			const MacroScope& macros,
+			unsigned depth = 0)
+		{
+			if (depth >= kMaxMacroExpansionDepth)
+			{
+				return std::string(line);
+			}
+
+			std::string out;
+			out.reserve(line.size());
+			std::size_t i = 0;
+			char quote    = '\0';
+			while (i < line.size())
+			{
+				const char c = line[i];
+				if (quote != '\0')
+				{
+					out += c;
+					++i;
+					if (c == '\\' && i < line.size())
+					{
+						out += line[i++];
+					}
+					else if (c == quote)
+					{
+						quote = '\0';
+					}
+
+					continue;
+				}
+
+				if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
+				{
+					out.append(line.substr(i));
+					break;
+				}
+
+				if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
+				{
+					const auto close = line.find("*/", i + kCommentDelimLen);
+					const std::size_t end =
+						close == std::string_view::npos ? line.size() : close + kCommentDelimLen;
+					out.append(line.substr(i, end - i));
+					i = end;
+					continue;
+				}
+
+				if (c == '"' || c == '\'')
+				{
+					quote = c;
+					out += c;
+					++i;
+					continue;
+				}
+
+				if (IsIdentStart(c))
+				{
+					const std::size_t start = i++;
+					while (i < line.size() && IsIdentContinue(line[i]))
+					{
+						++i;
+					}
+
+					// Heterogeneous lookup: no std::string temporary per identifier.
+					const std::string* replacement = macros.Find(line.substr(start, i - start));
+					if (replacement == nullptr || replacement->empty())
+					{
+						out.append(line.substr(start, i - start));
+					}
+					else
+					{
+						out += ExpandObjectMacros(*replacement, macros, depth + 1);
+					}
+
+					continue;
+				}
+
+				out += c;
+				++i;
+			}
+
+			return out;
+		}
+
+		bool EndsWithBackslash(std::string_view body)
+		{
+			return !body.empty() && body.back() == '\\';
+		}
+
+		// Advances `in_comment` over one source line: whether the next line starts
+		// inside a block comment. Strings, char literals and `//` comments are
+		// skipped so that `/*` inside them does not open a comment.
+		void AdvanceCommentState(
+			std::string_view line,
+			bool& in_comment,
+			std::string& rawTerminator)
+		{
+			for (std::size_t i = 0; i < line.size(); ++i)
+			{
+				if (!rawTerminator.empty())
+				{
+					const auto close = line.find(rawTerminator, i);
+					if (close == std::string_view::npos)
+					{
+						return;
+					}
+
+					i = close + rawTerminator.size() - 1;
+					rawTerminator.clear();
+					continue;
+				}
+
+				if (in_comment)
+				{
+					if (line[i] == '*' && i + 1 < line.size() && line[i + 1] == '/')
+					{
+						in_comment = false;
+						++i;
+					}
+
+					continue;
+				}
+
+				const char c = line[i];
+				if (c == 'R' && i + 1 < line.size() && line[i + 1] == '"')
+				{
+					constexpr std::size_t kMaxRawDelimiterLength = 16;
+					const auto open                              = line.find('(', i + 2);
+					if (open != std::string_view::npos && open - i - 2 <= kMaxRawDelimiterLength)
+					{
+						const auto delimiter = line.substr(i + 2, open - i - 2);
+						if (delimiter.find_first_of(" \t\r\n\\)") == std::string_view::npos)
+						{
+							rawTerminator = ")" + std::string(delimiter) + "\"";
+							i             = open;
+						}
+					}
+				}
+				else if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
+				{
+					in_comment = true;
+					++i;
+				}
+				else if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
+				{
+					return;
+				}
+				else if (c == '"' || c == '\'')
+				{
+					for (++i; i < line.size() && line[i] != c; ++i)
+					{
+						if (line[i] == '\\')
+						{
+							++i;
+						}
+					}
+				}
+			}
+		}
+
+	} // namespace
+
+	PreprocessorResult Preprocessor::Process(
+		std::string_view source,
+		bool build_active_source) const
+	{
+		return Process(source, build_active_source, {});
+	}
+
+	PreprocessorResult Preprocessor::Process(
+		std::string_view source,
+		bool build_active_source,
+		std::stop_token stop) const
+	{
+		PreprocessorResult result;
+		if (stop.stop_requested())
+		{
+			return result;
+		}
+
+		// Local overlay: file #defines stay small; predefined macros are read
+		// through the scope pointer without copying the whole map per file.
+		MacroMap local;
+		local.reserve(kInitialMacroCapacity);
+		ErasedSet erased;
+		const MacroScope scope
+		{
+			&local, &erased, m_predefined
+		};
+		if (build_active_source)
+		{
+			result.active_source.reserve(source.size() / kReserveDivisor);
+		}
+
+		std::vector<ConditionalFrame> stack;
+		bool active           = true;
+		bool in_block_comment = false;
+		std::string rawTerminator;
+		std::size_t offset = 0;
+
+		while (offset < source.size())
+		{
+			if (stop.stop_requested())
+			{
+				return result;
+			}
+
+			const std::size_t line_start = offset;
+			std::size_t end              = source.find('\n', offset);
+			if (end == std::string_view::npos)
+			{
+				end = source.size();
+			}
+			else
+			{
+				++end;
+			}
+
+			std::string_view line = source.substr(line_start, end - line_start);
+			std::string_view body = line;
+			if (!body.empty() && body.back() == '\n')
+			{
+				body.remove_suffix(1);
+			}
+
+			if (!body.empty() && body.back() == '\r')
+			{
+				body.remove_suffix(1);
+			}
+
+			auto trimmed = Trim(body);
+
+			// A directive continues over lines ending in a backslash: the whole
+			// span is one directive, and its logical text joins the pieces.
+			std::string joined;
+			if (!in_block_comment && rawTerminator.empty() && !trimmed.empty() && trimmed.front() == '#' &&
+				EndsWithBackslash(body))
+			{
+				joined.assign(body.substr(0, body.size() - 1));
+				while (end < source.size() && !stop.stop_requested())
+				{
+					const std::size_t next_end = source.find('\n', end);
+					const std::size_t stop =
+						next_end == std::string_view::npos ? source.size() : next_end + 1;
+					std::string_view piece = source.substr(end, stop - end);
+					end                    = stop;
+					if (!piece.empty() && piece.back() == '\n')
+					{
+						piece.remove_suffix(1);
+					}
+
+					if (!piece.empty() && piece.back() == '\r')
+					{
+						piece.remove_suffix(1);
+					}
+
+					const bool more = EndsWithBackslash(piece);
+					joined += ' ';
+					joined.append(piece.substr(0, more ? piece.size() - 1 : piece.size()));
+					if (!more)
+					{
+						break;
+					}
+				}
+
+				line    = source.substr(line_start, end - line_start);
+				trimmed = Trim(joined);
+			}
+
+			const bool line_in_comment = in_block_comment ||!rawTerminator.empty();
+			AdvanceCommentState(line, in_block_comment, rawTerminator);
+			if (!line_in_comment && !trimmed.empty() && trimmed.front() == '#')
+			{
+				trimmed.remove_prefix(1);
+				trimmed                   = Trim(trimmed);
+				const auto directive_name = ReadWord(trimmed);
+				const auto kind           = KindOf(directive_name);
+				result.directives.push_back({kind, line_start, line.size(), active});
+				const auto evaluate =[&]
+				{
+					IfExpression expression(trimmed, scope, stop);
+					const auto condition = expression.Evaluate();
+					if (expression.TooComplex())
+					{
+						result.diagnostics.push_back(
+							{line_start, "maximum preprocessor expression nesting exceeded"});
+					}
+
+					return condition;
+				};
+
+				if (kind == DirectiveKind::If || kind == DirectiveKind::Ifdef ||
+					kind == DirectiveKind::Ifndef)
+				{
+					bool condition = false;
+					if (kind == DirectiveKind::If)
+					{
+						condition = evaluate();
+					}
+					else
+					{
+						const std::string_view name(ReadWord(trimmed));
+						condition = scope.Contains(name);
+						if (kind == DirectiveKind::Ifndef)
+						{
+							condition = !condition;
+						}
+					}
+
+					stack.push_back({active, active&& condition, active&& condition, false});
+					active = stack.back().active;
+				}
+				else if (kind == DirectiveKind::Elif)
+				{
+					if (stack.empty())
+					{
+						result.diagnostics.push_back({line_start, "#elif without matching #if"});
+					}
+					else
+					{
+						auto& frame = stack.back();
+						if (frame.saw_else)
+						{
+							result.diagnostics.push_back({line_start, "#elif after #else"});
+						}
+
+						const bool condition =
+							frame.parent_active && !frame.branch_taken && evaluate();
+						frame.active = condition;
+						frame.branch_taken |= condition;
+						active = frame.active;
+					}
+				}
+				else if (kind == DirectiveKind::Else)
+				{
+					if (stack.empty())
+					{
+						result.diagnostics.push_back({line_start, "#else without matching #if"});
+					}
+					else
+					{
+						auto& frame = stack.back();
+						if (frame.saw_else)
+						{
+							result.diagnostics.push_back({line_start, "duplicate #else"});
+						}
+
+						frame.saw_else     = true;
+						frame.active       = frame.parent_active && !frame.branch_taken;
+						frame.branch_taken = true;
+						active             = frame.active;
+					}
+				}
+				else if (kind == DirectiveKind::Endif)
+				{
+					if (stack.empty())
+					{
+						result.diagnostics.push_back({line_start, "#endif without matching #if"});
+					}
+					else
+					{
+						active = stack.back().parent_active;
+						stack.pop_back();
+					}
+				}
+				else if (active && kind == DirectiveKind::Define)
+				{
+					trimmed              = Trim(trimmed);
+					std::size_t name_len = 0;
+					while (name_len < trimmed.size() && IsIdentContinue(trimmed[name_len]))
+					{
+						++name_len;
+					}
+
+					if (name_len == 0)
+					{
+						result.diagnostics.push_back(
+							{line_start, "#define requires a macro name"});
+					}
+					else
+					{
+						result.macro_events.push_back({true, line_start, std::string(trimmed)});
+						std::string name(trimmed.substr(0, name_len));
+						// Function-like macro: retain as an opaque definition; do not expand it.
+						if (name_len < trimmed.size() && trimmed[name_len] == '(')
+						{
+							local.erase(name);
+							erased.insert(std::move(name));
+						}
+						else
+						{
+							erased.erase(name);
+							local[std::move(name)] = std::string(Trim(trimmed.substr(name_len)));
+							// A re-#define revives the name even if previously #undef'd.
+						}
+					}
+				}
+				else if (active && kind == DirectiveKind::Undef)
+				{
+					std::string name(ReadWord(trimmed));
+					result.macro_events.push_back({false, line_start, name});
+					local.erase(name);
+					erased.insert(std::move(name));
+				}
+			}
+			else if (active)
+			{
+				result.active_ranges.push_back({line_start, line.size()});
+				if (build_active_source)
+				{
+					result.active_source += ExpandObjectMacros(line, scope);
+				}
+			}
+
+			offset = end;
+		}
+
+		if (!stack.empty())
+		{
+			result.diagnostics.push_back({source.size(), "unterminated conditional directive"});
+		}
+
+		result.local_macros.reserve(local.size());
+		for (auto& [name, value] : local)
+		{
+			result.local_macros.emplace(name, std::move(value));
+		}
+
+		return result;
+	}
 
 } // namespace heimdall

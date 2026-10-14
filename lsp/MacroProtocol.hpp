@@ -1,12 +1,12 @@
 #pragma once
 
-#include <Heimdall/MacroEnvironment.hpp>
-#include <Heimdall/MacroTable.hpp>
-
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
+
+#include <Heimdall/MacroEnvironment.hpp>
+#include <Heimdall/MacroTable.hpp>
 
 namespace heimdall::lsp
 {
@@ -23,7 +23,9 @@ namespace heimdall::lsp
 
 	/// The macro named at `offset`, as live there. On a directive line (`#define X`, `#ifdef X`)
 	/// the state after the directive is used, so the defining name resolves to itself.
-	[[nodiscard]] const MacroDef* MacroAt(const MacroEnvironment& env, std::string_view text,
+	[[nodiscard]] const MacroDef* MacroAt(
+		const MacroEnvironment& env,
+		std::string_view text,
 		WordRange word);
 
 	/// `#define NAME(a, b) body`, with a long body cut short.
@@ -50,14 +52,18 @@ namespace heimdall::lsp
 	/// when that is not safe to write back: an incomplete or unterminated call, a diagnostic,
 	/// a limit hit, a multi-line result, or a use on a directive line.
 	[[nodiscard]] std::optional<MacroExpansionEdit> MacroExpansionForEdit(
-		const MacroEnvironment& env, std::string_view text, WordRange word, const MacroDef& macro);
+		const MacroEnvironment& env,
+		std::string_view text,
+		WordRange word,
+		const MacroDef& macro);
 
 	/// Markdown for a hover: signature, expansion and where the macro comes from.
 	[[nodiscard]] std::string MacroHoverMarkdown(const MacroDef& macro, std::string_view expansion);
 
 	/// The macro's name inside its `#define` line of `fileText`; `directiveOffset` is the start
 	/// of that line.
-	[[nodiscard]] std::optional<WordRange> DefinitionNameRange(std::string_view fileText,
+	[[nodiscard]] std::optional<WordRange> DefinitionNameRange(
+		std::string_view fileText,
 		std::size_t directiveOffset,
 		std::string_view name);
 

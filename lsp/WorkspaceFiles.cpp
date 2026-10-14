@@ -72,96 +72,110 @@ namespace heimdall::lsp
 	namespace
 	{
 
-		WorkspaceDiscovery DiscoverSourcesDetailed(const std::filesystem::path& root,
-			std::stop_token stop, std::size_t maxFiles, bool skipDependencies)
+		WorkspaceDiscovery DiscoverSourcesDetailed(
+			const std::filesystem::path& root,
+			std::stop_token stop,
+			std::size_t maxFiles,
+			bool skipDependencies)
 		{
-		WorkspaceDiscovery result;
-		auto& files = result.files;
-		if (stop.stop_requested())
-		{
-			result.cancelled = true;
-			return result;
-		}
-
-		std::error_code error;
-		if (root.empty() ||!std::filesystem::is_directory(root, error))
-		{
-			result.error = error;
-			return result;
-		}
-
-		for (std::filesystem::recursive_directory_iterator
-			it(root, std::filesystem::directory_options::none, error),
-			end;
-			!error && it != end; it.increment(error))
-		{
+			WorkspaceDiscovery result;
+			auto& files = result.files;
 			if (stop.stop_requested())
 			{
 				result.cancelled = true;
-				break;
+				return result;
 			}
 
-			const auto name       = it->path().filename().string();
-			const auto parentName = it->path().parent_path().filename().string();
-			const bool buildParent = parentName.starts_with("build") ||
-				parentName.starts_with("cmake-build") || parentName == "out";
-			if (it->is_directory(error))
+			std::error_code error;
+			if (root.empty() ||!std::filesystem::is_directory(root, error))
 			{
-				const bool buildDirectory = name.starts_with("build") ||
-					name.starts_with("cmake-build") || name == "out";
-				const bool dependencyDirectory = name == "_deps";
-				if (skipDependencies && IsDependencyDirectory(name))
-				{
-					it.disable_recursion_pending();
-				}
-				else if ((buildParent && !dependencyDirectory) ||
-					(parentName == "_deps" && !name.ends_with("-src")) ||
-					(IsSkippedDirectory(name) && !buildDirectory && !dependencyDirectory))
-				{
-					it.disable_recursion_pending();
-				}
+				result.error = error;
+				return result;
 			}
-			else if (!buildParent && parentName != "_deps" && IsWorkspaceSource(it->path()) &&
-				!(skipDependencies && IsDependencySource(root, it->path())))
+
+			for (std::filesystem::recursive_directory_iterator
+				it(
+				root,
+				std::filesystem::directory_options::none,
+				error),
+				end;
+				!error && it != end; it.increment(error))
 			{
-				if (files.size() == maxFiles)
+				if (stop.stop_requested())
 				{
-					result.truncated = true;
+					result.cancelled = true;
 					break;
 				}
 
-				files.push_back(it->path());
-			}
-		}
+				const auto name       = it->path().filename().string();
+				const auto parentName = it->path().parent_path().filename().string();
+				const bool buildParent = parentName.starts_with("build") ||
+					parentName.starts_with("cmake-build") || parentName == "out";
+				if (it->is_directory(error))
+				{
+					const bool buildDirectory = name.starts_with("build") ||
+						name.starts_with("cmake-build") || name == "out";
+					const bool dependencyDirectory = name == "_deps";
+					if (skipDependencies && IsDependencyDirectory(name))
+					{
+						it.disable_recursion_pending();
+					}
+					else if ((buildParent && !dependencyDirectory) ||
+						(parentName == "_deps" && !name.ends_with("-src")) ||
+						(IsSkippedDirectory(name) && !buildDirectory && !dependencyDirectory))
+					{
+						it.disable_recursion_pending();
+					}
+				}
+				else if (!buildParent && parentName != "_deps" && IsWorkspaceSource(it->path()) &&
+					!(skipDependencies && IsDependencySource(root, it->path())))
+				{
+					if (files.size() == maxFiles)
+					{
+						result.truncated = true;
+						break;
+					}
 
-		std::ranges::sort(files);
-		result.error    = error;
-		result.complete = !error && !result.cancelled && !result.truncated;
-		return result;
-	}
+					files.push_back(it->path());
+				}
+			}
+
+			std::ranges::sort(files);
+			result.error    = error;
+			result.complete = !error && !result.cancelled && !result.truncated;
+			return result;
+		}
 
 	} // namespace
 
 	WorkspaceDiscovery DiscoverWorkspaceSourcesDetailed(
-		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+		const std::filesystem::path& root,
+		std::stop_token stop,
+		std::size_t maxFiles)
 	{
 		return DiscoverSourcesDetailed(root, stop, maxFiles, false);
 	}
 
 	WorkspaceDiscovery DiscoverProjectSourcesDetailed(
-		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+		const std::filesystem::path& root,
+		std::stop_token stop,
+		std::size_t maxFiles)
 	{
 		return DiscoverSourcesDetailed(root, stop, maxFiles, true);
 	}
 
 	std::vector<std::filesystem::path> DiscoverWorkspaceSources(
-		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+		const std::filesystem::path& root,
+		std::stop_token stop,
+		std::size_t maxFiles)
 	{
 		return DiscoverWorkspaceSourcesDetailed(root, stop, maxFiles).files;
 	}
 
 	std::vector<std::filesystem::path> DiscoverProjectSources(
-		const std::filesystem::path& root, std::stop_token stop, std::size_t maxFiles)
+		const std::filesystem::path& root,
+		std::stop_token stop,
+		std::size_t maxFiles)
 	{
 		return DiscoverProjectSourcesDetailed(root, stop, maxFiles).files;
 	}

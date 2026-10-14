@@ -1,18 +1,18 @@
 #pragma once
 
-#include <Heimdall/CompileDatabase.hpp>
-#include <Heimdall/Completion.hpp>
-#include <Heimdall/FlowModel.hpp>
-#include <Heimdall/IncludeAnalyzer.hpp>
-#include <Heimdall/RuleEngine.hpp>
-#include <Heimdall/SemanticModel.hpp>
-#include <Heimdall/TypeModel.hpp>
-
 #include <filesystem>
 #include <vector>
 
+#include <Heimdall/Completion.hpp>
+#include <Heimdall/RuleEngine.hpp>
+#include <Heimdall/SemanticModel.hpp>
+
 namespace heimdall
 {
+	class FlowModel;
+	struct IncludeProfile;
+	struct CompileCommand;
+	class TypeModel;
 
 	// What the project-level rules (F3) know beyond the one bound file: where it
 	// lives and, when a compile command was available, the headers it includes.
@@ -32,14 +32,22 @@ namespace heimdall
 	{
 	public:
 		/** Reports argument-count mismatches for locally resolved non-template functions. */
-		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArguments(const SemanticModel& model);
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArguments(
+			const SemanticModel& model);
+
+		/// Checks argument counts against local and visible header overloads.
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeProjectCallArguments(
+			const SemanticModel& model,
+			const ProjectContext& context);
 
 		/** Reports proven argument-type mismatches, accepting known implicit conversions. */
-		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(const TypeModel& types);
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(
+			const TypeModel& types);
 
 		/// Checks indexed function-object calls whose non-const reference cannot bind a wrapper.
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeIndexedCallArgumentTypes(
-			const TypeModel& types, const ScopeIndex& external);
+			const TypeModel& types,
+			const ScopeIndex& external);
 
 		/** Reports '.' member access on a receiver the typer knows is a pointer. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeDotOnPointer(const TypeModel& types);
@@ -156,7 +164,8 @@ namespace heimdall
 		// closure, or a standard-library name with a well-known header). The
 		// quick fix adds the include. Needs context.profile; silent without it,
 		// when some include was not found, or when the name is ambiguous.
-		static std::vector<Diagnostic> AnalyzeIncludeWhatYouUse(const SemanticModel& model,
+		static std::vector<Diagnostic> AnalyzeIncludeWhatYouUse(
+			const SemanticModel& model,
 			const ProjectContext& context);
 
 		// cpp/modernize-final: a polymorphic class that nothing derives from, and
@@ -167,7 +176,8 @@ namespace heimdall
 		// defined there decides whether the class is polymorphic. Header classes
 		// outside an anonymous namespace are never reported: any other file may
 		// derive from them. The fix (quick fix only) adds `final`.
-		static std::vector<Diagnostic> AnalyzeFinal(const SemanticModel& model,
+		static std::vector<Diagnostic> AnalyzeFinal(
+			const SemanticModel& model,
 			const ProjectContext& context);
 
 		// api/virtual-destructor: a struct/class that declares virtual functions
@@ -268,7 +278,8 @@ namespace heimdall
 		// to a function, out-of-class definitions, `= default`/`= delete`, overrides,
 		// friends, forward declarations, `main` and explicit specializations are left
 		// alone: their documentation lives elsewhere. No fix: the text is the author's.
-		static std::vector<Diagnostic> AnalyzeRequireDocComment(const SemanticModel& model,
+		static std::vector<Diagnostic> AnalyzeRequireDocComment(
+			const SemanticModel& model,
 			DocScope scope = DocScope::Public);
 
 		// doc/doxygen-style (opt-in): a function, class or enum inside `scope` whose
@@ -284,14 +295,16 @@ namespace heimdall
 		//  - the Qt styles `//!` and `/*! */` (Javadoc `///` and `/** */` is the
 		//    convention), or `@` and `\` command spellings mixed in one comment.
 		// Comments with `@copydoc`, `@inheritdoc` or `@overload` are skipped. No fix.
-		static std::vector<Diagnostic> AnalyzeDoxygenStyle(const SemanticModel& model,
+		static std::vector<Diagnostic> AnalyzeDoxygenStyle(
+			const SemanticModel& model,
 			DocScope scope = DocScope::Public);
 
 		// The two rules above, for those the engine has enabled, with the engine's
 		// DocScope. They are not part of Analyze: every undocumented declaration would
 		// trip them, so the CLI and the language server add them only when a config
 		// file or --rule asks for them.
-		static std::vector<Diagnostic> AnalyzeDocumentation(const SemanticModel& model,
+		static std::vector<Diagnostic> AnalyzeDocumentation(
+			const SemanticModel& model,
 			const RuleEngine& engine);
 
 		// Every rule above except the project-level ones, sorted by offset. The
@@ -301,7 +314,9 @@ namespace heimdall
 		static std::vector<Diagnostic> Analyze(const SemanticModel& model, const TypeModel& types);
 
 		// The same plus the project-level rules, which need the file's context.
-		static std::vector<Diagnostic> Analyze(const SemanticModel& model, const TypeModel& types,
+		static std::vector<Diagnostic> Analyze(
+			const SemanticModel& model,
+			const TypeModel& types,
 			const ProjectContext& context);
 	};
 

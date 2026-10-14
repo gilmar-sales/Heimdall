@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Document.hpp"
-
-#include <Heimdall/SyntaxHighlight.hpp>
-
 #include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+
+#include <Heimdall/SyntaxHighlight.hpp>
+
+#include "Document.hpp"
 
 namespace heimdall::lsp
 {

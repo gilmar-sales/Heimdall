@@ -1,10 +1,10 @@
-#include <Heimdall/IndexSnapshot.hpp>
-
 #include <algorithm>
 #include <functional>
 #include <set>
 #include <string>
 #include <unordered_map>
+
+#include <Heimdall/IndexSnapshot.hpp>
 
 namespace heimdall::index
 {
@@ -111,7 +111,7 @@ namespace heimdall::index
 				const auto symbol         = mQualSymbol[at];
 				if (!visible[candidateShard] ||
 					(mShards[candidateShard]->Symbols().kind[symbol] == heimdall::SymbolKind::Macro) !=
-						macroUse ||
+					macroUse ||
 					mShards[candidateShard]->Qualified(symbol) != qualified ||
 					(mShards[candidateShard]->Symbols().flags[symbol] &
 					(SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
@@ -123,7 +123,7 @@ namespace heimdall::index
 				if (std::ranges::none_of(found,[&](const Candidate& c)
 					{
 						return c.hash == hash && mShards[c.symbol.shard]->Identity(c.symbol.symbol) ==
-							mShards[candidateShard]->Identity(symbol);
+						mShards[candidateShard]->Identity(symbol);
 				}))
 				{
 					found.push_back({hash, {candidateShard, symbol}});
@@ -145,11 +145,13 @@ namespace heimdall::index
 				(symbols.paramMax[symbol] == kNoArity || args <= symbols.paramMax[symbol]);
 		};
 
-		std::function<bool(SymbolRef, std::string_view, std::vector<Candidate>&, std::set<SymbolHash>&)> collectMembers;
-		const auto lookup =[&](std::uint32_t sourceShard, std::uint32_t scope, std::uint32_t offset, std::string_view written,
+		std::function<bool(SymbolRef, std::string_view, std::vector<Candidate>&,
+			std::set<SymbolHash>&) > collectMembers;
+		const auto lookup =[&](std::uint32_t sourceShard, std::uint32_t scope, std::uint32_t offset,
+			std::string_view written,
 			std::vector<Candidate>& found, bool inherited = true)
 		{
-			const auto& source = *mShards[sourceShard];
+			const auto& source  = *mShards[sourceShard];
 			const bool absolute = written.starts_with("::");
 			if (absolute)
 			{
@@ -173,10 +175,12 @@ namespace heimdall::index
 							{
 								return false;
 							}
+
 							break;
 						}
 					}
 				}
+
 				if (const auto used = usingsAt.find(std::string(here)); used != usingsAt.end())
 				{
 					for (const auto& use : used->second)
@@ -205,10 +209,11 @@ namespace heimdall::index
 
 				scope = source.Scopes().parent[scope];
 			}
+
 			return true;
 		};
 
-		collectMembers = [&](SymbolRef owner, std::string_view name, std::vector<Candidate>& found,
+		collectMembers =[&](SymbolRef owner, std::string_view name, std::vector<Candidate>& found,
 			std::set<SymbolHash>& active)
 		{
 			const auto hash = HashOf(owner);
@@ -216,6 +221,7 @@ namespace heimdall::index
 			{
 				return false;
 			}
+
 			const auto& declaring = *mShards[owner.shard];
 			std::vector<Candidate> own;
 			find(Join(declaring.Qualified(owner.symbol), name), own);
@@ -240,7 +246,7 @@ namespace heimdall::index
 						if (!targets.empty())
 						{
 							base = targets.front();
-							}
+						}
 					}
 					else
 					{
@@ -248,8 +254,8 @@ namespace heimdall::index
 						if (occurrence != kInvalid)
 						{
 							const auto& uses = baseFile.Occurrences();
-							const auto qualifier = uses.qualifier[occurrence] == kInvalid ? std::string_view {} :
-								baseFile.Strings().Text(uses.qualifier[occurrence]);
+							const auto qualifier = uses.qualifier[occurrence] == kInvalid ? std::string_view {}:
+							baseFile.Strings().Text(uses.qualifier[occurrence]);
 							const auto spelling = baseFile.Strings().Text(uses.name[occurrence]);
 							std::vector<Candidate> targets;
 							lookup(declaration.shard, uses.scope[occurrence], uses.offset[occurrence],
@@ -260,6 +266,7 @@ namespace heimdall::index
 							}
 						}
 					}
+
 					if (!base.Valid())
 					{
 						complete = false;
@@ -270,6 +277,7 @@ namespace heimdall::index
 					}
 				}
 			}
+
 			active.erase(hash);
 			return complete;
 		};
@@ -292,18 +300,19 @@ namespace heimdall::index
 						classScope |= mShards[owner.shard]->Symbols().kind[owner.symbol] == heimdall::SymbolKind::Class;
 					}
 				}
+
 				const auto kind = file.Symbols().kind[occ.symbol[i]];
 				if (occ.role[i] == Role::Reference && (kind == heimdall::SymbolKind::Function ||
 					(classScope && kind == heimdall::SymbolKind::Variable)))
 				{
 					std::vector<Candidate> candidates;
-					const auto qualifier = occ.qualifier[i] == kInvalid ? std::string_view {} : file.Strings().Text(occ.qualifier[i]);
-					const auto name = file.Strings().Text(occ.name[i]);
+					const auto qualifier = occ.qualifier[i] == kInvalid ? std::string_view {}: file.Strings().Text(occ.qualifier[i]);
+					const auto name      = file.Strings().Text(occ.name[i]);
 					const bool complete = lookup(shard, occ.scope[i], occ.offset[i],
 						qualifier == "::" ? "::" + std::string(name) : Join(qualifier, name), candidates);
 					found = std::move(candidates);
 					state = complete && found.size() == 1 ? Resolution::Resolved :
-						complete && !found.empty() ? Resolution::Ambiguous : Resolution::Unresolved;
+					complete && !found.empty() ? Resolution::Ambiguous : Resolution::Unresolved;
 				}
 			}
 			else if (state == Resolution::Unresolved)
@@ -342,7 +351,7 @@ namespace heimdall::index
 								std::ranges::none_of(found,[&](const Candidate& c)
 								{
 									return c.hash == hash && mShards[c.symbol.shard]->Identity(c.symbol.symbol) ==
-										mShards[s]->Identity(symbol);
+									mShards[s]->Identity(symbol);
 							}))
 							{
 								found.push_back({hash, {s, symbol}});
@@ -371,7 +380,10 @@ namespace heimdall::index
 
 			if (occ.role[i] == Role::Reference && state != Resolution::Dependent)
 			{
-				std::erase_if(found, [&](const Candidate& candidate) { return !fits(candidate, occ.argCount[i]); });
+				std::erase_if(found,[&](const Candidate& candidate)
+					{
+						return !fits(candidate, occ.argCount[i]);
+				});
 				if (found.empty())
 				{
 					state = Resolution::Unresolved;
@@ -385,27 +397,38 @@ namespace heimdall::index
 			if (state == Resolution::Ambiguous && file.ArgumentTypes(i).size() == occ.argCount[i])
 			{
 				const auto arguments = file.ArgumentTypes(i);
-				bool known = std::ranges::none_of(arguments, [](std::uint8_t type) { return type == kUnknownBuiltin; });
-				const auto exact = [&](const Candidate& candidate)
+				bool known = std::ranges::none_of(arguments,[](std::uint8_t type)
+					{
+						return type == kUnknownBuiltin;
+				});
+				const auto exact =[&](const Candidate& candidate)
 				{
 					const auto parameters = mShards[candidate.symbol.shard]->ParameterTypes(candidate.symbol.symbol);
-					return parameters.size() >= arguments.size() && std::ranges::equal(arguments, parameters.first(arguments.size()));
+					return parameters.size() >= arguments.size() && std::ranges::equal(arguments,
+						parameters.first(arguments.size()));
 				};
 				for (const auto& candidate : found)
 				{
-					const auto& source = *mShards[candidate.symbol.shard];
+					const auto& source    = *mShards[candidate.symbol.shard];
 					const auto parameters = source.ParameterTypes(candidate.symbol.symbol);
 					known &= source.Symbols().kind[candidate.symbol.symbol] == heimdall::SymbolKind::Function &&
 						(source.Symbols().flags[candidate.symbol.symbol] & heimdall::SymbolFlag::Template) == 0 &&
 						source.Symbols().paramMax[candidate.symbol.symbol] != kNoArity && parameters.size() >= arguments.size();
 					if (parameters.size() >= arguments.size())
 					{
-						known &= std::ranges::none_of(parameters.first(arguments.size()), [](std::uint8_t type) { return type == kUnknownBuiltin; });
+						known &= std::ranges::none_of(parameters.first(arguments.size()),[](std::uint8_t type)
+							{
+								return type == kUnknownBuiltin;
+						});
 					}
 				}
+
 				if (known && std::ranges::count_if(found, exact) == 1)
 				{
-					std::erase_if(found, [&](const Candidate& candidate) { return !exact(candidate); });
+					std::erase_if(found,[&](const Candidate& candidate)
+						{
+							return !exact(candidate);
+					});
 					state = Resolution::Resolved;
 				}
 			}

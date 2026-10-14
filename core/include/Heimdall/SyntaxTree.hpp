@@ -1,14 +1,14 @@
 #pragma once
 
-#include <Heimdall/CppStandard.hpp>
-#include <Heimdall/Lexer.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/CppStandard.hpp>
+#include <Heimdall/Lexer.hpp>
 
 namespace heimdall
 {
@@ -46,10 +46,13 @@ namespace heimdall
 		static constexpr std::size_t RootNode                = 0;
 		static constexpr std::size_t kDefaultMaxNestingDepth = 512;
 
-		static SyntaxTree Parse(std::string_view source,
+		static SyntaxTree Parse(
+			std::string_view source,
 			std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
 
-		static SyntaxTree Parse(std::string_view source, CppStandard standard,
+		static SyntaxTree Parse(
+			std::string_view source,
+			CppStandard standard,
 			std::size_t max_nesting_depth = kDefaultMaxNestingDepth);
 
 		std::string_view Source() const noexcept

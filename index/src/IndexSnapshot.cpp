@@ -91,7 +91,8 @@ namespace heimdall::index
 	} // namespace
 
 	std::shared_ptr<const IndexSnapshot> IndexSnapshot::Build(
-		std::vector<std::shared_ptr<const FileShard>> shards, std::uint64_t revision)
+		std::vector<std::shared_ptr<const FileShard>> shards,
+		std::uint64_t revision)
 	{
 		auto snapshot       = std::shared_ptr<IndexSnapshot>(new IndexSnapshot());
 		snapshot->mShards   = std::move(shards);
@@ -186,12 +187,13 @@ namespace heimdall::index
 					{
 						edges.emplace_back(target, shard);
 					}
+
 					continue;
 				}
 
 				const auto spelling = file.Includes()[include];
-				const auto text  = file.Strings().Text(spelling);
-				const auto found = byFileName.find(FileName(text));
+				const auto text     = file.Strings().Text(spelling);
+				const auto found    = byFileName.find(FileName(text));
 				if (found == byFileName.end())
 				{
 					continue;
@@ -344,7 +346,8 @@ namespace heimdall::index
 	}
 
 	std::vector<SymbolRef> IndexSnapshot::Candidates(
-		std::uint32_t shard, std::uint32_t offset) const
+		std::uint32_t shard,
+		std::uint32_t offset) const
 	{
 		std::vector<SymbolRef> result;
 		if (shard >= mShards.size())
@@ -423,6 +426,7 @@ namespace heimdall::index
 				{
 					continue;
 				}
+
 				result.push_back({ref.shard, occ.offset[index], occ.length[index], occ.role[index],
 						Resolution::Resolved});
 			}

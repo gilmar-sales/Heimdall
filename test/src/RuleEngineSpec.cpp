@@ -21,6 +21,29 @@ TEST(RuleEngineSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
         "#define TEXT NULL\nvoid f() { auto p = nullptr; } // NULL\nconst char* s = \"NULL\";\n");
 }
 
+TEST(RuleEngineSpec, IgnoresIncludesInsideSeparateRawStringsButReportsRealDuplicates)
+{
+    constexpr std::string_view source =
+        "const char* first = R\"cpp(\n#include <example.hpp>\n)cpp\";\n"
+        "const char* second = R\"other(\n#include <example.hpp>\n)other\";\n"
+        "#include <example.hpp>\n#include <example.hpp>\n";
+
+    const auto diagnostics = heimdall::RuleEngine().Analyze(source);
+
+    const auto count = std::count_if(diagnostics.begin(), diagnostics.end(),[](const auto& diagnostic)
+        {
+            return diagnostic.code == "cpp/no-duplicate-include";
+    });
+    EXPECT_EQ(count, 1);
+    for (const auto& diagnostic : diagnostics)
+    {
+        if (diagnostic.code == "cpp/no-duplicate-include")
+        {
+            EXPECT_EQ(diagnostic.line, 8u);
+        }
+    }
+}
+
 TEST(RuleEngineSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
 {
     constexpr std::string_view source = "first  \r\nsecond\t\nclean\n";
@@ -557,7 +580,7 @@ TEST(RuleEngineSpec, SortIncludesKeepsSortedBlocks)
         .empty());
 }
 
-TEST(RuleEngineSpec, SortIncludesReordersBlocksIndependently)
+TEST(RuleEngineSpec, SortIncludesOrdersSectionsAcrossBlankLines)
 {
     constexpr std::string_view source =
         "#include <vector>\n"
@@ -568,15 +591,160 @@ TEST(RuleEngineSpec, SortIncludesReordersBlocksIndependently)
     heimdall::RuleOptions options;
     options.sort_includes = true;
     const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
-    ASSERT_EQ(diagnostics.size(), 2);
+    ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].line, 1);
-    EXPECT_EQ(diagnostics[1].line, 4);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
               "#include <map>\n"
         "#include <vector>\n"
         "\n"
         "#include \"a.h\"\n"
         "#include \"z.h\"\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesPinsHomonymousHeaderFirst)
+{
+    constexpr std::string_view source =
+        "#include <fstream>\n"
+        "#include <iostream>\n"
+        "\n"
+        "#include \"Reporting.hpp\"\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    options.main_file_name = "Reporting.cpp";
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "#include \"Reporting.hpp\"\n"
+        "\n"
+        "#include <fstream>\n"
+        "#include <iostream>\n");
+
+    // Without the file name the section already follows the plain order.
+    heimdall::RuleOptions plain;
+    plain.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(plain).Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, SortIncludesDoesNotPinForHeaderSources)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#include \"Widget.hpp\"\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    options.main_file_name = "Widget.hpp";
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
+}
+
+TEST(RuleEngineSpec, SortIncludesCanonicalizesOrderedBandsWithoutDiagnostics)
+{
+    constexpr std::string_view source =
+        "#include <cstddef>\n"
+        "#include <filesystem>\n"
+        "\n"
+        "#include <string>\n"
+        "#include <vector>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(source).empty());
+    EXPECT_EQ(heimdall::RuleEngine::SortIncludes(source, options),
+              "#include <cstddef>\n"
+        "#include <filesystem>\n"
+        "#include <string>\n"
+        "#include <vector>\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesRegroupsBandsWithBlankSeparators)
+{
+    constexpr std::string_view source =
+        "#include \"CliOptions.hpp\"\n"
+        "\n"
+        "#include <Heimdall/CompileDatabase.hpp>\n"
+        "#include <Heimdall/ParseTree.hpp>\n"
+        "#include <Heimdall/RuleEngine.hpp>\n"
+        "#include <Heimdall/SemanticAnalyzer.hpp>\n"
+        "\n"
+        "#include <cstddef>\n"
+        "#include <cstdint>\n"
+        "#include <filesystem>\n"
+        "#include <string>\n"
+        "#include <string_view>\n"
+        "#include <vector>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "#include <cstddef>\n"
+        "#include <cstdint>\n"
+        "#include <filesystem>\n"
+        "#include <string>\n"
+        "#include <string_view>\n"
+        "#include <vector>\n"
+        "\n"
+        "#include <Heimdall/CompileDatabase.hpp>\n"
+        "#include <Heimdall/ParseTree.hpp>\n"
+        "#include <Heimdall/RuleEngine.hpp>\n"
+        "#include <Heimdall/SemanticAnalyzer.hpp>\n"
+        "\n"
+        "#include \"CliOptions.hpp\"\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesGroupsBareAnglesBeforeQualifiedPaths)
+{
+    constexpr std::string_view source =
+        "#include \"CliOptions.hpp\"\n"
+        "#include \"FileDiscovery.hpp\"\n"
+        "#include \"Init.hpp\"\n"
+        "#include \"Pipeline.hpp\"\n"
+        "\n"
+        "#include <Heimdall/CompileDatabase.hpp>\n"
+        "#include <Heimdall/RuleConfig.hpp>\n"
+        "\n"
+        "#include <filesystem>\n"
+        "#include <iostream>\n"
+        "#include <string>\n"
+        "#include <vector>\n"
+        "#include \"Reporting.hpp\"\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "#include <filesystem>\n"
+        "#include <iostream>\n"
+        "#include <string>\n"
+        "#include <vector>\n"
+        "\n"
+        "#include <Heimdall/CompileDatabase.hpp>\n"
+        "#include <Heimdall/RuleConfig.hpp>\n"
+        "\n"
+        "#include \"CliOptions.hpp\"\n"
+        "#include \"FileDiscovery.hpp\"\n"
+        "#include \"Init.hpp\"\n"
+        "#include \"Pipeline.hpp\"\n"
+        "#include \"Reporting.hpp\"\n");
+}
+
+TEST(RuleEngineSpec, SortIncludesMovesQuoteBlockAfterAngleBlock)
+{
+    constexpr std::string_view source =
+        "#include \"b.h\"\n"
+        "#include \"a.h\"\n"
+        "\n"
+        "#include <vector>\n"
+        "#include <string>\n";
+    heimdall::RuleOptions options;
+    options.sort_includes = true;
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
+              "#include <string>\n"
+        "#include <vector>\n"
+        "\n"
+        "#include \"a.h\"\n"
+        "#include \"b.h\"\n");
 }
 
 TEST(RuleEngineSpec, SortIncludesDoesNotCrossCommentsAndDirectives)
@@ -620,6 +788,7 @@ TEST(RuleEngineSpec, SortIncludesRespectsConfiguredGroupOrder)
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
               "#include \"app.h\"\n"
+        "\n"
         "#include <vector>\n");
 }
 
@@ -636,6 +805,7 @@ TEST(RuleEngineSpec, SortIncludesSeparatesConfiguredGroups)
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
               "#include <map>\n"
         "#include <vector>\n"
+        "\n"
         "#include \"app.h\"\n");
 }
 

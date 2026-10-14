@@ -55,3 +55,18 @@ endif ()
 if (NOT check_output MATCHES "syntax/parse-error")
   message(FATAL_ERROR "expected syntax/parse-error in check output\nstdout:\n${check_output}\nstderr:\n${check_error}")
 endif ()
+
+# `lint` reports diagnostics but keeps a zero exit status: only `check`
+# (and `parse`) gate on findings. This locks that contract.
+execute_process(
+  COMMAND "${HEIMDALL_EXECUTABLE}" lint "${BAD_FILE}"
+  RESULT_VARIABLE lint_result
+  OUTPUT_VARIABLE lint_output
+  ERROR_VARIABLE lint_error
+)
+if (NOT lint_result EQUAL 0)
+  message(FATAL_ERROR "expected heimdall lint on broken file to exit 0; got ${lint_result}\nstdout:\n${lint_output}\nstderr:\n${lint_error}")
+endif ()
+if (NOT lint_output MATCHES "syntax/parse-error")
+  message(FATAL_ERROR "expected syntax/parse-error in lint output\nstdout:\n${lint_output}\nstderr:\n${lint_error}")
+endif ()

@@ -1,15 +1,13 @@
 #pragma once
 
-// Experimental source API v1, deliberately independent of internal tables and
-// C++ ABI. This is not an isolation boundary: compiled-in plugins are trusted.
-#include <Heimdall/Ids.hpp>
-
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/Ids.hpp>
 
 namespace heimdall
 {

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Heimdall/SemanticModel.hpp>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +8,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#include <Heimdall/SemanticModel.hpp>
 
 namespace heimdall
 {
@@ -322,7 +322,8 @@ namespace heimdall
 		}
 
 		/** Resolve a field only when the selected member view is complete. */
-		[[nodiscard]] TemplateMemberBinding LookupInstantiatedMember(std::uint32_t instance,
+		[[nodiscard]] TemplateMemberBinding LookupInstantiatedMember(
+			std::uint32_t instance,
 			NameId name) const;
 
 		/** Certify one source occurrence; workspace-only observations cannot justify a global edit. */

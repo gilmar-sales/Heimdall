@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Heimdall/Arena.hpp>
-#include <Heimdall/ParseTree.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -11,6 +8,9 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <Heimdall/Arena.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {

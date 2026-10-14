@@ -273,8 +273,7 @@ TEST(FormatterSpec, IndentsContinuationLines)
     const std::string expected =
         "int sum = a +\n"
         "    b;\n"
-        "foo(a,\n"
-        "    b);\n"
+        "foo(a, b);\n"
         "if (x\n"
         "    && y) {\n"
         "    f();\n"
@@ -400,8 +399,8 @@ TEST(FormatterSpec, AlignsDeclarationAndCallContinuations)
         "{\n"
         "    const auto path = std::filesystem::temp_directory_path() /\n"
         "                      (\"heimdall_rule_config_\" + std::string(suffix));\n"
-        "    std::ofstream out(directory / heimdall::RuleConfigFileName,\n"
-        "                      std::ios::binary | std::ios::trunc);\n"
+        "    std::ofstream out(directory / heimdall::RuleConfigFileName, std::ios::binary | "
+        "std::ios::trunc);\n"
         "}\n";
 
     const auto formatted = formatter.Format(source);
@@ -641,7 +640,8 @@ TEST(FormatterSpec, AllmanCombinesWithAddedBraces)
 TEST(FormatterSpec, SplitsBracesAfterFunctionSuffixes)
 {
     // Pin Keep: this test is about brace placement, not single_line_style.
-    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+    const heimdall::Formatter allman(
+        {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep});
     const auto check =[&](std::string_view source, std::string_view expected)
     {
@@ -703,7 +703,8 @@ TEST(FormatterSpec, IndentsConstructorInitializerListAfterTrailingColon)
 
 TEST(FormatterSpec, SplitsBracesOfNamedScopes)
 {
-    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+    const heimdall::Formatter allman(
+        {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep});
     const auto check =[&](std::string_view source, std::string_view expected)
     {
@@ -730,7 +731,8 @@ TEST(FormatterSpec, SplitsBracesOfNamedScopes)
 TEST(FormatterSpec, KeepsInitializerBracesAttached)
 {
     // Initializers and expressions never split, in either brace style.
-    const heimdall::Formatter allman({.brace_style = heimdall::BraceStyle::Allman,
+    const heimdall::Formatter allman(
+        {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep,
             .space_before_cpp11_braced_list = false});
     const auto check =[&](std::string_view source, std::string_view expected)
@@ -745,6 +747,42 @@ TEST(FormatterSpec, KeepsInitializerBracesAttached)
     check("f(a, {1, 2});\n", "f(a, {1, 2});\n");
     check("auto p = new (buf) T{1};\n", "auto p = new (buf) T{1};\n");
     check("Point p{.x = 1};\n", "Point p{.x = 1};\n");
+}
+
+TEST(FormatterSpec, KeepsMultilineAggregateElementsWithoutReflow)
+{
+    // The formatter only reindents: short elements split across lines stay
+    // split (joining them would be a reflow, which the engine does not do).
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source =
+        "typedef struct Filter\n"
+        "{\n"
+        "    const char *name;\n"
+        "    const char *pattern;\n"
+        "} Filter;\n"
+        "const Filter kFilters[] = {\n"
+        "        {\n"
+        "            \"Scene\", \"json\"\n"
+        "        },\n"
+        "        {\"All files\", \"*\"},\n"
+        "    };\n";
+    constexpr std::string_view expected =
+        "typedef struct Filter\n"
+        "{\n"
+        "    const char* name;\n"
+        "    const char* pattern;\n"
+        "} Filter;\n"
+        "const Filter kFilters[] = {\n"
+        "    {\n"
+        "        \"Scene\", \"json\"\n"
+        "    },\n"
+        "    {\"All files\", \"*\"},\n"
+        "};\n";
+
+    const std::string formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
 }
 
 TEST(FormatterSpec, SpacesTrailingReturnArrow)
@@ -797,7 +835,8 @@ TEST(FormatterSpec, CreatedSingleLineBlocksFollowTheBraceStyle)
 TEST(FormatterSpec, SupportsLeftPointerAlignment)
 {
     constexpr std::string_view source = "int*x;\nint &r=x;\n";
-    const heimdall::Formatter left({.pointer_alignment = heimdall::PointerAlignment::Left,
+    const heimdall::Formatter left(
+        {.pointer_alignment = heimdall::PointerAlignment::Left,
             .reference_alignment = heimdall::ReferenceAlignment::Left});
     const std::string expected = "int* x;\nint& r = x;\n";
     const std::string formatted = left.Format(source);
@@ -999,19 +1038,39 @@ TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
         "int* x;\nint& r = x;\nvoid f(int&& v);\nint * const p = nullptr;\n");
 }
 
-TEST(FormatterSpec, BreaksLongLinesAtCommas)
+TEST(FormatterSpec, BreaksLongDeclarationsVertically)
 {
-    // Isolate width-driven wrapping from the parameter-count rule.
-    const heimdall::Formatter narrow({.column_limit = 40,.max_parameters_per_line = 0});
+    // Width-driven parameter rule: a signature that exceeds the limit goes
+    // one parameter per line; a disabled limit preserves breaks as written.
+    const heimdall::Formatter narrow({.column_limit = 40});
     constexpr std::string_view source = "void f(int alpha, int beta, int gamma, int delta);\n";
     const std::string formatted = narrow.Format(source);
     EXPECT_EQ(formatted,
-              "void f(int alpha, int beta, int gamma,\n"
+              "void f(\n"
+        "    int alpha,\n"
+        "    int beta,\n"
+        "    int gamma,\n"
         "    int delta);\n");
     EXPECT_EQ(narrow.Format(formatted), formatted);
     // Disabled limit keeps the line whole.
-    const heimdall::Formatter unlimited({.column_limit = 0,.max_parameters_per_line = 0});
+    const heimdall::Formatter unlimited({.column_limit = 0});
     EXPECT_EQ(unlimited.Format(source), source);
+}
+
+TEST(FormatterSpec, PacksLongCallArgumentsAtCommas)
+{
+    // Calls are not declarations: overlong argument lists still pack several
+    // arguments per line instead of going one per line.
+    const heimdall::Formatter narrow({.column_limit = 40});
+    const std::string source = "void Run()\n{\n"
+        "    foo(alphaValue, betaValue, gammaValue, deltaValue);\n"
+        "}\n";
+    const std::string expected = "void Run()\n{\n"
+        "    foo(alphaValue, betaValue, gammaValue,\n"
+        "        deltaValue);\n"
+        "}\n";
+    EXPECT_EQ(narrow.Format(source), expected);
+    EXPECT_EQ(narrow.Format(expected), expected);
 }
 
 TEST(FormatterSpec, NormalizesAndAlignsTrailingComments)
@@ -1037,13 +1096,85 @@ TEST(FormatterSpec, SortsIncludesWhenEnabled)
     EXPECT_EQ(plain.Format(source), source); // off by default: verbatim
     const heimdall::Formatter sorter({.sort_includes = true});
     const std::string expected =
-        "#include \"a.h\"\n"
-        "#include \"b.h\"\n"
         "#include <string>\n"
-        "#include <vector>\n";
+        "#include <vector>\n"
+        "\n"
+        "#include \"a.h\"\n"
+        "#include \"b.h\"\n";
     const std::string sorted = sorter.Format(source);
     EXPECT_EQ(sorted, expected);
     EXPECT_EQ(sorter.Format(sorted), sorted);
+}
+
+TEST(FormatterSpec, IncludeOrderMatchesDiagnosticQuickFix)
+{
+    constexpr std::string_view source =
+        "#include \"z.hpp\"\n#include <apple>\n#include <Zebra>\n#include \"App.hpp\"\n";
+    constexpr std::string_view expected =
+        "#include <apple>\n#include <Zebra>\n\n#include \"App.hpp\"\n#include \"z.hpp\"\n";
+    heimdall::RuleOptions ruleOptions;
+    ruleOptions.sort_includes = true;
+    const heimdall::Formatter formatter({.sort_includes = true});
+
+    const auto diagnostics = heimdall::RuleEngine(ruleOptions).Analyze(source);
+    const auto formatted = formatter.Format(source);
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
+    EXPECT_EQ(diagnostics[0].message, "includes are not in the configured order");
+    EXPECT_TRUE(diagnostics[0].has_fix);
+    EXPECT_TRUE(diagnostics[0].fix_is_safe);
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), formatted);
+    EXPECT_TRUE(heimdall::RuleEngine(ruleOptions).Analyze(formatted).empty());
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, IncludeSortingRespectsConfiguredGroupsAndCaseSensitivity)
+{
+    constexpr std::string_view source =
+        "#include <apple>\n#include \"z.hpp\"\n#include <Zebra>\n#include \"App.hpp\"\n";
+    heimdall::FormatOptions options;
+    options.sort_includes = true;
+    options.includeOrder = {heimdall::IncludeGroup::Quote, heimdall::IncludeGroup::Angle};
+    options.includeCaseInsensitive = false;
+
+    const auto formatted = heimdall::Formatter(options).Format(source);
+
+    EXPECT_EQ(formatted,
+              "#include \"App.hpp\"\n#include \"z.hpp\"\n\n#include <Zebra>\n#include <apple>\n");
+}
+
+TEST(FormatterSpec, IncludeSortingPinsHomonymousHeaderFirst)
+{
+    heimdall::FormatOptions options;
+    options.sort_includes = true;
+    options.mainFileName = "Reporting.cpp";
+    const heimdall::Formatter formatter(options);
+    EXPECT_EQ(formatter.Format("#include <iostream>\n#include <fstream>\n\n#include \"Reporting.hpp\"\n"),
+              "#include \"Reporting.hpp\"\n\n#include <fstream>\n#include <iostream>\n");
+}
+
+TEST(FormatterSpec, IncludeSortingOrdersAcrossBlankLinesButNotCommentsOrDirectives)
+{
+    const heimdall::Formatter formatter({.sort_includes = true});
+
+    constexpr std::string_view grouped =
+        "#include \"b.h\"\n#include <vector>\n#include <string>\n";
+    EXPECT_EQ(formatter.Format(grouped),
+              "#include <string>\n#include <vector>\n\n#include \"b.h\"\n");
+
+    // Blank lines regroup with the bands instead of stranding singletons.
+    constexpr std::string_view across_blank =
+        "#include \"b.h\"\n\n#include <vector>\n#include <string>\n";
+    EXPECT_EQ(formatter.Format(across_blank),
+              "#include <string>\n#include <vector>\n\n#include \"b.h\"\n");
+
+    // Comments, macro includes and other directives still break sections.
+    constexpr std::string_view untouched =
+        "#include <z>\n// boundary\n#include <a>\n#include HEADER\n#include <a>\n"
+        "#ifdef USE\n#include <z>\n#endif\n";
+    EXPECT_EQ(formatter.Format(untouched), untouched);
 }
 
 TEST(FormatterSpec, ReportsNoEditsWhenAlreadyFormatted)
@@ -1155,7 +1286,8 @@ TEST(FormatterSpec, AddsBracesToSingleLineBlocks)
 TEST(FormatterSpec, SplitsSingleLineBlocksWithIndent)
 {
     // Attach pinned: this test isolates single_line_style.
-    const heimdall::Formatter split({.brace_style = heimdall::BraceStyle::Attach,
+    const heimdall::Formatter split(
+        {.brace_style = heimdall::BraceStyle::Attach,
             .single_line_style = heimdall::SingleLineStyle::Indent});
     EXPECT_EQ(split.Format("if (x) return;\n"), "if (x)\n    return;\n");
     // Braced singles lose the braces instead of gaining indentation.
@@ -1172,7 +1304,8 @@ TEST(FormatterSpec, SplitsSingleLineBlocksWithIndent)
 TEST(FormatterSpec, CollapsesSingleLineBlocks)
 {
     // Attach pinned: this test isolates single_line_style.
-    const heimdall::Formatter flat({.brace_style = heimdall::BraceStyle::Attach,
+    const heimdall::Formatter flat(
+        {.brace_style = heimdall::BraceStyle::Attach,
             .single_line_style = heimdall::SingleLineStyle::SingleLine});
     EXPECT_EQ(flat.Format("if (x) {\n    return;\n}\n"), "if (x) return;\n");
     EXPECT_EQ(flat.Format("if (x)\n    return;\n"), "if (x) return;\n");
@@ -1212,7 +1345,8 @@ TEST(FormatterSpec, KeepsStackedPointersTogether)
 
 TEST(FormatterSpec, BlankLineAfterControlBlock)
 {
-    const heimdall::Formatter formatter({.brace_style = heimdall::BraceStyle::Attach,
+    const heimdall::Formatter formatter(
+        {.brace_style = heimdall::BraceStyle::Attach,
             .single_line_style = heimdall::SingleLineStyle::Keep,
             .blank_line_after_control_block = true});
     constexpr std::string_view source =
@@ -1278,13 +1412,15 @@ TEST(FormatterSpec, KeepsEnumeratorsAndInitializerListsAtOneLevel)
     EXPECT_EQ(formatter.Format(enum_expected), enum_expected);
     const std::string list = "int a[] = {\n    1,\n    2\n};\n";
     EXPECT_EQ(formatter.Format(list), list);
-    // Argument and declarator commas still continue the statement.
-    EXPECT_EQ(formatter.Format("void f(int a,\nint b);\n"), "void f(int a,\n    int b);\n");
+    // Declared parameters collapse to one line when they fit; only calls
+    // keep comma continuations for statements that exceed the limit.
+    EXPECT_EQ(formatter.Format("void f(int a,\nint b);\n"), "void f(int a, int b);\n");
 }
 
 TEST(FormatterSpec, KeepsMemberAndVariableBraceInitializersAttached)
 {
-    const heimdall::Formatter formatter({.blank_line_after_control_block = false,
+    const heimdall::Formatter formatter(
+        {.blank_line_after_control_block = false,
             .space_before_cpp11_braced_list = false});
     const std::string source = "struct Options {\nCommand command{};\nint x{1};\nstd::vector<int> "
         "v{};\nstd::string s {};\n};\n";
@@ -1409,9 +1545,9 @@ TEST(FormatterSpec, MethodSeparationCanBeDisabledAndDoesNotSeparateFields)
               "struct S\n{\n    void first() {}\n    void second() {}\n    int value;\n};\n");
 }
 
-TEST(FormatterSpec, BreaksMoreThanThreeParametersOnePerLine)
+TEST(FormatterSpec, BreaksOverlongSignaturesOnePerLine)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter;
     const std::string source =
         "class ParseTree {\nstatic ParseTree Parse(std::string_view source, const ParserOptions& "
         "options,\n"
@@ -1429,7 +1565,7 @@ TEST(FormatterSpec, BreaksMoreThanThreeParametersOnePerLine)
 
 TEST(FormatterSpec, WrapsConstructorDeclarationsAndSeparatesPublicMethods)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter;
     const std::string source =
         "class DiagnosticSink {\npublic:\n"
         "DiagnosticSink(const AnalysisContext& context, const RuleDescriptor& rule,\n"
@@ -1470,7 +1606,7 @@ TEST(FormatterSpec, SeparatesFieldsMethodsAndAccessSectionsWithoutSplittingField
 
 TEST(FormatterSpec, SeparatesMethodDeclarationsFromEachOtherAndDefinitions)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter;
     const std::string source =
         "class Scheduler {\npublic:\n"
         "std::expected<void, std::string> Register(ScheduledRule rule);\n"
@@ -1490,7 +1626,7 @@ TEST(FormatterSpec, SeparatesMethodDeclarationsFromEachOtherAndDefinitions)
 
 TEST(FormatterSpec, WrapsConstructorDefinitionsAndInitializerLists)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter({.column_limit = 30});
     for (const std::string prefix :
         {
             "", "explicit ", "constexpr ", "explicit(false) "
@@ -1532,16 +1668,15 @@ TEST(FormatterSpec, DeclarationSpacingCanBeDisabledAndPreservesCrLf)
     EXPECT_NE(formatted.find("Run();\r\n\r\nprivate:"), std::string::npos);
     EXPECT_EQ(formatter.Format(formatted), formatted);
     EXPECT_EQ(heimdall::Formatter({.column_limit = 0,
-                                  .blank_line_between_methods = false,
-            .max_parameters_per_line = 0})
+                                  .blank_line_between_methods = false})
         .Format(source),
         "class S\r\n{\r\npublic:\r\n    S(int a, int b, int c, int d);\r\n"
         "    void Run();\r\nprivate:\r\n    int a;\r\n    int b;\r\n};\r\n");
 }
 
-TEST(FormatterSpec, ParameterThresholdDoesNotCountNestedCommasOrChangeCalls)
+TEST(FormatterSpec, ParameterWidthIgnoresNestedCommasAndLeavesCallsAlone)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter({.column_limit = 70});
     const std::string source =
         "void small(std::pair<int, int> pair, int x = call(1, 2), int y = 0);\n"
         "void run() { call(1, 2, 3, 4, 5); }\n";
@@ -1556,23 +1691,22 @@ TEST(FormatterSpec, ParameterThresholdDoesNotCountNestedCommasOrChangeCalls)
     EXPECT_EQ(formatter.Format(expected), expected);
 }
 
-TEST(FormatterSpec, ParameterWrappingCanBeDisabledOrConfigured)
+TEST(FormatterSpec, ParameterLayoutFollowsColumnLimit)
 {
     const std::string source = "void f(int a, int b, int c, int d);\n";
-    EXPECT_EQ(
-        heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 0}).Format(source),
-        source);
-    EXPECT_EQ(
-        heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 4}).Format(source),
-        source);
-    EXPECT_EQ(heimdall::Formatter({.column_limit = 0,.max_parameters_per_line = 2})
-        .Format("void f(int a, int b, int c);\n"),
-        "void f(\n    int a,\n    int b,\n    int c);\n");
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 100}).Format(source), source);
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 35}).Format(source), source);
+    const std::string vertical = "void f(\n    int a,\n    int b,\n    int c,\n    int d);\n";
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 34}).Format(source), vertical);
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 34}).Format(vertical), vertical);
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 0}).Format(source), source);
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 100}).Format(vertical), source);
+    EXPECT_EQ(heimdall::Formatter({.column_limit = 0}).Format(vertical), vertical);
 }
 
 TEST(FormatterSpec, DeclarationLayoutPreservesCrLfAndDirectives)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter({.column_limit = 30});
     const std::string source =
         "#define FN(a,b,c,d) function(a,b,c,d)\r\nvoid f(int a,int b,int c,int d);\r\n";
     const std::string expected = "#define FN(a,b,c,d) function(a,b,c,d)\r\nvoid f(\r\n    int "
@@ -1583,7 +1717,7 @@ TEST(FormatterSpec, DeclarationLayoutPreservesCrLfAndDirectives)
 
 TEST(FormatterSpec, WrapsDefinitionsVariadicsAndKeepsParameterComments)
 {
-    const heimdall::Formatter formatter({.column_limit = 0});
+    const heimdall::Formatter formatter({.column_limit = 40});
     const std::string source = "void f(int a, /* second */ int b, int c, ...) { use(a); }\n";
     const std::string expected =
         "void f(\n    int a,\n    /* second */ int b,\n    int c,\n    ...)\n{\n    use(a);\n}\n";
@@ -1821,7 +1955,6 @@ TEST(FormatterSpec, IncrementalFormattingMatchesEveryPassAcrossOptionsAndMalform
         options.align_consecutive_macros = true;
         options.align_consecutive_assignments = true;
         options.blank_line_between_methods = (selection & 16) != 0;
-        options.max_parameters_per_line = 1;
         const heimdall::Formatter formatter(options);
         for (auto source : kSources)
         {
@@ -1868,12 +2001,11 @@ TEST(FormatterSpec, IncrementalCheckpointInvalidatesOptionsDialectAndCancelledWo
 
 TEST(FormatterSpec, KeepsSemicolonAttachedToNestedRecordBeforeMethod)
 {
-    const std::string source = "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n";
+    const std::string source = "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(int x);\n};\n";
     const heimdall::Formatter formatter;
 
     const auto formatted = formatter.Format(source);
 
-    EXPECT_EQ(formatted,
-        "class S\n{\n    struct E\n    {\n        int a;\n    };\n\n    int C(\n        int x);\n};\n");
+    EXPECT_EQ(formatted, source);
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }

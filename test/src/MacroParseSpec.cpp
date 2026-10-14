@@ -94,6 +94,72 @@ TEST(MacroParseSpec, WholeStatementMacrosPreserveFollowingStatements)
     EXPECT_EQ(Count(tree, GrammarKind::DeclarationStatement), 1);
 }
 
+TEST(MacroParseSpec, AcceptsVariadicStatementMacroWithInternalSemicolon)
+{
+    const auto tree = Parse(
+        "void Test() { FORWARD(value = 1; other = 2;) after = 3; }",
+        {"FORWARD(...) __VA_ARGS__"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::ExpressionStatement), 3);
+}
+
+TEST(MacroParseSpec, ForwardedStatementStillRequiresSemicolon)
+{
+    const auto tree = Parse("void Test() { FORWARD(value = 1) after = 3; }",
+        {"FORWARD(...) __VA_ARGS__"});
+
+    EXPECT_FALSE(tree.Diagnostics().empty());
+}
+
+TEST(MacroParseSpec, EmptyConditionalMacroPreservesFollowingStatement)
+{
+    const auto tree = Parse("void Test() { CONDITIONAL(value = 1;) after = 3; }",
+        {"CONDITIONAL(...)"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::ExpressionStatement), 1);
+}
+
+TEST(MacroParseSpec, NestedStatementMacrosConsumeWholeDefinitions)
+{
+    // As in Assimp's IMPL_STRUCT: one call expands (through nested macros)
+    // to whole function definitions with no trailing `;` of its own.
+    const auto tree = Parse("namespace Api { GEN(Widget) GEN(Gadget) struct After {}; }",
+        {"GEN(ty) MAKE(ty) FREE(ty)", "MAKE(ty) void make##ty() {}",
+            "FREE(ty) void free##ty() {}"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 2);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 1);
+}
+
+TEST(MacroParseSpec, ForwardingMacroRelyingOnOuterSemicolonStaysAnExpression)
+{
+    // `FORWARD(lock.Check(1, 2));` expands without its own `;`: the outer one
+    // terminates it, so the invocation parses as a plain call statement.
+    const auto tree = Parse("struct Lock { void Check(int, int); };\n"
+        "void Test(Lock& lock) { FORWARD(lock.Check(1, 2)); lock.Check(3, 4); }",
+        {"FORWARD(...) __VA_ARGS__"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 1);
+    EXPECT_EQ(Count(tree, GrammarKind::ExpressionStatement), 1);
+}
+
+TEST(MacroParseSpec, EmptyMacroAtNamespaceScopeIsDroppedAsDecoration)
+{
+    // An empty body counts as a decoration: the invocation leaves the token
+    // stream before parsing, so the following definition stands on its own.
+    const auto tree = Parse("namespace Api { DISABLED(Widget) struct After {}; }",
+        {"DISABLED(...)"});
+
+    EXPECT_TRUE(tree.Diagnostics().empty()) << Describe(tree);
+    EXPECT_EQ(Count(tree, GrammarKind::MacroInvocation), 0);
+    EXPECT_EQ(Count(tree, GrammarKind::RecordDefinition), 1);
+}
+
 TEST(MacroParseSpec, ForwardingWarningMacrosPreserveNamespaceScope)
 {
     const auto tree = Parse("SUPPRESS_WARNINGS namespace Engine { struct Body {}; void Update() {} }",

@@ -43,7 +43,7 @@ namespace
     struct Typed
     {
         explicit Typed(std::string text) :
-        source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
+            source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
             model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model)),
             flow(heimdall::Flow::Build(types)) {}
 
@@ -516,6 +516,50 @@ TEST(ApiConstCorrectness, SilentForWritersStaticAndUnknownCalls)
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzeConstCorrectness(
         Typed("struct A { int x; int f() { return helper(x); } };\n").flow)
         .empty());
+}
+
+TEST(ApiConstCorrectness, SilentForNonConstTemplateMemberCalls)
+{
+    const Typed typed(
+        "struct ChildOf {}; struct ParentDepth {};\n"
+        "struct Extension { int value;\n"
+        "template <typename T> Extension& WithComponent() { value = 1; return *this; }\n"
+        "Extension& WithHierarchy() { return WithComponent<ChildOf>().WithComponent<ParentDepth>(); }\n"
+        "Extension& WithExplicitThis() { return this->WithComponent<ChildOf>(); }\n"
+        "};\n");
+
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
+
+    EXPECT_TRUE(diagnostics.empty());
+}
+
+TEST(ApiConstCorrectness, NonConstCalleePreventsConstSuggestionWithoutInspectingItsBody)
+{
+    const Typed typed(
+        "struct A { int value;\n"
+        "int Read() { return value; }\n"
+        "int Forward() { return Read(); }\n"
+        "int ForwardExplicitly() { return this->Read(); }\n"
+        "};\n");
+
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_NE(diagnostics[0].message.find("'Read'"), std::string::npos);
+}
+
+TEST(ApiConstCorrectness, ReportsReaderCallingConstTemplateMember)
+{
+    const Typed typed(
+        "struct A { int value;\n"
+        "template <typename T> int Read() const { return value; }\n"
+        "int Forward() { return Read<int>(); }\n"
+        "};\n");
+
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_NE(diagnostics[0].message.find("'Forward'"), std::string::npos);
 }
 
 // ---- api/unsafe-downcast -----------------------------------------------------

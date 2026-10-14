@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Heimdall/FileShard.hpp>
-
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <span>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/FileShard.hpp>
 
 namespace heimdall::index
 {
@@ -67,7 +67,8 @@ namespace heimdall::index
 	{
 	public:
 		[[nodiscard]] static std::shared_ptr<const IndexSnapshot> Build(
-			std::vector<std::shared_ptr<const FileShard>> shards, std::uint64_t revision = 0);
+			std::vector<std::shared_ptr<const FileShard>> shards,
+			std::uint64_t revision = 0);
 
 		/** Store generation pinned by this snapshot; standalone snapshots default to zero. */
 		[[nodiscard]] std::uint64_t Revision() const noexcept
@@ -91,7 +92,8 @@ namespace heimdall::index
 		 * resolve it locally: same spelling, declared in a file this shard includes.
 		 */
 		[[nodiscard]] std::vector<SymbolRef> Candidates(
-			std::uint32_t shard, std::uint32_t offset) const;
+			std::uint32_t shard,
+			std::uint32_t offset) const;
 
 		/** Scoped lookup of every occurrence of `shard`; computed once, on first use. */
 		[[nodiscard]] const ShardResolution& Resolved(std::uint32_t shard) const;
@@ -121,7 +123,8 @@ namespace heimdall::index
 
 		/** Fuzzy name search, best matches first. */
 		[[nodiscard]] std::vector<SymbolRef> Search(
-			std::string_view query, std::size_t limit) const;
+			std::string_view query,
+			std::size_t limit) const;
 
 		[[nodiscard]] std::size_t StorageBytes() const noexcept;
 

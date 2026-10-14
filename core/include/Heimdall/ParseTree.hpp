@@ -1,10 +1,5 @@
 #pragma once
 
-#include <Heimdall/MacroResolver.hpp>
-#include <Heimdall/Preprocessor.hpp>
-#include <Heimdall/SyntaxTree.hpp>
-#include <Heimdall/TypeNames.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -15,6 +10,11 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <Heimdall/MacroResolver.hpp>
+#include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/SyntaxTree.hpp>
+#include <Heimdall/TypeNames.hpp>
 
 namespace heimdall
 {
@@ -404,7 +404,9 @@ namespace heimdall
 
 		/// Returns the live object-like replacement from the resolver or local directive timeline.
 		/// The returned text is owned; undefined and function-like macros return an empty string.
-		[[nodiscard]] std::string ObjectReplacement(std::string_view name, std::size_t offset) const;
+		[[nodiscard]] std::string ObjectReplacement(
+			std::string_view name,
+			std::size_t offset) const;
 
 		// Header type oracle the file was parsed with (may be null): later layers
 		// consult it for names declared in headers, which the local model never binds.

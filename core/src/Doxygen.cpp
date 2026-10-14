@@ -1,6 +1,7 @@
+#include <Heimdall/Doxygen.hpp>
+
 #include <algorithm>
 #include <cctype>
-#include <Heimdall/Doxygen.hpp>
 
 namespace heimdall
 {

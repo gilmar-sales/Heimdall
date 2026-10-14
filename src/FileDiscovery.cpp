@@ -355,7 +355,8 @@ namespace heimdall::cli
 		return MatchGlobRec(NormalizeSeparators(pattern), 0, NormalizeSeparators(text), 0);
 	}
 
-	bool CollectFiles(const std::vector<std::filesystem::path>& inputs,
+	bool CollectFiles(
+		const std::vector<std::filesystem::path>& inputs,
 		std::vector<std::filesystem::path>& files)
 	{
 		for (const auto& input : inputs)

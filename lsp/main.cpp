@@ -1,6 +1,6 @@
-#include "Server.hpp"
-
 #include <iostream>
+
+#include "Server.hpp"
 
 #if defined(_WIN32)
     #include <fcntl.h>

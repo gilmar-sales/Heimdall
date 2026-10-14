@@ -1578,6 +1578,35 @@ namespace heimdall
 			}
 		}
 
+		// Position of `(` for a direct `f(` or template `f<T>(` call at `name`,
+		// or `body.second` when the name is not followed by a call.
+		std::size_t CallParen(const detail::TokenView& view, std::size_t name,
+			std::pair<std::size_t, std::size_t> body)
+		{
+			if (name + 1 >= body.second)
+			{
+				return body.second;
+			}
+
+			if (view.At(name + 1) == Tok::LParen)
+			{
+				return name + 1;
+			}
+
+			if (view.At(name + 1) != Tok::Lt)
+			{
+				return body.second;
+			}
+
+			const auto close = view.MatchAngle(name + 1, body.second);
+			if (close + 1 < body.second && view.At(close + 1) == Tok::LParen)
+			{
+				return close + 1;
+			}
+
+			return body.second;
+		}
+
 		// The member function `function` of `klass` never observably mutates:
 		// no member write, no address of a member escaping, no call to a
 		// non-const member, and no call the engine cannot resolve. Bare `this`
@@ -1631,8 +1660,12 @@ namespace heimdall
 					// A call the engine cannot see may be a member of an
 					// unresolved base; anything else (a plain read of an
 					// unknown name) is harmless.
-					if (after == Tok::LParen && before != Tok::Dot && before != Tok::Arrow &&
-						before != Tok::ColonColon)
+					const bool isCall =
+						after == Tok::LParen || CallParen(view, i, body) < body.second;
+					const bool isThisArrow = before == Tok::Arrow && i >= 2 &&
+						view.Text(i - 2) == "this";
+					if (isCall && before != Tok::Dot && before != Tok::ColonColon &&
+						(before != Tok::Arrow || isThisArrow))
 					{
 						return false;
 					}
@@ -1670,8 +1703,11 @@ namespace heimdall
 					continue;
 				}
 
-				// A call to a member function of this class.
-				if (symbols.kind[target] == SymbolKind::Function && after == Tok::LParen &&
+				// A call to a member function of this class. A callee without
+				// `const` is assumed to mutate: proving purity through its body
+				// would depend on the caller's arguments.
+				if (symbols.kind[target] == SymbolKind::Function &&
+					CallParen(view, i, body) < body.second &&
 					before != Tok::Dot && before != Tok::Arrow && before != Tok::ColonColon)
 				{
 					const ScopeId target_scope = symbols.scope[target];
@@ -1694,7 +1730,8 @@ namespace heimdall
 				}
 
 				if (symbols.kind[target] == SymbolKind::Function && before == Tok::Arrow &&
-					i >= 2 && view.Text(i - 2) == "this" && after == Tok::LParen)
+					i >= 2 && view.Text(i - 2) == "this" &&
+					CallParen(view, i, body) < body.second)
 				{
 					if ((symbols.flags[target] & SymbolFlag::Const) == 0 &&
 						(symbols.flags[target] & SymbolFlag::Static) == 0)

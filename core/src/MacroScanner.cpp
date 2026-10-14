@@ -1,8 +1,9 @@
-#include <Heimdall/MacroExpander.hpp>
 #include <Heimdall/MacroScanner.hpp>
 
 #include <algorithm>
 #include <cstdint>
+
+#include <Heimdall/MacroExpander.hpp>
 
 namespace heimdall
 {
@@ -10,17 +11,17 @@ namespace heimdall
 	namespace
 	{
 
-		constexpr std::size_t kMaxExpressionDepth = 128;
+		constexpr std::size_t kMaxExpressionDepth     = 128;
 		constexpr std::size_t kAttributeBracketLength = 2; // `[[`
-		constexpr long long kValueBits = 64;
-		constexpr unsigned kDecimal = 10;
-		constexpr unsigned kHexadecimal = 16;
-		constexpr unsigned kBinary = 2;
-		constexpr unsigned kOctal = 8;
-		constexpr unsigned kNotADigit = 99;
-		constexpr std::size_t kEscapeOffset = 2; // quote, backslash, then the escape letter
-		constexpr std::size_t kBasePrefixLength = 2; // `0x`, `0b`
-		constexpr std::size_t kDelimiterPair = 2; // opening and closing delimiter
+		constexpr long long kValueBits                = 64;
+		constexpr unsigned kDecimal                   = 10;
+		constexpr unsigned kHexadecimal               = 16;
+		constexpr unsigned kBinary                    = 2;
+		constexpr unsigned kOctal                     = 8;
+		constexpr unsigned kNotADigit                 = 99;
+		constexpr std::size_t kEscapeOffset           = 2; // quote, backslash, then the escape letter
+		constexpr std::size_t kBasePrefixLength       = 2; // `0x`, `0b`
+		constexpr std::size_t kDelimiterPair          = 2; // opening and closing delimiter
 
 		bool IsBlank(char c) noexcept
 		{
@@ -182,7 +183,9 @@ namespace heimdall
 		constexpr long long kAttributeCpp23 = 202207;
 		constexpr long long kAttributeCpp26 = 202403;
 
-		std::optional<long long> BuiltinFeature(std::string_view feature, std::string_view operand)
+		std::optional<long long> BuiltinFeature(
+			std::string_view feature,
+			std::string_view operand)
 		{
 			if (feature == "__has_cpp_attribute")
 			{
@@ -223,7 +226,9 @@ namespace heimdall
 		class Condition
 		{
 		public:
-			Condition(const std::vector<ExpandedToken>& tokens, const MacroTable& table,
+			Condition(
+				const std::vector<ExpandedToken>& tokens,
+				const MacroTable& table,
 				const MacroScanCallbacks& callbacks) :
 				mTokens(tokens), mTable(table), mCallbacks(callbacks) {}
 
@@ -972,7 +977,7 @@ namespace heimdall
 					{KindOfDirective(name), lineStart, line.size(), active});
 			}
 
-			const bool opensGroup       = name == "if" || name == "ifdef" || name == "ifndef";
+			const bool opensGroup = name == "if" || name == "ifdef" || name == "ifndef";
 			// Conditional directives are always part of the compiled text; the others only
 			// count inside an active group.
 			record(active || opensGroup || name == "elif" || name == "elifdef" ||

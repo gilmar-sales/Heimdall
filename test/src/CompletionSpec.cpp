@@ -1586,6 +1586,25 @@ TEST(CompletionSpec, HoverTypedefPreservesPointerAndArrayDeclarators)
     EXPECT_EQ(samples.size, sizeof(short[5]));
 }
 
+TEST(CompletionSpec, HoverTypedefStructIncludesPointerFields)
+{
+    constexpr std::string_view header =
+        "typedef struct SDL_DialogFileFilter { const char* name; const char* pattern; } SDL_DialogFileFilter;";
+    const auto index = heimdall::CompletionEngine::IndexScopes(header, {});
+    constexpr std::string_view source = "SDL_DialogFileFilter filter;";
+
+    const auto external = LayoutAtHover(source, "SDL_DialogFileFilter", &index);
+    const auto local = LayoutAtHover(std::string(header) + "\n" + std::string(source),
+        "SDL_DialogFileFilter");
+
+    ASSERT_TRUE(external.known);
+    ASSERT_TRUE(local.known);
+    EXPECT_EQ(external.size, 2u * sizeof(const char*));
+    EXPECT_EQ(external.align, alignof(const char*));
+    EXPECT_EQ(local.size, external.size);
+    EXPECT_EQ(local.align, external.align);
+}
+
 TEST(CompletionSpec, HoverAliasUsesItsDeclarationScope)
 {
     const auto index = heimdall::CompletionEngine::IndexScopes(

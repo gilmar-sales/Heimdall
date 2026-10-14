@@ -12,6 +12,20 @@
 namespace heimdall::detail
 {
 
+    struct ParameterCount
+    {
+        std::size_t required = 0;
+        std::size_t total = 0;
+        bool variadic = false;
+        bool known = false;
+        std::uint32_t suffix = kNone;
+    };
+
+    class TokenView;
+
+    [[nodiscard]] ParameterCount CountParameters(const SemanticModel& model,
+                                                 const TokenView& view, SymbolId symbol);
+
     // The model's tokens, with the helpers every rule below needs.
     class TokenView
     {

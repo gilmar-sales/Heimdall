@@ -21,15 +21,15 @@ O schema em `schemas/heimdall.schema.json` valida os tipos e valores aceitos.
     "align-trailing-comments": true,
     "pointer-alignment": "left",
     "reference-alignment": "left",
-    "blank-line-between-methods": true,
-    "max-parameters-per-line": 3
+    "blank-line-between-methods": true
   }
 }
 ```
 
 Para desativar uma regra booleana suportada, use `false`. Para valores de estilo, use a
 opção correspondente documentada abaixo. `column-limit: 0` desativa a quebra por limite de
-colunas; `max-parameters-per-line: 0` desativa a quebra de parâmetros.
+colunas e a regra de parâmetros verticais (quebras de linha de parâmetros são preservadas
+como escritas).
 
 ## Opções do `.clang-format` do Freyr
 
@@ -81,7 +81,12 @@ ajustadas por projeto:
 | `format.space-before-inheritance-colon` | boolean | `true` |
 | `format.reference-alignment` | `left` / `right` | `left` |
 | `format.blank-line-between-methods` | boolean | `true` |
-| `format.max-parameters-per-line` | inteiro não negativo; `0` desativa | `3` |
+
+Parâmetros de declarações/definições (incluindo construtores, mas não chamadas) seguem
+uma regra vertical sem chave própria: se a assinatura couber em `column-limit`, fica em
+uma linha; caso contrário, cada parâmetro vai para sua própria linha. Com
+`column-limit: 0` a regra é desativada e as quebras de linha dos parâmetros são
+preservadas como escritas.
 
 As opções descritas como não implementadas não são aceitas no objeto `format`; o loader
 rejeita chaves desconhecidas em vez de ignorá-las silenciosamente. A tabela é também o

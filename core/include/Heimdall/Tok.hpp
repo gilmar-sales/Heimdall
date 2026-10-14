@@ -306,7 +306,7 @@ namespace heimdall
 	{
 		template <std::size_t N>
 		consteval TokLiteral(const char(&text)[N]) :
-		tok(LookupTok({text, N - 1})), text(text, N - 1) {}
+			tok(LookupTok({text, N - 1})), text(text, N - 1) {}
 
 		Tok tok;
 		std::string_view text;

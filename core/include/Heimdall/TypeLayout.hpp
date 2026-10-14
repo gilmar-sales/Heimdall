@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Heimdall/Completion.hpp>
-
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <Heimdall/Completion.hpp>
 
 namespace heimdall
 {
@@ -49,7 +49,8 @@ namespace heimdall
 	class TypeLayoutResolver
 	{
 	public:
-		TypeLayoutResolver(const ScopeIndex* local,
+		TypeLayoutResolver(
+			const ScopeIndex* local,
 			const ScopeIndex* external,
 			LayoutTarget target);
 
@@ -57,7 +58,8 @@ namespace heimdall
 		// (`const Node * const`, `char[16]`). `context` is the scope path the name
 		// is looked up from. A reference is as large as its referent unless
 		// `reference_is_pointer` (class members store it as a pointer).
-		std::optional<TypeLayout> OfType(std::string_view text,
+		std::optional<TypeLayout> OfType(
+			std::string_view text,
 			const std::vector<std::string>& context = {},
 			bool reference_is_pointer = false) const;
 
@@ -71,7 +73,8 @@ namespace heimdall
 
 		// `offsetof(record, member)`: `record` as written (aliases followed), `member`
 		// a direct, non-static data member of it.
-		std::optional<std::uint64_t> OffsetOf(std::string_view record,
+		std::optional<std::uint64_t> OffsetOf(
+			std::string_view record,
 			std::string_view member) const;
 
 		// Offset of an indexed data member inside the record that declares it, found

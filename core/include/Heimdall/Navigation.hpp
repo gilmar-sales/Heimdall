@@ -1,14 +1,14 @@
 #pragma once
 
-#include <Heimdall/Completion.hpp>
-#include <Heimdall/ParseTree.hpp>
-
 #include <cstddef>
 #include <cstdint>
+#include <stop_token>
 #include <string>
 #include <string_view>
-#include <stop_token>
 #include <vector>
+
+#include <Heimdall/Completion.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 namespace heimdall
 {
@@ -69,11 +69,14 @@ namespace heimdall
 		static std::vector<UsingDirective> UsingDirectives(const ParseTree& tree);
 
 		static std::vector<AmbiguousReference> FindAmbiguities(
-			const ParseTree& tree, const ScopeIndex* external = nullptr);
+			const ParseTree& tree,
+			const ScopeIndex* external = nullptr);
 
 		// Where the symbol under `offset` is defined (body for functions when
 		// known, else the declaration). An ambiguous name yields every candidate.
-		static std::vector<NavTarget> Definition(const ParseTree& tree, std::size_t offset,
+		static std::vector<NavTarget> Definition(
+			const ParseTree& tree,
+			std::size_t offset,
 			const ScopeIndex* external = nullptr);
 
 		/// Resolves written occurrences in this document, including macro arguments.
@@ -89,7 +92,9 @@ namespace heimdall
 
 		// Where the symbol under `offset` is implemented: overriders / derived
 		// types, else out-of-line definitions, else the definition itself.
-		static std::vector<NavTarget> Implementation(const ParseTree& tree, std::size_t offset,
+		static std::vector<NavTarget> Implementation(
+			const ParseTree& tree,
+			std::size_t offset,
 			const ScopeIndex* external = nullptr);
 
 		// Definitions inside `tree` of the function (`function`) or type declared

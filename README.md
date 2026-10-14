@@ -459,8 +459,8 @@ set and an atomic work index; results are emitted in sorted path order. The
 formatter normalizes indentation and spacing, separates function/method declarations
 and definitions (including constructors), groups consecutive fields and separates
 them from methods and access sections,
-and puts declared parameters on individual lines when there are more than three.
-`check` exits 1 if
+and puts each declared parameter on its own line when the signature exceeds
+`column-limit`. `check` exits 1 if
 lint diagnostics are found; I/O or CLI errors exit 2.
 
 These declaration layout defaults can be configured in `.heimdall.json`:
@@ -468,14 +468,15 @@ These declaration layout defaults can be configured in `.heimdall.json`:
 ```json
 {
   "format": {
-    "blank-line-between-methods": true,
-    "max-parameters-per-line": 3
+    "blank-line-between-methods": true
   }
 }
 ```
 
-Set the first option to `false` or the second to `0` to disable it. Parameter
-wrapping applies to declarations/definitions, including constructors, not calls. Unary complement stays
+Set the option to `false` to disable it. Parameter wrapping applies to
+declarations/definitions, including constructors, not calls: signatures that fit
+within `column-limit` stay on one line, otherwise one parameter per line
+(`column-limit: 0` preserves parameter line breaks as written). Unary complement stays
 attached to its operand, with assignment spacing preserved: `kNone = ~0u;`.
 
 `parse` dumps the grammar tree (node kinds with byte offsets) and reports

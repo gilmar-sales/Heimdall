@@ -163,7 +163,7 @@ TEST(RuleConfigSpec, LoadsIncludeOrderSettings)
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].code, "cpp/sort-includes");
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics),
-              "#include \"app.h\"\n#include <vector>\n");
+              "#include \"app.h\"\n\n#include <vector>\n");
     std::filesystem::remove_all(directory);
 }
 
@@ -274,20 +274,17 @@ TEST(RuleConfigSpec, LoadsAndMergesDeclarationLayoutSettings)
     const auto directory = MakeConfigDir("layout");
     WriteConfig(
         directory,
-        R"({"root":true,"format":{"blank-line-between-methods":false,"max-parameters-per-line":0}})");
+        R"({"root":true,"format":{"blank-line-between-methods":false}})");
     auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
     ASSERT_TRUE(loaded);
     EXPECT_TRUE(loaded->has_blank_line_between_methods);
-    EXPECT_TRUE(loaded->has_max_parameters_per_line);
     EXPECT_FALSE(loaded->format_options.blank_line_between_methods);
-    EXPECT_EQ(loaded->format_options.max_parameters_per_line, 0);
     const auto child = directory / "child";
     std::filesystem::create_directories(child);
-    WriteConfig(child, R"({"format":{"max-parameters-per-line":5}})");
+    WriteConfig(child, R"({"format":{"blank-line-between-methods":true}})");
     auto merged = heimdall::FindFormatOptions(child);
     ASSERT_TRUE(merged&&*merged);
-    EXPECT_FALSE((* *merged).blank_line_between_methods);
-    EXPECT_EQ((* *merged).max_parameters_per_line, 5);
+    EXPECT_TRUE((* *merged).blank_line_between_methods);
     std::filesystem::remove_all(directory);
 }
 
@@ -297,10 +294,8 @@ TEST(RuleConfigSpec, RejectsInvalidDeclarationLayoutSettings)
     for (const auto json :
         {
             R"({"format":{"blank-line-between-methods":"true"}})",
-            R"({"format":{"max-parameters-per-line":-1}})",
-            R"({"format":{"max-parameters-per-line":3.5}})",
-            R"({"format":{"max-parameters-per-line":true}})",
-            R"({"format":{"max-parameters-per-line":"3"}})"
+            R"({"format":{"max-parameters-per-line":3}})",
+            R"({"format":{"max-parameters-per-line":0}})"
     })
     {
         SCOPED_TRACE(json);
@@ -372,6 +367,47 @@ TEST(RuleConfigSpec, LoadsFormatterBehaviorSettings)
     EXPECT_FALSE((*found)->blank_line_after_type_definition);
     EXPECT_FALSE((*found)->space_before_inheritance_colon);
     EXPECT_FALSE((*found)->align_trailing_comments);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, FormatterUsesNearestConfiguredIncludeOrder)
+{
+    const auto directory = MakeConfigDir("format-include-order");
+    const auto child = directory / "child";
+    std::filesystem::create_directories(child);
+    WriteConfig(directory,
+                R"({"format":{"sort-includes":true},"include-order":{"groups":["angle","quote"]}})");
+    WriteConfig(child,
+                R"({"include-order":{"groups":["quote","angle"],"case-insensitive":false}})");
+
+    const auto found = heimdall::FindFormatOptions(child);
+
+    ASSERT_TRUE(found);
+    ASSERT_TRUE(*found);
+    EXPECT_TRUE((*found)->sort_includes);
+    EXPECT_FALSE((*found)->includeCaseInsensitive);
+    EXPECT_EQ(heimdall::Formatter(* *found).Format("#include <apple>\n#include <Zebra>\n#include \"app.hpp\"\n"),
+              "#include \"app.hpp\"\n\n#include <Zebra>\n#include <apple>\n");
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, BareFilenameInWorkingDirectoryResolvesConfig)
+{
+    const auto directory = MakeConfigDir("bare-filename");
+    WriteConfig(directory,
+                R"({"root":true,"format":{"sort-includes":true},"include-order":{"groups":["quote","angle"]}})");
+    std::ofstream(directory / "file.cpp") << "#include <a>\n";
+    const auto saved = std::filesystem::current_path();
+    std::filesystem::current_path(directory);
+    const auto found = heimdall::FindFormatOptions("file.cpp");
+    std::filesystem::current_path(saved);
+
+    ASSERT_TRUE(found);
+    ASSERT_TRUE(*found);
+    EXPECT_TRUE((*found)->sort_includes);
+    ASSERT_EQ((*found)->includeOrder.size(), 2u);
+    EXPECT_EQ((*found)->includeOrder[0], heimdall::IncludeGroup::Quote);
+    EXPECT_EQ((*found)->includeOrder[1], heimdall::IncludeGroup::Angle);
     std::filesystem::remove_all(directory);
 }
 

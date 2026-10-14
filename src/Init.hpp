@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CliOptions.hpp"
-
 #include <filesystem>
 #include <string>
+
+#include "CliOptions.hpp"
 
 namespace heimdall::cli
 {

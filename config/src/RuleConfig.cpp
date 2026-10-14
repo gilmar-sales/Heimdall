@@ -1,10 +1,9 @@
-#include <Heimdall/RuleConfig.hpp>
-
-#include <simdjson.h>
-
 #include <algorithm>
 #include <limits>
+#include <simdjson.h>
 #include <vector>
+
+#include <Heimdall/RuleConfig.hpp>
 
 namespace heimdall
 {
@@ -520,22 +519,10 @@ namespace heimdall
 					continue;
 				}
 
-				if (key == "max-parameters-per-line")
+				if (key != "pointer-alignment" && key != "reference-alignment")
 				{
-					std::uint64_t setting;
-					if (field.value.get_uint64().get(setting) ||
-						setting > std::numeric_limits<std::size_t>::max())
-					{
-						return std::unexpected("'max-parameters-per-line' in 'format' must be a "
-							"non-negative integer: " +
-							path.string());
-					}
-
-					configuration.format_options.max_parameters_per_line =
-						static_cast<std::size_t>(setting);
-					configuration.has_max_parameters_per_line = true;
-					mark_override();
-					continue;
+					return std::unexpected(
+						"unknown key in 'format' in Heimdall config: " + std::string(key));
 				}
 
 				std::string_view setting;
@@ -610,6 +597,12 @@ namespace heimdall
 		if (std::filesystem::is_regular_file(current))
 		{
 			current = current.parent_path();
+			if (current.empty())
+			{
+				// A bare filename (`heimdall lint main.cpp`): the parent is
+				// empty and `absolute` rejects empty paths.
+				current = std::filesystem::current_path();
+			}
 		}
 
 		current = std::filesystem::absolute(current).lexically_normal();
@@ -725,6 +718,12 @@ namespace heimdall
 		FormatOptions merged;
 		for (auto it = configurations.rbegin(); it != configurations.rend(); ++it)
 		{
+			if (it->has_include_order)
+			{
+				merged.includeOrder           = it->options.include_order;
+				merged.includeCaseInsensitive = it->options.include_case_insensitive;
+			}
+
 			for (const auto& rule : it->options.overrides)
 			{
 				if (rule.code == "format/require-final-newline")
@@ -747,10 +746,6 @@ namespace heimdall
 				else if (key == "blank-line-between-methods")
 				{
 					merged.blank_line_between_methods = value.blank_line_between_methods;
-				}
-				else if (key == "max-parameters-per-line")
-				{
-					merged.max_parameters_per_line = value.max_parameters_per_line;
 				}
 				else if (key == "indent-width")
 				{

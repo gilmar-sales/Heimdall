@@ -1,12 +1,12 @@
 #include <Heimdall/Formatter.hpp>
 
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <algorithm>
 #include <optional>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
 {
@@ -43,7 +43,8 @@ namespace heimdall
 				source[token.offset] == brace;
 		}
 
-		bool IsDirectiveLine(std::size_t line_start,
+		bool IsDirectiveLine(
+			std::size_t line_start,
 			const std::vector<PreprocessorDirective>& directives,
 			std::size_t& directive_cursor)
 		{
@@ -1390,7 +1391,9 @@ namespace heimdall
 			return true;
 		}
 
-		bool PassBodyIsDeclaration(const std::vector<PSig>& sigs, std::size_t begin,
+		bool PassBodyIsDeclaration(
+			const std::vector<PSig>& sigs,
+			std::size_t begin,
 			std::size_t end)
 		{
 			// `if (a) { Widget w; }` must keep its braces: an unbraced declaration
@@ -2525,7 +2528,7 @@ namespace heimdall
 
 	std::string Formatter::Format(std::string_view source) const
 	{
-		if (m_options.blank_line_between_methods || m_options.max_parameters_per_line != 0)
+		if (m_options.blank_line_between_methods || m_options.column_limit != 0)
 		{
 			return Format(ParseTree::Parse(source, {}));
 		}
@@ -2576,7 +2579,9 @@ namespace heimdall
 	}
 
 	FormattingSnapshot Formatter::FormatIncremental(
-		const ParseTree& tree, const FormattingSnapshot* previous, std::stop_token stop) const
+		const ParseTree& tree,
+		const FormattingSnapshot* previous,
+		std::stop_token stop) const
 	{
 		FormattingSnapshot snapshot;
 		if (stop.stop_requested() || tree.Cancelled())
@@ -2637,7 +2642,9 @@ namespace heimdall
 		return snapshot;
 	}
 
-	std::string Formatter::FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+	std::string Formatter::FormatImpl(
+		std::string_view source,
+		const std::vector<Token>& tokens,
 		const std::vector<PreprocessorDirective>& directives) const
 	{
 		if (mStop.stop_requested())
@@ -2662,7 +2669,9 @@ namespace heimdall
 		return FormatShaped(altered, fresh_tokens, fresh_directives);
 	}
 
-	std::string Formatter::FormatShaped(std::string_view source, const std::vector<Token>& tokens,
+	std::string Formatter::FormatShaped(
+		std::string_view source,
+		const std::vector<Token>& tokens,
 		const std::vector<PreprocessorDirective>& directives) const
 	{
 		if (source.empty() || mStop.stop_requested())
@@ -4263,50 +4272,6 @@ namespace heimdall
 			}
 		}
 
-		// ---- Include sorting ----------------------------------------------------
-		if (m_options.sort_includes)
-		{
-			auto header_key =[](const std::string& line)->std::string
-			{
-				const auto pos = line.find("include");
-				if (pos == std::string::npos)
-				{
-					return line;
-				}
-
-				std::string_view rest(line.c_str() + pos + kIncludeKeywordLength);
-				while (!rest.empty() && IsIndent(rest.front()))
-				{
-					rest.remove_prefix(1);
-				}
-
-				return std::string(rest);
-			};
-			std::size_t i = 0;
-			while (i < out_lines.size())
-			{
-				if (!out_lines[i].is_include)
-				{
-					++i;
-					continue;
-				}
-
-				std::size_t j = i;
-				while (j < out_lines.size() && out_lines[j].is_include)
-				{
-					++j;
-				}
-
-				std::stable_sort(out_lines.begin() + static_cast<std::ptrdiff_t>(i),
-					out_lines.begin() + static_cast<std::ptrdiff_t>(j),
-					[&](const OutLine& left, const OutLine& right)
-					{
-						return header_key(left.text) < header_key(right.text);
-				});
-				i = j;
-			}
-		}
-
 		std::string output;
 		for (const auto& line : out_lines)
 		{
@@ -4351,6 +4316,16 @@ namespace heimdall
 			output += source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
 		}
 
+		if (m_options.sort_includes)
+		{
+			RuleOptions options;
+			options.sort_includes            = true;
+			options.include_order            = m_options.includeOrder;
+			options.include_case_insensitive = m_options.includeCaseInsensitive;
+			options.main_file_name           = m_options.mainFileName;
+			return RuleEngine::SortIncludes(output, options);
+		}
+
 		return output;
 	}
 
@@ -4393,7 +4368,8 @@ namespace heimdall
 		return Diff(source, formatted);
 	}
 
-	std::vector<FormatEdit> Formatter::FormatEdits(const ParseTree& tree,
+	std::vector<FormatEdit> Formatter::FormatEdits(
+		const ParseTree& tree,
 		std::stop_token stop) const
 	{
 		const Formatter worker(m_options, stop);
@@ -4406,7 +4382,8 @@ namespace heimdall
 		return worker.Diff(tree.Source(), formatted);
 	}
 
-	std::vector<FormatEdit> Formatter::ComputeEdits(std::string_view source,
+	std::vector<FormatEdit> Formatter::ComputeEdits(
+		std::string_view source,
 		std::string_view formatted,
 		std::stop_token stop)
 	{
@@ -4418,7 +4395,8 @@ namespace heimdall
 		return Formatter({}, stop).Diff(source, formatted);
 	}
 
-	std::vector<FormatEdit> Formatter::Diff(std::string_view source,
+	std::vector<FormatEdit> Formatter::Diff(
+		std::string_view source,
 		std::string_view formatted) const
 	{
 		if (formatted == source)
@@ -4526,7 +4504,9 @@ namespace heimdall
 		return edits;
 	}
 
-	std::string Formatter::FormatRange(std::string_view source, std::size_t start_line,
+	std::string Formatter::FormatRange(
+		std::string_view source,
+		std::size_t start_line,
 		std::size_t end_line) const
 	{
 		const auto edits = FormatEdits(source);

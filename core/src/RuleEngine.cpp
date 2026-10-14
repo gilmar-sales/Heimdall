@@ -1,6 +1,3 @@
-#include <Heimdall/Lexer.hpp>
-#include <Heimdall/LineTable.hpp>
-#include <Heimdall/Preprocessor.hpp>
 #include <Heimdall/RuleEngine.hpp>
 
 #include <algorithm>
@@ -14,25 +11,31 @@
 #include <unordered_set>
 #include <utility>
 
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
+
 namespace heimdall
 {
 
 	namespace
 	{
 
-		constexpr std::size_t kMinPrefixedLen    = 2;
-		constexpr int kDecimalBase               = 10;
-		constexpr int kHexBase                   = 16;
-		constexpr int kBinaryBase                = 2;
-		constexpr int kOctalBase                 = 8;
-		constexpr std::size_t kHexPrefixLen      = 2;
-		constexpr int kMaxSignHops               = 4;
-		constexpr int kMaxDeclWalkSteps          = 25;
-		constexpr int kMaxEnumLookback           = 6;
-		constexpr std::size_t kIncludeDelimCount = 2;
-		constexpr std::size_t kMinSortableBlock  = 2;
+		constexpr std::size_t kMinPrefixedLen     = 2;
+		constexpr int kDecimalBase                = 10;
+		constexpr int kHexBase                    = 16;
+		constexpr int kBinaryBase                 = 2;
+		constexpr int kOctalBase                  = 8;
+		constexpr std::size_t kHexPrefixLen       = 2;
+		constexpr int kMaxSignHops                = 4;
+		constexpr int kMaxDeclWalkSteps           = 25;
+		constexpr int kMaxEnumLookback            = 6;
+		constexpr std::size_t kIncludeDelimCount  = 2;
+		constexpr std::size_t kMinSortableSection = 2;
 
-		bool IsInDirective(std::size_t offset, const std::vector<PreprocessorDirective>& directives,
+		bool IsInDirective(
+			std::size_t offset,
+			const std::vector<PreprocessorDirective>& directives,
 			std::size_t& cursor)
 		{
 			while (cursor < directives.size() &&
@@ -102,7 +105,9 @@ namespace heimdall
 		}
 
 		std::vector<Suppression> FindSuppressions(
-			std::string_view source, const std::vector<Token>& tokens, const LineTable& lines)
+			std::string_view source,
+			const std::vector<Token>& tokens,
+			const LineTable& lines)
 		{
 			constexpr std::string_view line_marker = "heimdall-disable-line";
 			constexpr std::string_view next_marker = "heimdall-disable-next-line";
@@ -326,7 +331,8 @@ namespace heimdall
 			bool angle;
 		};
 
-		std::optional<IncludeTarget> ReadIncludeTarget(std::string_view source,
+		std::optional<IncludeTarget> ReadIncludeTarget(
+			std::string_view source,
 			const PreprocessorDirective& directive)
 		{
 			std::string_view body = source.substr(directive.offset, directive.length);
@@ -574,7 +580,9 @@ namespace heimdall
 		// must contain const/constexpr/constinit/enum. Note: constinit was
 		// a former false positive (flagged `constinit int kX = 42;`); it
 		// names its value exactly like const/constexpr, so it is exempt.
-		bool IsNamedConstantInitializer(const std::vector<Token>& tokens, std::string_view source,
+		bool IsNamedConstantInitializer(
+			const std::vector<Token>& tokens,
+			std::string_view source,
 			std::size_t index)
 		{
 			std::size_t trigger = PrevSignificant(tokens, index);
@@ -924,6 +932,323 @@ namespace heimdall
 	std::vector<Diagnostic> RuleEngine::Analyze(const ParseTree& tree) const
 	{
 		return AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
+	}
+
+	// Lower-cased file stem/extension split ("src/Reporting.cpp" -> {"reporting", "cpp"}).
+	struct FileStemExt
+	{
+		std::string stem;
+		std::string ext;
+	};
+
+	FileStemExt SplitFileName(std::string_view path)
+	{
+		const auto slash = path.find_last_of("/\\");
+		const auto name  = slash == std::string_view::npos ? path : path.substr(slash + 1);
+		const auto dot   = name.find_last_of('.');
+		FileStemExt parts;
+		if (dot == std::string_view::npos || dot == 0)
+		{
+			parts.stem = std::string(name);
+		}
+		else
+		{
+			parts.stem = std::string(name.substr(0, dot));
+			parts.ext  = std::string(name.substr(dot + 1));
+		}
+
+		for (auto& c : parts.stem)
+		{
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		}
+
+		for (auto& c : parts.ext)
+		{
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		}
+
+		return parts;
+	}
+
+	bool IsImplExtension(std::string_view ext)
+	{
+		return ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" || ext == "c++" ||
+			ext == "cp";
+	}
+
+	bool IsHeaderExtension(std::string_view ext)
+	{
+		return ext == "h" || ext == "hh" || ext == "hpp" || ext == "hxx" || ext == "h++";
+	}
+
+	struct IncludeSectionFix
+	{
+		std::size_t offset = 0;
+		std::size_t length = 0;
+		std::string replacement;
+		bool misordered = false;
+	};
+
+	// Sections, canonical replacements and order verdicts for every sortable
+	// run of literal includes. A fix is recorded when the section is misordered
+	// or when its blank lines do not match the canonical regrouping (one blank
+	// line between bands); the caller decides which fixes become diagnostics.
+	std::vector<IncludeSectionFix> SortIncludeSections(
+		std::string_view source,
+		const std::vector<PreprocessorDirective>& directives,
+		const std::vector<IncludeGroup>& group_order,
+		bool case_insensitive,
+		std::string_view main_file_name)
+	{
+		// Literal includes only: #include_next and macro includes
+		// have no target to order.
+		struct IncludeEntry
+		{
+			std::size_t directive;
+			IncludeTarget target;
+		};
+
+		std::vector<IncludeEntry> includes;
+
+		std::vector<IncludeSectionFix> fixes;
+		for (std::size_t i = 0; i < directives.size(); ++i)
+		{
+			if (directives[i].kind != DirectiveKind::Include)
+			{
+				continue;
+			}
+
+			auto target = ReadIncludeTarget(source, directives[i]);
+			if (target)
+			{
+				includes.push_back({i, *target});
+			}
+		}
+
+		// The homonymous header of the translation unit ("Reporting.hpp"
+		// for "Reporting.cpp") sorts before every group. Only implementation
+		// files pin a header; headers and unknown files keep plain order.
+		const auto main_parts     = SplitFileName(main_file_name);
+		const bool source_is_impl = !main_parts.stem.empty() && IsImplExtension(main_parts.ext);
+		auto is_main_header =[&](const IncludeTarget& target)
+		{
+			if (!source_is_impl)
+			{
+				return false;
+			}
+
+			const auto name  = target.text.substr(1, target.text.size() - kIncludeDelimCount);
+			const auto slash = name.find_last_of("/\\");
+			const auto filename =
+				slash == std::string_view::npos ? name : name.substr(slash + 1);
+			const auto dot = filename.find_last_of('.');
+			if (dot == std::string_view::npos || dot == 0)
+			{
+				return false;
+			}
+
+			const auto ext = filename.substr(dot + 1);
+			if (ext.size() >= 8)
+			{
+				return false;
+			}
+
+			char lowered[8];
+			for (std::size_t i = 0; i < ext.size(); ++i)
+			{
+				lowered[i] =
+					static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
+			}
+
+			if (!IsHeaderExtension(std::string_view(lowered, ext.size())))
+			{
+				return false;
+			}
+
+			const auto stem = filename.substr(0, dot);
+			return stem.size() == main_parts.stem.size() &&
+				std::equal(stem.begin(), stem.end(), main_parts.stem.begin(),
+				[](char left, char right)
+				{
+					return std::tolower(static_cast<unsigned char>(left)) ==
+					static_cast<unsigned char>(right);
+			});
+		};
+
+		auto group_index =[&](const IncludeTarget& target)
+		{
+			const auto wanted = target.angle ? IncludeGroup::Angle : IncludeGroup::Quote;
+			const auto it     = std::find(group_order.begin(), group_order.end(), wanted);
+			return it == group_order.end() ? group_order.size()
+			: static_cast<std::size_t>(it - group_order.begin());
+		};
+
+		// A qualified `<...>` path (`<Heimdall/RuleConfig.hpp>`) as opposed
+		// to a top-level header (`<vector>`).
+		auto is_qualified_path =[](const IncludeTarget& target)
+		{
+			return target.angle &&
+				target.text.substr(1, target.text.size() - kIncludeDelimCount).find('/') !=
+				std::string_view::npos;
+		};
+
+		auto section_band =[&](const IncludeTarget& target)
+		{
+			return std::pair(is_main_header(target),
+				std::pair(group_index(target), is_qualified_path(target)));
+		};
+
+		auto sorts_before =[&](const IncludeTarget& left, const IncludeTarget& right)
+		{
+			const bool left_main  = is_main_header(left);
+			const bool right_main = is_main_header(right);
+			if (left_main != right_main)
+			{
+				return left_main;
+			}
+
+			const auto left_group  = group_index(left);
+			const auto right_group = group_index(right);
+			if (left_group != right_group)
+			{
+				return left_group < right_group;
+			}
+
+			const auto left_name = left.text.substr(1, left.text.size() - kIncludeDelimCount);
+			const auto right_name =
+				right.text.substr(1, right.text.size() - kIncludeDelimCount);
+			// Inside `<...>` top-level headers (`<vector>`) come before
+			// qualified paths (`<Heimdall/RuleConfig.hpp>`): system
+			// headers, then project and third-party headers.
+			if (left.angle && right.angle)
+			{
+				const bool left_qualified  = is_qualified_path(left);
+				const bool right_qualified = is_qualified_path(right);
+				if (left_qualified != right_qualified)
+				{
+					return !left_qualified;
+				}
+			}
+
+			return case_insensitive
+			? CaseInsensitiveLess(left_name, right_name)
+			: left_name < right_name;
+		};
+
+		// A section is a run of includes joined only by blank lines.
+		// Comments, other directives, macro includes and
+		// `#include_next` start a new section, so reordering never
+		// crosses them. The fix orders the section by the configured
+		// (group, name) key and regroups it with one blank line
+		// between bands, so the group order holds across the
+		// whole section.
+		auto is_blank_gap =[&](std::size_t begin, std::size_t end)
+		{
+			for (auto i = begin; i < end; ++i)
+			{
+				const char c = source[i];
+				if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' &&
+					c != '\v')
+				{
+					return false;
+				}
+			}
+
+			return true;
+		};
+
+		std::size_t section_begin = 0;
+		while (section_begin < includes.size())
+		{
+			std::size_t section_end = section_begin + 1;
+			while (section_end < includes.size())
+			{
+				const auto& previous = directives[includes[section_end - 1].directive];
+				const auto& current  = directives[includes[section_end].directive];
+				if (!is_blank_gap(previous.offset + previous.length, current.offset))
+				{
+					break;
+				}
+
+				++section_end;
+			}
+
+			if (section_end - section_begin >= kMinSortableSection)
+			{
+				std::vector<std::size_t> order(section_end - section_begin);
+				for (std::size_t i = 0; i < order.size(); ++i)
+				{
+					order[i] = i;
+				}
+
+				std::stable_sort(
+					order.begin(), order.end(),[&](std::size_t left, std::size_t right)
+					{
+						return sorts_before(includes[section_begin + left].target,
+						includes[section_begin + right].target);
+				});
+
+				const auto& first = directives[includes[section_begin].directive];
+				const auto& last  = directives[includes[section_end - 1].directive];
+				const auto offset = first.offset;
+				const auto length = last.offset + last.length - offset;
+				// Regroup: one blank line separates the bands
+				// (top-level `<...>`, qualified `<...>`, `"..."`);
+				// includes inside one band stay contiguous.
+				const auto& first_directive =
+					directives[includes[section_begin + order[0]].directive];
+				const std::string_view first_text(
+					source.substr(first_directive.offset, first_directive.length));
+				const std::string_view band_separator =
+					first_text.size() >= 2 && first_text[first_text.size() - 2] == '\r'
+				? "\r\n"
+				: "\n";
+				std::string replacement;
+				for (std::size_t k = 0; k < order.size(); ++k)
+				{
+					const auto& directive =
+						directives[includes[section_begin + order[k]].directive];
+					replacement.append(source.substr(directive.offset, directive.length));
+					if (k + 1 < order.size())
+					{
+						const auto& current_target =
+							includes[section_begin + order[k]].target;
+						const auto& next_target =
+							includes[section_begin + order[k + 1]].target;
+						if (section_band(current_target) != section_band(next_target))
+						{
+							replacement.append(band_separator);
+						}
+					}
+				}
+
+				const auto original   = source.substr(offset, length);
+				const bool misordered = !std::is_sorted(order.begin(), order.end());
+				if (misordered || replacement != original)
+				{
+					fixes.push_back({offset, length, std::move(replacement), misordered});
+				}
+			}
+
+			section_begin = section_end;
+		}
+
+		return fixes;
+	}
+
+	std::string RuleEngine::SortIncludes(std::string_view source, const RuleOptions& options)
+	{
+		const auto tokens     = Lexer(source).Lex();
+		const auto directives = Preprocessor().Process(source).directives;
+		const auto fixes = SortIncludeSections(source, directives, options.include_order,
+			options.include_case_insensitive, options.main_file_name);
+		std::string output(source);
+		for (auto fix = fixes.rbegin(); fix != fixes.rend(); ++fix)
+		{
+			output.replace(fix->offset, fix->length, fix->replacement);
+		}
+
+		return output;
 	}
 
 	std::vector<Diagnostic> RuleEngine::AnalyzeImpl(
@@ -2463,123 +2788,25 @@ namespace heimdall
 
 		if (RuleEnabled("cpp/sort-includes", m_options.sort_includes))
 		{
-			// Literal includes only: #include_next and macro includes
-			// have no target to order.
-			struct IncludeEntry
+			for (auto& fix : SortIncludeSections(source, directives, m_options.include_order,
+				m_options.include_case_insensitive, m_options.main_file_name))
 			{
-				std::size_t directive;
-				IncludeTarget target;
-			};
-
-			std::vector<IncludeEntry> includes;
-			for (std::size_t i = 0; i < directives.size(); ++i)
-			{
-				if (directives[i].kind != DirectiveKind::Include)
+				if (!fix.misordered)
 				{
 					continue;
 				}
 
-				auto target = ReadIncludeTarget(source, directives[i]);
-				if (target)
-				{
-					includes.push_back({i, *target});
-				}
-			}
-
-			auto group_index =[this](const IncludeTarget& target)
-			{
-				const auto& order = m_options.include_order;
-				const auto wanted = target.angle ? IncludeGroup::Angle : IncludeGroup::Quote;
-				const auto it     = std::find(order.begin(), order.end(), wanted);
-				return it == order.end() ? order.size()
-				: static_cast<std::size_t>(it - order.begin());
-			};
-
-			auto sorts_before =[&](const IncludeTarget& left, const IncludeTarget& right)
-			{
-				const auto left_group  = group_index(left);
-				const auto right_group = group_index(right);
-				if (left_group != right_group)
-				{
-					return left_group < right_group;
-				}
-
-				const auto left_name = left.text.substr(1, left.text.size() - kIncludeDelimCount);
-				const auto right_name =
-					right.text.substr(1, right.text.size() - kIncludeDelimCount);
-				return m_options.include_case_insensitive
-				? CaseInsensitiveLess(left_name, right_name)
-				: left_name < right_name;
-			};
-
-			// A block is a run of includes on adjacent lines. Blank
-			// lines, comments and other directives start a new block,
-			// so reordering never crosses them.
-			std::size_t block_begin = 0;
-			while (block_begin < includes.size())
-			{
-				std::size_t block_end = block_begin + 1;
-				while (block_end < includes.size())
-				{
-					const auto& previous = directives[includes[block_end - 1].directive];
-					const auto& current  = directives[includes[block_end].directive];
-					if (current.offset != previous.offset + previous.length)
-					{
-						break;
-					}
-
-					++block_end;
-				}
-
-				if (block_end - block_begin >= kMinSortableBlock)
-				{
-					std::vector<std::size_t> order(block_end - block_begin);
-					for (std::size_t i = 0; i < order.size(); ++i)
-					{
-						order[i] = i;
-					}
-
-					std::stable_sort(
-						order.begin(), order.end(),[&](std::size_t left, std::size_t right)
-						{
-							return sorts_before(includes[block_begin + left].target,
-							includes[block_begin + right].target);
-					});
-
-					// The identity permutation means the block already
-					// follows the configured order.
-					if (!std::is_sorted(order.begin(), order.end()))
-					{
-						const auto& first = directives[includes[block_begin].directive];
-						const auto& last  = directives[includes[block_end - 1].directive];
-						const auto offset = first.offset;
-						const auto length = last.offset + last.length - offset;
-						std::string replacement;
-						for (const auto index : order)
-						{
-							const auto& directive =
-								directives[includes[block_begin + index].directive];
-							replacement.append(source.substr(directive.offset, directive.length));
-						}
-
-						// Safe in batch: the configured order is the
-						// project's declared convention, and the fix
-						// only reorders includes inside one block.
-						diagnostics.push_back(MakeDiagnostic(
-							RuleId::UnsortedIncludes, "cpp/sort-includes",
-							"includes are not in the configured order", offset, length,
-							lines.Lookup(offset), {offset, length, std::move(replacement)}));
-					}
-				}
-
-				block_begin = block_end;
+				diagnostics.push_back(MakeDiagnostic(RuleId::UnsortedIncludes, "cpp/sort-includes",
+					"includes are not in the configured order", fix.offset, fix.length,
+					lines.Lookup(fix.offset), {fix.offset, fix.length, std::move(fix.replacement)}));
 			}
 		}
 
 		return ApplyPolicy(std::move(diagnostics), source, tokens);
 	}
 
-	std::vector<Diagnostic> RuleEngine::ApplyPolicy(std::vector<Diagnostic> diagnostics,
+	std::vector<Diagnostic> RuleEngine::ApplyPolicy(
+		std::vector<Diagnostic> diagnostics,
 		std::string_view source,
 		const std::vector<Token>& tokens) const
 	{
@@ -2636,7 +2863,9 @@ namespace heimdall
 	}
 
 	std::string RuleEngine::ApplyFixes(
-		std::string_view source, const std::vector<Diagnostic>& diagnostics, bool include_unsafe)
+		std::string_view source,
+		const std::vector<Diagnostic>& diagnostics,
+		bool include_unsafe)
 	{
 		std::vector<const TextEdit*> edits;
 		edits.reserve(diagnostics.size());

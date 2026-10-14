@@ -1,12 +1,12 @@
 #pragma once
 
-#include <Heimdall/MacroTable.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>
+
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
 {
@@ -26,7 +26,8 @@ namespace heimdall
 
 		/// The definition of `name` live at byte `offset`, or null. Must stay valid for as long
 		/// as the resolver lives and be safe to call from the parsing thread.
-		[[nodiscard]] virtual const MacroDef* Find(std::string_view name,
+		[[nodiscard]] virtual const MacroDef* Find(
+			std::string_view name,
 			std::size_t offset) const noexcept = 0;
 
 		/// Summary of every definition the resolver can return. A parse that was reused under a

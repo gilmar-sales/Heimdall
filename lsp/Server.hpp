@@ -1,20 +1,5 @@
 #pragma once
 
-#include "Document.hpp"
-#include "ThreadPool.hpp"
-#include "WorkspaceSymbolIndex.hpp"
-
-#include <Heimdall/AnalysisFeatures.hpp>
-#include <Heimdall/CompileDatabase.hpp>
-#include <Heimdall/Formatter.hpp>
-#include <Heimdall/IndexRename.hpp>
-#include <Heimdall/IndexStore.hpp>
-#include <Heimdall/IncludeAnalyzer.hpp>
-#include <Heimdall/IncludeIndex.hpp>
-#include <Heimdall/MacroEnvironment.hpp>
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/RuleEngine.hpp>
-
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -26,8 +11,8 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
-#include <span>
 #include <simdjson.h>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -36,6 +21,21 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/AnalysisFeatures.hpp>
+#include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/Formatter.hpp>
+#include <Heimdall/IncludeAnalyzer.hpp>
+#include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/IndexRename.hpp>
+#include <Heimdall/IndexStore.hpp>
+#include <Heimdall/MacroEnvironment.hpp>
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/RuleEngine.hpp>
+
+#include "Document.hpp"
+#include "ThreadPool.hpp"
+#include "WorkspaceSymbolIndex.hpp"
 
 namespace heimdall::lsp
 {
@@ -166,10 +166,14 @@ namespace heimdall::lsp
 
 		void Respond(std::string_view id, std::string_view result);
 
-		void PublishDiagnostics(const std::string& uri, std::shared_ptr<const std::string> text,
+		void PublishDiagnostics(
+			const std::string& uri,
+			std::shared_ptr<const std::string> text,
 			std::int64_t version);
 
-		bool DocumentParams(simdjson::dom::element request, std::string_view& uri,
+		bool DocumentParams(
+			simdjson::dom::element request,
+			std::string_view& uri,
 			simdjson::dom::object& document);
 
 		void OpenDocument(simdjson::dom::element request);
@@ -228,29 +232,53 @@ namespace heimdall::lsp
 		// Macros live in a document's translation unit (builtins, -D, every #include in order).
 		// Cached per open document and version; dropped when the document closes.
 		std::shared_ptr<const heimdall::MacroEnvironment> MacroEnvironmentFor(
-			const std::string& uri, const std::shared_ptr<const std::string>& text,
-			std::int64_t version, const heimdall::CompileCommand* command, bool remember = true);
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			std::int64_t version,
+			const heimdall::CompileCommand* command,
+			bool remember = true);
 
-		heimdall::ParserOptions ParserOptionsForText(const std::string& uri,
-			const std::shared_ptr<const std::string>& text, std::int64_t version,
-			const heimdall::CompileCommand* command, bool remember);
+		heimdall::ParserOptions ParserOptionsForText(
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			std::int64_t version,
+			const heimdall::CompileCommand* command,
+			bool remember);
 
 		// Hover and go-to-definition of a macro name; false when `offset` is not on a macro.
-		bool MacroHover(const std::string& uri, const std::shared_ptr<const std::string>& text,
-			std::int64_t version, const LineIndex& lines, std::size_t offset,
-			const heimdall::CompileCommand* command, std::string_view id);
-		bool MacroDefinition(const std::string& uri, const std::shared_ptr<const std::string>& text,
-			std::int64_t version, std::size_t offset, const heimdall::CompileCommand* command,
+		bool MacroHover(
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			std::int64_t version,
+			const LineIndex& lines,
+			std::size_t offset,
+			const heimdall::CompileCommand* command,
 			std::string_view id);
 
-		void AppendMacroCompletions(const std::string& uri,
-			const std::shared_ptr<const std::string>& text, std::int64_t version,
-			const heimdall::CompileCommand* command, std::size_t offset, const std::string& prefix,
-			const Position& start, const Position& end,
-			const std::vector<heimdall::CompletionItem>& items, std::size_t& rank,
+		bool MacroDefinition(
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			std::int64_t version,
+			std::size_t offset,
+			const heimdall::CompileCommand* command,
+			std::string_view id);
+
+		void AppendMacroCompletions(
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
+			std::int64_t version,
+			const heimdall::CompileCommand* command,
+			std::size_t offset,
+			const std::string& prefix,
+			const Position& start,
+			const Position& end,
+			const std::vector<heimdall::CompletionItem>& items,
+			std::size_t& rank,
 			std::string& response);
 
-		void AppendHeaderMacroSymbols(std::string_view query, std::span<const SymbolHit> hits,
+		void AppendHeaderMacroSymbols(
+			std::string_view query,
+			std::span<const SymbolHit> hits,
 			std::string& response);
 
 		struct MacroEnvironmentEntry
@@ -263,7 +291,10 @@ namespace heimdall::lsp
 		std::unordered_map<std::string, MacroEnvironmentEntry> mMacroEnvironments;
 
 		// Syntax highlight: lexical and declaration-based classification, full or ranged.
-		void SemanticTokensRequest(simdjson::dom::element request, std::string_view id, bool ranged);
+		void SemanticTokensRequest(
+			simdjson::dom::element request,
+			std::string_view id,
+			bool ranged);
 
 		enum class TypeHierarchyMode
 		{
@@ -273,7 +304,9 @@ namespace heimdall::lsp
 		};
 
 		void TypeHierarchyRequest(
-			simdjson::dom::element request, std::string_view id, TypeHierarchyMode mode);
+			simdjson::dom::element request,
+			std::string_view id,
+			TypeHierarchyMode mode);
 
 		// "Go to Symbol in Workspace": answers from the last published symbol index and
 		// never parses or scans while the request is served.
@@ -292,7 +325,8 @@ namespace heimdall::lsp
 		void IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop);
 
 		[[nodiscard]] std::shared_ptr<const heimdall::index::FileShard> IndexShard(
-			const heimdall::ParseTree& tree, const std::filesystem::path& file,
+			const heimdall::ParseTree& tree,
+			const std::filesystem::path& file,
 			const heimdall::CompileCommand* command);
 
 		void SymbolIndexMain(std::stop_token stop);
@@ -311,11 +345,14 @@ namespace heimdall::lsp
 		// answer in microseconds and the client re-requests once indexing lands.
 		// Kept as a separate name so call sites cannot accidentally reintroduce
 		// the old 25ms-poll loop on pool threads.
-		HeaderView AwaitHeaderScopes(const std::string& uri,
+		HeaderView AwaitHeaderScopes(
+			const std::string& uri,
 			const std::shared_ptr<const std::string>& text,
 			const heimdall::CompileCommand* command);
 
-		HeaderView HeaderScopes(const std::string& uri, const std::shared_ptr<const std::string>& text,
+		HeaderView HeaderScopes(
+			const std::string& uri,
+			const std::shared_ptr<const std::string>& text,
 			const heimdall::CompileCommand* command);
 
 		std::shared_ptr<const heimdall::ParseTree> CachedParse(
@@ -328,11 +365,13 @@ namespace heimdall::lsp
 
 		// Rule-engine diagnostics plus, when semantic analysis is on and the file
 		// has a compile command, cpp/no-unused-include (policy already applied).
-		heimdall::AnalysisContext AnalysisFor(const std::string& uri,
+		heimdall::AnalysisContext AnalysisFor(
+			const std::string& uri,
 			std::shared_ptr<const heimdall::ParseTree> tree,
 			heimdall::ParserOptions options);
 
-		std::vector<heimdall::Diagnostic> RuleDiagnostics(const std::string& uri,
+		std::vector<heimdall::Diagnostic> RuleDiagnostics(
+			const std::string& uri,
 			std::shared_ptr<const heimdall::ParseTree>
 			tree,
 			const heimdall::CompileCommand* command);
@@ -488,7 +527,8 @@ namespace heimdall::lsp
 		};
 
 		std::shared_ptr<const FormattingResult> CachedFormatting(
-			const std::shared_ptr<const heimdall::ParseTree>& tree, heimdall::FormatOptions options,
+			const std::shared_ptr<const heimdall::ParseTree>& tree,
+			heimdall::FormatOptions options,
 			std::stop_token stop);
 
 		std::mutex mFormattingMutex;

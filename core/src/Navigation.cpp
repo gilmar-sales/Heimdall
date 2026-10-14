@@ -1,7 +1,4 @@
 #include <Heimdall/Navigation.hpp>
-#include <Heimdall/Doxygen.hpp>
-#include <Heimdall/MacroExpander.hpp>
-#include <Heimdall/MacroScanner.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +13,10 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/Doxygen.hpp>
+#include <Heimdall/MacroExpander.hpp>
+#include <Heimdall/MacroScanner.hpp>
 
 namespace heimdall
 {
@@ -292,7 +293,9 @@ namespace heimdall
 
 			// Members named `name` declared directly in `scope`: buffer first, then
 			// the header index. Block locals are never members.
-			void Members(const Path& scope, std::string_view name,
+			void Members(
+				const Path& scope,
+				std::string_view name,
 				std::vector<Candidate>& out) const
 			{
 				const std::string key = PathKey(scope);
@@ -393,7 +396,8 @@ namespace heimdall
 			{
 				for (std::size_t keep = from.size() + 1; keep > 0; --keep)
 				{
-					Path candidate(from.begin(),
+					Path candidate(
+						from.begin(),
 						from.begin() + static_cast<std::ptrdiff_t>(keep - 1));
 					candidate.insert(candidate.end(), written.begin(), written.end());
 					if (KnownScope(candidate))
@@ -607,7 +611,9 @@ namespace heimdall
 			}
 
 		private:
-			void AddClosure(const Path& ns, std::vector<Path>& out,
+			void AddClosure(
+				const Path& ns,
+				std::vector<Path>& out,
 				std::unordered_set<std::string>& seen) const
 			{
 				if (!seen.insert(PathKey(ns)).second)
@@ -2052,7 +2058,9 @@ namespace heimdall
 		// At a call site with several same-name overloads, keep only the best
 		// argument-compatible overload. Ties (including calls with no usable
 		// argument information) keep every candidate.
-		void RankOverloads(const Model& model, std::size_t cursor_token,
+		void RankOverloads(
+			const Model& model,
+			std::size_t cursor_token,
 			std::vector<Candidate>& found)
 		{
 			if (found.size() < kMinAmbiguousScopes || cursor_token == kNone)
@@ -2189,7 +2197,8 @@ namespace heimdall
 			}
 		}
 
-		std::vector<NavTarget> ToTargets(const Model& model,
+		std::vector<NavTarget> ToTargets(
+			const Model& model,
 			const std::vector<Candidate>& candidates)
 		{
 			std::vector<NavTarget> out;
@@ -2207,7 +2216,8 @@ namespace heimdall
 		return Model(tree, nullptr).Directives();
 	}
 
-	std::vector<AmbiguousReference> Navigation::FindAmbiguities(const ParseTree& tree,
+	std::vector<AmbiguousReference> Navigation::FindAmbiguities(
+		const ParseTree& tree,
 		const ScopeIndex* external)
 	{
 		const Model model(tree, external);
@@ -2426,7 +2436,9 @@ namespace heimdall
 			return signature + ')';
 		}
 
-		std::vector<NavTarget> DocumentationDefinition(const ParseTree& tree, std::size_t offset,
+		std::vector<NavTarget> DocumentationDefinition(
+			const ParseTree& tree,
+			std::size_t offset,
 			const ScopeIndex* external)
 		{
 			const auto references = DoxygenReferences(tree);
@@ -2532,7 +2544,9 @@ namespace heimdall
 		}
 	}
 
-	std::vector<NavTarget> Navigation::Definition(const ParseTree& tree, std::size_t offset,
+	std::vector<NavTarget> Navigation::Definition(
+		const ParseTree& tree,
+		std::size_t offset,
 		const ScopeIndex* external)
 	{
 		const auto& tokens = tree.Tokens();
@@ -2905,7 +2919,9 @@ namespace heimdall
 		return result;
 	}
 
-	std::vector<NavTarget> Navigation::Implementation(const ParseTree& tree, std::size_t offset,
+	std::vector<NavTarget> Navigation::Implementation(
+		const ParseTree& tree,
+		std::size_t offset,
 		const ScopeIndex* external)
 	{
 		const Model model(tree, external);

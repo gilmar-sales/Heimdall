@@ -1,4 +1,3 @@
-#include <Heimdall/SymbolOutline.hpp>
 #include <Heimdall/SyntaxHighlight.hpp>
 
 #include <algorithm>
@@ -6,6 +5,8 @@
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <Heimdall/SymbolOutline.hpp>
 
 namespace heimdall
 {
@@ -557,7 +558,8 @@ namespace heimdall
 		return highlighter.Run(tree);
 	}
 
-	std::vector<HighlightSpan> SyntaxHighlight::Extract(const ParseTree& tree,
+	std::vector<HighlightSpan> SyntaxHighlight::Extract(
+		const ParseTree& tree,
 		const HighlightContext& context)
 	{
 		Highlighter highlighter(tree, &context);

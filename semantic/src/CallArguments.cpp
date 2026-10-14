@@ -1,114 +1,183 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <Heimdall/LineTable.hpp>
+#include <Heimdall/HeaderSummary.hpp>
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/Navigation.hpp>
 #include <Heimdall/SemanticRules.hpp>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
-#include "detail/TokenView.hpp"
 #include "detail/ImplicitConversion.hpp"
+#include "detail/TokenView.hpp"
 
 namespace heimdall
 {
+	[[nodiscard]] detail::ParameterCount detail::CountParameters(const SemanticModel& model,
+		const detail::TokenView& view,
+		SymbolId symbol)
+	{
+		const auto& symbols = model.Symbols();
+		const auto& nodes   = model.Tree().NodesSoA();
+		ParameterCount result;
+		if (symbols.kind[symbol] != SymbolKind::Function ||
+			(symbols.flags[symbol] & SymbolFlag::Template) != 0)
+		{
+			return result;
+		}
+
+		const auto open = view.PositionOf(symbols.decl_token[symbol]) + 1;
+		if (view.At(open) != Tok::LParen)
+		{
+			return result;
+		}
+
+		std::uint32_t suffix = kNone;
+		for (const auto child : model.ChildrenOf(symbols.decl_node[symbol]))
+		{
+			if (nodes.Kind(child) != GrammarKind::Declarator)
+			{
+				continue;
+			}
+
+			for (const auto part : model.ChildrenOf(child))
+			{
+				if (nodes.Kind(part) == GrammarKind::FunctionSuffix &&
+					nodes.FirstToken(part) == view.TokenAt(open))
+				{
+					suffix = part;
+					break;
+				}
+			}
+		}
+
+		if (suffix == kNone)
+		{
+			return result;
+		}
+
+		const auto close = view.Match(open, view.Size());
+		if (close == view.Size())
+		{
+			return result;
+		}
+
+		result.variadic = close > open + 1 && view.At(close - 1) == Tok::Ellipsis;
+		for (const auto parameter : model.ChildrenOf(suffix))
+		{
+			if (nodes.Kind(parameter) != GrammarKind::ParameterDeclaration)
+			{
+				continue;
+			}
+
+			const auto[begin, end] = view.Range(parameter);
+			bool hasDefault        = false;
+			for (auto position = begin; position < end; ++position)
+			{
+				const auto tok = view.At(position);
+				if (tok == Tok::Eq)
+				{
+					hasDefault = true;
+					break;
+				}
+
+				if (tok == Tok::Ellipsis)
+				{
+					return {};
+				}
+
+				if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
+				{
+					position = view.Match(position, end);
+				}
+			}
+
+			++result.total;
+			result.required += hasDefault ? 0 : 1;
+		}
+
+		result.known  = true;
+		result.suffix = suffix;
+		return result;
+	}
+
 	namespace
 	{
-		struct ParameterCount
-		{
-			std::size_t required = 0;
-			std::size_t total    = 0;
-			bool variadic        = false;
-			bool known           = false;
-			std::uint32_t suffix = kNone;
-		};
+		using detail::ParameterCount;
+		using detail::CountParameters;
 
-		[[nodiscard]] ParameterCount CountParameters(const SemanticModel& model,
-			const detail::TokenView& view,
-			SymbolId symbol)
+		// Arguments supplied to the call whose callee occupies [begin, end) and
+		// whose closing paren is at callEnd - 1, counted by top-level commas.
+		// The node-child count cannot be used: an argument the parser split
+		// (a cast to a type unknown without its header, as `(Mode)event->mod`)
+		// still contributes a single comma-separated argument.
+		[[nodiscard]] std::size_t CountSuppliedArguments(const detail::TokenView& view,
+			std::size_t end, std::size_t callEnd)
 		{
-			const auto& symbols = model.Symbols();
-			const auto& nodes   = model.Tree().NodesSoA();
-			ParameterCount result;
-			if (symbols.kind[symbol] != SymbolKind::Function ||
-				(symbols.flags[symbol] & SymbolFlag::Template) != 0)
+			if (view.At(end) != Tok::LParen || view.At(callEnd - 1) != Tok::RParen)
 			{
-				return result;
+				return 0;
 			}
 
-			const auto open = view.PositionOf(symbols.decl_token[symbol]) + 1;
-			if (view.At(open) != Tok::LParen)
+			if (end + 1 >= callEnd - 1)
 			{
-				return result;
+				return 0;
 			}
 
-			std::uint32_t suffix = kNone;
-			for (const auto child : model.ChildrenOf(symbols.decl_node[symbol]))
+			std::size_t commas     = 0;
+			std::size_t angleDepth = 0;
+			for (auto position = end + 1; position < callEnd - 1;)
 			{
-				if (nodes.Kind(child) != GrammarKind::Declarator)
+				const Tok tok = view.At(position);
+				if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
 				{
+					position = view.Match(position, callEnd - 1) + 1;
 					continue;
 				}
 
-				for (const auto part : model.ChildrenOf(child))
+				if (tok == Tok::Lt &&
+					(view.KindAt(position - 1) == TokenKind::Identifier ||
+					view.At(position - 1) == Tok::Gt || view.At(position - 1) == Tok::Shr))
 				{
-					if (nodes.Kind(part) == GrammarKind::FunctionSuffix &&
-						nodes.FirstToken(part) == view.TokenAt(open))
-					{
-						suffix = part;
-						break;
-					}
+					++angleDepth;
 				}
-			}
-
-			if (suffix == kNone)
-			{
-				return result;
-			}
-
-			const auto close = view.Match(open, view.Size());
-			if (close == view.Size())
-			{
-				return result;
-			}
-
-			result.variadic = close > open + 1 && view.At(close - 1) == Tok::Ellipsis;
-			for (const auto parameter : model.ChildrenOf(suffix))
-			{
-				if (nodes.Kind(parameter) != GrammarKind::ParameterDeclaration)
+				else if (tok == Tok::Gt && angleDepth != 0)
 				{
-					continue;
+					--angleDepth;
+				}
+				else if (tok == Tok::Shr && angleDepth != 0)
+				{
+					angleDepth = angleDepth > 1 ? angleDepth - 2 : 0;
+				}
+				else if (tok == Tok::Comma && angleDepth == 0)
+				{
+					++commas;
 				}
 
-				const auto[begin, end] = view.Range(parameter);
-				bool hasDefault        = false;
-				for (auto position = begin; position < end; ++position)
-				{
-					const auto tok = view.At(position);
-					if (tok == Tok::Eq)
-					{
-						hasDefault = true;
-						break;
-					}
-
-					if (tok == Tok::Ellipsis)
-					{
-						return {};
-					}
-
-					if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
-					{
-						position = view.Match(position, end);
-					}
-				}
-
-				++result.total;
-				result.required += hasDefault ? 0 : 1;
+				++position;
 			}
 
-			result.known  = true;
-			result.suffix = suffix;
-			return result;
+			return commas + 1;
+		}
+
+		// `a::b::c` from outermost-first parts.
+		[[nodiscard]] std::string JoinNamespace(const std::vector<std::string_view>& parts)
+		{
+			std::string joined;
+			for (const auto part : parts)
+			{
+				if (!joined.empty())
+				{
+					joined += "::";
+				}
+
+				joined += part;
+			}
+
+			return joined;
 		}
 
 		enum class Conversion
@@ -604,6 +673,12 @@ namespace heimdall
 
 	std::vector<Diagnostic> SemanticRules::AnalyzeCallArguments(const SemanticModel& model)
 	{
+		return AnalyzeProjectCallArguments(model, {});
+	}
+
+	std::vector<Diagnostic> SemanticRules::AnalyzeProjectCallArguments(const SemanticModel& model,
+		const ProjectContext& context)
+	{
 		std::vector<Diagnostic> diagnostics;
 		const auto& nodes   = model.Tree().NodesSoA();
 		const auto& symbols = model.Symbols();
@@ -614,6 +689,72 @@ namespace heimdall
 		{
 			counts.push_back(CountParameters(model, view, symbol));
 		}
+
+		struct HeaderOverload
+		{
+			ParameterCount count;
+			std::string qualifiedNamespace;
+			std::size_t includeOffset = 0;
+		};
+
+		std::unordered_map<std::string, std::vector<HeaderOverload>> headerOverloads;
+		if (context.profile != nullptr)
+		{
+			const auto includes = IncludeAnalyzer::DirectIncludes(model.Tree());
+			std::unordered_set<std::string> visited;
+			for (std::size_t entry = 0; entry < context.profile->entries.size() && entry < includes.size(); ++entry)
+			{
+				const auto& include = context.profile->entries[entry];
+				// Only the directly included header extends the overload set:
+				// walking the transitive closure would parse the whole system
+				// header tree for every file, and a used function should be
+				// declared by a direct include. The directive's own active flag
+				// decides, so includes under a satisfied `#ifndef` guard count
+				// while platform branches that are off do not.
+				const auto directive = std::find_if(model.Tree().Directives().begin(),
+					model.Tree().Directives().end(),
+					[&](const auto& candidate)
+					{
+						return candidate.offset == includes[entry].directive_offset;
+				});
+				if (directive == model.Tree().Directives().end() ||!directive->active ||
+					include.header.empty())
+				{
+					continue;
+				}
+
+				const auto key = include.header.generic_string();
+				if (!visited.insert(key).second)
+				{
+					continue;
+				}
+
+				const auto summary = HeaderSummary::Load(include.header);
+				if (!summary->Readable())
+				{
+					continue;
+				}
+
+				for (std::size_t exported = 0; exported < summary->ExportCount(); ++exported)
+				{
+					if (summary->Kind(exported) != ExportKind::Function)
+					{
+						continue;
+					}
+
+					headerOverloads[std::string(summary->ExportName(exported))].push_back({
+							{
+								summary->FunctionRequired(exported), summary->FunctionTotal(exported),
+								summary->FunctionVariadic(exported), summary->FunctionArityKnown(exported), kNone
+						},
+							std::string(summary->ExportNamespace(exported)),
+							includes[entry].directive_offset});
+				}
+			}
+		}
+
+		const auto usingDirectives = context.profile != nullptr
+		? Navigation::UsingDirectives(model.Tree()) : std::vector<UsingDirective> {};
 
 		LineTable lines;
 		bool linesBuilt = false;
@@ -660,7 +801,12 @@ namespace heimdall
 				continue;
 			}
 
-			const auto supplied = children.size() - 1;
+			// The node-child count cannot be trusted here: an argument the
+			// parser split (a cast to a type unknown without its header, as
+			// `(Mode)event->mod`) still contributes a single comma-separated
+			// argument. Unexpected shapes keep the legacy child count.
+			const auto supplied = view.At(end) == Tok::LParen
+			? CountSuppliedArguments(view, end, callEnd) : children.size() - 1;
 			bool viable         = false;
 			bool unknown        = false;
 			bool variadic       = false;
@@ -686,6 +832,67 @@ namespace heimdall
 					(count.variadic || supplied <= count.total);
 				minimum = std::min(minimum, count.required);
 				maximum = std::max(maximum, count.total);
+			}
+
+			// A project header can declare overloads the bound file does not
+			// repeat (Assimp's FBX wrappers, whose one-argument forms live only
+			// in FBXParser.h). The callee is unqualified here, so a header
+			// overload counts when its namespace encloses the call, is global,
+			// or is nominated by an active using-directive.
+			std::vector<std::string_view> namespaceParts;
+			for (auto scope = overloadScope; scope < model.Scopes().Size() &&
+				model.Scopes().kind[scope] != ScopeKind::TranslationUnit; scope = model.Scopes().parent[scope])
+			{
+				const auto owner = model.Scopes().owner[scope];
+				if (model.Scopes().kind[scope] != ScopeKind::Namespace || owner == kNone)
+				{
+					continue;
+				}
+
+				namespaceParts.push_back(model.Names().Text(symbols.name[owner]));
+			}
+
+			std::unordered_set<std::string> visibleNamespaces {""};
+			std::vector<std::string_view> outerFirst(namespaceParts.rbegin(), namespaceParts.rend());
+			for (std::size_t depth = 1; depth <= outerFirst.size(); ++depth)
+			{
+				visibleNamespaces.insert(JoinNamespace(std::vector<std::string_view>(
+					outerFirst.begin(), outerFirst.begin() + depth)));
+			}
+
+			const auto callOffset = view.Offset(begin);
+			for (const auto& directive : usingDirectives)
+			{
+				if (callOffset >= directive.active_begin && callOffset < directive.active_end)
+				{
+					std::vector<std::string_view> target;
+					for (const auto& part : directive.target)
+					{
+						target.push_back(part);
+					}
+
+					visibleNamespaces.insert(JoinNamespace(target));
+				}
+			}
+
+			const std::string calleeName(view.Text(begin));
+			if (const auto found = headerOverloads.find(calleeName); found != headerOverloads.end())
+			{
+				for (const auto& overload : found->second)
+				{
+					if (overload.includeOffset > callOffset ||
+						!visibleNamespaces.contains(overload.qualifiedNamespace))
+					{
+						continue;
+					}
+
+					const auto& count = overload.count;
+					unknown |=!count.known;
+					variadic |= count.variadic;
+					viable |= count.known && supplied >= count.required && (count.variadic || supplied <= count.total);
+					minimum = std::min(minimum, count.required);
+					maximum = std::max(maximum, count.total);
+				}
 			}
 
 			if (viable || unknown || minimum == view.Size())

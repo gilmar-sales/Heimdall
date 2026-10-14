@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Heimdall/MacroTable.hpp>
-#include <Heimdall/Preprocessor.hpp>
-
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -10,6 +7,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
 {

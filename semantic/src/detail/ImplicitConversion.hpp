@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <Heimdall/TypeModel.hpp>
 
 namespace heimdall::detail
@@ -11,7 +13,8 @@ namespace heimdall::detail
 		Unknown
 	};
 
-	[[nodiscard]] ConversionResult CheckImplicitConversion(const TypeModel& types,
+	[[nodiscard]] ConversionResult CheckImplicitConversion(
+		const TypeModel& types,
 		std::uint32_t expression,
 		TypeId target);
 }

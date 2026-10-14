@@ -1,12 +1,13 @@
-#include "Support.hpp"
-#include <Heimdall/Refactoring.hpp>
-#include <Heimdall/Doxygen.hpp>
-#include <Heimdall/Navigation.hpp>
-
 #include <algorithm>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <Heimdall/Doxygen.hpp>
+#include <Heimdall/Navigation.hpp>
+#include <Heimdall/Refactoring.hpp>
+
+#include "Support.hpp"
 
 namespace heimdall
 {
@@ -17,10 +18,7 @@ namespace heimdall
 			return {code, std::move(message)};
 		}
 
-		bool TemplateParameterNamed(
-			const SemanticModel& model,
-			NodeId node,
-			std::string_view name);
+		bool TemplateParameterNamed(const SemanticModel& model, NodeId node, std::string_view name);
 
 		void AppendDocumentationEdits(
 			const ParseTree& tree,
@@ -342,7 +340,8 @@ namespace heimdall
 			// Declaration membership was a linear find per token, i.e.
 			// O(tokens x symbols). A set built once makes it O(1) per token.
 			const std::unordered_set<std::uint32_t> declarations(
-				symbols.decl_token.begin(), symbols.decl_token.end());
+				symbols.decl_token.begin(),
+				symbols.decl_token.end());
 			// Intern the new name once instead of hashing it per candidate.
 			const auto wanted = model.Names().Find(name);
 
@@ -587,7 +586,10 @@ namespace heimdall
 		// every member access in the unit. Shared by reference collection and
 		// new-name capture analysis so both see the same attribution.
 		std::expected<std::unordered_map<std::uint32_t, SymbolId>, RefactoringError>
-		BuildMemberUses(const SemanticModel& model, const TypeModel& types, std::stop_token stop)
+		BuildMemberUses(
+			const SemanticModel& model,
+			const TypeModel& types,
+			std::stop_token stop)
 		{
 			std::unordered_map<std::uint32_t, SymbolId> member_use;
 			const auto& soa = model.Tree().NodesSoA();
@@ -686,7 +688,8 @@ namespace heimdall
 			}
 
 			const std::unordered_set<std::uint32_t> declarations(
-				symbols.decl_token.begin(), symbols.decl_token.end());
+				symbols.decl_token.begin(),
+				symbols.decl_token.end());
 
 			// Functions containing assembly or coroutines veto occurrences
 			// inside them; uses elsewhere are unaffected.
@@ -885,7 +888,8 @@ namespace heimdall
 			}
 
 			const std::unordered_set<std::uint32_t> declarations(
-				symbols.decl_token.begin(), symbols.decl_token.end());
+				symbols.decl_token.begin(),
+				symbols.decl_token.end());
 			const auto& tokens = tree.Tokens();
 			for (std::uint32_t token = 0; token < tokens.size(); ++token)
 			{
@@ -1399,7 +1403,8 @@ namespace heimdall
 	// Shared rename/signature helpers (declared in refactor/src/Support.hpp).
 	// Token containing `offset` (binary search; tokens are offset-ordered),
 	// or kNone. Shared by the local, field and workspace paths.
-	std::uint32_t refactor_detail::FindSelectedToken(const std::vector<Token>& tokens,
+	std::uint32_t refactor_detail::FindSelectedToken(
+		const std::vector<Token>& tokens,
 		std::size_t offset)
 	{
 		const auto matches =[&](const Token& token)
@@ -1570,9 +1575,14 @@ namespace heimdall
 		return Identifier(name);
 	}
 
-	void refactor_detail::CollectDocumentationEdits(const ParseTree& tree, DocumentEdits& edits,
-		const std::vector<std::size_t>& declarations, std::string_view oldName,
-		std::string_view newName, bool selfBrief, bool uniqueWorkspaceName,
+	void refactor_detail::CollectDocumentationEdits(
+		const ParseTree& tree,
+		DocumentEdits& edits,
+		const std::vector<std::size_t>& declarations,
+		std::string_view oldName,
+		std::string_view newName,
+		bool selfBrief,
+		bool uniqueWorkspaceName,
 		std::string_view qualifiedName)
 	{
 		AppendDocumentationEdits(tree, edits, declarations, oldName, newName, selfBrief,

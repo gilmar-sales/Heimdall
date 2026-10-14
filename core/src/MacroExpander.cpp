@@ -15,12 +15,12 @@ namespace heimdall
 	namespace
 	{
 
-		constexpr std::size_t kStopCheckInterval = 1024;
-		constexpr unsigned kHalfWord = 32;
-		constexpr unsigned kPointerAlignmentBits = 4;
+		constexpr std::size_t kStopCheckInterval          = 1024;
+		constexpr unsigned kHalfWord                      = 32;
+		constexpr unsigned kPointerAlignmentBits          = 4;
 		constexpr std::size_t kParenthesizedDefinedTokens = 3; // `(`, name, `)`
-		constexpr std::size_t kVaOptOpen = 2; // `__VA_OPT__` and its `(`
-		constexpr std::string_view kVaOpt        = "__VA_OPT__";
+		constexpr std::size_t kVaOptOpen                  = 2; // `__VA_OPT__` and its `(`
+		constexpr std::string_view kVaOpt                 = "__VA_OPT__";
 
 		struct Storage
 		{
@@ -155,7 +155,7 @@ namespace heimdall
 				}
 
 				// The same few sets meet again and again; remember what they combine to.
-				const auto [slot, fresh] = mUnions.try_emplace(PairKey(a, b), 0);
+				const auto[slot, fresh] = mUnions.try_emplace(PairKey(a, b), 0);
 				if (!fresh)
 				{
 					return slot->second;
@@ -173,7 +173,7 @@ namespace heimdall
 					return a;
 				}
 
-				const auto [slot, fresh] = mIntersections.try_emplace(PairKey(a, b), 0);
+				const auto[slot, fresh] = mIntersections.try_emplace(PairKey(a, b), 0);
 				if (!fresh)
 				{
 					return slot->second;
@@ -189,7 +189,7 @@ namespace heimdall
 			{
 				const auto key = PairKey(id, static_cast<std::uint32_t>(
 					reinterpret_cast<std::uintptr_t>(macro) >> kPointerAlignmentBits));
-				const auto [slot, fresh] = mAdditions.try_emplace(key, std::make_pair(macro, 0u));
+				const auto[slot, fresh] = mAdditions.try_emplace(key, std::make_pair(macro, 0u));
 				if (!fresh && slot->second.first == macro)
 				{
 					return slot->second.second;
@@ -197,7 +197,7 @@ namespace heimdall
 
 				HideSet set = mHideSets[id];
 				set.insert(std::ranges::lower_bound(set, macro), macro);
-				slot->second = { macro, HideSetId(std::move(set)) };
+				slot->second = {macro, HideSetId(std::move(set))};
 				return slot->second.second;
 			}
 
@@ -465,7 +465,8 @@ namespace heimdall
 				return arguments.size() == want;
 			}
 
-			std::optional<std::size_t> ParamIndex(const MacroDef& macro,
+			std::optional<std::size_t> ParamIndex(
+				const MacroDef& macro,
 				std::string_view name) const
 			{
 				for (std::size_t i = 0; i < macro.params.size(); ++i)
@@ -770,7 +771,9 @@ namespace heimdall
 
 	} // namespace
 
-	ExpansionResult MacroExpander::Expand(std::string_view text, bool protectDefined,
+	ExpansionResult MacroExpander::Expand(
+		std::string_view text,
+		bool protectDefined,
 		std::stop_token stop) const
 	{
 		const std::vector<Token> tokens = Lexer(text).Lex();
@@ -783,11 +786,7 @@ namespace heimdall
 		bool protectDefined,
 		std::stop_token stop) const
 	{
-		Run run(
-			mTable,
-			mLimits,
-			protectDefined,
-			std::move(stop));
+		Run run(mTable, mLimits, protectDefined, std::move(stop));
 		return run.Execute(text, tokens);
 	}
 

@@ -1,16 +1,16 @@
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <vector>
+
+#include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/RuleConfig.hpp>
+
 #include "CliOptions.hpp"
 #include "FileDiscovery.hpp"
 #include "Init.hpp"
 #include "Pipeline.hpp"
 #include "Reporting.hpp"
-
-#include <Heimdall/CompileDatabase.hpp>
-#include <Heimdall/RuleConfig.hpp>
-
-#include <filesystem>
-#include <iostream>
-
-#include <vector>
 
 int main(int argc, char**argv)
 {
@@ -79,6 +79,13 @@ int main(int argc, char**argv)
 			}
 
 			options.format_options = loaded->format_options;
+			if (loaded->has_include_order)
+			{
+				options.format_options.includeOrder = loaded->options.include_order;
+				options.format_options.includeCaseInsensitive =
+					loaded->options.include_case_insensitive;
+			}
+
 			// Explicit flags win over the config file.
 			if (options.pointer_alignment_override)
 			{

@@ -5,20 +5,27 @@
 // <Heimdall/...> API. Keeps the 1900-line grammar engine out of the header
 // while letting ParseTree::Parse stay in its own TU for parallel builds.
 
+#include <stop_token>
+
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
 
-#include <stop_token>
+namespace heimdall
+{
+
+	class MacroResolver;
+	class TypeNameOracle;
+}
 
 namespace heimdall::detail
 {
-
-    void ParseWithGrammar(ParseTree&                    tree,
-                          const PreprocessorResult&     preprocessing,
-                          std::stop_token               stop,
-                          const Preprocessor::MacroMap* macros,
-                          const ParseReuse*             reuse,
-                          const TypeNameOracle*         type_names,
-                          const MacroResolver*          resolver);
+	void ParseWithGrammar(
+		ParseTree& tree,
+		const PreprocessorResult& preprocessing,
+		std::stop_token stop,
+		const Preprocessor::MacroMap* macros,
+		const ParseReuse* reuse,
+		const TypeNameOracle* type_names,
+		const MacroResolver* resolver);
 
 } // namespace heimdall::detail

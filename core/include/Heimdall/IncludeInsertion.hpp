@@ -20,7 +20,8 @@ namespace heimdall
 	/// joins the top-level include block: angled includes before quoted ones, each group
 	/// sorted case-insensitively. Without includes it goes after `#pragma once` or the
 	/// include guard, else after the leading file comment.
-	[[nodiscard]] std::optional<IncludeEdit> PlanIncludeInsertion(std::string_view source,
+	[[nodiscard]] std::optional<IncludeEdit> PlanIncludeInsertion(
+		std::string_view source,
 		std::string_view spelled);
 
 } // namespace heimdall

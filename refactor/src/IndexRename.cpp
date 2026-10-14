@@ -1,15 +1,16 @@
 #include <Heimdall/IndexRename.hpp>
 
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/ShardBuilder.hpp>
-#include "Support.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <limits>
 #include <map>
 #include <set>
 #include <unordered_map>
+
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/ShardBuilder.hpp>
+
+#include "Support.hpp"
 
 namespace heimdall
 {
@@ -34,7 +35,10 @@ namespace heimdall
 			std::uint32_t length;
 		};
 
-		std::uint32_t MapOffset(const std::vector<Edit>& edits, std::int64_t delta, std::uint32_t offset)
+		std::uint32_t MapOffset(
+			const std::vector<Edit>& edits,
+			std::int64_t delta,
+			std::uint32_t offset)
 		{
 			std::int64_t shift = 0;
 			for (const auto& edit : edits)
@@ -55,7 +59,9 @@ namespace heimdall
 
 		// After a class-name use at `end`: `::` [~] name, where name repeats the class name.
 		std::optional<std::uint32_t> ConstructorNameAfter(
-			std::string_view text, std::size_t end, std::string_view name)
+			std::string_view text,
+			std::size_t end,
+			std::string_view name)
 		{
 			auto at = end;
 			const auto skip =[&]
@@ -178,8 +184,11 @@ namespace heimdall
 		// conditions, other macros' bodies). It refuses whenever the old spelling is reachable
 		// in a way the index does not see, or the new one could change what other code means.
 		std::expected<RefactoringPlan, RefactoringError> RenameMacro(
-			const idx::IndexSnapshot& snapshot, const PreparedIndexRename& prepared,
-			std::string_view newName, const IndexRenameContext& context, Run& run,
+			const idx::IndexSnapshot& snapshot,
+			const PreparedIndexRename& prepared,
+			std::string_view newName,
+			const IndexRenameContext& context,
+			Run& run,
 			std::stop_token stop)
 		{
 			const std::string& oldName = prepared.name;
@@ -204,7 +213,7 @@ namespace heimdall
 					{
 						return Fail(RefactoringErrorCode::IncompleteAnalysis,
 							"A use of this macro is not resolved to its definition: " +
-								run.Where(shardIndex, occ.offset[i]));
+							run.Where(shardIndex, occ.offset[i]));
 					}
 
 					uses[shardIndex].insert(occ.offset[i]);
@@ -250,14 +259,16 @@ namespace heimdall
 				{
 					return Fail(RefactoringErrorCode::IncompleteAnalysis,
 						"Syntax errors prevent proving the rename for an affected name: " +
-							file.Path());
+						file.Path());
 				}
 
 				const auto includeLines = IncludeLines(text);
-				const auto inInclude    = [&](std::size_t offset)
+				const auto inInclude =[&](std::size_t offset)
 				{
-					return std::ranges::any_of(includeLines, [&](const auto& line)
-						{ return offset >= line.first && offset < line.second; });
+					return std::ranges::any_of(includeLines,[&](const auto& line)
+						{
+							return offset >= line.first && offset < line.second;
+					});
 				};
 				const auto tokens = Lexer(text).Lex();
 				std::vector<std::size_t> significant;
@@ -269,7 +280,7 @@ namespace heimdall
 					}
 				}
 
-				const auto spelling = [&](std::size_t sig)
+				const auto spelling =[&](std::size_t sig)
 				{
 					return text.substr(tokens[significant[sig]].offset, tokens[significant[sig]].length);
 				};
@@ -304,7 +315,7 @@ namespace heimdall
 					{
 						return Fail(RefactoringErrorCode::NameCollision,
 							"The new name is already used: " +
-								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+							run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
 					}
 
 					if (word != oldName)
@@ -312,12 +323,12 @@ namespace heimdall
 						continue;
 					}
 
-					if (found == uses.end() || !found->second.contains(token.offset))
+					if (found == uses.end() ||!found->second.contains(token.offset))
 					{
 						return Fail(RefactoringErrorCode::IncompleteAnalysis,
 							"An occurrence of the macro's spelling is not a recorded use "
 							"(inactive code?): " +
-								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+							run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
 					}
 
 					const bool pasted = (sig > 0 && (spelling(sig - 1) == "##" || spelling(sig - 1) == "#")) ||
@@ -326,12 +337,12 @@ namespace heimdall
 					{
 						return Fail(RefactoringErrorCode::MacroContext,
 							"The macro name takes part in token pasting or stringification: " +
-								run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
+							run.Where(shardIndex, static_cast<std::uint32_t>(token.offset)));
 					}
 
 					// An argument of a macro that pastes or stringifies it: its spelling is the result.
 					constexpr std::size_t kMaxLookback = 4096;
-					std::size_t depth = 0;
+					std::size_t depth                  = 0;
 					for (std::size_t back = sig, steps = 0; back > 0 && steps < kMaxLookback; --back, ++steps)
 					{
 						const auto previous = spelling(back - 1);
@@ -346,7 +357,7 @@ namespace heimdall
 						else if (previous == "(")
 						{
 							if (back >= 2 && pastingCalls.contains(static_cast<std::uint32_t>(
-									tokens[significant[back - 2]].offset)))
+								tokens[significant[back - 2]].offset)))
 							{
 								return Fail(RefactoringErrorCode::MacroContext,
 									"The macro name is an argument of a macro that pastes or stringifies "
@@ -444,17 +455,21 @@ namespace heimdall
 					{
 						return {};
 					}
+
 					result = candidate;
 				}
 			}
+
 			return result;
 		}
 
 		std::expected<std::vector<idx::SymbolHash>, RefactoringError> RenameFamily(
-			const idx::IndexSnapshot& snapshot, idx::SymbolRef anchor, std::stop_token stop)
+			const idx::IndexSnapshot& snapshot,
+			idx::SymbolRef anchor,
+			std::stop_token stop)
 		{
-			const auto hash = snapshot.HashOf(anchor);
-			const auto owner = ClassOwner(snapshot, anchor);
+			const auto hash        = snapshot.HashOf(anchor);
+			const auto owner       = ClassOwner(snapshot, anchor);
 			const auto& targetFile = *snapshot.Shards()[anchor.shard];
 			if (!owner.Valid() || targetFile.Symbols().kind[anchor.symbol] != SymbolKind::Function)
 			{
@@ -470,6 +485,7 @@ namespace heimdall
 				std::uint32_t flags;
 				std::set<idx::SymbolHash> ancestors;
 			};
+
 			std::vector<Method> methods;
 			std::map<idx::SymbolHash, std::size_t> byHash;
 			for (std::uint32_t shard = 0; shard < snapshot.Shards().size(); ++shard)
@@ -481,27 +497,34 @@ namespace heimdall
 					{
 						return std::unexpected(Cancelled());
 					}
+
 					if (file.Symbols().kind[symbol] != SymbolKind::Function || file.Name(symbol) != targetFile.Name(anchor.symbol) ||
 						(file.Symbols().flags[symbol] & (SymbolFlag::Static | SymbolFlag::Constructor | SymbolFlag::Destructor | SymbolFlag::Operator)) != 0)
 					{
 						continue;
 					}
 
-					const idx::SymbolRef ref {shard, symbol};
+					const idx::SymbolRef ref
+					{
+						shard, symbol
+					};
 					const auto container = ClassOwner(snapshot, ref);
 					if (!container.Valid())
 					{
 						continue;
 					}
-					const auto methodHash = snapshot.HashOf(ref);
-					const auto [at, inserted] = byHash.emplace(methodHash, methods.size());
+
+					const auto methodHash    = snapshot.HashOf(ref);
+					const auto[at, inserted] = byHash.emplace(methodHash, methods.size());
 					if (!inserted)
 					{
 						methods[at->second].flags |= file.Symbols().flags[symbol];
 						continue;
 					}
+
 					methods.emplace_back(ref, methodHash, snapshot.HashOf(container),
-						file.Strings().Text(file.Symbols().signature[symbol]), file.Symbols().flags[symbol], std::set<idx::SymbolHash> {});
+						file.Strings().Text(file.Symbols().signature[symbol]), file.Symbols().flags[symbol],
+						std::set<idx::SymbolHash> {});
 				}
 			}
 
@@ -515,23 +538,29 @@ namespace heimdall
 					{
 						return std::unexpected(Cancelled());
 					}
+
 					const auto current = pending.back();
 					pending.pop_back();
 					if (!visited.insert(current).second)
 					{
 						continue;
 					}
+
 					if (snapshot.Declarations(current).empty())
 					{
-						return Fail(RefactoringErrorCode::IncompleteAnalysis, "A method hierarchy contains an unindexed or conflicting class");
+						return Fail(RefactoringErrorCode::IncompleteAnalysis,
+							"A method hierarchy contains an unindexed or conflicting class");
 					}
+
 					for (const auto declaration : snapshot.Declarations(current))
 					{
 						const auto& file = *snapshot.Shards()[declaration.shard];
 						if ((file.Symbols().flags[declaration.symbol] & SymbolFlag::Template) != 0)
 						{
-							return Fail(RefactoringErrorCode::IncompleteAnalysis, "A template hierarchy requires instantiation coverage: " + file.Path());
+							return Fail(RefactoringErrorCode::IncompleteAnalysis,
+								"A template hierarchy requires instantiation coverage: " + file.Path());
 						}
+
 						for (const auto relation : file.RelationsTo(current))
 						{
 							const auto& relations = file.Relations();
@@ -546,8 +575,10 @@ namespace heimdall
 								if (occurrence == idx::kInvalid || snapshot.Resolved(declaration.shard).state[occurrence] != idx::Resolution::Resolved ||
 									snapshot.Resolved(declaration.shard).Targets(occurrence).size() != 1)
 								{
-									return Fail(RefactoringErrorCode::IncompleteAnalysis, "A method hierarchy has an unresolved base: " + file.Path());
+									return Fail(RefactoringErrorCode::IncompleteAnalysis,
+										"A method hierarchy has an unresolved base: " + file.Path());
 								}
+
 								const auto base = snapshot.HashOf(snapshot.Resolved(declaration.shard).Targets(occurrence).front());
 								pending.push_back(base);
 								method.ancestors.insert(base);
@@ -562,6 +593,7 @@ namespace heimdall
 			{
 				isVirtual[i] = (methods[i].flags & (SymbolFlag::Virtual | SymbolFlag::Pure)) != 0;
 			}
+
 			bool changed = true;
 			while (changed)
 			{
@@ -574,11 +606,12 @@ namespace heimdall
 							methods[derived].signature == methods[base].signature)
 						{
 							isVirtual[derived] = true;
-							changed = true;
+							changed            = true;
 						}
 					}
 				}
 			}
+
 			const auto selected = byHash.find(hash);
 			if (selected != byHash.end())
 			{
@@ -592,10 +625,12 @@ namespace heimdall
 					}
 				}
 			}
-			if (selected == byHash.end() || !isVirtual[selected->second])
+
+			if (selected == byHash.end() ||!isVirtual[selected->second])
 			{
 				return std::vector<idx::SymbolHash> {hash};
 			}
+
 			std::set<std::size_t> family {selected->second};
 			changed = true;
 			while (changed)
@@ -607,6 +642,7 @@ namespace heimdall
 					{
 						continue;
 					}
+
 					for (const auto member : family)
 					{
 						if (methods[i].signature == methods[member].signature &&
@@ -619,17 +655,21 @@ namespace heimdall
 					}
 				}
 			}
+
 			std::vector<idx::SymbolHash> result;
 			for (const auto member : family)
 			{
 				result.push_back(methods[member].hash);
 			}
+
 			return result;
 		}
 	} // namespace
 
 	bool IndexRename::SpansFiles(
-		const idx::IndexSnapshot& snapshot, std::string_view path, std::size_t offset)
+		const idx::IndexSnapshot& snapshot,
+		std::string_view path,
+		std::size_t offset)
 	{
 		const auto shard = snapshot.ShardFor(path);
 		if (shard == idx::kInvalid)
@@ -690,7 +730,8 @@ namespace heimdall
 			{
 				if (!file->ExactIncludes())
 				{
-					return Fail(RefactoringErrorCode::IncompleteAnalysis, "Include resolution is incomplete: " + file->Path());
+					return Fail(RefactoringErrorCode::IncompleteAnalysis,
+						"Include resolution is incomplete: " + file->Path());
 				}
 
 				for (const auto target : file->IncludeTargets())
@@ -711,7 +752,7 @@ namespace heimdall
 					{
 						return Fail(RefactoringErrorCode::IncompleteAnalysis,
 							"An included dependency is not indexed: " + targetPath +
-								" (included from " + file->Path() + ")");
+							" (included from " + file->Path() + ")");
 					}
 				}
 			}
@@ -723,9 +764,11 @@ namespace heimdall
 		{
 			return Fail(RefactoringErrorCode::UnsupportedSymbol, "This file is not indexed");
 		}
+
 		if (!snapshot.Shards()[origin]->SyntaxComplete())
 		{
-			return Fail(RefactoringErrorCode::IncompleteAnalysis, "The selected document has syntax errors: " + std::string(path));
+			return Fail(RefactoringErrorCode::IncompleteAnalysis,
+				"The selected document has syntax errors: " + std::string(path));
 		}
 
 		if (offset >= current->text->size() || offset > std::numeric_limits<std::uint32_t>::max())
@@ -753,13 +796,13 @@ namespace heimdall
 				"The selected occurrence does not resolve to exactly one entity");
 		}
 
-		auto anchor = resolved.Targets(occurrence).front();
-		const auto& initial = *snapshot.Shards()[anchor.shard];
+		auto anchor             = resolved.Targets(occurrence).front();
+		const auto& initial     = *snapshot.Shards()[anchor.shard];
 		const auto impliedOwner = ClassOwner(snapshot, anchor);
 		const bool qualifiedConstructor = initial.Symbols().kind[anchor.symbol] == SymbolKind::Function &&
 			(initial.Symbols().flags[anchor.symbol] & SymbolFlag::Qualified) != 0 && impliedOwner.Valid() &&
 			initial.Name(anchor.symbol) == snapshot.Shards()[impliedOwner.shard]->Name(impliedOwner.symbol);
-		if (qualifiedConstructor || (initial.Symbols().flags[anchor.symbol] & (SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
+		if (qualifiedConstructor ||(initial.Symbols().flags[anchor.symbol] & (SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
 		{
 			const auto owner = initial.Symbols().container[anchor.symbol];
 			if (owner != idx::kInvalid && initial.Symbols().kind[owner] == SymbolKind::Class)
@@ -771,11 +814,12 @@ namespace heimdall
 				const auto qualified = initial.Qualified(anchor.symbol);
 				const auto separator = qualified.rfind("::");
 				std::vector<idx::SymbolRef> owners;
-				for (const auto candidate : separator == std::string_view::npos ? std::vector<idx::SymbolRef> {} :
+				for (const auto candidate : separator == std::string_view::npos ? std::vector<idx::SymbolRef> {}:
 					snapshot.Named(qualified.substr(0, separator)))
 				{
 					const auto& file = *snapshot.Shards()[candidate.shard];
-					if (separator != std::string_view::npos && file.Qualified(candidate.symbol) == qualified.substr(0, separator) &&
+					if (separator != std::string_view::npos && file.Qualified(candidate.symbol) == qualified.substr(0,
+						separator) &&
 						file.Symbols().kind[candidate.symbol] == SymbolKind::Class)
 					{
 						owners.push_back(candidate);
@@ -788,10 +832,10 @@ namespace heimdall
 				}
 
 				anchor = owners.front();
-				if (std::ranges::any_of(owners, [&](const idx::SymbolRef candidate)
+				if (std::ranges::any_of(owners,[&](const idx::SymbolRef candidate)
 					{
 						return snapshot.HashOf(candidate) != snapshot.HashOf(anchor);
-					}))
+				}))
 				{
 					return Fail(RefactoringErrorCode::IncompleteAnalysis, "The constructor's class is ambiguous");
 				}
@@ -830,18 +874,22 @@ namespace heimdall
 		{
 			return std::unexpected(family.error());
 		}
+
 		for (const auto member : *family)
 		{
 			for (const auto declaration : snapshot.Declarations(member))
 			{
 				if (context.editable && !context.editable(snapshot.Shards()[declaration.shard]->Path()))
 				{
-					return Fail(RefactoringErrorCode::UnsupportedSymbol, "A virtual family declaration is outside the editable workspace");
+					return Fail(RefactoringErrorCode::UnsupportedSymbol,
+						"A virtual family declaration is outside the editable workspace");
 				}
 			}
 		}
+
 		const auto& occurrences = snapshot.Shards()[origin]->Occurrences();
-		return PreparedIndexRename {anchor, occurrences.offset[occurrence], occurrences.length[occurrence], oldName, *family};
+		return PreparedIndexRename {anchor, occurrences.offset[occurrence], occurrences.length[occurrence],
+				oldName, *family};
 	}
 
 	std::expected<RefactoringPlan, RefactoringError> IndexRename::Rename(
@@ -869,12 +917,12 @@ namespace heimdall
 		}
 
 		Run run {snapshot, context, stop, {}};
-		const auto anchor = prepared->symbol;
-		const auto hash = snapshot.HashOf(anchor);
-		const auto declarations = snapshot.Declarations(hash);
+		const auto anchor          = prepared->symbol;
+		const auto hash            = snapshot.HashOf(anchor);
+		const auto declarations    = snapshot.Declarations(hash);
 		const auto& declaringShard = *snapshot.Shards()[anchor.shard];
-		const auto& oldName = prepared->name;
-		const auto kind = declaringShard.Symbols().kind[anchor.symbol];
+		const auto& oldName        = prepared->name;
+		const auto kind            = declaringShard.Symbols().kind[anchor.symbol];
 		if (oldName == newName)
 		{
 			return RefactoringPlan {"Rename " + oldName, snapshot.Revision(), {}};
@@ -908,7 +956,8 @@ namespace heimdall
 					for (std::uint32_t s = 0; s < file.Symbols().Size(); ++s)
 					{
 						if (file.Symbols().container[s] == derived.symbol.symbol &&
-							file.Name(s) == oldName && std::ranges::find(prepared->family, file.Symbols().hash[s]) == prepared->family.end())
+							file.Name(s) == oldName && std::ranges::find(prepared->family,
+							file.Symbols().hash[s]) == prepared->family.end())
 						{
 							return Fail(RefactoringErrorCode::NameCollision,
 								"A derived class declares a member with the same name: " +
@@ -925,17 +974,17 @@ namespace heimdall
 		std::map<std::uint32_t, std::set<std::uint32_t>> offsets; // shard -> offsets
 		for (const auto member : prepared->family)
 		{
-		for (const auto& use : snapshot.References(member))
-		{
-			if (use.resolution != idx::Resolution::Resolved)
+			for (const auto& use : snapshot.References(member))
 			{
-				return Fail(RefactoringErrorCode::IncompleteAnalysis,
-					"A use of this symbol is not resolved to a single declaration: " +
-					run.Where(use.shard, use.offset));
-			}
+				if (use.resolution != idx::Resolution::Resolved)
+				{
+					return Fail(RefactoringErrorCode::IncompleteAnalysis,
+						"A use of this symbol is not resolved to a single declaration: " +
+						run.Where(use.shard, use.offset));
+				}
 
-			offsets[use.shard].insert(use.offset);
-		}
+				offsets[use.shard].insert(use.offset);
+			}
 		}
 
 		if (kind == SymbolKind::Class)
@@ -990,6 +1039,7 @@ namespace heimdall
 				}
 			}
 		}
+
 		const bool uniqueWorkspaceName = sameNamedEntities.size() == 1;
 		for (std::uint32_t shardIndex = 0; shardIndex < snapshot.Shards().size(); ++shardIndex)
 		{
@@ -1095,6 +1145,7 @@ namespace heimdall
 					}
 				}
 			}
+
 			DocumentEdits documentation;
 			refactor_detail::CollectDocumentationEdits(tree, documentation, declarationOffsets,
 				oldName, newName, kind == SymbolKind::Class || kind == SymbolKind::Function,
@@ -1103,6 +1154,7 @@ namespace heimdall
 			{
 				offsets[shardIndex].insert(static_cast<std::uint32_t>(edit.offset));
 			}
+
 			std::set<std::uint32_t> declared;
 			for (SymbolId s = 0; s < model.Symbols().Size(); ++s)
 			{
@@ -1187,7 +1239,8 @@ namespace heimdall
 		}
 
 		std::vector<std::shared_ptr<const idx::FileShard>> shards(
-			snapshot.Shards().begin(), snapshot.Shards().end());
+			snapshot.Shards().begin(),
+			snapshot.Shards().end());
 		for (const auto& [shardIndex, text] : edited)
 		{
 			if (stop.stop_requested())
@@ -1217,20 +1270,22 @@ namespace heimdall
 					"The rename would introduce parse errors in " + file.Path());
 			}
 
-			const auto model   = Binder::Bind(after);
+			const auto model = Binder::Bind(after);
 			shards[shardIndex] = idx::ShardBuilder::Build(model, file.Path(), file.ConfigHash(),
-				[&file, &edits, shardIndex, delta](std::string_view, bool, std::uint32_t offset) -> std::optional<std::string>
+				[&file, &edits, shardIndex, delta](std::string_view, bool,
+				std::uint32_t offset)->std::optional<std::string>
 				{
 					for (std::size_t include = 0; include < file.IncludeOffsets().size(); ++include)
 					{
 						if (MapOffset(edits.at(shardIndex), delta, file.IncludeOffsets()[include]) == offset &&
-							file.IncludeTargets()[include] != idx::kInvalid)
+						file.IncludeTargets()[include] != idx::kInvalid)
 						{
 							return std::string(file.Strings().Text(file.IncludeTargets()[include]));
-						}
 					}
+				}
+
 					return std::nullopt;
-				});
+			});
 		}
 
 		const auto changed = idx::IndexSnapshot::Build(shards);
@@ -1277,12 +1332,12 @@ namespace heimdall
 		};
 		for (const auto member : prepared->family)
 		{
-		const auto newHash = hashOf(member);
-		if (changed->Declarations(newHash).size() != snapshot.Declarations(member).size())
-		{
-			return Fail(RefactoringErrorCode::NameCollision,
-				"The new name is already declared in the project");
-		}
+			const auto newHash = hashOf(member);
+			if (changed->Declarations(newHash).size() != snapshot.Declarations(member).size())
+			{
+				return Fail(RefactoringErrorCode::NameCollision,
+					"The new name is already declared in the project");
+			}
 		}
 
 		for (std::uint32_t shardIndex = 0; shardIndex < snapshot.Shards().size(); ++shardIndex)

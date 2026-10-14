@@ -1,6 +1,4 @@
-#include <Heimdall/MacroTable.hpp>
 #include <Heimdall/ShardBuilder.hpp>
-#include <Heimdall/TypeModel.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -8,6 +6,9 @@
 #include <ranges>
 #include <string>
 #include <unordered_map>
+
+#include <Heimdall/MacroTable.hpp>
+#include <Heimdall/TypeModel.hpp>
 
 namespace heimdall::index
 {
@@ -44,13 +45,16 @@ namespace heimdall::index
 	class ShardBuilderImpl
 	{
 	public:
-		ShardBuilderImpl(const SemanticModel& model, std::string path, std::uint64_t configHash,
+		ShardBuilderImpl(
+			const SemanticModel& model,
+			std::string path,
+			std::uint64_t configHash,
 			ShardBuilder::IncludeResolver resolveInclude) :
-		mModel(model), mShard(std::make_unique<FileShard>()), mResolveInclude(std::move(resolveInclude))
+			mModel(model), mShard(std::make_unique<FileShard>()), mResolveInclude(std::move(resolveInclude))
 		{
-			mShard->mPath        = std::move(path);
-			mShard->mConfigHash  = configHash;
-			mShard->mContentHash = HashBytes(model.Tree().Source());
+			mShard->mPath           = std::move(path);
+			mShard->mConfigHash     = configHash;
+			mShard->mContentHash    = HashBytes(model.Tree().Source());
 			mShard->mSyntaxComplete = !model.Tree().Cancelled() && model.Tree().Diagnostics().empty();
 		}
 
@@ -103,7 +107,9 @@ namespace heimdall::index
 		}
 
 		// `A::B::name` written at a qualified declaration, outermost first.
-		void AppendWrittenQualifier(std::uint32_t token, std::string& out,
+		void AppendWrittenQualifier(
+			std::uint32_t token,
+			std::string& out,
 			std::vector<std::uint32_t>* names = nullptr) const
 		{
 			const auto& sig    = mModel.Significant();
@@ -187,6 +193,7 @@ namespace heimdall::index
 					key += '\0';
 					key += mShard->mPath;
 				}
+
 				const auto hash = HashBytes(key);
 
 				const auto container = symbols.scope[symbol] < mModel.Scopes().Size()
@@ -437,6 +444,7 @@ namespace heimdall::index
 				key += '\0';
 				key += mShard->mPath;
 			}
+
 			const auto hash = HashBytes(key);
 
 			auto& out           = mShard->mSymbols;
@@ -1081,6 +1089,7 @@ namespace heimdall::index
 			{
 				mTypes.emplace(Typer::Type(mModel));
 			}
+
 			return *mTypes;
 		}
 
@@ -1091,25 +1100,27 @@ namespace heimdall::index
 			{
 				return kUnknownBuiltin;
 			}
+
 			type = table.Strip(type);
 			return table.Kind(type) == TypeKind::Builtin ? static_cast<std::uint8_t>(table.Arg(type)) : kUnknownBuiltin;
 		}
 
 		void CollectParameterTypes(SymbolId symbol)
 		{
-			auto& out = mShard->mSymbols;
+			auto& out        = mShard->mSymbols;
 			const auto begin = static_cast<std::uint32_t>(mShard->mParameterTypes.size());
 			out.paramTypeBegin.push_back(begin);
 			if (mModel.Symbols().kind[symbol] == SymbolKind::Function)
 			{
 				const auto declaration = mModel.Symbols().decl_node[symbol];
-				const auto& soa = mModel.Tree().NodesSoA();
+				const auto& soa        = mModel.Tree().NodesSoA();
 				for (auto node = declaration + 1; node < soa.SubtreeEnd(declaration); ++node)
 				{
 					if (soa.Kind(node) == GrammarKind::CompoundStatement)
 					{
 						break;
 					}
+
 					if (soa.Kind(node) == GrammarKind::ParameterDeclaration)
 					{
 						const auto code = BuiltinCode(Types().ParameterType(node), true);
@@ -1117,28 +1128,32 @@ namespace heimdall::index
 						{
 							mShard->mParameterTypes.push_back(code);
 						}
+
 						node = static_cast<std::uint32_t>(soa.SubtreeEnd(node)) - 1;
 					}
 				}
 			}
+
 			out.paramTypeCount.push_back(static_cast<std::uint32_t>(mShard->mParameterTypes.size()) - begin);
 		}
 
 		void CollectCallTypes()
 		{
 			const auto& tree = mModel.Tree();
-			const auto& soa = tree.NodesSoA();
+			const auto& soa  = tree.NodesSoA();
 			for (std::uint32_t node = 0; node < soa.size(); ++node)
 			{
 				if (soa.Kind(node) != GrammarKind::CallExpression)
 				{
 					continue;
 				}
+
 				const auto children = mModel.ChildrenOf(node);
 				if (children.empty())
 				{
 					continue;
 				}
+
 				auto callee = children.front();
 				if (soa.Kind(callee) == GrammarKind::MemberExpression)
 				{
@@ -1147,17 +1162,21 @@ namespace heimdall::index
 					{
 						continue;
 					}
+
 					callee = members.back();
 				}
+
 				if (soa.Kind(callee) != GrammarKind::IdentifierExpression || soa.TokenCount(callee) != 1)
 				{
 					continue;
 				}
+
 				const auto begin = static_cast<std::uint32_t>(mShard->mArgumentTypes.size());
 				for (const auto argument : children.subspan(1))
 				{
 					mShard->mArgumentTypes.push_back(BuiltinCode(Types().NodeType(argument), false));
 				}
+
 				mCalls.emplace(static_cast<std::uint32_t>(tree.Tokens()[soa.FirstToken(callee)].offset),
 					std::pair(begin, static_cast<std::uint32_t>(children.size() - 1)));
 			}
@@ -1225,7 +1244,7 @@ namespace heimdall::index
 			}
 
 			const auto qualified = mShard->mStrings.Text(mShard->mScopes.qualified[scope]);
-			return qualified.empty() ? std::string {} : "::" + std::string(qualified);
+			return qualified.empty() ? std::string {}: "::" + std::string(qualified);
 		}
 
 		void CollectReceivers()
@@ -1243,7 +1262,7 @@ namespace heimdall::index
 				return;
 			}
 
-			const auto& types  = Types();
+			const auto& types = Types();
 			const auto& table = types.Types();
 			for (std::uint32_t node = 0; node < soa.size(); ++node)
 			{
@@ -1421,7 +1440,7 @@ namespace heimdall::index
 		bool IsMacroMention(std::uint32_t index) const
 		{
 			const auto& tokens = mModel.Tree().Tokens();
-			const auto previous = [&](std::size_t from) -> std::optional<std::size_t>
+			const auto previous =[&](std::size_t from)->std::optional<std::size_t>
 			{
 				while (from > 0)
 				{
@@ -1435,7 +1454,10 @@ namespace heimdall::index
 
 				return std::nullopt;
 			};
-			const auto text = [&](std::size_t token) { return mModel.Tree().Text(tokens[token]); };
+			const auto text =[&](std::size_t token)
+			{
+				return mModel.Tree().Text(tokens[token]);
+			};
 			auto before = previous(index);
 			if (before && text(*before) == "(")
 			{
@@ -1477,6 +1499,7 @@ namespace heimdall::index
 				std::uint32_t symbol;
 				std::uint32_t nameOffset;
 			};
+
 			std::vector<Defined> defined;
 			std::vector<std::uint32_t> nameOffsets;
 			for (const auto& event : tree.MacroEvents())
@@ -1492,8 +1515,11 @@ namespace heimdall::index
 					continue;
 				}
 
-				auto at = std::ranges::lower_bound(tokens, static_cast<std::uint32_t>(event.offset),
-					{}, [](const Token& token) { return token.offset; });
+				auto at = std::ranges::lower_bound(tokens, static_cast<std::uint32_t>(event.offset), {},
+					[](const Token& token)
+					{
+						return token.offset;
+				});
 				std::size_t seen = 0;
 				while (at != tokens.end() && seen < kMaxDirectiveTokens &&
 					!(at->kind == TokenKind::Identifier && tree.Text(*at) == parsed->name))
@@ -1515,7 +1541,7 @@ namespace heimdall::index
 					signature = "(";
 					for (std::size_t i = 0; i < parsed->params.size(); ++i)
 					{
-						signature += (i == 0 ? "" : ", ") + parsed->params[i];
+						signature +=(i == 0 ? "" : ", ") + parsed->params[i];
 					}
 
 					signature += ")";
@@ -1540,7 +1566,7 @@ namespace heimdall::index
 				for (const auto& bodyToken : parsed->tokens)
 				{
 					const std::string_view text = std::string_view(parsed->body)
-						.substr(bodyToken.token.offset, bodyToken.token.length);
+					.substr(bodyToken.token.offset, bodyToken.token.length);
 					pastes = pastes || text == "#" || text == "##";
 				}
 
@@ -1553,11 +1579,11 @@ namespace heimdall::index
 				out.paramMax.push_back(maximum);
 				out.paramTypeBegin.push_back(static_cast<std::uint32_t>(mShard->mParameterTypes.size()));
 				out.paramTypeCount.push_back(0);
-				defined.push_back({ parsed->name, local, at->offset });
+				defined.push_back({parsed->name, local, at->offset});
 				nameOffsets.push_back(at->offset);
-				mMacroPending.push_back({ at->offset, at->length, local,
-					mShard->mStrings.Intern(parsed->name), Role::Definition, Resolution::Resolved,
-					kOccurrenceMacro });
+				mMacroPending.push_back({at->offset, at->length, local,
+						mShard->mStrings.Intern(parsed->name), Role::Definition, Resolution::Resolved,
+						kOccurrenceMacro});
 			}
 
 			const MacroResolver* resolver = tree.MacroResolverRef().get();
@@ -1575,10 +1601,10 @@ namespace heimdall::index
 				}
 			}
 
-			const auto& active     = tree.ActiveRanges();
-			const auto& directives = tree.Directives();
-			std::size_t activeAt   = 0;
-			std::size_t skipAt     = 0;
+			const auto& active      = tree.ActiveRanges();
+			const auto& directives  = tree.Directives();
+			std::size_t activeAt    = 0;
+			std::size_t skipAt      = 0;
 			std::size_t directiveAt = 0;
 			for (const std::uint32_t index : tree.IdentifierTokens())
 			{
@@ -1610,10 +1636,10 @@ namespace heimdall::index
 				const bool inDirective =
 					directiveAt < directives.size() && directives[directiveAt].offset <= token.offset;
 				const bool inactive = inDirective
-					? !directives[directiveAt].active
-					: !active.empty() &&
-						(activeAt == active.size() || token.offset < active[activeAt].offset);
-				if (inactive || (skipAt < skipped.size() && token.offset >= skipped[skipAt].first) ||
+				? !directives[directiveAt].active
+				: !active.empty() &&
+					(activeAt == active.size() || token.offset < active[activeAt].offset);
+				if (inactive ||(skipAt < skipped.size() && token.offset >= skipped[skipAt].first) ||
 					std::ranges::binary_search(nameOffsets, token.offset))
 				{
 					continue;
@@ -1637,7 +1663,10 @@ namespace heimdall::index
 				if (found == nullptr && local == nullptr)
 				{
 					mention = IsMacroMention(index) &&
-						std::ranges::any_of(defined, [&](const Defined& entry) { return entry.name == text; });
+						std::ranges::any_of(defined,[&](const Defined& entry)
+						{
+							return entry.name == text;
+					});
 				}
 
 				if (found == nullptr && !mention && (resolver != nullptr || local == nullptr))
@@ -1658,9 +1687,9 @@ namespace heimdall::index
 				}
 
 				const bool bound = local != nullptr && (found == nullptr || SamePath(found->file, mShard->mPath));
-				mMacroPending.push_back({ token.offset, token.length, bound ? local->symbol : kInvalid,
-					mShard->mStrings.Intern(text), Role::Reference,
-					bound ? Resolution::Resolved : Resolution::Unresolved, kOccurrenceMacro });
+				mMacroPending.push_back({token.offset, token.length, bound ? local->symbol : kInvalid,
+						mShard->mStrings.Intern(text), Role::Reference,
+						bound ? Resolution::Resolved : Resolution::Unresolved, kOccurrenceMacro});
 			}
 		}
 
@@ -1818,7 +1847,7 @@ namespace heimdall::index
 			const auto source = mModel.Tree().Source();
 			for (const auto& directive : mModel.Tree().Directives())
 			{
-				if (directive.kind != DirectiveKind::Include || !directive.active ||
+				if (directive.kind != DirectiveKind::Include ||!directive.active ||
 					directive.offset + directive.length > source.size())
 				{
 					continue;
@@ -1870,15 +1899,20 @@ namespace heimdall::index
 	};
 
 	std::shared_ptr<const FileShard> ShardBuilder::Build(
-		const SemanticModel& model, std::string path, std::uint64_t configHash, IncludeResolver resolveInclude)
+		const SemanticModel& model,
+		std::string path,
+		std::uint64_t configHash,
+		IncludeResolver resolveInclude)
 	{
 		return ShardBuilderImpl(model, std::move(path), configHash, std::move(resolveInclude)).Run();
 	}
 
-	std::uint64_t ShardBuilder::ConfigurationHash(const ParserOptions& options, const CompileCommand* command)
+	std::uint64_t ShardBuilder::ConfigurationHash(
+		const ParserOptions& options,
+		const CompileCommand* command)
 	{
 		std::uint64_t hash = HashBytes(std::to_string(static_cast<unsigned>(options.standard)));
-		const auto append = [&](std::string_view text)
+		const auto append =[&](std::string_view text)
 		{
 			hash = HashBytes(std::to_string(text.size()) + ':', hash);
 			hash = HashBytes(text, hash);
@@ -1910,12 +1944,14 @@ namespace heimdall::index
 			{
 				append(path.lexically_normal().generic_string());
 			}
+
 			append("include-directories");
 			for (const auto& path : command->include_directories)
 			{
 				append(path.lexically_normal().generic_string());
 			}
 		}
+
 		return hash;
 	}
 } // namespace heimdall::index
