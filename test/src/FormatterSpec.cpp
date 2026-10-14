@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <Heimdall/Formatter.hpp>
+#include <Heimdall/RuleConfig.hpp>
 
 #include <array>
 #include <filesystem>
@@ -1846,6 +1847,86 @@ TEST(FormatterSpec, LeavesBackslashContinuedMacroDefinitionsVerbatim)
     const auto formatted = heimdall::Formatter().Format(source);
     EXPECT_EQ(formatted.substr(0, formatted.find("int")), source.substr(0, source.find("int")));
     EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, PreservesHumanReadableMultilineMacros)
+{
+    // A uniformly indented X-macro (one entry per line, joined literals) is
+    // copied verbatim instead of staircasing: continuation lines are part of
+    // the directive, while the surrounding code is still formatted.
+    constexpr std::string_view source =
+        "#define TOK_LIST(X) \\\n"
+        "    X(LBrace, \"{\") \\\n"
+        "    X(HashHash, \"##\") \\\n"
+        "    X(Ellipsis, \"...\") \\\n"
+        "    X(KwAlignof, \"alignof\") \\\n"
+        "    X(KwImport, \"import\")\n"
+        "int  a ;\n";
+    constexpr std::string_view expected =
+        "#define TOK_LIST(X) \\\n"
+        "    X(LBrace, \"{\") \\\n"
+        "    X(HashHash, \"##\") \\\n"
+        "    X(Ellipsis, \"...\") \\\n"
+        "    X(KwAlignof, \"alignof\") \\\n"
+        "    X(KwImport, \"import\")\n"
+        "int a;\n";
+
+    const std::string formatted = heimdall::Formatter().Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(heimdall::Formatter().Format(formatted), formatted);
+    EXPECT_TRUE(heimdall::Formatter().FormatEdits(expected).empty());
+}
+
+TEST(FormatterSpec, TokListMacroStaysHumanReadable)
+{
+    // Guards the real X-macro in core/include/Heimdall/Tok.hpp: uniformly
+    // indented continuations, one entry per line, within the column limit,
+    // and already formatter-stable (no staircase, no split literals).
+    const auto path = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "core" / "include" /
+        "Heimdall" / "Tok.hpp";
+    std::ifstream file(path, std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+
+    const std::string source(std::istreambuf_iterator<char>(file), {});
+    // Same options the `format` command resolves for this file: core/ headers
+    // are tab-indented with aligned assignments (root .heimdall.json).
+    heimdall::FormatOptions options;
+    if (const auto found = heimdall::FindFormatOptions(path))
+    {
+        if (*found)
+        {
+            options = * *found;
+        }
+    }
+
+    options.mainFileName = path.filename().string();
+    const heimdall::Formatter formatter(options);
+    const std::string formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, source);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+
+    const std::size_t define = source.find("#define HEIMDALL_TOK_LIST(X)");
+    ASSERT_NE(define, std::string::npos);
+    std::size_t pos = source.find('\n', define) + 1;
+    const std::size_t limit = heimdall::FormatOptions().column_limit;
+    std::size_t continuations = 0;
+    while (pos < source.size())
+    {
+        const std::size_t end = source.find('\n', pos);
+        const std::string line = source.substr(pos, end - pos);
+        EXPECT_TRUE(line.starts_with("    X(")) << line;
+        EXPECT_LT(line.size(), limit) << line;
+        ++continuations;
+        pos = end + 1;
+        if (!line.ends_with('\\'))
+        {
+            break;
+        }
+    }
+
+    EXPECT_GT(continuations, 100);
 }
 
 TEST(FormatterSpec, IfConstexprKeepsTheSpaceBeforeTheCondition)

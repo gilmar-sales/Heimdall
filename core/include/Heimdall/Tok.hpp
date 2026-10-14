@@ -12,145 +12,152 @@ namespace heimdall
 	// the parser compares a byte instead of running memcmp on the token text.
 	// Tokens that are not a keyword or punctuator (plain identifiers, literals,
 	// trivia) are Tok::None.
-#define HEIMDALL_TOK_LIST(X)                                                                                                             \
-    X(LBrace, "{")                                                                                                                       \
-    X(RBrace, "}") X(LBracket, "[") X(RBracket, "]") X(LParen, "(") X(RParen, ")") X(Hash, "#") X(                                       \
-        HashHash, "##") X(Lt, "<") X(Gt, ">") X(Percent, "%") X(Colon, ":") X(ColonColon, "::")                                          \
-        X(Semi, ";") X(Dot, ".") X(Ellipsis, "...") X(DotStar, ".*") X(Question, "?") X(                                                 \
-            Star, "*") X(Plus, "+") X(Minus, "-") X(Slash, "/") X(Caret, "^") X(CaretCaret, "^^") X(Amp, "&")                           \
-            X(Pipe, "|") X(Tilde, "~") X(Bang, "!") X(Eq, "=") X(Comma, ",") X(Backslash, "\\") X(                                       \
-                DigraphHash, "%:") X(DigraphHashHash, "%:%:") X(PercentEq, "%=")                                                         \
-                X(DigraphRBrace, "%>") X(DigraphRBracket, ":>") X(DigraphLBracket, "<:") X(                                              \
-                    DigraphLBrace, "<%") X(Arrow, "->") X(ArrowStar, "->*") X(MinusMinus, "--")                                          \
-                    X(MinusEq, "-=") X(Spaceship, "<=>") X(ShlEq, "<<=") X(                                                              \
-                        Shl, "<<") X(Le, "<=") X(ShrEq, ">>=") X(Shr, ">>") X(Ge, ">=")                                                  \
-                        X(PlusPlus, "++") X(PlusEq, "+=") X(StarEq, "*=") X(SlashEq, "/=") X(AmpAmp, "&&") X(                            \
-                            AmpEq, "&=") X(PipePipe,                                                                                     \
-                                           "||") X(PipeEq,                                                                               \
-                                                   "|=") X(CaretEq, "^=")                                                                \
-                            X(EqEq, "==") X(BangEq, "!=") X(KwAlignas, "alignas") X(KwAlignof, "a"                                       \
-                                                                                               "l"                                       \
-                                                                                               "i"                                       \
-                                                                                               "g"                                       \
-                                                                                               "n"                                       \
-                                                                                               "o"                                       \
-                                                                                               "f") X(                                   \
-                                KwAsm,                                                                                                   \
-                                "asm") X(KwAuto,                                                                                         \
-                                         "auto") X(KwBool,                                                                               \
-                                                   "bool") X(KwBreak, "break")                                                           \
-                                X(KwCase, "case") X(KwCatch, "catch") X(KwChar, "char") X(KwChar8, "char8_t") X(KwChar16, "char16_t") X( \
-                                    KwChar32,                                                                                            \
-                                    "char32_t") X(KwClass, "class") X(KwConcept, "concept")                                              \
-                                    X(KwConst,                                                                                           \
-                                      "const") X(KwConsteval,                                                                            \
-                                                 "consteval") X(KwConstexpr, "constexpr")                                                \
-                                        X(KwConstinit,                                                                                   \
-                                          "constinit") X(KwConstCast,                                                                    \
-                                                         "const_cast") X(KwContinue,                                                     \
-                                                                         "continue") X(KwCoAwait, "co_await")                            \
-                                            X(KwCoReturn, "co_return") X(KwCoYield, "co_yield") X(KwDecltype, "decltype") X(             \
-                                                KwDefault,                                                                               \
-                                                "default") X(KwDelete,                                                                   \
-                                                             "delete") X(KwDo, "do")                                                     \
-                                                X(KwDouble, "double") X(KwDynamicCast, "dynamic_"                                        \
-                                                                                       "cast") X(KwElse, "else") X(KwEnum, "enum") X(    \
-                                                    KwExplicit,                                                                          \
-                                                    "explicit") X(KwExport, "export")                                                    \
-                                                    X(KwExtern, "extern") X(KwFalse, "false") X(KwFinal, "final") X(KwFloat, "float") X( \
-                                                        KwFor,                                                                           \
-                                                        "for") X(KwFriend,                                                               \
-                                                                 "friend") X(KwGoto,                                                     \
-                                                                             "goto") X(KwIf,                                             \
-                                                                                       "if") X(KwImport,                                 \
-                                                                                               "i"                                       \
-                                                                                               "m"                                       \
-                                                                                               "p"                                       \
-                                                                                               "o"                                       \
-                                                                                               "r"                                       \
-                                                                                               "t")                                      \
-                                                        X(KwInline, "inline") X(KwInt, "int") X(KwLong, "long") X(KwModule, "module") X( \
-                                                            KwMutable,                                                                   \
-                                                            "mutable") X(KwNamespace,                                                    \
-                                                                         "namespace") X(KwNew, "n"                                       \
-                                                                                               "e"                                       \
-                                                                                               "w")                                      \
-                                                            X(KwNoexcept, "noexcept") X(                                                 \
-                                                                KwNullptr,                                                               \
-                                                                "nullptr") X(KwOperator,                                                 \
-                                                                             "operator")                                                 \
-                                                                X(KwOverride, "override") X(KwPrivate, "private") X(                     \
-                                                                    KwProtected,                                                         \
-                                                                    "protected") X(KwPublic,                                             \
-                                                                                   "public") X(KwRegister,                               \
-                                                                                               "r"                                       \
-                                                                                               "e"                                       \
-                                                                                               "g"                                       \
-                                                                                               "i"                                       \
-                                                                                               "s"                                       \
-                                                                                               "t"                                       \
-                                                                                               "e"                                       \
-                                                                                               "r")                                      \
-                                                                    X(KwReinterpretCast, "reinter"                                       \
-                                                                                         "pret_"                                         \
-                                                                                         "cast") X(KwRequires, "requires") X(            \
-                                                                        KwReturn,                                                        \
-                                                                        "return") X(KwShort, "sho"                                       \
-                                                                                             "rt")                                       \
-                                                                        X(KwSigned, "signed") X(                                         \
-                                                                            KwSizeof,                                                    \
-                                                                            "sizeof") X(KwStatic, "static")                              \
-                                                                            X(KwStaticAssert, "st"                                       \
-                                                                                              "at"                                       \
-                                                                                              "ic"                                       \
-                                                                                              "_a"                                       \
-                                                                                              "ss"                                       \
-                                                                                              "er"                                       \
-                                                                                              "t") X(                                    \
-                                                                                KwStaticCast,                                            \
-                                                                                "static_cast") X(KwStruct,                               \
-                                                                                                 "struct") X(KwSwitch,                   \
-                                                                                                             "switch")                   \
-                                                                                X(KwTemplate, "te"                                       \
-                                                                                              "mp"                                       \
-                                                                                              "la"                                       \
-                                                                                              "t"                                        \
-                                                                                              "e") X(KwThis, "this") X(                  \
-                                                                                    KwThreadLocal,                                       \
-                                                                                    "thread_"                                            \
-                                                                                    "local") X(KwThrow,                                  \
-                                                                                               "t"                                       \
-                                                                                               "h"                                       \
-                                                                                               "r"                                       \
-                                                                                               "o"                                       \
-                                                                                               "w")                                      \
-                                                                                    X(KwTrue, "tr"                                       \
-                                                                                              "u"                                        \
-                                                                                              "e") X(                                    \
-                                                                                        KwTry,                                           \
-                                                                                        "try") X(KwTypedef,                              \
-                                                                                                 "typedef")                              \
-                                                                                        X(KwTypeid, "typeid") X(                         \
-                                                                                            KwTypename,                                  \
-                                                                                            "type"                                       \
-                                                                                            "nam"                                        \
-                                                                                            "e") X(KwUnion,                              \
-                                                                                                   "union")                              \
-                                                                                            X(KwUnsigned,                                \
-                                                                                              "un"                                       \
-                                                                                              "si"                                       \
-                                                                                              "gn"                                       \
-                                                                                              "e"                                        \
-                                                                                              "d") X(KwUsing,                            \
-                                                                                                     "using") X(KwVirtual,               \
-                                                                                                                "virtual")               \
-                                                                                                X(KwVoid, "void") X(                     \
-                                                                                                    KwVolatile,                          \
-                                                                                                    "volatile")                          \
-                                                                                                    X(KwWchar,                           \
-                                                                                                      "wchar_t")                         \
-                                                                                                        X(KwWhile,                       \
-                                                                                                          "while")
+#define HEIMDALL_TOK_LIST(X) \
+    X(LBrace, "{") \
+    X(RBrace, "}") \
+    X(LBracket, "[") \
+    X(RBracket, "]") \
+    X(LParen, "(") \
+    X(RParen, ")") \
+    X(Hash, "#") \
+    X(HashHash, "##") \
+    X(Lt, "<") \
+    X(Gt, ">") \
+    X(Percent, "%") \
+    X(Colon, ":") \
+    X(ColonColon, "::") \
+    X(Semi, ";") \
+    X(Dot, ".") \
+    X(Ellipsis, "...") \
+    X(DotStar, ".*") \
+    X(Question, "?") \
+    X(Star, "*") \
+    X(Plus, "+") \
+    X(Minus, "-") \
+    X(Slash, "/") \
+    X(Caret, "^") \
+    X(CaretCaret, "^^") \
+    X(Amp, "&") \
+    X(Pipe, "|") \
+    X(Tilde, "~") \
+    X(Bang, "!") \
+    X(Eq, "=") \
+    X(Comma, ",") \
+    X(Backslash, "\\") \
+    X(DigraphHash, "%:") \
+    X(DigraphHashHash, "%:%:") \
+    X(PercentEq, "%=") \
+    X(DigraphRBrace, "%>") \
+    X(DigraphRBracket, ":>") \
+    X(DigraphLBracket, "<:") \
+    X(DigraphLBrace, "<%") \
+    X(Arrow, "->") \
+    X(ArrowStar, "->*") \
+    X(MinusMinus, "--") \
+    X(MinusEq, "-=") \
+    X(Spaceship, "<=>") \
+    X(ShlEq, "<<=") \
+    X(Shl, "<<") \
+    X(Le, "<=") \
+    X(ShrEq, ">>=") \
+    X(Shr, ">>") \
+    X(Ge, ">=") \
+    X(PlusPlus, "++") \
+    X(PlusEq, "+=") \
+    X(StarEq, "*=") \
+    X(SlashEq, "/=") \
+    X(AmpAmp, "&&") \
+    X(AmpEq, "&=") \
+    X(PipePipe, "||") \
+    X(PipeEq, "|=") \
+    X(CaretEq, "^=") \
+    X(EqEq, "==") \
+    X(BangEq, "!=") \
+    X(KwAlignas, "alignas") \
+    X(KwAlignof, "alignof") \
+    X(KwAsm, "asm") \
+    X(KwAuto, "auto") \
+    X(KwBool, "bool") \
+    X(KwBreak, "break") \
+    X(KwCase, "case") \
+    X(KwCatch, "catch") \
+    X(KwChar, "char") \
+    X(KwChar8, "char8_t") \
+    X(KwChar16, "char16_t") \
+    X(KwChar32, "char32_t") \
+    X(KwClass, "class") \
+    X(KwConcept, "concept") \
+    X(KwConst, "const") \
+    X(KwConsteval, "consteval") \
+    X(KwConstexpr, "constexpr") \
+    X(KwConstinit, "constinit") \
+    X(KwConstCast, "const_cast") \
+    X(KwContinue, "continue") \
+    X(KwCoAwait, "co_await") \
+    X(KwCoReturn, "co_return") \
+    X(KwCoYield, "co_yield") \
+    X(KwDecltype, "decltype") \
+    X(KwDefault, "default") \
+    X(KwDelete, "delete") \
+    X(KwDo, "do") \
+    X(KwDouble, "double") \
+    X(KwDynamicCast, "dynamic_cast") \
+    X(KwElse, "else") \
+    X(KwEnum, "enum") \
+    X(KwExplicit, "explicit") \
+    X(KwExport, "export") \
+    X(KwExtern, "extern") \
+    X(KwFalse, "false") \
+    X(KwFinal, "final") \
+    X(KwFloat, "float") \
+    X(KwFor, "for") \
+    X(KwFriend, "friend") \
+    X(KwGoto, "goto") \
+    X(KwIf, "if") \
+    X(KwImport, "import") \
+    X(KwInline, "inline") \
+    X(KwInt, "int") \
+    X(KwLong, "long") \
+    X(KwModule, "module") \
+    X(KwMutable, "mutable") \
+    X(KwNamespace, "namespace") \
+    X(KwNew, "new") \
+    X(KwNoexcept, "noexcept") \
+    X(KwNullptr, "nullptr") \
+    X(KwOperator, "operator") \
+    X(KwOverride, "override") \
+    X(KwPrivate, "private") \
+    X(KwProtected, "protected") \
+    X(KwPublic, "public") \
+    X(KwRegister, "register") \
+    X(KwReinterpretCast, "reinterpret_cast") \
+    X(KwRequires, "requires") \
+    X(KwReturn, "return") \
+    X(KwShort, "short") \
+    X(KwSigned, "signed") \
+    X(KwSizeof, "sizeof") \
+    X(KwStatic, "static") \
+    X(KwStaticAssert, "static_assert") \
+    X(KwStaticCast, "static_cast") \
+    X(KwStruct, "struct") \
+    X(KwSwitch, "switch") \
+    X(KwTemplate, "template") \
+    X(KwThis, "this") \
+    X(KwThreadLocal, "thread_local") \
+    X(KwThrow, "throw") \
+    X(KwTrue, "true") \
+    X(KwTry, "try") \
+    X(KwTypedef, "typedef") \
+    X(KwTypeid, "typeid") \
+    X(KwTypename, "typename") \
+    X(KwUnion, "union") \
+    X(KwUnsigned, "unsigned") \
+    X(KwUsing, "using") \
+    X(KwVirtual, "virtual") \
+    X(KwVoid, "void") \
+    X(KwVolatile, "volatile") \
+    X(KwWchar, "wchar_t") \
+    X(KwWhile, "while")
 
 	enum class Tok : std::uint8_t
 	{
@@ -187,9 +194,14 @@ namespace heimdall
 			return h;
 		}
 
-		// Open-addressing table built at compile time; a lookup is one hash and,
-		// almost always, one comparison.
-		constexpr std::array<Entry, kTableSize> BuildTable()
+		/**
+		 * @brief Builds the Token->Keyword Table
+		 *
+         * A lookup is one hash and, almost always, one comparison.
+         *
+		 * @return Open-addressing table built at compile time.
+		 */
+		[[nodiscard]] constexpr std::array<Entry, kTableSize> BuildTable()
 		{
 			std::array<Entry, kTableSize> table {};
 			const auto insert =[&table](std::string_view text, Tok tok)
@@ -205,6 +217,7 @@ namespace heimdall
 #define HEIMDALL_TOK_INSERT(name, text) insert(text, Tok::name);
 			HEIMDALL_TOK_LIST(HEIMDALL_TOK_INSERT)
 #undef HEIMDALL_TOK_INSERT
+
 			return table;
 		}
 
