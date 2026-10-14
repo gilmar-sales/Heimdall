@@ -1307,6 +1307,56 @@ namespace heimdall
 				SymbolFlag::Final | SymbolFlag::Operator)) != 0;
 		}
 
+		// Out-of-line `A::A` / `A::~A` definitions never get the binder's
+		// Constructor/Destructor flag (it only marks unqualified in-class
+		// names), but they own their parameter like any sink constructor.
+		bool IsConstructorOrDestructor(
+			const SemanticModel& model, const detail::TokenView& view, SymbolId owner)
+		{
+			const auto& symbols = model.Symbols();
+			if (owner == kNone || symbols.name[owner] == kNone)
+			{
+				return false;
+			}
+
+			if ((symbols.flags[owner] &
+				(SymbolFlag::Constructor | SymbolFlag::Destructor)) != 0)
+			{
+				return true;
+			}
+
+			std::string func(model.Names().Text(symbols.name[owner]));
+			if (!func.empty() && func.front() == '~')
+			{
+				func.erase(func.begin());
+			}
+
+			if (func.empty())
+			{
+				return false;
+			}
+
+			const std::size_t name = view.PositionOf(symbols.decl_token[owner]);
+			if (name == 0 || name >= view.Size())
+			{
+				return false;
+			}
+
+			std::size_t cursor = name;
+			if (view.At(cursor - 1) == Tok::Tilde)
+			{
+				--cursor;
+			}
+
+			if (cursor >= 2 && view.At(cursor - 1) == Tok::ColonColon &&
+				view.IsWord(cursor - 2))
+			{
+				return view.Text(cursor - 2) == func;
+			}
+
+			return false;
+		}
+
 		// ---------------------------------------------------------------------
 		// api/pass-by-value: `const T&` that is copied (sink idiom)
 
@@ -1482,8 +1532,9 @@ namespace heimdall
 
 				// Sink constructors (`: m_(std::move(p))`, `m_ = p`) own their
 				// argument: that is api/pass-by-value's, not this rule's.
-				if ((symbols.flags[owner] & (SymbolFlag::Constructor | SymbolFlag::Destructor)) !=
-					0)
+				// Out-of-line `A::A` definitions are covered too: the binder
+				// only flags unqualified in-class names as constructors.
+				if (IsConstructorOrDestructor(model, view, owner))
 				{
 					continue;
 				}

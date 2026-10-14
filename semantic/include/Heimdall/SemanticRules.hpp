@@ -20,8 +20,9 @@ namespace heimdall
 	struct ProjectContext
 	{
 		std::filesystem::path file;
-		const IncludeProfile* profile = nullptr;
-		const CompileCommand* command = nullptr;
+		const IncludeProfile* profile  = nullptr;
+		const CompileCommand* command  = nullptr;
+		const RuleOptions* ruleOptions = nullptr;
 	};
 
 	// Rules that run on a bound SemanticModel (see
@@ -41,6 +42,10 @@ namespace heimdall
 
 		/** Reports proven argument-type mismatches, accepting known implicit conversions. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeCallArgumentTypes(
+			const TypeModel& types);
+
+		/** Reports proven errors after candidate substitution; dependent/incomplete calls stay silent. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeTemplateSubstitution(
 			const TypeModel& types);
 
 		/// Checks indexed function-object calls whose non-const reference cannot bind a wrapper.

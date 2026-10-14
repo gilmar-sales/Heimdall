@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -85,8 +86,6 @@ namespace heimdall
 		PluginSeverity severity = PluginSeverity::Warning;
 		bool enabled            = true;
 		std::vector<PluginNodeKind> interests;
-		// Output is buffered and validated by the host. No internal Diagnostic,
-		// ParseTree, SemanticModel or table reference crosses this boundary.
 		std::function<void(const PluginContext&, NodeId, std::vector<PluginDiagnostic>&) > on_node;
 	};
 

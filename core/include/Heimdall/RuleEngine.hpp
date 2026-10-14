@@ -88,7 +88,9 @@ namespace heimdall
 		RequiresValidity,
 		ConceptRedeclaration,
 		// Experimental external rules use their string code as identity.
-		External
+		External,
+		/// Proven failures of local template substitution, never speculative candidate notes.
+		TemplateSubstitution
 	};
 
 	// Which declarations the doc/* rules look at. Public: what other code can
@@ -240,6 +242,12 @@ namespace heimdall
 		DocScope DocumentationScope() const
 		{
 			return m_options.doc_scope;
+		}
+
+		/// Returns the configured rule and include-order options.
+		[[nodiscard]] const RuleOptions& Options() const noexcept
+		{
+			return m_options;
 		}
 
 		// Applies the non-overlapping fixes. Fixes marked unsafe (editor quick fixes)

@@ -7,7 +7,7 @@ namespace heimdall
 
 	InstantiationTable::InstantiationTable(std::pmr::memory_resource* resource) :
 		primary(resource), selected(resource), firstArgument(resource), argumentCount(resource),
-		state(resource),
+		firstSubstitution(resource), substitutionCount(resource), state(resource), checkState(resource), reason(resource),
 		firstBase(resource), baseCount(resource), baseType(resource) {}
 
 	DependentReferenceTable::DependentReferenceTable(std::pmr::memory_resource* resource) :
@@ -24,8 +24,8 @@ namespace heimdall
 
 		if (m_types.Kind(type) == TypeKind::TemplateParameter)
 		{
-			const auto first = mInstantiations.firstArgument[instance];
-			for (std::uint32_t i = 0; i < mInstantiations.argumentCount[instance]; ++i)
+			const auto first = mInstantiations.firstSubstitution[instance];
+			for (std::uint32_t i = 0; i < mInstantiations.substitutionCount[instance]; ++i)
 			{
 				if (mTemplateArguments.parameter[first + i] == m_types.Arg(type))
 				{
@@ -73,8 +73,8 @@ namespace heimdall
 
 		if (m_types.Kind(type) == TypeKind::TemplateParameter)
 		{
-			const auto first = mInstantiations.firstArgument[instance];
-			for (std::uint32_t i = 0; i < mInstantiations.argumentCount[instance]; ++i)
+			const auto first = mInstantiations.firstSubstitution[instance];
+			for (std::uint32_t i = 0; i < mInstantiations.substitutionCount[instance]; ++i)
 			{
 				if (mTemplateArguments.parameter[first + i] == m_types.Arg(type))
 				{

@@ -44,6 +44,7 @@ add_executable(Tests_run
   src/ModernizeCxxSpec.cpp
   src/SemanticBinderFlagsSpec.cpp
   src/SemanticTyperSpec.cpp
+  src/SfinaeSpec.cpp
   src/SemanticFlowSpec.cpp
   src/UnreachableCodeSpec.cpp
   src/ReturnValidationSpec.cpp
@@ -70,6 +71,7 @@ add_executable(Tests_run
   src/DocumentSpec.cpp
   src/ThreadPoolSpec.cpp
   src/IncludeIndexSpec.cpp
+  src/HeaderFixtureSpec.cpp
   src/IncludeAnalyzerSpec.cpp
   src/ProjectRulesSpec.cpp
   src/ParserTruncationSpec.cpp
@@ -156,6 +158,20 @@ add_test(
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME LspSfinaeSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspSfinaeSmoke.py"
+      "$<TARGET_FILE:heimdall-lsp>"
+  )
+  set_tests_properties(LspSfinaeSmoke PROPERTIES TIMEOUT 60)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(
+      NAME SfinaeCompilerDifferential
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/SfinaeCompilerSpec.py"
+        --compiler "${CMAKE_CXX_COMPILER}" --spec "${CMAKE_CURRENT_SOURCE_DIR}/src/SfinaeSpec.cpp"
+    )
+    set_tests_properties(SfinaeCompilerDifferential PROPERTIES TIMEOUT 120 LABELS "semantic;conformance")
+  endif ()
   add_test(
     NAME LspIncludeOrderSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspIncludeOrderSmoke.py"

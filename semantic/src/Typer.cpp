@@ -1,10 +1,10 @@
-#include <Heimdall/TypeModel.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <optional>
 #include <string>
+
+#include <Heimdall/TypeModel.hpp>
 
 #include "detail/TokenView.hpp"
 
@@ -124,6 +124,16 @@ namespace heimdall
 		return spelling == kNone ? Unknown : Intern(TypeKind::DependentName, spelling, definitionScope);
 	}
 
+	TypeId TypeTable::DependentMember(TypeId receiver, NameId name)
+	{
+		return name == kNone ? Unknown : Intern(TypeKind::DependentMember, receiver, name);
+	}
+
+	TypeId TypeTable::DecltypeExpression(std::uint32_t node, bool unparenthesized)
+	{
+		return node == kNone ? Unknown : Intern(TypeKind::DecltypeExpression, node, unparenthesized);
+	}
+
 	bool TypeTable::IsDependent(TypeId type) const noexcept
 	{
 		for (std::size_t steps = 0; steps < Size(); ++steps)
@@ -132,6 +142,8 @@ namespace heimdall
 			{
 			case TypeKind::TemplateParameter:
 			case TypeKind::DependentName:
+			case TypeKind::DependentMember:
+			case TypeKind::DecltypeExpression:
 			case TypeKind::InjectedClass:
 				return true;
 			case TypeKind::TemplateId:
@@ -227,7 +239,7 @@ namespace heimdall
 		m_arena(std::make_unique<Arena>(arena_hint)), m_model(&model),
 		m_externals(m_arena->Resource()), m_types(m_arena->Resource()),
 		mTemplateArguments(m_arena->Resource()), mInstantiations(m_arena->Resource()),
-		mDependentReferences(m_arena->Resource()),
+		mDependentReferences(m_arena->Resource()), mTemplateCalls(m_arena->Resource()),
 		m_symbol_type(m_arena->Resource()), m_node_type(m_arena->Resource()),
 		m_member_symbol(m_arena->Resource()), mLambdaNodes(m_arena->Resource()),
 		mLambdaReturns(m_arena->Resource()) {}
@@ -252,6 +264,10 @@ namespace heimdall
 		}
 		case TypeKind::DependentName:
 			return std::string(m_externals.Text(m_types.Arg(type)));
+		case TypeKind::DependentMember:
+			return Spell(m_types.Arg(type)) + "::" + std::string(m_externals.Text(m_types.Extent(type)));
+		case TypeKind::DecltypeExpression:
+			return "<dependent decltype>";
 		case TypeKind::TemplateId:
 		{
 			const auto instance = m_types.Arg(type);
@@ -736,17 +752,9 @@ namespace heimdall
 
 		TypeId OverloadReturn(SymbolId symbol);
 
-		Base ParseBase(
-			std::size_t begin,
-			std::size_t end,
-			ScopeId scope,
-			std::uint32_t before);
+		Base ParseBase(std::size_t begin, std::size_t end, ScopeId scope, std::uint32_t before);
 
-		TypeId ParseName(
-			std::size_t& pos,
-			std::size_t end,
-			ScopeId scope,
-			std::uint32_t before);
+		TypeId ParseName(std::size_t& pos, std::size_t end, ScopeId scope, std::uint32_t before);
 
 		std::vector<TypeId> ParseTemplateArguments(
 			std::size_t begin,
@@ -755,14 +763,120 @@ namespace heimdall
 			std::uint32_t before,
 			std::vector<std::pair<std::uint32_t, std::uint32_t>>* syntax = nullptr);
 
-		TypeId Instantiate(TemplateId declaration, std::vector<TypeId> arguments,
-			std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax = {});
+		TypeId Instantiate(
+			TemplateId declaration,
+			std::vector<TypeId> arguments,
+			std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax = {},
+			SubstitutionContext context = SubstitutionContext::Instantiation);
 
 		void BuildDependentReferences();
 
 		std::uint32_t mInstantiationDepth = 0;
 
-		TypeId SubstituteArguments(TypeId type, TemplateId declaration, std::span<const TypeId> arguments);
+		TypeId SubstituteArguments(
+			TypeId type,
+			TemplateId declaration,
+			std::span<const TypeId> arguments);
+
+		SubstitutionResult CheckedSubstitute(
+			TypeId type,
+			TemplateId declaration,
+			std::span<const TypeId> arguments,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth = kMaxTemplateDepth);
+
+		SubstitutionResult SubstituteMember(
+			TypeId receiver,
+			NameId name,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		SubstitutionState DeduceType(
+			TypeId pattern,
+			TypeId argument,
+			TemplateId declaration,
+			std::vector<TypeId>& arguments,
+			std::size_t explicitCount,
+			std::uint32_t remainingDepth = kMaxTemplateDepth);
+
+		SubstitutionState MatchTypePattern(
+			TypeId pattern,
+			TypeId argument,
+			TemplateId declaration,
+			std::vector<TypeId>& bindings,
+			bool ordering,
+			std::uint32_t remainingDepth);
+
+		SubstitutionResult MatchTypePatterns(
+			std::span<const TypeId> patterns,
+			std::span<const TypeId> arguments,
+			TemplateId declaration,
+			std::vector<TypeId>& bindings,
+			bool ordering = false);
+
+		struct ConstraintOutcome
+		{
+			SubstitutionState state   = SubstitutionState::Incomplete;
+			bool satisfied            = false;
+			SubstitutionReason reason = SubstitutionReason::Unsupported;
+		};
+
+		ConstraintOutcome EvaluateConstraintTokens(
+			std::size_t begin,
+			std::size_t end,
+			TemplateId declaration,
+			std::span<const TypeId> bindings,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		ConstraintOutcome EvaluateRequiresBody(
+			std::size_t brace,
+			std::size_t close,
+			TemplateId declaration,
+			std::span<const TypeId> bindings,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		ConstraintOutcome EvaluateTypeRequirement(
+			std::uint32_t requirement,
+			TemplateId declaration,
+			std::span<const TypeId> bindings,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		ConstraintOutcome EvaluateConceptId(
+			std::size_t begin,
+			std::size_t end,
+			TemplateId declaration,
+			std::span<const TypeId> bindings,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		ConstraintOutcome CheckAssociatedConstraints(
+			TemplateId declaration,
+			std::span<const TypeId> bindings,
+			SubstitutionContext context);
+
+		std::vector<std::string> ConstraintAtoms(TemplateId declaration);
+
+		struct SubstitutedExpression
+		{
+			SubstitutionResult result;
+			Category category = Category::Unknown;
+		};
+
+		SubstitutedExpression CheckExpression(
+			std::uint32_t node,
+			TemplateId declaration,
+			std::span<const TypeId> arguments,
+			SubstitutionContext context,
+			std::uint32_t remainingDepth);
+
+		TypeId ResolveTemplateCall(
+			std::uint32_t node,
+			SymbolId symbol,
+			std::span<const TypeId> explicitArguments,
+			bool explicitCall);
 
 		TypeId ApplyOperators(TypeId type, std::size_t begin, std::size_t end);
 
@@ -794,13 +908,17 @@ namespace heimdall
 		std::pair<TypeId, Category> OperandAt(std::size_t pos, ScopeId scope);
 
 		// Type of the initializer of an `auto` variable, with its value category.
-		std::pair<TypeId, Category> AutoInitializer(std::uint32_t node, std::uint32_t init,
+		std::pair<TypeId, Category> AutoInitializer(
+			std::uint32_t node,
+			std::uint32_t init,
 			std::size_t name_pos);
 
 		// Allocated type of a `new`-expression as written after the keyword:
 		// `new T...` is a prvalue of type `T*`. `new` has no dedicated node,
 		// so this scans the tokens instead. Unknown when unresolvable.
-		std::pair<TypeId, Category> NewExpressionType(std::size_t new_pos, std::size_t end,
+		std::pair<TypeId, Category> NewExpressionType(
+			std::size_t new_pos,
+			std::size_t end,
 			ScopeId scope);
 
 		TypeId NumberType(std::string_view text);
@@ -1181,7 +1299,9 @@ namespace heimdall
 		return arguments;
 	}
 
-	TypeId TyperImpl::SubstituteArguments(TypeId type, TemplateId declaration,
+	TypeId TyperImpl::SubstituteArguments(
+		TypeId type,
+		TemplateId declaration,
 		std::span<const TypeId> arguments)
 	{
 		if (m_types.Kind(type) == TypeKind::TemplateParameter)
@@ -1226,8 +1346,1107 @@ namespace heimdall
 		}
 	}
 
-	TypeId TyperImpl::Instantiate(TemplateId declaration, std::vector<TypeId> arguments,
-		std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax)
+	SubstitutionResult TyperImpl::CheckedSubstitute(
+		TypeId type,
+		TemplateId declaration,
+		std::span<const TypeId> arguments,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		if (remainingDepth == 0)
+		{
+			return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::DepthLimit};
+		}
+
+		const auto kind = m_types.Kind(type);
+		if (kind == TypeKind::TemplateParameter)
+		{
+			const auto parameter   = m_types.Arg(type);
+			const auto& parameters = m_model.TemplateParameters();
+			if (parameter < parameters.owner.size() && parameters.owner[parameter] == declaration &&
+				parameters.position[parameter] < arguments.size())
+			{
+				if (parameters.pack[parameter])
+				{
+					return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+				}
+
+				const auto bound = arguments[parameters.position[parameter]];
+				if (m_types.Kind(bound) == TypeKind::TemplateId && !m_types.IsDependent(bound))
+				{
+					return {bound, SubstitutionState::Success, SubstitutionReason::None};
+				}
+			}
+		}
+
+		if (kind == TypeKind::DecltypeExpression)
+		{
+			const auto unparenthesized = m_types.Extent(type) != 0;
+			auto expression = CheckExpression(m_types.Arg(type), declaration, arguments, context,
+				remainingDepth - 1);
+			if (expression.result.state != SubstitutionState::Success)
+			{
+				return expression.result;
+			}
+
+			if (!unparenthesized)
+			{
+				if (expression.category == Category::Unknown)
+				{
+					return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+				}
+
+				expression.result.type = expression.category == Category::LValue
+				? m_types.LRef(expression.result.type) : m_types.Value(expression.result.type);
+			}
+
+			return expression.result;
+		}
+
+		if (kind == TypeKind::DependentMember)
+		{
+			const auto name = m_types.Extent(type);
+			const auto receiver = CheckedSubstitute(m_types.Arg(type), declaration, arguments, context,
+				remainingDepth - 1);
+			if (receiver.state != SubstitutionState::Success)
+			{
+				return receiver.state == SubstitutionState::Dependent
+				? SubstitutionResult {type, receiver.state, receiver.reason}: receiver;
+			}
+
+			return SubstituteMember(receiver.type, name, context, remainingDepth - 1);
+		}
+
+		if (kind == TypeKind::TemplateId)
+		{
+			const auto instance   = m_types.Arg(type);
+			const auto& instances = m_out.mInstantiations;
+			if (instance >= instances.primary.size())
+			{
+				return {};
+			}
+
+			const auto primary = instances.primary[instance];
+			const auto first   = instances.firstArgument[instance];
+			const auto count   = instances.argumentCount[instance];
+			std::vector<TypeId> replaced;
+			replaced.reserve(count);
+			bool dependent = false;
+			for (std::uint32_t i = 0; i < count; ++i)
+			{
+				const auto result = CheckedSubstitute(m_out.mTemplateArguments.type[first + i], declaration,
+					arguments, context, remainingDepth - 1);
+				if (result.state != SubstitutionState::Success && result.state != SubstitutionState::Dependent)
+				{
+					return result;
+				}
+
+				dependent = dependent || result.state == SubstitutionState::Dependent;
+				replaced.push_back(result.type);
+			}
+
+			if (dependent)
+			{
+				return {type, SubstitutionState::Dependent, SubstitutionReason::None};
+			}
+
+			const auto owner = m_model.Templates().owner[primary];
+			if (owner < m_symbols.Size() && m_symbols.kind[owner] == SymbolKind::TypeAlias)
+			{
+				return CheckedSubstitute(SymbolType(owner), primary, replaced, context, remainingDepth - 1);
+			}
+
+			const auto concrete = Instantiate(primary, std::move(replaced), {}, context);
+			if (m_types.Kind(concrete) != TypeKind::TemplateId)
+			{
+				return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+			}
+
+			const auto concreteInstance = m_types.Arg(concrete);
+			const auto check            = m_out.mInstantiations.checkState[concreteInstance];
+			if (check == SubstitutionState::SubstitutionFailure || check == SubstitutionState::ConstraintUnsatisfied)
+			{
+				return {TypeTable::Unknown,
+					context == SubstitutionContext::Immediate ? SubstitutionState::SubstitutionFailure : SubstitutionState::HardError,
+					m_out.mInstantiations.reason[concreteInstance]};
+			}
+
+			if (check == SubstitutionState::Incomplete || check == SubstitutionState::Dependent)
+			{
+				return {TypeTable::Unknown, check, SubstitutionReason::Unsupported};
+			}
+
+			return {concrete, SubstitutionState::Success, SubstitutionReason::None};
+		}
+
+		if (kind == TypeKind::Pointer || kind == TypeKind::LRef || kind == TypeKind::RRef ||
+			kind == TypeKind::Const || kind == TypeKind::Array)
+		{
+			const auto extent = m_types.Extent(type);
+			const auto inner = CheckedSubstitute(m_types.Arg(type), declaration, arguments, context,
+				remainingDepth - 1);
+			if (inner.state != SubstitutionState::Success && inner.state != SubstitutionState::Dependent)
+			{
+				return inner;
+			}
+
+			return m_types.FormSubstitutedType(kind, inner, extent, context);
+		}
+
+		std::vector<TypeBinding> bindings;
+		if (declaration < m_model.Templates().owner.size())
+		{
+			const auto first = m_model.Templates().firstParameter[declaration];
+			const auto count = m_model.Templates().parameterCount[declaration];
+			bindings.reserve(std::min<std::size_t>(count, arguments.size()));
+			for (std::uint32_t i = 0; i < count && i < arguments.size(); ++i)
+			{
+				bindings.push_back({first + i, arguments[i]});
+			}
+		}
+
+		return m_types.Substitute(type, bindings, context, remainingDepth);
+	}
+
+	SubstitutionResult TyperImpl::SubstituteMember(
+		TypeId receiver,
+		NameId name,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		const auto invalid =[&](SubstitutionReason reason)
+		{
+			return SubstitutionResult {TypeTable::Unknown, context == SubstitutionContext::Immediate
+				? SubstitutionState::SubstitutionFailure : SubstitutionState::HardError, reason};
+		};
+		if (remainingDepth == 0)
+		{
+			return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::DepthLimit};
+		}
+
+		if (m_types.Kind(receiver) == TypeKind::Const)
+		{
+			receiver = m_types.Arg(receiver);
+		}
+
+		SymbolId owner         = kNone;
+		TemplateId declaration = kNone;
+		std::vector<TypeId> arguments;
+		if (m_types.Kind(receiver) == TypeKind::Class)
+		{
+			owner = m_types.Arg(receiver);
+		}
+		else if (m_types.Kind(receiver) == TypeKind::TemplateId)
+		{
+			const auto instance   = m_types.Arg(receiver);
+			const auto& instances = m_out.mInstantiations;
+			if (instance >= instances.state.size())
+			{
+				return {};
+			}
+
+			if (instances.checkState[instance] == SubstitutionState::HardError || instances.state[instance] == TemplateResolution::Ambiguous)
+			{
+				return {TypeTable::Unknown, SubstitutionState::HardError, instances.reason[instance]};
+			}
+
+			if (instances.checkState[instance] == SubstitutionState::ConstraintUnsatisfied)
+			{
+				return {TypeTable::Unknown,
+					context == SubstitutionContext::Immediate ? SubstitutionState::SubstitutionFailure : SubstitutionState::HardError,
+					instances.reason[instance]};
+			}
+
+			if (instances.state[instance] != TemplateResolution::Resolved)
+			{
+				return {};
+			}
+
+			declaration      = instances.selected[instance];
+			owner            = m_model.Templates().owner[declaration];
+			const auto first = instances.firstSubstitution[instance];
+			arguments.assign(m_out.mTemplateArguments.type.begin() + first,
+				m_out.mTemplateArguments.type.begin() + first + instances.substitutionCount[instance]);
+		}
+		else if (m_types.Kind(receiver) == TypeKind::Builtin || m_types.Kind(receiver) == TypeKind::Pointer ||
+			m_types.Kind(receiver) == TypeKind::LRef || m_types.Kind(receiver) == TypeKind::RRef ||
+			m_types.Kind(receiver) == TypeKind::Array)
+		{
+			return invalid(SubstitutionReason::WrongMemberKind);
+		}
+		else
+		{
+			return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+		}
+
+		if (owner >= m_symbols.Size())
+		{
+			return {};
+		}
+
+		const auto record = m_symbols.decl_node[owner];
+		if (record >= m_nodes.size() || m_nodes.Kind(record) != GrammarKind::RecordDefinition)
+		{
+			return {};
+		}
+
+		const auto[begin, end] = NodeSig(record);
+		bool definition        = false;
+		for (auto pos = begin; pos < end; ++pos)
+		{
+			definition = definition || At(pos) == Tok::LBrace;
+		}
+
+		if (!definition)
+		{
+			return {};
+		}
+
+		if (declaration != kNone)
+		{
+			if (m_symbols.base_count[owner] != 0)
+			{
+				return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+			}
+
+			for (const auto child : m_model.ChildrenOf(record))
+			{
+				if (m_nodes.Kind(child) == GrammarKind::StaticAssertDeclaration)
+				{
+					return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+				}
+			}
+
+			for (SymbolId member = 0; member < m_symbols.Size(); ++member)
+			{
+				if (m_symbols.scope[member] != m_symbols.member_scope[owner])
+				{
+					continue;
+				}
+
+				if (m_symbols.kind[member] == SymbolKind::Variable || m_symbols.kind[member] == SymbolKind::TypeAlias)
+				{
+					const auto effect = CheckedSubstitute(SymbolType(member), declaration, arguments,
+						SubstitutionContext::Instantiation, remainingDepth - 1);
+					if (effect.state != SubstitutionState::Success)
+					{
+						return effect;
+					}
+				}
+				else if (m_symbols.kind[member] == SymbolKind::Function)
+				{
+					return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+				}
+			}
+		}
+
+		const auto memberName = m_model.Names().Find(m_out.m_externals.Text(name));
+		const auto member     = m_model.LookupLocal(m_symbols.member_scope[owner], memberName);
+		if (member == kNone)
+		{
+			return m_symbols.base_count[owner] == 0 ? invalid(SubstitutionReason::MissingMember)
+			: SubstitutionResult
+			{
+				TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported
+			};
+		}
+
+		if (m_symbols.access[member] != AccessLevel::Public || m_symbols.next_same_name[member] != kNone)
+		{
+			return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::AccessDenied};
+		}
+
+		if (m_symbols.kind[member] == SymbolKind::Class)
+		{
+			return {m_types.Class(member), SubstitutionState::Success, SubstitutionReason::None};
+		}
+
+		if (m_symbols.kind[member] == SymbolKind::Enum)
+		{
+			return {m_types.Enum(member), SubstitutionState::Success, SubstitutionReason::None};
+		}
+
+		if (m_symbols.kind[member] != SymbolKind::TypeAlias)
+		{
+			return invalid(SubstitutionReason::WrongMemberKind);
+		}
+
+		return CheckedSubstitute(SymbolType(member), declaration, arguments,
+			declaration == kNone ? context : SubstitutionContext::Instantiation, remainingDepth - 1);
+	}
+
+	SubstitutionState TyperImpl::MatchTypePattern(
+		TypeId pattern,
+		TypeId argument,
+		TemplateId declaration,
+		std::vector<TypeId>& bindings,
+		bool ordering,
+		std::uint32_t remainingDepth)
+	{
+		if (remainingDepth == 0 || pattern == TypeTable::Unknown || argument == TypeTable::Unknown)
+		{
+			return SubstitutionState::Incomplete;
+		}
+
+		if (!ordering && m_types.IsDependent(argument))
+		{
+			return SubstitutionState::Dependent;
+		}
+
+		const auto kind = m_types.Kind(pattern);
+		if (kind == TypeKind::TemplateParameter)
+		{
+			const auto parameter   = m_types.Arg(pattern);
+			const auto& parameters = m_model.TemplateParameters();
+			if (parameter >= parameters.owner.size() || parameters.owner[parameter] != declaration ||
+				parameters.pack[parameter])
+			{
+				return SubstitutionState::Incomplete;
+			}
+
+			const auto position = parameters.position[parameter];
+			if (position >= bindings.size())
+			{
+				return SubstitutionState::Incomplete;
+			}
+
+			if (bindings[position] != TypeTable::Unknown && bindings[position] != argument)
+			{
+				return SubstitutionState::DeductionFailure;
+			}
+
+			bindings[position] = argument;
+			return SubstitutionState::Success;
+		}
+
+		if (kind == TypeKind::DependentMember || kind == TypeKind::DecltypeExpression)
+		{
+			return ordering ? SubstitutionState::Incomplete : SubstitutionState::Success;
+		}
+
+		if (kind == TypeKind::TemplateId)
+		{
+			const auto instance = m_types.Arg(pattern);
+			const auto primary  = m_out.mInstantiations.primary[instance];
+			const auto owner    = m_model.Templates().owner[primary];
+			if (owner < m_symbols.Size() && m_symbols.kind[owner] == SymbolKind::TypeAlias)
+			{
+				return ordering ? SubstitutionState::Incomplete : SubstitutionState::Success;
+			}
+
+			if (m_types.Kind(argument) != TypeKind::TemplateId)
+			{
+				return SubstitutionState::DeductionFailure;
+			}
+
+			const auto actual     = m_types.Arg(argument);
+			const auto& instances = m_out.mInstantiations;
+			if (instances.primary[actual] != primary || instances.argumentCount[actual] != instances.argumentCount[instance])
+			{
+				return SubstitutionState::DeductionFailure;
+			}
+
+			const auto first       = instances.firstArgument[instance];
+			const auto actualFirst = instances.firstArgument[actual];
+			const auto count       = instances.argumentCount[instance];
+			for (std::uint32_t i = 0; i < count; ++i)
+			{
+				const auto state = MatchTypePattern(m_out.mTemplateArguments.type[first + i],
+					m_out.mTemplateArguments.type[actualFirst + i], declaration, bindings, ordering,
+					remainingDepth - 1);
+				if (state != SubstitutionState::Success)
+				{
+					return state;
+				}
+			}
+
+			return SubstitutionState::Success;
+		}
+
+		if (kind == TypeKind::Pointer || kind == TypeKind::LRef || kind == TypeKind::RRef ||
+			kind == TypeKind::Const || kind == TypeKind::Array)
+		{
+			if (m_types.Kind(argument) != kind ||(kind == TypeKind::Array && m_types.Extent(pattern) != m_types.Extent(argument)))
+			{
+				return SubstitutionState::DeductionFailure;
+			}
+
+			return MatchTypePattern(m_types.Arg(pattern), m_types.Arg(argument), declaration, bindings,
+				ordering, remainingDepth - 1);
+		}
+
+		return pattern == argument ? SubstitutionState::Success : SubstitutionState::DeductionFailure;
+	}
+
+	SubstitutionResult TyperImpl::MatchTypePatterns(
+		std::span<const TypeId> patterns,
+		std::span<const TypeId> arguments,
+		TemplateId declaration,
+		std::vector<TypeId>& bindings,
+		bool ordering)
+	{
+		const auto& templates = m_model.Templates();
+		if (declaration >= templates.owner.size() ||!templates.complete[declaration])
+		{
+			return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+		}
+
+		if (patterns.size() != arguments.size())
+		{
+			return {TypeTable::Unknown, SubstitutionState::DeductionFailure, SubstitutionReason::ArgumentCount};
+		}
+
+		const auto count = templates.parameterCount[declaration];
+		const auto first = templates.firstParameter[declaration];
+		bindings.assign(count, TypeTable::Unknown);
+		for (std::uint32_t i = 0; i < count; ++i)
+		{
+			if (m_model.TemplateParameters().kind[first + i] != TemplateParameterKind::Type || m_model.TemplateParameters().pack[first + i])
+			{
+				return {TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported};
+			}
+		}
+
+		for (std::size_t i = 0; i < patterns.size(); ++i)
+		{
+			const auto state = MatchTypePattern(patterns[i], arguments[i], declaration, bindings, ordering,
+				kMaxTemplateDepth);
+			if (state != SubstitutionState::Success)
+			{
+				return {TypeTable::Unknown, state, SubstitutionReason::ConflictingDeduction};
+			}
+		}
+
+		if (!ordering && std::ranges::find(bindings, TypeTable::Unknown) != bindings.end())
+		{
+			return {TypeTable::Unknown, SubstitutionState::DeductionFailure,
+				SubstitutionReason::ConflictingDeduction};
+		}
+
+		if (!ordering)
+		{
+			for (std::size_t i = 0; i < patterns.size(); ++i)
+			{
+				const auto result = CheckedSubstitute(patterns[i], declaration, bindings,
+					SubstitutionContext::Immediate);
+				if (result.state != SubstitutionState::Success)
+				{
+					return result;
+				}
+
+				if (result.type != arguments[i])
+				{
+					return {TypeTable::Unknown, SubstitutionState::DeductionFailure,
+						SubstitutionReason::ConflictingDeduction};
+				}
+			}
+		}
+
+		return {TypeTable::Unknown, SubstitutionState::Success, SubstitutionReason::None};
+	}
+
+	TyperImpl::ConstraintOutcome TyperImpl::EvaluateConstraintTokens(
+		std::size_t begin,
+		std::size_t end,
+		TemplateId declaration,
+		std::span<const TypeId> bindings,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		if (remainingDepth == 0)
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::DepthLimit};
+		}
+
+		while (begin < end && At(begin) == Tok::KwRequires)
+		{
+			// A bare `requires { ... }` requirement body used as an operand.
+			std::size_t brace = begin + 1;
+			if (At(brace) == Tok::LParen)
+			{
+				brace = MatchParen(brace, end);
+				if (brace < end)
+				{
+					++brace;
+				}
+			}
+
+			if (brace >= end || At(brace) != Tok::LBrace)
+			{
+				return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+			}
+
+			const auto close = MatchParen(brace, end);
+			if (close >= end)
+			{
+				return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+			}
+
+			return EvaluateRequiresBody(brace, close, declaration, bindings, context, remainingDepth - 1);
+		}
+
+		// Strip one layer of parentheses covering the whole range.
+		if (begin < end && At(begin) == Tok::LParen)
+		{
+			const auto close = MatchParen(begin, end);
+			if (close + 1 == end)
+			{
+				return EvaluateConstraintTokens(begin + 1, close, declaration, bindings, context,
+					remainingDepth - 1);
+			}
+		}
+
+		// Top-level `||` first (lowest precedence), then `&&`, both short-circuit.
+		for (const auto op :
+			{
+				Tok::PipePipe, Tok::AmpAmp
+		})
+		{
+			for (auto i = begin; i < end;)
+			{
+				const auto tok = At(i);
+				if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
+				{
+					const auto close = MatchParen(i, end);
+					i                = close >= end ? end : close + 1;
+					continue;
+				}
+
+				if (tok == Tok::Lt)
+				{
+					const auto close = MatchAngle(i, end);
+					i                = close >= end ? i + 1 : close + 1;
+					continue;
+				}
+
+				if (tok == op)
+				{
+					auto left = EvaluateConstraintTokens(begin, i, declaration, bindings, context, remainingDepth - 1);
+					if (left.state != SubstitutionState::Success)
+					{
+						return left;
+					}
+
+					if (op == Tok::PipePipe && left.satisfied)
+					{
+						return {SubstitutionState::Success, true, SubstitutionReason::None};
+					}
+
+					if (op == Tok::AmpAmp && !left.satisfied)
+					{
+						return {SubstitutionState::Success, false, SubstitutionReason::None};
+					}
+
+					return EvaluateConstraintTokens(i + 1, end, declaration, bindings, context, remainingDepth - 1);
+				}
+
+				++i;
+			}
+		}
+
+		if (begin < end && At(begin) == Tok::Bang)
+		{
+			auto operand = EvaluateConstraintTokens(begin + 1, end, declaration, bindings, context,
+				remainingDepth - 1);
+			if (operand.state != SubstitutionState::Success)
+			{
+				return operand;
+			}
+
+			operand.satisfied = !operand.satisfied;
+			return operand;
+		}
+
+		if (end == begin + 1)
+		{
+			if (At(begin) == Tok::KwTrue)
+			{
+				return {SubstitutionState::Success, true, SubstitutionReason::None};
+			}
+
+			if (At(begin) == Tok::KwFalse)
+			{
+				return {SubstitutionState::Success, false, SubstitutionReason::None};
+			}
+		}
+
+		// Concept-id `Name<args...>` covering the whole range.
+		if (begin < end && (WordAt(begin) || At(begin) == Tok::ColonColon))
+		{
+			auto pos = begin +(At(begin) == Tok::ColonColon ? 1 : 0);
+			if (pos < end && WordAt(pos))
+			{
+				++pos;
+				if (pos < end && At(pos) == Tok::Lt)
+				{
+					const auto close = MatchAngle(pos, end);
+					if (close + 1 == end)
+					{
+						return EvaluateConceptId(begin, end, declaration, bindings, context, remainingDepth - 1);
+					}
+				}
+				else if (pos == end)
+				{
+					// Nullary concept-id or a bare placeholder.
+					return EvaluateConceptId(begin, end, declaration, bindings, context, remainingDepth - 1);
+				}
+			}
+		}
+
+		// Atomic expression constraint: must be a constant expression of type bool.
+		// Reuse unevaluated-expression checking for validity, then enforce bool.
+		for (auto node = std::uint32_t {0}; node < m_nodes.size(); ++node)
+		{
+			const auto[rangeBegin, rangeEnd] = NodeSig(node);
+			if (rangeBegin != begin || rangeEnd != end)
+			{
+				continue;
+			}
+
+			switch (m_nodes.Kind(node))
+			{
+			case GrammarKind::LiteralExpression:
+			case GrammarKind::IdentifierExpression:
+			case GrammarKind::ParenthesizedExpression:
+			case GrammarKind::UnaryExpression:
+			case GrammarKind::BinaryExpression:
+			case GrammarKind::CallExpression:
+			{
+				auto checked = CheckExpression(node, declaration, bindings, context, remainingDepth - 1);
+				if (checked.result.state != SubstitutionState::Success)
+				{
+					if (checked.result.state == SubstitutionState::SubstitutionFailure)
+					{
+						return {SubstitutionState::Success, false, SubstitutionReason::None};
+					}
+
+					return {checked.result.state, false, checked.result.reason};
+				}
+
+				if (!m_types.IsBool(checked.result.type))
+				{
+					// An atomic constraint that is valid but not bool is
+					// ill-formed, not a substitution failure.
+					return {SubstitutionState::HardError, false, SubstitutionReason::InvalidExpression};
+				}
+
+				// A valid bool-valued expression that is not a recognized
+				// constant cannot prove satisfaction either way here.
+				return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+			}
+			default:
+				break;
+			}
+		}
+
+		return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+	}
+
+	TyperImpl::ConstraintOutcome TyperImpl::EvaluateRequiresBody(
+		std::size_t brace,
+		std::size_t close,
+		TemplateId declaration,
+		std::span<const TypeId> bindings,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		if (remainingDepth == 0)
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::DepthLimit};
+		}
+
+		for (auto first = brace + 1; first < close;)
+		{
+			auto last           = first;
+			std::uint32_t depth = 0;
+			for (; last < close; ++last)
+			{
+				const auto tok = At(last);
+				if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace || tok == Tok::Lt)
+				{
+					++depth;
+				}
+				else if (tok == Tok::RParen || tok == Tok::RBracket || tok == Tok::RBrace || tok == Tok::Gt)
+				{
+					depth = depth > 0 ? depth - 1 : 0;
+				}
+				else if (tok == Tok::Semi && depth == 0)
+				{
+					break;
+				}
+			}
+
+			if (first != last)
+			{
+				// Locate the Requirement node covering these tokens when present.
+				std::uint32_t requirement = kNone;
+				for (std::uint32_t node = 0; node < m_nodes.size(); ++node)
+				{
+					if (m_nodes.Kind(node) != GrammarKind::Requirement)
+					{
+						continue;
+					}
+
+					const auto[rangeBegin, rangeEnd] = NodeSig(node);
+					if (rangeBegin == first && (rangeEnd == last ||(rangeEnd == last + 1 && At(last) == Tok::Semi)))
+					{
+						requirement = node;
+						break;
+					}
+				}
+
+				ConstraintOutcome outcome {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+				if (requirement != kNone && m_tree.RequirementKindOf(requirement) == RequirementKind::Type)
+				{
+					outcome = EvaluateTypeRequirement(requirement, declaration, bindings, context, remainingDepth - 1);
+				}
+				else if (first < last && At(first) == Tok::KwRequires)
+				{
+					outcome = EvaluateConstraintTokens(first, last, declaration, bindings, context, remainingDepth - 1);
+				}
+				else if (requirement != kNone)
+				{
+					bool nested = false;
+					for (const auto child : m_model.ChildrenOf(requirement))
+					{
+						if (m_nodes.Kind(child) == GrammarKind::RequiresExpression)
+						{
+							const auto[childBegin, childEnd] = NodeSig(child);
+							outcome = EvaluateConstraintTokens(childBegin, childEnd, declaration, bindings,
+								context, remainingDepth - 1);
+							nested = true;
+							break;
+						}
+					}
+
+					if (!nested)
+					{
+						outcome = {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+					}
+				}
+
+				if (outcome.state != SubstitutionState::Success)
+				{
+					return outcome;
+				}
+
+				if (!outcome.satisfied)
+				{
+					return {SubstitutionState::Success, false, SubstitutionReason::None};
+				}
+			}
+
+			first = last < close && At(last) == Tok::Semi ? last + 1 : close;
+		}
+
+		return {SubstitutionState::Success, true, SubstitutionReason::None};
+	}
+
+	TyperImpl::ConstraintOutcome TyperImpl::EvaluateTypeRequirement(
+		std::uint32_t requirement,
+		TemplateId declaration,
+		std::span<const TypeId> bindings,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		const auto[begin, end] = NodeSig(requirement);
+		auto first             = begin +(begin < end && At(begin) == Tok::KwTypename ? 1 : 0);
+		auto last              = end;
+		if (last > first && At(last - 1) == Tok::Semi)
+		{
+			--last;
+		}
+
+		if (first >= last)
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		const auto& templates = m_model.Templates();
+		const auto scope = declaration < templates.scope.size()
+		? templates.scope[declaration] : SemanticModel::TranslationUnitScope;
+		const auto type   = ParseTypeTokens(first, last, scope, m_sig[first]);
+		const auto result = CheckedSubstitute(type, declaration, bindings, context, remainingDepth);
+		if (result.state == SubstitutionState::Success || result.state == SubstitutionState::Dependent)
+		{
+			return {result.state, result.state == SubstitutionState::Success, SubstitutionReason::None};
+		}
+
+		if (result.state == SubstitutionState::SubstitutionFailure)
+		{
+			return {SubstitutionState::Success, false, SubstitutionReason::None};
+		}
+
+		return {result.state, false, result.reason};
+	}
+
+	TyperImpl::ConstraintOutcome TyperImpl::EvaluateConceptId(
+		std::size_t begin,
+		std::size_t end,
+		TemplateId declaration,
+		std::span<const TypeId> bindings,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		auto pos = begin +(At(begin) == Tok::ColonColon ? 1 : 0);
+		if (pos >= end ||!WordAt(pos))
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		const auto name       = m_model.Names().Find(TextAt(pos));
+		const auto& templates = m_model.Templates();
+		const auto scope = declaration < templates.scope.size()
+		? templates.scope[declaration] : SemanticModel::TranslationUnitScope;
+		const auto symbol = name == kNone ? kNone : m_model.Lookup(scope, name, m_sig[begin]);
+		if (symbol == kNone || m_symbols.kind[symbol] != SymbolKind::Concept)
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		const auto conceptDeclaration = m_model.TemplateOf(symbol);
+		if (conceptDeclaration >= templates.owner.size() ||!templates.complete[conceptDeclaration])
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		std::vector<TypeId> conceptArgs;
+		if (pos + 1 < end && At(pos + 1) == Tok::Lt)
+		{
+			const auto close = MatchAngle(pos + 1, end);
+			if (close + 1 != end)
+			{
+				return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+			}
+
+			for (auto first = pos + 2; first < close;)
+			{
+				auto last           = first;
+				std::uint32_t depth = 0;
+				for (; last < close; ++last)
+				{
+					const auto tok = At(last);
+					if (tok == Tok::Lt)
+					{
+						++depth;
+					}
+					else if (tok == Tok::Gt && depth != 0)
+					{
+						--depth;
+					}
+					else if (tok == Tok::Comma && depth == 0)
+					{
+						break;
+					}
+				}
+
+				const auto parsed = ParseTypeTokens(first, last, scope, m_sig[first]);
+				const auto substituted = CheckedSubstitute(parsed, declaration, bindings, context,
+					remainingDepth - 1);
+				if (substituted.state != SubstitutionState::Success)
+				{
+					if (substituted.state == SubstitutionState::SubstitutionFailure)
+					{
+						return {SubstitutionState::Success, false, SubstitutionReason::None};
+					}
+
+					return {substituted.state, false, substituted.reason};
+				}
+
+				conceptArgs.push_back(substituted.type);
+				first = last + 1;
+			}
+		}
+
+		const auto count = templates.parameterCount[conceptDeclaration];
+		if (!conceptArgs.empty() && conceptArgs.size() != count)
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		if (conceptArgs.empty())
+		{
+			conceptArgs.assign(count, TypeTable::Unknown);
+		}
+
+		const auto conceptNode = templates.node[conceptDeclaration];
+		for (auto node = conceptNode; node < m_nodes.SubtreeEnd(conceptNode); ++node)
+		{
+			if (m_nodes.Kind(node) != GrammarKind::ConceptDefinition)
+			{
+				continue;
+			}
+
+			for (const auto child : m_model.ChildrenOf(node))
+			{
+				if (m_nodes.Kind(child) == GrammarKind::RequiresExpression)
+				{
+					const auto[childBegin, childEnd] = NodeSig(child);
+					return EvaluateConstraintTokens(childBegin, childEnd, conceptDeclaration, conceptArgs,
+						context, remainingDepth - 1);
+				}
+			}
+		}
+
+		return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+	}
+
+	TyperImpl::ConstraintOutcome TyperImpl::CheckAssociatedConstraints(
+		TemplateId declaration,
+		std::span<const TypeId> bindings,
+		SubstitutionContext context)
+	{
+		const auto& templates = m_model.Templates();
+		if (declaration >= templates.node.size())
+		{
+			return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+		}
+
+		const auto root    = templates.node[declaration];
+		const auto rootEnd = m_nodes.SubtreeEnd(root);
+		bool any           = false;
+		for (auto node = root; node < rootEnd; ++node)
+		{
+			if (m_nodes.Kind(node) != GrammarKind::RequiresClause)
+			{
+				continue;
+			}
+
+			bool nested = false;
+			for (auto parent = m_nodes.Parent(node); parent < m_nodes.size() && parent != root;
+				parent = m_nodes.Parent(parent))
+			{
+				if (m_nodes.Kind(parent) == GrammarKind::RequiresClause ||
+					m_nodes.Kind(parent) == GrammarKind::RequiresExpression ||
+					m_nodes.Kind(parent) == GrammarKind::Requirement)
+				{
+					nested = true;
+					break;
+				}
+			}
+
+			if (nested)
+			{
+				continue;
+			}
+
+			any                    = true;
+			const auto[begin, end] = NodeSig(node);
+			if (begin + 1 >= end)
+			{
+				return {SubstitutionState::Incomplete, false, SubstitutionReason::Unsupported};
+			}
+
+			const auto outcome = EvaluateConstraintTokens(begin + 1, end, declaration, bindings, context,
+				kMaxTemplateDepth);
+			if (outcome.state != SubstitutionState::Success)
+			{
+				return outcome;
+			}
+
+			if (!outcome.satisfied)
+			{
+				return {SubstitutionState::Success, false, SubstitutionReason::None};
+			}
+		}
+
+		if (!any)
+		{
+			return {SubstitutionState::Success, true, SubstitutionReason::None};
+		}
+
+		return {SubstitutionState::Success, true, SubstitutionReason::None};
+	}
+
+	std::vector<std::string> TyperImpl::ConstraintAtoms(TemplateId declaration)
+	{
+		std::vector<std::string> atoms;
+		const auto& templates = m_model.Templates();
+		if (declaration >= templates.node.size())
+		{
+			return atoms;
+		}
+
+		const auto root    = templates.node[declaration];
+		const auto rootEnd = m_nodes.SubtreeEnd(root);
+		for (auto node = root; node < rootEnd; ++node)
+		{
+			if (m_nodes.Kind(node) != GrammarKind::RequiresClause)
+			{
+				continue;
+			}
+
+			const auto range = NodeSig(node);
+			if (range.first + 1 >= range.second)
+			{
+				continue;
+			}
+
+			// Split the clause body at top-level `&&`; each conjunct is an atom.
+			auto first = range.first + 1;
+			auto end   = range.second;
+			if (first < end && At(first) == Tok::LParen && MatchParen(first, end) + 1 == end)
+			{
+				++first;
+				--end;
+			}
+
+			for (auto i = first; i <= end; ++i)
+			{
+				bool split = i == end;
+				if (!split)
+				{
+					const auto tok = At(i);
+					if (tok == Tok::LParen || tok == Tok::LBracket || tok == Tok::LBrace)
+					{
+						const auto close = MatchParen(i, end);
+						i                = close >= end ? end : close;
+						continue;
+					}
+
+					if (tok == Tok::Lt)
+					{
+						const auto close = MatchAngle(i, end);
+						i                = close >= end ? i : close;
+						continue;
+					}
+
+					split = tok == Tok::AmpAmp;
+				}
+
+				if (split && i > first)
+				{
+					std::string atom;
+					for (auto pos = first; pos < i; ++pos)
+					{
+						if (!atom.empty())
+						{
+							atom += ' ';
+						}
+
+						atom += std::string(TextAt(pos));
+					}
+
+					if (!atom.empty())
+					{
+						atoms.push_back(std::move(atom));
+					}
+
+					first = i + 1;
+				}
+			}
+		}
+
+		std::ranges::sort(atoms);
+		atoms.erase(std::ranges::unique(atoms).begin(), atoms.end());
+		return atoms;
+	}
+
+	TypeId TyperImpl::Instantiate(
+		TemplateId declaration,
+		std::vector<TypeId> arguments,
+		std::vector<std::pair<std::uint32_t, std::uint32_t>> syntax,
+		SubstitutionContext context)
 	{
 		const auto& templates  = m_model.Templates();
 		const auto& parameters = m_model.TemplateParameters();
@@ -1237,27 +2456,54 @@ namespace heimdall
 		}
 
 		++mInstantiationDepth;
+		struct DepthGuard
+		{
+			std::uint32_t& depth;
+			~DepthGuard()
+			{
+				--depth;
+			}
+		} depthGuard
+		{
+			mInstantiationDepth
+		};
 		syntax.resize(arguments.size(), {kNone, kNone});
 		const auto firstParameter = templates.firstParameter[declaration];
 		const auto count          = templates.parameterCount[declaration];
 		bool complete             = templates.complete[declaration] && templates.kind[declaration] == TemplateDeclarationKind::Primary;
+		SubstitutionResult formation {TypeTable::Unknown, SubstitutionState::Success,
+			SubstitutionReason::None};
+		const auto declarationOwner = templates.owner[declaration];
+		const bool aliasPack = declarationOwner < m_symbols.Size() && m_symbols.kind[declarationOwner] == SymbolKind::TypeAlias &&
+			count != 0 && parameters.pack[firstParameter + count - 1];
 		for (std::uint32_t i = 0; i < count; ++i)
 		{
 			const auto parameter = firstParameter + i;
-			complete             = complete && parameters.kind[parameter] == TemplateParameterKind::Type && !parameters.pack[parameter];
+			complete = complete && parameters.kind[parameter] == TemplateParameterKind::Type &&
+				(!parameters.pack[parameter] ||(aliasPack && i + 1 == count));
+			if (aliasPack && i + 1 == count)
+			{
+				break;
+			}
+
 			if (i >= arguments.size())
 			{
 				const auto begin = parameters.defaultBegin[parameter];
 				const auto end   = parameters.defaultEnd[parameter];
 				const auto defaultType = begin == kNone ? TypeTable::Unknown
 				: ParseTypeTokens(Pos(begin), Pos(end), templates.scope[declaration], begin);
-				arguments.push_back(SubstituteArguments(defaultType, declaration, arguments));
+				formation = CheckedSubstitute(defaultType, declaration, arguments, SubstitutionContext::Immediate);
+				arguments.push_back(formation.type);
 				syntax.emplace_back(begin, end);
+				if (formation.state != SubstitutionState::Success && formation.state != SubstitutionState::Dependent)
+				{
+					complete = false;
+					break;
+				}
 			}
 		}
 
-		--mInstantiationDepth;
-		complete       = complete && arguments.size() == count;
+		complete       = complete && (aliasPack ? arguments.size() + 1 >= count : arguments.size() == count);
 		bool dependent = false;
 		for (const auto argument : arguments)
 		{
@@ -1265,8 +2511,30 @@ namespace heimdall
 			complete  = complete && argument != TypeTable::Unknown;
 		}
 
+		if (complete && !dependent)
+		{
+			const auto constraints = CheckAssociatedConstraints(declaration, arguments, context);
+			if (constraints.state == SubstitutionState::Success && !constraints.satisfied)
+			{
+				formation = {TypeTable::Unknown, SubstitutionState::ConstraintUnsatisfied,
+					SubstitutionReason::None};
+				complete = false;
+			}
+			else if (constraints.state == SubstitutionState::HardError)
+			{
+				formation = {TypeTable::Unknown, SubstitutionState::HardError, constraints.reason};
+				complete  = false;
+			}
+			else if (constraints.state != SubstitutionState::Success)
+			{
+				complete = false;
+			}
+		}
+
 		TemplateId selected = declaration;
-		const auto owner    = templates.owner[declaration];
+		std::vector<TypeId> selectedBindings;
+		bool ambiguous   = false;
+		const auto owner = templates.owner[declaration];
 		for (TemplateId candidate = 0; candidate < templates.owner.size(); ++candidate)
 		{
 			const auto symbol = templates.owner[candidate];
@@ -1276,8 +2544,12 @@ namespace heimdall
 				continue;
 			}
 
-			if (templates.kind[candidate] == TemplateDeclarationKind::Partial ||
-				templates.kind[candidate] == TemplateDeclarationKind::Primary ||!templates.complete[candidate])
+			if (templates.kind[candidate] == TemplateDeclarationKind::Partial)
+			{
+				continue;
+			}
+
+			if (templates.kind[candidate] == TemplateDeclarationKind::Primary ||!templates.complete[candidate])
 			{
 				complete = false;
 				continue;
@@ -1311,9 +2583,122 @@ namespace heimdall
 			}
 		}
 
+		if (complete && !dependent && selected == declaration)
+		{
+			struct PartialMatch
+			{
+				TemplateId declaration;
+				std::vector<TypeId> patterns;
+				std::vector<TypeId> bindings;
+			};
+
+			constexpr std::size_t kMaxPartialCandidates = 128;
+			std::vector<PartialMatch> matches;
+			std::size_t visits = 0;
+			for (TemplateId candidate = 0; candidate < templates.owner.size(); ++candidate)
+			{
+				const auto symbol = templates.owner[candidate];
+				if (templates.kind[candidate] != TemplateDeclarationKind::Partial || symbol == kNone || owner == kNone ||
+					m_symbols.name[symbol] != m_symbols.name[owner] || m_symbols.scope[symbol] != m_symbols.scope[owner])
+				{
+					continue;
+				}
+
+				if (++visits > kMaxPartialCandidates ||!templates.complete[candidate])
+				{
+					complete = false;
+					continue;
+				}
+
+				const auto namePos = Pos(m_symbols.decl_token[symbol]);
+				const auto end     = NodeSig(m_symbols.decl_node[symbol]).second;
+				const auto close   = MatchAngle(namePos + 1, end);
+				if (close >= end)
+				{
+					complete = false;
+					continue;
+				}
+
+				auto patterns = ParseTemplateArguments(namePos + 2, close, templates.scope[candidate],
+					m_symbols.decl_token[symbol]);
+				std::vector<TypeId> bindings;
+				const auto result = MatchTypePatterns(patterns, arguments, candidate, bindings);
+				if (result.state == SubstitutionState::Success)
+				{
+					const auto partialConstraints = CheckAssociatedConstraints(candidate, bindings, context);
+					if (partialConstraints.state == SubstitutionState::Success && partialConstraints.satisfied)
+					{
+						matches.push_back({candidate, std::move(patterns), std::move(bindings)});
+					}
+					else if (partialConstraints.state == SubstitutionState::HardError)
+					{
+						formation = {TypeTable::Unknown, SubstitutionState::HardError, partialConstraints.reason};
+						complete  = false;
+						break;
+					}
+					else if (partialConstraints.state == SubstitutionState::Success)
+					{
+						// Unsatisfied partial constraints: not a match, primary may still match.
+					}
+					else
+					{
+						complete = false;
+					}
+				}
+				else if (result.state == SubstitutionState::HardError)
+				{
+					formation = result;
+					complete  = false;
+					break;
+				}
+				else if (result.state != SubstitutionState::DeductionFailure && result.state != SubstitutionState::SubstitutionFailure)
+				{
+					complete = false;
+				}
+			}
+
+			if (complete && !matches.empty())
+			{
+				std::size_t winners = 0;
+				for (const auto& match : matches)
+				{
+					bool best = true;
+					for (const auto& other : matches)
+					{
+						if (&match == &other)
+						{
+							continue;
+						}
+
+						std::vector<TypeId> forwardBindings, reverseBindings;
+						const auto forward = MatchTypePatterns(other.patterns, match.patterns, other.declaration,
+							forwardBindings, true);
+						const auto reverse = MatchTypePatterns(match.patterns, other.patterns, match.declaration,
+							reverseBindings, true);
+						if (forward.state == SubstitutionState::Incomplete || reverse.state == SubstitutionState::Incomplete)
+						{
+							complete = false;
+						}
+
+						best = best && forward.state == SubstitutionState::Success && reverse.state == SubstitutionState::DeductionFailure;
+					}
+
+					if (best)
+					{
+						selected         = match.declaration;
+						selectedBindings = match.bindings;
+						++winners;
+					}
+				}
+
+				ambiguous = complete && winners != 1;
+				complete  = complete && !ambiguous;
+			}
+		}
+
 		auto& instances = m_out.mInstantiations;
 		auto& table     = m_out.mTemplateArguments;
-		const auto state = !complete ? TemplateResolution::Incomplete
+		const auto state = ambiguous ? TemplateResolution::Ambiguous : !complete ? TemplateResolution::Incomplete
 		: dependent ? TemplateResolution::Dependent : TemplateResolution::Resolved;
 		std::uint64_t key = declaration;
 		for (const auto argument : arguments)
@@ -1342,7 +2727,14 @@ namespace heimdall
 		instances.selected.push_back(state == TemplateResolution::Resolved ? selected : kNone);
 		instances.firstArgument.push_back(static_cast<std::uint32_t>(table.type.size()));
 		instances.argumentCount.push_back(static_cast<std::uint32_t>(arguments.size()));
+		instances.firstSubstitution.push_back(instances.firstArgument.back());
+		instances.substitutionCount.push_back(instances.argumentCount.back());
 		instances.state.push_back(state);
+		instances.checkState.push_back(formation.state == SubstitutionState::SubstitutionFailure || formation.state == SubstitutionState::HardError || formation.state == SubstitutionState::ConstraintUnsatisfied
+			? formation.state : state == TemplateResolution::Resolved ? SubstitutionState::Success
+			: state == TemplateResolution::Dependent ? SubstitutionState::Dependent
+			: state == TemplateResolution::Ambiguous ? SubstitutionState::Ambiguous : SubstitutionState::Incomplete);
+		instances.reason.push_back(formation.reason);
 		instances.firstBase.push_back(kNone);
 		instances.baseCount.push_back(0);
 		if (complete)
@@ -1352,7 +2744,7 @@ namespace heimdall
 
 		for (std::uint32_t i = 0; i < arguments.size(); ++i)
 		{
-			const auto parameter = i < count ? firstParameter + i : kNone;
+			const auto parameter = i < count ? firstParameter + i : aliasPack ? firstParameter + count - 1 : kNone;
 			table.parameter.push_back(parameter);
 			table.sourceBegin.push_back(syntax[i].first);
 			table.sourceEnd.push_back(syntax[i].second);
@@ -1362,11 +2754,24 @@ namespace heimdall
 				: parameters.kind[parameter] == TemplateParameterKind::Value ? TemplateArgumentKind::Value : TemplateArgumentKind::Template);
 		}
 
+		if (state == TemplateResolution::Resolved && templates.kind[selected] == TemplateDeclarationKind::Partial)
+		{
+			instances.firstSubstitution[instance] = static_cast<std::uint32_t>(table.type.size());
+			instances.substitutionCount[instance] = static_cast<std::uint32_t>(selectedBindings.size());
+			for (std::uint32_t i = 0; i < selectedBindings.size(); ++i)
+			{
+				table.parameter.push_back(templates.firstParameter[selected] + i);
+				table.sourceBegin.push_back(kNone);
+				table.sourceEnd.push_back(kNone);
+				table.type.push_back(selectedBindings[i]);
+				table.kind.push_back(TemplateArgumentKind::Type);
+			}
+		}
+
 		std::vector<TypeId> baseTypes;
 		const auto selectedOwner = templates.owner[selected];
 		if (complete && selectedOwner != kNone && mInstantiationDepth < kMaxTemplateDepth)
 		{
-			++mInstantiationDepth;
 			const auto baseFirst = m_symbols.first_base[selectedOwner];
 			const auto baseCount = m_symbols.base_count[selectedOwner];
 			const auto end       = NodeSig(m_symbols.decl_node[selectedOwner]).second;
@@ -1393,16 +2798,16 @@ namespace heimdall
 
 				const auto baseType = ParseTypeTokens(begin, last, templates.scope[selected],
 					m_model.Bases().token[baseFirst + i]);
-				baseTypes.push_back(SubstituteArguments(baseType, declaration, arguments));
+				baseTypes.push_back(SubstituteArguments(baseType, selected,
+					templates.kind[selected] == TemplateDeclarationKind::Partial ? std::span<const TypeId>(selectedBindings) : std::span<const TypeId>(arguments)));
 			}
 
-			--mInstantiationDepth;
 		}
 
 		instances.firstBase[instance] = static_cast<std::uint32_t>(instances.baseType.size());
 		instances.baseCount[instance] = static_cast<std::uint32_t>(baseTypes.size());
 		instances.baseType.insert(instances.baseType.end(), baseTypes.begin(), baseTypes.end());
-		return m_types.TemplateInstance(instance, dependent ||!complete);
+		return m_types.TemplateInstance(instance, dependent ||(!complete && !ambiguous));
 	}
 
 	// `[::] a [<...>] [:: b [<...>]]...` at `pos`: a type name. Library (`std::`)
@@ -1421,13 +2826,15 @@ namespace heimdall
 
 		std::string text;
 		std::string_view last_component;
-		SymbolId current    = kNone;
-		bool first          = true;
-		bool is_std         = false;
-		bool template_args  = false;
-		bool dependent      = false;
-		bool unresolved     = false;
-		TypeId templateType = TypeTable::Unknown;
+		SymbolId current         = kNone;
+		bool first               = true;
+		bool is_std              = false;
+		bool template_args       = false;
+		bool dependent           = false;
+		bool unresolved          = false;
+		TypeId templateType      = TypeTable::Unknown;
+		TypeId qualifiedReceiver = TypeTable::Unknown;
+		TypeId qualifiedType     = TypeTable::Unknown;
 		for (; pos < end && WordAt(pos);)
 		{
 			const auto spelled = TextAt(pos);
@@ -1455,6 +2862,11 @@ namespace heimdall
 			}
 
 			current = found;
+			if (qualifiedReceiver != TypeTable::Unknown)
+			{
+				qualifiedType = m_types.DependentMember(qualifiedReceiver, m_out.m_externals.InternCopy(spelled));
+			}
+
 			if (found != kNone && m_symbols.kind[found] == SymbolKind::TemplateParameter)
 			{
 				dependent = true;
@@ -1493,7 +2905,8 @@ namespace heimdall
 						dependent = dependent || m_types.IsDependent(argument);
 					}
 
-					if (current != kNone && m_symbols.kind[current] == SymbolKind::Class)
+					if (current != kNone && (m_symbols.kind[current] == SymbolKind::Class ||
+						m_symbols.kind[current] == SymbolKind::TypeAlias))
 					{
 						templateType = Instantiate(m_model.TemplateOf(current), std::move(arguments), std::move(syntax));
 					}
@@ -1517,6 +2930,23 @@ namespace heimdall
 
 			if (pos + 1 < end && At(pos) == Tok::ColonColon && WordAt(pos + 1))
 			{
+				if (qualifiedType != TypeTable::Unknown)
+				{
+					qualifiedReceiver = qualifiedType;
+				}
+				else if (templateType != TypeTable::Unknown)
+				{
+					qualifiedReceiver = templateType;
+				}
+				else if (current != kNone && m_symbols.kind[current] == SymbolKind::TemplateParameter)
+				{
+					const auto parameter = m_model.ParameterOf(current);
+					if (parameter != kNone && m_model.TemplateParameters().kind[parameter] == TemplateParameterKind::Type)
+					{
+						qualifiedReceiver = m_types.Parameter(parameter);
+					}
+				}
+
 				templateType = TypeTable::Unknown;
 				text += "::";
 				++pos;
@@ -1524,6 +2954,11 @@ namespace heimdall
 			}
 
 			break;
+		}
+
+		if (qualifiedType != TypeTable::Unknown)
+		{
+			return qualifiedType;
 		}
 
 		if (dependent)
@@ -1604,7 +3039,12 @@ namespace heimdall
 		case SymbolKind::Enum:
 			return m_types.Enum(current);
 		case SymbolKind::TypeAlias:
-			return template_args ? TypeTable::Unknown : SymbolType(current);
+			if (template_args)
+			{
+				return CheckedSubstitute(templateType, kNone, {}, SubstitutionContext::Instantiation).type;
+			}
+
+			return SymbolType(current);
 		default:
 			return TypeTable::Unknown;
 		}
@@ -1746,6 +3186,22 @@ namespace heimdall
 		}
 		else if (first == Tok::KwDecltype)
 		{
+			for (std::uint32_t node = 0; node < m_nodes.size(); ++node)
+			{
+				if (m_nodes.Kind(node) == GrammarKind::DecltypeSpecifier && m_nodes.FirstToken(node) == m_sig[pos])
+				{
+					const auto children = m_model.ChildrenOf(node);
+					if (children.size() == 1)
+					{
+						const auto kind = m_nodes.Kind(children.front());
+						type = m_types.DecltypeExpression(children.front(), kind == GrammarKind::IdentifierExpression ||
+							kind == GrammarKind::MemberExpression);
+					}
+
+					break;
+				}
+			}
+
 			pos = pos + 1 < end && At(pos + 1) == Tok::LParen ? MatchParen(pos + 1, end) + 1 : end;
 		}
 		else
@@ -1763,10 +3219,7 @@ namespace heimdall
 			}
 
 			type = ParseName(pos, end, scope, before);
-			if (dependent && !m_types.IsDependent(type))
-			{
-				type = TypeTable::Unknown;
-			}
+			(void) dependent;
 
 			// A constrained placeholder (`Concept auto`, `C decltype(auto)`):
 			// the constraint does not change deduction, so `auto` deduces
@@ -2189,7 +3642,9 @@ namespace heimdall
 	// arguments, array extents and direct/braced initializers only end the
 	// type; anything unresolvable stays Unknown.
 	std::pair<TypeId, TyperImpl::Category> TyperImpl::NewExpressionType(
-		std::size_t new_pos, std::size_t end, ScopeId scope)
+		std::size_t new_pos,
+		std::size_t end,
+		ScopeId scope)
 	{
 		const std::pair<TypeId, Category> unknown {TypeTable::Unknown, Category::Unknown};
 		if (At(new_pos) != Tok::KwNew)
@@ -2259,7 +3714,9 @@ namespace heimdall
 
 	// `= e`, `{e}`, `(e)` after the name, or the range of a range-for.
 	std::pair<TypeId, TyperImpl::Category> TyperImpl::AutoInitializer(
-		std::uint32_t node, std::uint32_t init, std::size_t name_pos)
+		std::uint32_t node,
+		std::uint32_t init,
+		std::size_t name_pos)
 	{
 		const std::pair<TypeId, Category> unknown {TypeTable::Unknown, Category::Unknown};
 		if (m_nodes.Kind(node) == GrammarKind::ParameterDeclaration)
@@ -2403,6 +3860,17 @@ namespace heimdall
 		}
 		case GrammarKind::ParenthesizedExpression:
 			return kids.size() == 1 ? ValueCategory(kids[0]) : Category::Unknown;
+		case GrammarKind::CallExpression:
+			for (const auto& call : m_out.mTemplateCalls)
+			{
+				if (call.node == node && call.result.state == SubstitutionState::Success)
+				{
+					return m_types.Kind(call.result.returnType) == TypeKind::LRef
+					? Category::LValue : Category::PRValue;
+				}
+			}
+
+			return Category::Unknown;
 		case GrammarKind::CastExpression:
 			return Category::PRValue; // `(T&)x` would be an lvalue, but a cast to a reference
 			// is not modeled
@@ -2563,6 +4031,11 @@ namespace heimdall
 
 			if (trailing == kNone)
 			{
+				if ((m_symbols.flags[symbol] & SymbolFlag::Template) != 0)
+				{
+					return TypeTable::Unknown;
+				}
+
 				// Deduced from the body: plain `auto` / `const auto` only.
 				const auto declared = FindChild(declarator, GrammarKind::DeclaredName);
 				if (m_nodes.Kind(node) != GrammarKind::FunctionDefinition || declared == kNone ||
@@ -2626,12 +4099,6 @@ namespace heimdall
 
 		if (m_nodes.Kind(node) == GrammarKind::UsingDeclaration)
 		{
-			const auto parent = m_nodes.Parent(node);
-			if (parent < m_nodes.size() && m_nodes.Kind(parent) == GrammarKind::TemplateDeclaration)
-			{
-				return TypeTable::Unknown;
-			}
-
 			const auto[begin, end] = NodeSig(node);
 			const auto name_pos    = Pos(m_symbols.decl_token[symbol]);
 			if (name_pos + 2 >= end || At(name_pos + 1) != Tok::Eq)
@@ -3308,6 +4775,982 @@ namespace heimdall
 		return ParseTypeTokens(begin + 2, end - 1, m_model.ScopeOfNode(callee), m_sig[begin]);
 	}
 
+	TyperImpl::SubstitutedExpression TyperImpl::CheckExpression(
+		std::uint32_t node,
+		TemplateId declaration,
+		std::span<const TypeId> arguments,
+		SubstitutionContext context,
+		std::uint32_t remainingDepth)
+	{
+		const auto invalid =[&]()
+		{
+			return SubstitutedExpression {
+				{
+					TypeTable::Unknown, context == SubstitutionContext::Immediate
+					? SubstitutionState::SubstitutionFailure : SubstitutionState::HardError,
+						SubstitutionReason::InvalidExpression
+				}, Category::Unknown};
+		};
+		if (remainingDepth == 0 || node >= m_nodes.size())
+		{
+			return {
+				{
+					TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::DepthLimit
+				}, Category::Unknown};
+		}
+
+		const auto[begin, end] = NodeSig(node);
+		const auto children    = m_model.ChildrenOf(node);
+		const auto kind        = m_nodes.Kind(node);
+		if (kind == GrammarKind::IdentifierExpression && end == begin + 1)
+		{
+			for (auto parent = m_nodes.Parent(node); parent != 0 && parent < m_nodes.size(); parent = m_nodes.Parent(parent))
+			{
+				if (m_nodes.Kind(parent) != GrammarKind::FunctionDeclaration && m_nodes.Kind(parent) != GrammarKind::FunctionDefinition)
+				{
+					continue;
+				}
+
+				const auto declarator = FindChild(parent, GrammarKind::Declarator);
+				const auto suffix = declarator == kNone ? kNone : FindChild(declarator,
+					GrammarKind::FunctionSuffix);
+				if (suffix == kNone)
+				{
+					break;
+				}
+
+				for (const auto parameter : m_model.ChildrenOf(suffix))
+				{
+					if (m_nodes.Kind(parameter) != GrammarKind::ParameterDeclaration)
+					{
+						continue;
+					}
+
+					const auto parameterDeclarator = FindChild(parameter, GrammarKind::Declarator);
+					const auto name = parameterDeclarator == kNone ? kNone : FindChild(parameterDeclarator,
+						GrammarKind::DeclaredName);
+					if (name != kNone && m_nodes.FirstToken(name) < m_sig[begin] &&
+						Text(m_nodes.FirstToken(name)) == TextAt(begin))
+					{
+						return {CheckedSubstitute(ParameterType(parameter), declaration, arguments, context,
+								remainingDepth - 1), Category::LValue};
+					}
+				}
+
+				break;
+			}
+
+			const auto symbol = m_model.ResolveToken(m_sig[begin]);
+			if (symbol == kNone ||(m_symbols.kind[symbol] != SymbolKind::Variable &&
+				m_symbols.kind[symbol] != SymbolKind::Parameter))
+			{
+				return {};
+			}
+
+			return {CheckedSubstitute(SymbolType(symbol), declaration, arguments, context, remainingDepth - 1),
+				Category::LValue};
+		}
+
+		if (kind == GrammarKind::LiteralExpression)
+		{
+			const auto type = LiteralType(node);
+			return {m_types.Substitute(type, {}, context, remainingDepth - 1),
+				m_types.Kind(type) == TypeKind::Array ? Category::LValue : Category::PRValue};
+		}
+
+		if (kind == GrammarKind::ParenthesizedExpression && children.size() == 1)
+		{
+			return CheckExpression(children.front(), declaration, arguments, context, remainingDepth - 1);
+		}
+
+		if (kind == GrammarKind::UnaryExpression && children.size() == 1)
+		{
+			auto operand = CheckExpression(children.front(), declaration, arguments, context,
+				remainingDepth - 1);
+			if (operand.result.state != SubstitutionState::Success)
+			{
+				return operand;
+			}
+
+			const auto type = m_types.Strip(operand.result.type);
+			if (m_types.Kind(type) == TypeKind::Class || m_types.Kind(type) == TypeKind::TemplateId ||
+				m_types.Kind(type) == TypeKind::External || m_types.Kind(type) == TypeKind::Enum)
+			{
+				return {
+					{
+						TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported
+					}, Category::Unknown};
+			}
+
+			if (At(begin) == Tok::Star)
+			{
+				if (m_types.Kind(type) != TypeKind::Pointer || m_types.IsBuiltin(m_types.Arg(type),
+					BuiltinType::Void))
+				{
+					return invalid();
+				}
+
+				return {
+					{
+						m_types.Arg(type), SubstitutionState::Success, SubstitutionReason::None
+					}, Category::LValue};
+			}
+
+			if (At(begin) == Tok::Amp)
+			{
+				if (operand.category != Category::LValue || m_types.IsBuiltin(type, BuiltinType::Void))
+				{
+					return invalid();
+				}
+
+				return {
+					{
+						m_types.Pointer(m_types.Value(operand.result.type)), SubstitutionState::Success,
+							SubstitutionReason::None
+					}, Category::PRValue};
+			}
+
+			if (At(begin) == Tok::Plus || At(begin) == Tok::Minus || At(begin) == Tok::Tilde)
+			{
+				if (At(begin) == Tok::Plus && m_types.Kind(type) == TypeKind::Pointer)
+				{
+					return {
+						{
+							type, SubstitutionState::Success, SubstitutionReason::None
+						}, Category::PRValue};
+				}
+
+				if (!m_types.IsArithmetic(type) ||(At(begin) == Tok::Tilde && !m_types.IsInteger(type) && !m_types.IsBool(type)))
+				{
+					return invalid();
+				}
+
+				return {
+					{
+						Promoted(type), SubstitutionState::Success, SubstitutionReason::None
+					}, Category::PRValue};
+			}
+
+			return {};
+		}
+
+		if (kind == GrammarKind::BinaryExpression && children.size() == 2)
+		{
+			const auto left = CheckExpression(children[0], declaration, arguments, context, remainingDepth - 1);
+			if (left.result.state != SubstitutionState::Success)
+			{
+				return left;
+			}
+
+			const auto right = CheckExpression(children[1], declaration, arguments, context,
+				remainingDepth - 1);
+			if (right.result.state != SubstitutionState::Success)
+			{
+				return right;
+			}
+
+			const auto op        = At(NodeSig(children[0]).second);
+			const auto leftType  = m_types.Strip(left.result.type);
+			const auto rightType = m_types.Strip(right.result.type);
+			const auto unmodeled =[&](TypeId type)
+			{
+				const auto typeKind = m_types.Kind(type);
+				return typeKind == TypeKind::Class || typeKind == TypeKind::TemplateId ||
+					typeKind == TypeKind::External || typeKind == TypeKind::Enum;
+			};
+			if (unmodeled(leftType) || unmodeled(rightType))
+			{
+				return {
+					{
+						TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported
+					}, Category::Unknown};
+			}
+
+			if (op == Tok::Comma)
+			{
+				return right;
+			}
+
+			if (op == Tok::Plus || op == Tok::Minus || op == Tok::Star || op == Tok::Slash ||
+				op == Tok::Percent || op == Tok::Amp || op == Tok::Pipe || op == Tok::Caret)
+			{
+				if (m_types.Kind(leftType) == TypeKind::Pointer || m_types.Kind(rightType) == TypeKind::Pointer)
+				{
+					return {
+						{
+							TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported
+						}, Category::Unknown};
+				}
+
+				if (!m_types.IsArithmetic(leftType) ||!m_types.IsArithmetic(rightType))
+				{
+					return invalid();
+				}
+
+				if ((op == Tok::Percent || op == Tok::Amp || op == Tok::Pipe || op == Tok::Caret) &&
+					(m_types.IsFloating(leftType) || m_types.IsFloating(rightType)))
+				{
+					return invalid();
+				}
+
+				return {
+					{
+						Arithmetic(leftType, rightType), SubstitutionState::Success, SubstitutionReason::None
+					}, Category::PRValue};
+			}
+
+			return {};
+		}
+
+		if (kind == GrammarKind::CastExpression && children.size() == 2 &&
+			m_nodes.Kind(children.front()) == GrammarKind::TypeSpecifier)
+		{
+			const auto operand = CheckExpression(children[1], declaration, arguments, context,
+				remainingDepth - 1);
+			if (operand.result.state != SubstitutionState::Success)
+			{
+				return operand;
+			}
+
+			const auto[typeBegin, typeEnd] = NodeSig(children.front());
+			const auto target              = ParseTypeTokens(typeBegin, typeEnd, m_model.ScopeOfNode(node), m_sig[begin]);
+			if (m_types.IsBuiltin(target, BuiltinType::Void))
+			{
+				return {
+					{
+						target, SubstitutionState::Success, SubstitutionReason::None
+					}, Category::PRValue};
+			}
+
+			return {};
+		}
+
+		if (kind == GrammarKind::CallExpression && !children.empty())
+		{
+			const auto[calleeBegin, calleeEnd] = NodeSig(children.front());
+			if (calleeEnd == calleeBegin + 1 && IsBuiltinWord(At(calleeBegin)) && children.size() == 1)
+			{
+				const auto type = ParseTypeTokens(calleeBegin, calleeEnd, m_model.ScopeOfNode(node), m_sig[begin]);
+				return {
+					{
+						type, SubstitutionState::Success, SubstitutionReason::None
+					}, Category::PRValue};
+			}
+		}
+
+		return {
+			{
+				TypeTable::Unknown, SubstitutionState::Incomplete, SubstitutionReason::Unsupported
+			}, Category::Unknown};
+	}
+
+	SubstitutionState TyperImpl::DeduceType(
+		TypeId pattern,
+		TypeId argument,
+		TemplateId declaration,
+		std::vector<TypeId>& arguments,
+		std::size_t explicitCount,
+		std::uint32_t remainingDepth)
+	{
+		if (remainingDepth == 0 || pattern == TypeTable::Unknown || argument == TypeTable::Unknown)
+		{
+			return SubstitutionState::Incomplete;
+		}
+
+		if (m_types.IsDependent(argument))
+		{
+			return SubstitutionState::Dependent;
+		}
+
+		const auto kind = m_types.Kind(pattern);
+		if (kind == TypeKind::TemplateParameter)
+		{
+			const auto parameter   = m_types.Arg(pattern);
+			const auto& parameters = m_model.TemplateParameters();
+			if (parameter >= parameters.owner.size() || parameters.owner[parameter] != declaration)
+			{
+				return SubstitutionState::Dependent;
+			}
+
+			const auto position = parameters.position[parameter];
+			if (position >= arguments.size())
+			{
+				return SubstitutionState::Incomplete;
+			}
+
+			if (position < explicitCount)
+			{
+				return SubstitutionState::Success;
+			}
+
+			if (arguments[position] != TypeTable::Unknown && arguments[position] != argument)
+			{
+				return SubstitutionState::DeductionFailure;
+			}
+
+			arguments[position] = argument;
+			return SubstitutionState::Success;
+		}
+
+		if (kind == TypeKind::DependentMember || kind == TypeKind::DecltypeExpression)
+		{
+			return SubstitutionState::Success;
+		}
+
+		if (kind == TypeKind::Const)
+		{
+			return DeduceType(m_types.Arg(pattern), m_types.Kind(argument) == TypeKind::Const
+				? m_types.Arg(argument) : argument, declaration, arguments, explicitCount, remainingDepth - 1);
+		}
+
+		if (kind == TypeKind::Pointer || kind == TypeKind::Array)
+		{
+			if (m_types.Kind(argument) != kind)
+			{
+				return m_types.IsDependent(pattern) ? SubstitutionState::DeductionFailure : SubstitutionState::Success;
+			}
+
+			return DeduceType(m_types.Arg(pattern), m_types.Arg(argument), declaration, arguments,
+				explicitCount, remainingDepth - 1);
+		}
+
+		return m_types.IsDependent(pattern) ? SubstitutionState::Incomplete : SubstitutionState::Success;
+	}
+
+	TypeId TyperImpl::ResolveTemplateCall(
+		std::uint32_t node,
+		SymbolId symbol,
+		std::span<const TypeId> explicitArguments,
+		bool explicitCall)
+	{
+		constexpr std::uint8_t kExact        = 0;
+		constexpr std::uint8_t kPromotion    = 1;
+		constexpr std::uint8_t kConversion   = 2;
+		constexpr std::uint8_t kEllipsis     = 3;
+		constexpr std::size_t kMaxCandidates = 128;
+		struct Candidate
+		{
+			SymbolId symbol = kNone;
+			TypeId type     = TypeTable::Unknown;
+			std::vector<std::uint8_t> conversions;
+			bool isTemplate        = false;
+			bool hasReference      = false;
+			TemplateId declaration = kNone;
+			std::vector<TypeId> patterns;
+		};
+
+		const auto children = m_model.ChildrenOf(node);
+		const auto publish =[&](TemplateCallResult result, TypeId type)
+		{
+			result.returnType = type;
+			m_out.mTemplateCalls.push_back({node, result});
+			return type;
+		};
+		if (children.empty() ||!m_tree.Diagnostics().empty() || m_tree.Cancelled())
+		{
+			return publish({}, TypeTable::Unknown);
+		}
+
+		for (const auto& directive : m_tree.Directives())
+		{
+			if (directive.active && (directive.kind == DirectiveKind::Include ||
+				directive.kind == DirectiveKind::Define || directive.kind == DirectiveKind::Undef))
+			{
+				return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+					TypeTable::Unknown);
+			}
+		}
+
+		if (m_tree.TypeNames() != nullptr)
+		{
+			return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+				TypeTable::Unknown);
+		}
+
+		for (std::uint32_t part = 0; part < m_nodes.size(); ++part)
+		{
+			if (m_nodes.Kind(part) == GrammarKind::ImportDeclaration || m_nodes.Kind(part) == GrammarKind::ModuleDeclaration)
+			{
+				return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+					TypeTable::Unknown);
+			}
+
+			if (m_nodes.Kind(part) == GrammarKind::UsingDeclaration)
+			{
+				const auto[begin, end] = NodeSig(part);
+				if (end <= begin + 2 || At(begin + 2) != Tok::Eq)
+				{
+					return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+						TypeTable::Unknown);
+				}
+			}
+		}
+
+		std::vector<std::uint32_t> argumentNodes(children.begin() + 1, children.end());
+		const auto before                  = m_nodes.FirstToken(children.front());
+		bool incomplete                    = false;
+		bool dependent                     = false;
+		SubstitutionReason rejectionReason = SubstitutionReason::None;
+		std::uint32_t rejectionToken       = kNone;
+		std::vector<Candidate> viable;
+		for (const auto argument : argumentNodes)
+		{
+			auto type = m_types.Strip(NodeType(argument));
+			while (m_types.Kind(type) == TypeKind::Pointer || m_types.Kind(type) == TypeKind::Array)
+			{
+				type = m_types.Strip(m_types.Arg(type));
+			}
+
+			if (m_types.Kind(type) == TypeKind::External || m_types.Kind(type) == TypeKind::TemplateId)
+			{
+				incomplete = true;
+			}
+			else if (m_types.Kind(type) == TypeKind::Class)
+			{
+				const auto owner = m_types.Arg(type);
+				incomplete = incomplete || m_symbols.scope[owner] != SemanticModel::TranslationUnitScope ||
+					m_symbols.base_count[owner] != 0;
+				for (SymbolId member = 0; member < m_symbols.Size(); ++member)
+				{
+					if (m_symbols.scope[member] == m_symbols.member_scope[owner] &&
+						(m_symbols.flags[member] & (SymbolFlag::Friend | SymbolFlag::Constructor)) != 0)
+					{
+						incomplete = true;
+					}
+				}
+			}
+		}
+
+		std::size_t visits = 0;
+		for (auto candidate = m_model.LookupLocal(m_symbols.scope[symbol], m_symbols.name[symbol]);
+			candidate != kNone; candidate = m_symbols.next_same_name[candidate])
+		{
+			if (++visits > kMaxCandidates)
+			{
+				return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::DepthLimit},
+					TypeTable::Unknown);
+			}
+
+			if (m_symbols.decl_token[candidate] > before)
+			{
+				continue;
+			}
+
+			if (m_symbols.kind[candidate] != SymbolKind::Function ||
+				(m_symbols.flags[candidate] & (SymbolFlag::Qualified | SymbolFlag::Friend | SymbolFlag::Operator | SymbolFlag::Defaulted)) != 0)
+			{
+				incomplete = true;
+				continue;
+			}
+
+			const auto declaration = m_model.TemplateOf(candidate);
+			const bool isTemplate  = (m_symbols.flags[candidate] & SymbolFlag::Template) != 0;
+			if (explicitCall && !isTemplate)
+			{
+				continue;
+			}
+
+			const auto function   = m_symbols.decl_node[candidate];
+			const auto declarator = FindChild(function, GrammarKind::Declarator);
+			const auto suffix = declarator == kNone ? kNone : FindChild(declarator,
+				GrammarKind::FunctionSuffix);
+			if (suffix == kNone)
+			{
+				incomplete = true;
+				continue;
+			}
+
+			// The exception specification is instantiated separately when
+			// required and is not part of the immediate context. A plain
+			// `noexcept` is trivially valid; anything parenthesized stays
+			// unresolved rather than guessed.
+			bool specUnresolved = false;
+			for (const auto holder :
+				{
+					suffix, declarator
+			})
+			{
+				if (holder == kNone)
+				{
+					continue;
+				}
+
+				for (const auto child : m_model.ChildrenOf(holder))
+				{
+					if (m_nodes.Kind(child) != GrammarKind::NoexceptSpecifier)
+					{
+						continue;
+					}
+
+					const auto[specBegin, specEnd] = NodeSig(child);
+					specUnresolved                 = specUnresolved || specEnd > specBegin + 1;
+				}
+			}
+
+			if (specUnresolved)
+			{
+				incomplete = true;
+				continue;
+			}
+
+			bool unsupported                       = false;
+			const auto[functionBegin, functionEnd] = NodeSig(function);
+			const auto body                        = FindChild(function, GrammarKind::CompoundStatement);
+			const auto signatureEnd                = body == kNone ? functionEnd : NodeSig(body).first;
+			for (auto position = functionBegin; position < signatureEnd; ++position)
+			{
+				unsupported = unsupported || At(position) == Tok::KwVolatile || At(position) == Tok::KwThis;
+			}
+
+			std::vector<TypeId> arguments(explicitArguments.begin(), explicitArguments.end());
+			const auto& templates  = m_model.Templates();
+			const auto& parameters = m_model.TemplateParameters();
+			std::uint32_t first    = 0;
+			std::uint32_t count    = 0;
+			if (isTemplate)
+			{
+				if (declaration >= templates.owner.size() ||!templates.complete[declaration])
+				{
+					incomplete = true;
+					continue;
+				}
+
+				first = templates.firstParameter[declaration];
+				count = templates.parameterCount[declaration];
+				if (arguments.size() > count)
+				{
+					rejectionReason = SubstitutionReason::ArgumentCount;
+					continue;
+				}
+
+				arguments.resize(count, TypeTable::Unknown);
+				for (std::uint32_t i = 0; i < count; ++i)
+				{
+					unsupported = unsupported || parameters.pack[first + i] || parameters.kind[first + i] != TemplateParameterKind::Type;
+				}
+			}
+
+			std::vector<std::uint32_t> parameterNodes;
+			std::size_t required = 0;
+			for (const auto part : m_model.ChildrenOf(suffix))
+			{
+				if (m_nodes.Kind(part) != GrammarKind::ParameterDeclaration)
+				{
+					continue;
+				}
+
+				const auto[begin, end] = NodeSig(part);
+				if (end == begin + 1 && At(begin) == Tok::KwVoid)
+				{
+					continue;
+				}
+
+				bool hasDefault = false;
+				for (auto pos = begin; pos < end; ++pos)
+				{
+					hasDefault  = hasDefault || At(pos) == Tok::Eq;
+					unsupported = unsupported || At(pos) == Tok::Ellipsis;
+				}
+
+				parameterNodes.push_back(part);
+				required += hasDefault ? 0 : 1;
+			}
+
+			const auto[suffixBegin, suffixEnd] = NodeSig(suffix);
+			const auto close                   = MatchParen(suffixBegin, suffixEnd);
+			const bool variadic                = close > suffixBegin && close < suffixEnd && At(close - 1) == Tok::Ellipsis;
+			if (unsupported)
+			{
+				incomplete = true;
+				continue;
+			}
+
+			if (argumentNodes.size() < parameterNodes.size())
+			{
+				incomplete = true;
+				continue;
+			}
+
+			if (argumentNodes.size() < required ||(!variadic && argumentNodes.size() > parameterNodes.size()))
+			{
+				rejectionReason = SubstitutionReason::ArgumentCount;
+				continue;
+			}
+
+			struct Slot
+			{
+				std::uint32_t token;
+				TypeId type;
+				bool parameter = false;
+			};
+
+			std::vector<Slot> slots;
+			const auto spec           = FindChild(function, GrammarKind::TypeSpecifier);
+			const auto trailing       = FindChild(suffix, GrammarKind::TrailingReturnType);
+			const auto directTrailing = FindChild(declarator, GrammarKind::TrailingReturnType);
+			const auto returnNode     = trailing != kNone ? trailing : directTrailing != kNone ? directTrailing : spec;
+			const auto returnType     = SymbolType(candidate);
+			if (returnNode == kNone)
+			{
+				incomplete = true;
+				continue;
+			}
+
+			slots.push_back({m_nodes.FirstToken(returnNode), returnType});
+			for (const auto parameter : parameterNodes)
+			{
+				slots.push_back({m_nodes.FirstToken(parameter), ParameterType(parameter), true});
+			}
+
+			std::ranges::sort(slots, {}, &Slot::token);
+			const auto checkSignature =[&](std::span<const TypeId> values, bool partial)
+			{
+				SubstitutionResult result {returnType, SubstitutionState::Success, SubstitutionReason::None};
+				for (const auto& slot : slots)
+				{
+					result = CheckedSubstitute(slot.type, declaration, values, SubstitutionContext::Immediate);
+					if (slot.parameter && result.state == SubstitutionState::Success && m_types.IsBuiltin(result.type,
+						BuiltinType::Void))
+					{
+						result = {TypeTable::Unknown, SubstitutionState::SubstitutionFailure,
+							SubstitutionReason::VoidParameter};
+					}
+					else if (!slot.parameter && result.state == SubstitutionState::Success && m_types.Kind(result.type) == TypeKind::Array)
+					{
+						result = {TypeTable::Unknown, SubstitutionState::SubstitutionFailure,
+							SubstitutionReason::InvalidFunctionReturn};
+					}
+
+					if (result.state != SubstitutionState::Success && !(partial && result.state == SubstitutionState::Dependent))
+					{
+						rejectionToken = slot.token;
+						return result;
+					}
+				}
+
+				return result;
+			};
+
+			SubstitutionResult result {returnType, SubstitutionState::Success, SubstitutionReason::None};
+			if (isTemplate && !explicitArguments.empty())
+			{
+				auto initial = arguments;
+				for (std::uint32_t i = static_cast<std::uint32_t>(explicitArguments.size()); i < count; ++i)
+				{
+					initial[i] = m_types.Parameter(first + i);
+				}
+
+				result = checkSignature(initial, true);
+			}
+
+			if (result.state == SubstitutionState::Success || result.state == SubstitutionState::Dependent)
+			{
+				result = {TypeTable::Unknown, SubstitutionState::Success, SubstitutionReason::None};
+				for (std::size_t i = 0; isTemplate && i < std::min(argumentNodes.size(),
+					parameterNodes.size()); ++i)
+				{
+					auto pattern    = ParameterType(parameterNodes[i]);
+					auto actual     = NodeType(argumentNodes[i]);
+					const auto kind = m_types.Kind(pattern);
+					if (kind == TypeKind::LRef || kind == TypeKind::RRef)
+					{
+						const auto category = ValueCategory(argumentNodes[i]);
+						pattern             = m_types.Arg(pattern);
+						if (kind == TypeKind::RRef && m_types.Kind(pattern) == TypeKind::TemplateParameter && category == Category::LValue)
+						{
+							actual = m_types.LRef(actual);
+						}
+					}
+					else
+					{
+						pattern = m_types.Strip(pattern);
+						actual  = m_types.Decay(m_types.Strip(actual));
+					}
+
+					result.state = DeduceType(pattern, actual, declaration, arguments, explicitArguments.size());
+					if (result.state != SubstitutionState::Success)
+					{
+						result.reason = result.state == SubstitutionState::DeductionFailure
+						? SubstitutionReason::ConflictingDeduction : SubstitutionReason::UnknownType;
+						break;
+					}
+				}
+			}
+
+			if (result.state == SubstitutionState::Success)
+			{
+				for (std::uint32_t i = 0; isTemplate && i < count; ++i)
+				{
+					if (arguments[i] != TypeTable::Unknown)
+					{
+						continue;
+					}
+
+					const auto begin = parameters.defaultBegin[first + i];
+					const auto end   = parameters.defaultEnd[first + i];
+					if (begin == kNone)
+					{
+						result = {TypeTable::Unknown, SubstitutionState::DeductionFailure,
+							SubstitutionReason::ConflictingDeduction};
+						break;
+					}
+
+					const auto defaultType = ParseTypeTokens(Pos(begin), Pos(end), templates.scope[declaration], begin);
+					result = CheckedSubstitute(defaultType, declaration, std::span(arguments).first(i),
+						SubstitutionContext::Immediate);
+					if (result.state != SubstitutionState::Success)
+					{
+						rejectionToken = begin;
+						break;
+					}
+
+					arguments[i] = result.type;
+				}
+			}
+
+			if (result.state == SubstitutionState::Success && isTemplate)
+			{
+				const auto constraints = CheckAssociatedConstraints(declaration, arguments,
+					SubstitutionContext::Immediate);
+				if (constraints.state == SubstitutionState::Success && !constraints.satisfied)
+				{
+					result = {TypeTable::Unknown, SubstitutionState::ConstraintUnsatisfied, SubstitutionReason::None};
+				}
+				else if (constraints.state == SubstitutionState::HardError)
+				{
+					result         = {TypeTable::Unknown, SubstitutionState::HardError, constraints.reason};
+					rejectionToken = m_nodes.FirstToken(function);
+				}
+				else if (constraints.state == SubstitutionState::Incomplete)
+				{
+					result = {TypeTable::Unknown, SubstitutionState::Incomplete, constraints.reason};
+				}
+				else if (constraints.state == SubstitutionState::Dependent)
+				{
+					result = {TypeTable::Unknown, SubstitutionState::Dependent, constraints.reason};
+				}
+			}
+
+			if (result.state == SubstitutionState::Success)
+			{
+				result = checkSignature(arguments, false);
+			}
+
+			if (result.state == SubstitutionState::HardError)
+			{
+				return publish({kNone, result.state, result.reason, rejectionToken}, TypeTable::Unknown);
+			}
+
+			if (result.state == SubstitutionState::Incomplete || result.state == SubstitutionState::Dependent)
+			{
+				incomplete = incomplete || result.state == SubstitutionState::Incomplete;
+				dependent  = dependent || result.state == SubstitutionState::Dependent;
+				continue;
+			}
+
+			if (result.state == SubstitutionState::ConstraintUnsatisfied || result.state == SubstitutionState::DeductionFailure || result.state == SubstitutionState::SubstitutionFailure)
+			{
+				rejectionReason = result.reason;
+				continue;
+			}
+
+			if (result.state != SubstitutionState::Success)
+			{
+				rejectionReason = result.reason;
+				continue;
+			}
+
+			Candidate accepted {candidate, TypeTable::Unknown, {}, isTemplate};
+			accepted.declaration = declaration;
+			accepted.patterns.reserve(parameterNodes.size());
+			for (const auto parameter : parameterNodes)
+			{
+				accepted.patterns.push_back(m_types.Strip(ParameterType(parameter)));
+			}
+
+			accepted.type = CheckedSubstitute(returnType, declaration, arguments,
+				SubstitutionContext::Immediate).type;
+			bool convertible = true;
+			for (std::size_t i = 0; i < argumentNodes.size(); ++i)
+			{
+				if (i >= parameterNodes.size())
+				{
+					accepted.conversions.push_back(kEllipsis);
+					continue;
+				}
+
+				const auto parameter = CheckedSubstitute(ParameterType(parameterNodes[i]), declaration,
+					arguments, SubstitutionContext::Immediate).type;
+				const auto actual     = NodeType(argumentNodes[i]);
+				const auto source     = m_types.Strip(actual);
+				const auto target     = m_types.Strip(parameter);
+				const auto reference  = m_types.Kind(parameter);
+				accepted.hasReference = accepted.hasReference || reference == TypeKind::LRef || reference == TypeKind::RRef;
+				if (reference == TypeKind::LRef || reference == TypeKind::RRef)
+				{
+					const auto category = ValueCategory(argumentNodes[i]);
+					if (category == Category::Unknown)
+					{
+						incomplete  = true;
+						convertible = false;
+						break;
+					}
+
+					if ((reference == TypeKind::LRef && !m_types.IsConstQualified(parameter) && category != Category::LValue) ||
+						(reference == TypeKind::RRef && category == Category::LValue) ||
+						(!m_types.IsConstQualified(parameter) && m_types.IsConstQualified(actual)))
+					{
+						convertible = false;
+						break;
+					}
+				}
+
+				if (source == target && source != TypeTable::Unknown)
+				{
+					accepted.conversions.push_back(kExact);
+				}
+				else if (m_types.IsArithmetic(source) && m_types.IsArithmetic(target))
+				{
+					const auto promoted = Promote(static_cast<BuiltinType>(m_types.Arg(source)));
+					const bool promotion = (promoted && m_types.IsBuiltin(target, *promoted) && source != target) ||
+						(m_types.IsBuiltin(source, BuiltinType::Float) && m_types.IsBuiltin(target, BuiltinType::Double));
+					accepted.conversions.push_back(promotion ? kPromotion : kConversion);
+				}
+				else
+				{
+					incomplete  = true;
+					convertible = false;
+					break;
+				}
+			}
+
+			if (convertible)
+			{
+				viable.push_back(std::move(accepted));
+			}
+		}
+
+		if (incomplete || dependent)
+		{
+			return publish({kNone, incomplete ? SubstitutionState::Incomplete : SubstitutionState::Dependent,
+					SubstitutionReason::Unsupported}, TypeTable::Unknown);
+		}
+
+		if (viable.empty())
+		{
+			return publish({kNone, SubstitutionState::NoMatch, rejectionReason, rejectionToken},
+				TypeTable::Unknown);
+		}
+
+		for (const auto& candidate : viable)
+		{
+			for (const auto& other : viable)
+			{
+				if (&candidate != &other && (candidate.hasReference || other.hasReference) &&
+					candidate.conversions == other.conversions)
+				{
+					return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+						TypeTable::Unknown);
+				}
+			}
+		}
+
+		bool orderingIncomplete = false;
+		const auto better =[&](const Candidate& left, const Candidate& right)
+		{
+			bool strict = false;
+			for (std::size_t i = 0; i < left.conversions.size(); ++i)
+			{
+				if (left.conversions[i] > right.conversions[i])
+				{
+					return false;
+				}
+
+				strict = strict || left.conversions[i] < right.conversions[i];
+			}
+
+			if (strict ||(!left.isTemplate && right.isTemplate))
+			{
+				return true;
+			}
+
+			if (left.isTemplate && right.isTemplate && left.conversions == right.conversions)
+			{
+				const auto leftAtoms  = ConstraintAtoms(left.declaration);
+				const auto rightAtoms = ConstraintAtoms(right.declaration);
+				if (leftAtoms != rightAtoms)
+				{
+					bool leftCovers = true;
+					for (const auto& atom : rightAtoms)
+					{
+						leftCovers = leftCovers && std::ranges::find(leftAtoms, atom) != leftAtoms.end();
+					}
+
+					bool rightCovers = true;
+					for (const auto& atom : leftAtoms)
+					{
+						rightCovers = rightCovers && std::ranges::find(rightAtoms, atom) != rightAtoms.end();
+					}
+
+					if (leftCovers && leftAtoms.size() > rightAtoms.size())
+					{
+						return true;
+					}
+
+					if (rightCovers && rightAtoms.size() > leftAtoms.size())
+					{
+						return false;
+					}
+
+					if (!leftCovers ||!rightCovers)
+					{
+						orderingIncomplete = true;
+						return false;
+					}
+				}
+			}
+
+			if (left.isTemplate && right.isTemplate)
+			{
+				std::vector<TypeId> forwardBindings, reverseBindings;
+				const auto forward = MatchTypePatterns(right.patterns, left.patterns, right.declaration,
+					forwardBindings, true);
+				const auto reverse = MatchTypePatterns(left.patterns, right.patterns, left.declaration,
+					reverseBindings, true);
+				orderingIncomplete = orderingIncomplete || forward.state == SubstitutionState::Incomplete || reverse.state == SubstitutionState::Incomplete;
+				return forward.state == SubstitutionState::Success && reverse.state == SubstitutionState::DeductionFailure;
+			}
+
+			return false;
+		};
+		for (const auto& candidate : viable)
+		{
+			bool best = true;
+			for (const auto& other : viable)
+			{
+				if (&candidate != &other && !better(candidate, other))
+				{
+					best = false;
+					break;
+				}
+			}
+
+			if (best && !orderingIncomplete)
+			{
+				return publish({candidate.symbol, SubstitutionState::Success, SubstitutionReason::None},
+					candidate.type);
+			}
+		}
+
+		if (orderingIncomplete)
+		{
+			return publish({kNone, SubstitutionState::Incomplete, SubstitutionReason::Unsupported},
+				TypeTable::Unknown);
+		}
+
+		return publish({kNone, SubstitutionState::Ambiguous, SubstitutionReason::None}, TypeTable::Unknown);
+	}
+
 	TypeId TyperImpl::CallType(std::uint32_t node)
 	{
 		const auto kids = m_model.ChildrenOf(node);
@@ -3357,6 +5800,15 @@ namespace heimdall
 			switch (m_symbols.kind[symbol])
 			{
 			case SymbolKind::Function:
+				for (auto candidate = m_model.LookupLocal(m_symbols.scope[symbol], m_symbols.name[symbol]);
+					candidate != kNone; candidate = m_symbols.next_same_name[candidate])
+				{
+					if ((m_symbols.flags[candidate] & SymbolFlag::Template) != 0)
+					{
+						return ResolveTemplateCall(node, symbol, {}, false);
+					}
+				}
+
 				return OverloadReturn(symbol);
 			case SymbolKind::Class:
 				return (m_symbols.flags[symbol] & SymbolFlag::Template) != 0
@@ -3377,7 +5829,18 @@ namespace heimdall
 				return CastType(callee);
 			}
 
-			const auto[begin, end]      = NodeSig(callee);
+			const auto[begin, end] = NodeSig(callee);
+			if (WordAt(begin) && At(begin + 1) == Tok::Lt && At(end - 1) == Tok::Gt)
+			{
+				const auto symbol = m_model.ResolveToken(m_sig[begin]);
+				if (symbol != kNone && m_symbols.kind[symbol] == SymbolKind::Function)
+				{
+					const auto arguments = ParseTemplateArguments(begin + 2, end - 1,
+						m_model.ScopeOfNode(callee), m_sig[begin]);
+					return ResolveTemplateCall(node, symbol, arguments, true);
+				}
+			}
+
 			const auto templateChildren = m_model.ChildrenOf(callee);
 			if (!templateChildren.empty() &&
 				m_nodes.Kind(templateChildren[0]) == GrammarKind::MemberExpression)
@@ -3563,6 +6026,7 @@ namespace heimdall
 		}
 
 		BuildDependentReferences();
+		std::ranges::sort(m_out.mTemplateCalls, {}, &TemplateCallRecord::node);
 	}
 
 	TypeModel Typer::Type(const SemanticModel& model)

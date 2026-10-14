@@ -1,9 +1,9 @@
-#include <Heimdall/SemanticModel.hpp>
-
 #include <algorithm>
 #include <string>
 #include <tuple>
 #include <utility>
+
+#include <Heimdall/SemanticModel.hpp>
 
 namespace heimdall
 {
@@ -55,8 +55,8 @@ namespace heimdall
 			case GrammarKind::SwitchStatement:
 			case GrammarKind::TryStatement:
 			case GrammarKind::LambdaExpression:
-			// A requires-expression owns its local parameters (`requires (T a)`
-			// declares `a` for the requirements only).
+				// A requires-expression owns its local parameters (`requires (T a)`
+				// declares `a` for the requirements only).
 			case GrammarKind::RequiresExpression:
 				return true;
 			default:
@@ -167,11 +167,7 @@ namespace heimdall
 
 		ScopeId CreateScope(std::uint32_t node, ScopeId parent);
 
-		ScopeId AddScope(
-			ScopeId parent,
-			ScopeKind kind,
-			SymbolId owner,
-			std::uint32_t node);
+		ScopeId AddScope(ScopeId parent, ScopeKind kind, SymbolId owner, std::uint32_t node);
 
 		ScopeId CreateNamespace(std::uint32_t node, ScopeId parent);
 
@@ -210,14 +206,22 @@ namespace heimdall
 
 		FunctionHead ScanHead(std::uint32_t node) const;
 
-		std::uint32_t FlagsFromHead(std::uint32_t node, const FunctionHead& head,
-			std::uint64_t& signature, std::string& signatureText) const;
+		std::uint32_t FlagsFromHead(
+			std::uint32_t node,
+			const FunctionHead& head,
+			std::uint64_t& signature,
+			std::string& signatureText) const;
 
-		std::uint64_t ParameterSignature(std::uint32_t node, const FunctionHead& head, std::string& signatureText) const;
+		std::uint64_t ParameterSignature(
+			std::uint32_t node,
+			const FunctionHead& head,
+			std::string& signatureText) const;
 
 		NameId HeadName(const FunctionHead& head);
 
-		bool QualifierSegments(std::uint32_t first, std::uint32_t last_exclusive,
+		bool QualifierSegments(
+			std::uint32_t first,
+			std::uint32_t last_exclusive,
 			std::vector<std::uint32_t>& out) const;
 
 		SymbolId ResolveQualifier(
@@ -1075,7 +1079,10 @@ namespace heimdall
 		return m_model.m_names.Intern(Text(head.name_token));
 	}
 
-	std::uint64_t BinderImpl::ParameterSignature(std::uint32_t node, const FunctionHead& head, std::string& signatureText) const
+	std::uint64_t BinderImpl::ParameterSignature(
+		std::uint32_t node,
+		const FunctionHead& head,
+		std::string& signatureText) const
 	{
 		const auto declarator = FindChild(node, GrammarKind::Declarator);
 		std::uint32_t suffix =
@@ -1136,8 +1143,11 @@ namespace heimdall
 		return HashU64(hash, parameters);
 	}
 
-	std::uint32_t BinderImpl::FlagsFromHead(std::uint32_t node, const FunctionHead& head,
-		std::uint64_t& signature, std::string& signatureText) const
+	std::uint32_t BinderImpl::FlagsFromHead(
+		std::uint32_t node,
+		const FunctionHead& head,
+		std::uint64_t& signature,
+		std::string& signatureText) const
 	{
 		std::uint32_t flags = 0;
 		auto[begin, end]    = NodeSig(node);
@@ -1254,11 +1264,14 @@ namespace heimdall
 		{
 			signatureText += '/' + std::to_string(qualifiers);
 		}
-		signature             = parameters == 0 ? 0 : HashU64(parameters, qualifiers);
+
+		signature = parameters == 0 ? 0 : HashU64(parameters, qualifiers);
 		return flags;
 	}
 
-	bool BinderImpl::QualifierSegments(std::uint32_t first, std::uint32_t last_exclusive,
+	bool BinderImpl::QualifierSegments(
+		std::uint32_t first,
+		std::uint32_t last_exclusive,
 		std::vector<std::uint32_t>& out) const
 	{
 		out.clear();
@@ -1371,8 +1384,8 @@ namespace heimdall
 		auto scope              = ParentScopeFor(node);
 		std::uint64_t signature = 0;
 		std::string signatureText;
-		std::uint32_t flags     = FlagsFromHead(node, head, signature, signatureText);
-		const auto parent       = m_tree.NodesSoA().Parent(node);
+		std::uint32_t flags = FlagsFromHead(node, head, signature, signatureText);
+		const auto parent   = m_tree.NodesSoA().Parent(node);
 		if (parent < m_tree.NodesSoA().size() && KindOf(parent) == GrammarKind::TemplateDeclaration)
 		{
 			flags |= SymbolFlag::Template;
@@ -1427,7 +1440,7 @@ namespace heimdall
 		flags |= ReturnsPointerFlag(node);
 		const auto id = Declare(HeadName(head), SymbolKind::Function, scope, flags, head.name_token,
 			node, kNone, !qualified || rerouted);
-		m_model.m_symbols.signature[id] = signature;
+		m_model.m_symbols.signature[id]     = signature;
 		m_model.m_symbols.signatureText[id] = m_model.m_names.InternCopy(signatureText);
 	}
 
@@ -1599,8 +1612,16 @@ namespace heimdall
 		if (begin + 2 < end && Is(m_sig[begin], Tok::KwUsing) && IsIdent(m_sig[begin + 1]) &&
 			Is(m_sig[begin + 2], Tok::Eq))
 		{
-			const auto token = m_sig[begin + 1];
-			Declare(m_model.m_names.Intern(Text(token)), SymbolKind::TypeAlias, ScopeFor(node), 0,
+			const auto token    = m_sig[begin + 1];
+			auto scope          = ScopeFor(node);
+			std::uint32_t flags = 0;
+			if (m_model.m_scopes.kind[scope] == ScopeKind::Template)
+			{
+				scope = m_model.m_scopes.parent[scope];
+				flags = SymbolFlag::Template;
+			}
+
+			Declare(m_model.m_names.Intern(Text(token)), SymbolKind::TypeAlias, scope, flags,
 				token, node, kNone, true);
 		}
 	}
@@ -1869,14 +1890,8 @@ namespace heimdall
 				}
 			}
 
-			const auto[begin, end] = NodeSig(templates.node[id]);
-			for (auto pos = begin; pos < end; ++pos)
-			{
-				if (Is(m_sig[pos], Tok::KwRequires))
-				{
-					templates.complete[id] = 0;
-				}
-			}
+			// Associated constraints (`requires ...`) are evaluated during
+			// substitution; unmodeled constraints yield Incomplete at use sites.
 		}
 	}
 
@@ -1884,7 +1899,7 @@ namespace heimdall
 	{
 		// `concept Name = ...`: the name right after `concept`.
 		const auto[begin, end] = NodeSig(node);
-		if (begin >= end || !Is(m_sig[begin], Tok::KwConcept))
+		if (begin >= end ||!Is(m_sig[begin], Tok::KwConcept))
 		{
 			return;
 		}

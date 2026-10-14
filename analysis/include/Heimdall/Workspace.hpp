@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -103,7 +104,6 @@ namespace heimdall
 
 		std::shared_ptr<const std::string> Source(DocumentId document) const;
 
-		/** Returns persistent pieces when present without materializing compatibility text. */
 		[[nodiscard]] std::shared_ptr<const SourceSnapshot> SourceBuffer(DocumentId document) const;
 
 		const std::filesystem::path& Path(DocumentId document) const;

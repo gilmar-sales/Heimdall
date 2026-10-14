@@ -15,6 +15,8 @@ add_library(heimdall_semantic STATIC
   src/Binder.cpp
   src/Typer.cpp
   src/TemplateModel.cpp
+  src/TemplateSubstitution.cpp
+  src/TemplateSubstitutionRules.cpp
   src/SemanticRules.cpp
   src/HeaderSummary.cpp
   src/ProjectIndex.cpp

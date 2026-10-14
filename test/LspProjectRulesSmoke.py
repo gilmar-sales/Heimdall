@@ -82,8 +82,10 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_project_rules_") as tempor
     assert add_include[0]["kind"] == "quickfix"
     assert not add_include[0].get("isPreferred"), add_include
     edit = next(iter(add_include[0]["edit"]["changes"].values()))[0]
-    assert edit["newText"] == "#include <core.hpp>\n", edit
-    assert edit["range"]["start"] == {"line": 2, "character": 0}, edit
+    assert edit["newText"] == ("#include <core.hpp>\n"
+                               "#include <shape.hpp>\n"
+                               "#include <wrapper.hpp>\n"), edit
+    assert edit["range"]["start"] == {"line": 0, "character": 0}, edit
     assert edit["range"]["end"] == {"line": 2, "character": 0}, edit
 
     mark_final = [a for a in actions if "final" in a["title"]]

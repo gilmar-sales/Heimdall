@@ -1291,6 +1291,22 @@ namespace heimdall
 
 		// Consume decl-specifier-seq starting at begin. Returns position after specifiers.
 		// Creates one TypeSpecifier node plus NestedNameSpecifier / AttributeSpecifier children.
+		void ParseDecltypeSpecifier(std::size_t begin, std::size_t end, std::size_t parent)
+		{
+			if (begin + kTwo >= end ||!Is(begin, "decltype") ||!Is(begin + 1, "(") ||
+				m_match[begin + 1] == Invalid || m_match[begin + 1] >= end)
+			{
+				return;
+			}
+
+			const auto close     = m_match[begin + 1];
+			const auto specifier = Add(GrammarKind::DecltypeSpecifier, begin, close + 1, parent);
+			if (!(close == begin + 3 && Is(begin + kTwo, "auto")))
+			{
+				ParseExpression(begin + kTwo, close, specifier);
+			}
+		}
+
 		std::size_t ParseDeclSpecifiers(std::size_t begin, std::size_t end, std::size_t parent)
 		{
 			auto i                = SkipAttributes(begin, end, parent);
@@ -1313,6 +1329,7 @@ namespace heimdall
 				if (text == "decltype" && i + 1 < end && Is(i + 1, "(") &&
 					m_match[i + 1] != Invalid)
 				{
+					ParseDecltypeSpecifier(i, end, parent);
 					i        = m_match[i + 1] + 1;
 					saw_type = true;
 					continue;
@@ -1359,6 +1376,15 @@ namespace heimdall
 						i = m_match[body] + 1;
 					}
 
+					continue;
+				}
+
+				if (text == "typename")
+				{
+					++i;
+					std::size_t ignoredName = Invalid;
+					i                       = ParseQualifiedName(i, end, parent, ignoredName);
+					saw_type                = true;
 					continue;
 				}
 
@@ -1471,7 +1497,7 @@ namespace heimdall
 					// `const A::B *` (unnamed parameter): once a cv-qualifier/specifier has
 					// been consumed, a name followed only by pointer/reference operators
 					// is the type; leaving it as a declarator name would strand `A::`.
-					if (spec_start < save &&
+					if ((spec_start < save || m_tree.NodesSoA().Kind(parent) == GrammarKind::ParameterDeclaration) &&
 						(look >= end || Is(look, ",") || Is(look, "=") || Is(look, ")")))
 					{
 						i        = after;
@@ -2064,14 +2090,25 @@ namespace heimdall
 				std::size_t dummy = Invalid;
 				// Reuse qualified-name scanning for the trailing type core.
 				const auto name_start = type_end;
-				type_end              = ParseQualifiedName(type_end, end, suffix, dummy);
-				if (type_end == name_start)
+				if (Is(type_end, "decltype") && type_end + 1 < end && Is(type_end + 1, "(") &&
+					m_match[type_end + 1] != Invalid && m_match[type_end + 1] < end)
 				{
-					++type_end;
+					type_end            = m_match[type_end + 1] + 1;
+					const auto trailing = Add(GrammarKind::TrailingReturnType, tail, type_end, suffix);
+					ParseDecltypeSpecifier(name_start, type_end, trailing);
+					tail = type_end;
 				}
+				else
+				{
+					type_end = ParseQualifiedName(type_end, end, suffix, dummy);
+					if (type_end == name_start)
+					{
+						++type_end;
+					}
 
-				Add(GrammarKind::TrailingReturnType, tail, type_end, suffix);
-				tail = type_end;
+					Add(GrammarKind::TrailingReturnType, tail, type_end, suffix);
+					tail = type_end;
+				}
 			}
 
 			// Trailing requires-clause belongs to the suffix when present here.
@@ -6035,8 +6072,7 @@ namespace heimdall
 					const auto item_parent =
 						is_template ? Add(GrammarKind::TemplateDeclaration, start, item_end, parent)
 					: parent;
-					if (leading_req != Invalid && node_kind != GrammarKind::NamespaceDefinition &&
-						node_kind != GrammarKind::RecordDefinition)
+					if (leading_req != Invalid && node_kind != GrammarKind::NamespaceDefinition)
 					{
 						ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
 					}

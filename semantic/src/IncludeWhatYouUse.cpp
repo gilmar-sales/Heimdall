@@ -1,8 +1,3 @@
-#include <Heimdall/ProjectIndex.hpp>
-#include <Heimdall/SemanticRules.hpp>
-
-#include "detail/RuleSupport.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <optional>
@@ -11,6 +6,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+#include <Heimdall/ProjectIndex.hpp>
+#include <Heimdall/SemanticRules.hpp>
+
+#include "detail/RuleSupport.hpp"
 
 namespace heimdall
 {
@@ -339,16 +339,8 @@ namespace heimdall
 						", which this file only includes indirectly";
 					TextEdit fix {0, 0, {}};
 					bool has_fix = false;
-					if (target && InsertionPoint(fix.offset))
+					if (target && IncludeFix(*target, fix))
 					{
-						// The directive's range may or may not take in its line break.
-						const std::string_view source = m_tree.Source();
-						const std::string newline =
-							source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
-						const bool at_line_start =
-							fix.offset == 0 || source[fix.offset - 1] == '\n';
-						fix.replacement = at_line_start ? "#include " + *target + newline
-						: newline + "#include " + *target;
 						has_fix = true;
 						message += "; add #include " + *target;
 					}
@@ -631,7 +623,9 @@ namespace heimdall
 				return ClassifyProject(token, name, qualifier, global);
 			}
 
-			std::optional<MissingUse> ClassifyStd(std::uint32_t token, std::string_view name) const
+			std::optional<MissingUse> ClassifyStd(
+				std::uint32_t token,
+				std::string_view name) const
 			{
 				const auto& table = StdTable();
 				const auto found  = table.find(name);
@@ -881,20 +875,60 @@ namespace heimdall
 				return satisfied;
 			}
 
-			// Where the new include goes: after the last unconditional include.
-			bool InsertionPoint(std::size_t& offset) const
+			bool IncludeFix(std::string_view target, TextEdit& fix) const
 			{
-				bool found = false;
-				for (const auto& include : m_includes)
+				std::size_t last = m_includes.size();
+				for (std::size_t i = 0; i < m_includes.size(); ++i)
 				{
-					if (!include.conditional)
+					if (!m_includes[i].conditional)
 					{
-						offset = include.directive_offset + include.directive_length;
-						found  = true;
+						last = i;
 					}
 				}
 
-				return found;
+				if (last == m_includes.size())
+				{
+					return false;
+				}
+
+				const auto source = m_tree.Source();
+				std::size_t first = last;
+				while (first > 0 && !m_includes[first - 1].conditional)
+				{
+					const auto& previous = m_includes[first - 1];
+					const auto gap = source.substr(previous.directive_offset + previous.directive_length,
+						m_includes[first].directive_offset - previous.directive_offset - previous.directive_length);
+					if (gap.find_first_not_of(" \t\r\n\f\v") != std::string_view::npos)
+					{
+						break;
+					}
+
+					--first;
+				}
+
+				fix.offset                 = m_includes[first].directive_offset;
+				fix.length                 = m_includes[last].directive_offset + m_includes[last].directive_length - fix.offset;
+				const auto original        = source.substr(fix.offset, fix.length);
+				const std::string newline  = source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
+				const bool endsWithNewline = original.ends_with('\n');
+				std::string section(original);
+				if (!endsWithNewline)
+				{
+					section += newline;
+				}
+
+				section += "#include ";
+				section += target;
+				section += newline;
+				auto options           = m_context.ruleOptions ? *m_context.ruleOptions : RuleOptions {};
+				options.main_file_name = m_context.file.generic_string();
+				fix.replacement        = RuleEngine::SortIncludes(section, options);
+				if (!endsWithNewline)
+				{
+					fix.replacement.resize(fix.replacement.size() - newline.size());
+				}
+
+				return true;
 			}
 
 			// How to write the include of a project header so that it resolves.
@@ -982,7 +1016,8 @@ namespace heimdall
 
 	} // namespace
 
-	std::vector<Diagnostic> SemanticRules::AnalyzeIncludeWhatYouUse(const SemanticModel& model,
+	std::vector<Diagnostic> SemanticRules::AnalyzeIncludeWhatYouUse(
+		const SemanticModel& model,
 		const ProjectContext& context)
 	{
 		if (context.profile == nullptr)
@@ -994,7 +1029,9 @@ namespace heimdall
 	}
 
 	std::vector<Diagnostic> SemanticRules::Analyze(
-		const SemanticModel& model, const TypeModel& types, const ProjectContext& context)
+		const SemanticModel& model,
+		const TypeModel& types,
+		const ProjectContext& context)
 	{
 		auto all = Analyze(model, types);
 		std::erase_if(all,[](const Diagnostic& diagnostic)

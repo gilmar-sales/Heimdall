@@ -1,8 +1,9 @@
 #include <Heimdall/ProjectSymbolIndex.hpp>
-#include <Heimdall/Workspace.hpp>
 
 #include <algorithm>
 #include <unordered_set>
+
+#include <Heimdall/Workspace.hpp>
 
 namespace heimdall
 {
@@ -121,7 +122,9 @@ namespace heimdall
 			bool local = false, internal = false, member = false;
 		};
 
-		ScopeName QualifiedScope(const SemanticModel& model, ScopeId scope,
+		ScopeName QualifiedScope(
+			const SemanticModel& model,
+			ScopeId scope,
 			bool lexical_only = false)
 		{
 			ScopeName result;
@@ -377,7 +380,9 @@ namespace heimdall
 	} // namespace
 
 	std::expected<ProjectSymbolIndex, SymbolIndexError> ProjectSymbolIndex::Build(
-		const AnalysisSnapshot& snapshot, SymbolIndexLimits limits, std::stop_token stop)
+		const AnalysisSnapshot& snapshot,
+		SymbolIndexLimits limits,
+		std::stop_token stop)
 	{
 		if (stop.stop_requested())
 		{

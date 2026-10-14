@@ -5,9 +5,11 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
+#include <unordered_map>
 
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Doxygen.hpp>
@@ -60,6 +62,471 @@ namespace heimdall::lsp
 				milliseconds * kTenthsPerSecond / kMillisecondsPerSecond;
 			return std::to_string(tenths / kTenthsPerSecond) + "." +
 				std::to_string(tenths % kTenthsPerSecond) + " s";
+		}
+
+		// A signature fix (api/pass-by-const-reference, api/pass-by-value) must
+		// land on the declaration too, or the program no longer compiles. The
+		// diagnostic only covers the definition, so the sibling declarations
+		// are resolved through the workspace index and edited with the same
+		// type surgery on their own spelling.
+		struct ParamSite
+		{
+			heimdall::SymbolId owner = heimdall::kNone;
+			std::size_t ordinal      = 0; // positional, among ParameterDeclarations
+			std::size_t paramCount   = 0;
+			std::uint32_t funcNameToken = heimdall::kNone;
+			std::string name;
+		};
+
+		std::unordered_map<std::uint32_t, heimdall::SymbolId> ParamFunctionMap(
+			const heimdall::SymbolTable& symbols)
+		{
+			std::unordered_map<std::uint32_t, heimdall::SymbolId> map;
+			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+			{
+				if (symbols.kind[symbol] == heimdall::SymbolKind::Function)
+				{
+					map[symbols.decl_node[symbol]] = symbol;
+				}
+			}
+
+			return map;
+		}
+
+		heimdall::SymbolId ParamOwner(
+			const heimdall::SemanticModel& model,
+			const std::unordered_map<std::uint32_t, heimdall::SymbolId>& function_of,
+			std::uint32_t node)
+		{
+			const auto& soa = model.Tree().NodesSoA();
+			std::uint32_t current = node;
+			for (std::size_t steps = 0; steps <= soa.size(); ++steps)
+			{
+				const auto kind = soa.Kind(current);
+				if (kind == heimdall::GrammarKind::FunctionDefinition)
+				{
+					const auto found = function_of.find(current);
+					return found == function_of.end() ? heimdall::kNone : found->second;
+				}
+
+				if (kind == heimdall::GrammarKind::LambdaExpression)
+				{
+					return heimdall::kNone;
+				}
+
+				const auto parent = soa.Parent(current);
+				if (parent >= soa.size() || parent == current)
+				{
+					return heimdall::kNone;
+				}
+
+				current = parent;
+			}
+
+			return heimdall::kNone;
+		}
+
+		// Positional ParameterDeclaration children of a function's suffix, for
+		// definitions and pure declarations alike. Unnamed parameters have no
+		// symbol, so the ordinal must be positional to stay aligned.
+		std::vector<std::uint32_t> SuffixParams(
+			const heimdall::SemanticModel& model, heimdall::SymbolId function)
+		{
+			const auto& soa     = model.Tree().NodesSoA();
+			const auto& symbols = model.Symbols();
+			for (const auto child : model.ChildrenOf(symbols.decl_node[function]))
+			{
+				if (soa.Kind(child) != heimdall::GrammarKind::Declarator)
+				{
+					continue;
+				}
+
+				for (const auto suffix : model.ChildrenOf(child))
+				{
+					if (soa.Kind(suffix) != heimdall::GrammarKind::FunctionSuffix)
+					{
+						continue;
+					}
+
+					std::vector<std::uint32_t> parameters;
+					for (const auto parameter : model.ChildrenOf(suffix))
+					{
+						if (soa.Kind(parameter) == heimdall::GrammarKind::ParameterDeclaration)
+						{
+							parameters.push_back(parameter);
+						}
+					}
+
+					return parameters;
+				}
+			}
+
+			return {};
+		}
+
+		ParamSite FindParamSite(
+			const heimdall::ParseTree& tree,
+			const heimdall::SemanticModel& model,
+			std::size_t byteOffset)
+		{
+			const auto& symbols = model.Symbols();
+			const auto& tokens  = tree.Tokens();
+			heimdall::SymbolId param = heimdall::kNone;
+			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+			{
+				if (symbols.kind[symbol] != heimdall::SymbolKind::Parameter ||
+					symbols.name[symbol] == heimdall::kNone)
+				{
+					continue;
+				}
+
+				const auto token = symbols.decl_token[symbol];
+				if (token < tokens.size() && tokens[token].offset == byteOffset)
+				{
+					param = symbol;
+					break;
+				}
+			}
+
+			if (param == heimdall::kNone)
+			{
+				return {};
+			}
+
+			const auto function_of = ParamFunctionMap(symbols);
+			const auto owner = ParamOwner(model, function_of, symbols.decl_node[param]);
+			if (owner == heimdall::kNone)
+			{
+				return {};
+			}
+
+			const auto parameters = SuffixParams(model, owner);
+			for (std::size_t i = 0; i < parameters.size(); ++i)
+			{
+				if (parameters[i] == symbols.decl_node[param])
+				{
+					return {owner, i, parameters.size(), symbols.decl_token[owner],
+						std::string(model.Names().Text(symbols.name[param]))};
+				}
+			}
+
+			return {};
+		}
+
+		bool IsSpace(char c) noexcept
+		{
+			return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
+				c == '\v';
+		}
+
+		std::string_view Trimmed(std::string_view text)
+		{
+			while (!text.empty() && IsSpace(text.front()))
+			{
+				text.remove_prefix(1);
+			}
+
+			while (!text.empty() && IsSpace(text.back()))
+			{
+				text.remove_suffix(1);
+			}
+
+			return text;
+		}
+
+		// `const Foo &` -> `Foo`: drops `&` and standalone `const` words,
+		// preserving every other spelling (notably `::` qualification).
+		std::string StripConstRef(std::string_view raw)
+		{
+			std::string out;
+			std::string word;
+			const auto flush =[&]
+			{
+				if (!word.empty() && word != "const")
+				{
+					if (!out.empty() && !IsSpace(out.back()))
+					{
+						out += ' ';
+					}
+
+					out += word;
+				}
+
+				word.clear();
+			};
+			for (const char c : raw)
+			{
+				if (c == '&')
+				{
+					flush();
+					continue;
+				}
+
+				if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+					(c >= '0' && c <= '9') || c == '_')
+				{
+					word += c;
+				}
+				else
+				{
+					flush();
+					if (!IsSpace(c))
+					{
+						if (!out.empty() && !IsSpace(out.back()) && out.back() != ':' &&
+							c != ':')
+						{
+							out += ' ';
+						}
+
+						out += c;
+					}
+					else if (!out.empty() && !IsSpace(out.back()))
+					{
+						out += ' ';
+					}
+				}
+			}
+
+			flush();
+			while (!out.empty() && IsSpace(out.back()))
+			{
+				out.pop_back();
+			}
+
+			return out;
+		}
+
+		struct DeclEdit
+		{
+			std::size_t begin = 0;
+			std::size_t end   = 0;
+			std::string text;
+		};
+
+		// Recomputes the definition's type surgery on one sibling declaration,
+		// keeping that declaration's own type spelling. False means "leave this
+		// declaration alone" (complex spelling, arity drift, already matching).
+		bool SiblingParamEdit(
+			const heimdall::ParseTree& tree,
+			const heimdall::SemanticModel& model,
+			std::uint32_t funcNameByteOffset,
+			std::size_t ordinal,
+			std::size_t paramCount,
+			bool toConstRef,
+			std::string_view defParamName,
+			DeclEdit& edit)
+		{
+			const auto& symbols = model.Symbols();
+			const auto& tokens  = tree.Tokens();
+			heimdall::SymbolId function = heimdall::kNone;
+			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+			{
+				if (symbols.kind[symbol] != heimdall::SymbolKind::Function)
+				{
+					continue;
+				}
+
+				const auto token = symbols.decl_token[symbol];
+				if (token < tokens.size() && tokens[token].offset == funcNameByteOffset)
+				{
+					function = symbol;
+					break;
+				}
+			}
+
+			if (function == heimdall::kNone)
+			{
+				return false;
+			}
+
+			const auto parameters = SuffixParams(model, function);
+			if (parameters.size() != paramCount || ordinal >= parameters.size())
+			{
+				return false;
+			}
+
+			const auto node  = parameters[ordinal];
+			const auto& soa  = tree.NodesSoA();
+			const auto first = soa.FirstToken(node);
+			const auto count = soa.TokenCount(node);
+			std::fprintf(stderr, "[paramfix] node span=%s first=%s count=%u params=%zu ordinal=%zu\n",
+				std::string(tree.Source().substr(
+				tokens[first].offset,
+					tokens[std::min(first + count, static_cast<std::uint32_t>(tokens.size())) - 1].offset +
+					tokens[std::min(first + count, static_cast<std::uint32_t>(tokens.size())) - 1].length -
+					tokens[first].offset))
+				.c_str(),
+				std::string(tree.Text(tokens[first])).c_str(), count, parameters.size(),
+				ordinal);
+			if (count == 0 || first >= tokens.size())
+			{
+				return false;
+			}
+
+			const auto last = std::min(first + count, static_cast<std::uint32_t>(tokens.size()));
+			std::uint32_t name = heimdall::kNone;
+			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+			{
+				if (symbols.kind[symbol] == heimdall::SymbolKind::Parameter &&
+					symbols.decl_node[symbol] == node && symbols.name[symbol] != heimdall::kNone)
+				{
+					name = symbols.decl_token[symbol];
+					break;
+				}
+			}
+
+			std::string paramName;
+			std::uint32_t scanEnd = last;
+			if (name != heimdall::kNone)
+			{
+				if (name < first || name >= last)
+				{
+					return false;
+				}
+
+				scanEnd = name;
+				paramName = std::string(tree.Text(tokens[name]));
+			}
+
+			bool hasConst = false, hasRef = false, veto = false;
+			std::uint32_t typeToken = heimdall::kNone;
+			std::size_t lastSigEnd  = 0;
+			for (auto i = first; i < scanEnd; ++i)
+			{
+				const auto& token = tokens[i];
+				if (token.kind == heimdall::TokenKind::Whitespace)
+				{
+					continue;
+				}
+
+				if (token.kind == heimdall::TokenKind::LineComment ||
+					token.kind == heimdall::TokenKind::BlockComment)
+				{
+					return false;
+				}
+
+				if (token.tok == heimdall::Tok::Eq)
+				{
+					break;
+				}
+
+				if (token.tok == heimdall::Tok::LBracket ||
+					token.tok == heimdall::Tok::LParen ||
+					token.tok == heimdall::Tok::Ellipsis)
+				{
+					veto = true;
+					break;
+				}
+
+				if (token.tok == heimdall::Tok::KwConst)
+				{
+					hasConst = true;
+				}
+
+				if (token.tok == heimdall::Tok::Amp || token.tok == heimdall::Tok::AmpAmp)
+				{
+					hasRef = true;
+				}
+
+				if (token.tok == heimdall::Tok::Star)
+				{
+					veto = true;
+					break;
+				}
+
+				if (typeToken == heimdall::kNone)
+				{
+					typeToken = i;
+				}
+
+				lastSigEnd = token.offset + token.length;
+			}
+
+			if (veto || typeToken == heimdall::kNone || lastSigEnd == 0)
+			{
+				return false;
+			}
+
+			const std::string_view source = tree.Source();
+			const std::size_t typeBegin   = tokens[typeToken].offset;
+			if (typeBegin > source.size() || lastSigEnd > source.size())
+			{
+				return false;
+			}
+
+			if (toConstRef)
+			{
+				if (hasRef)
+				{
+					return false;
+				}
+
+				// Named: `Type name` -> `const Type& name`. Unnamed: the type
+				// itself is the whole range (`Type` -> `const Type&`).
+				const bool named = name != heimdall::kNone;
+				const std::size_t typeEnd =
+					named ? tokens[name].offset : lastSigEnd;
+				const std::size_t rangeEnd =
+					named ? tokens[name].offset + tokens[name].length : lastSigEnd;
+				if (typeEnd < typeBegin || rangeEnd < typeBegin || rangeEnd > source.size())
+				{
+					return false;
+				}
+
+				const std::string raw(Trimmed(source.substr(typeBegin, typeEnd - typeBegin)));
+				if (raw.empty())
+				{
+					return false;
+				}
+
+				std::string replacement = hasConst ? raw : "const " + raw;
+				replacement += '&';
+				if (named)
+				{
+					replacement += ' ';
+					replacement += paramName;
+				}
+
+				std::fprintf(stderr, "[paramfix] raw=%s name=%s repl=%s range=[%zu,%zu)\n",
+					raw.c_str(), paramName.c_str(), replacement.c_str(), typeBegin,
+					rangeEnd);
+				edit = {typeBegin, rangeEnd, std::move(replacement)};
+				return true;
+			}
+
+			if (!hasRef)
+			{
+				return false;
+			}
+
+			// Named: `const Type& name` -> `Type name`. Unnamed: the type span
+			// up to the last significant token (stopping before any `=`).
+			const bool named = name != heimdall::kNone;
+			const std::size_t typeEnd =
+				named ? tokens[name].offset : lastSigEnd;
+			const std::size_t rangeEnd =
+				named ? tokens[name].offset + tokens[name].length : lastSigEnd;
+			if (typeEnd < typeBegin || rangeEnd < typeBegin || rangeEnd > source.size())
+			{
+				return false;
+			}
+
+			const std::string stripped =
+				StripConstRef(Trimmed(source.substr(typeBegin, typeEnd - typeBegin)));
+			if (stripped.empty())
+			{
+				return false;
+			}
+
+			std::string replacement = stripped;
+			if (named)
+			{
+				replacement += ' ';
+				replacement += paramName;
+			}
+
+			edit = {typeBegin, rangeEnd, std::move(replacement)};
+			return true;
 		}
 
 		// Interactive handlers + two for background work (compiler probing).
@@ -2820,6 +3287,127 @@ namespace heimdall::lsp
 		const auto selection_start = lines->OffsetFromPosition(
 			{static_cast<std::size_t>(PositionNumber(start_object, "line")),
 				static_cast<std::size_t>(PositionNumber(start_object, "character"))});
+		// A signature fix must also rewrite the sibling declarations, or the
+		// program no longer compiles. The extras below are best-effort: any
+		// declaration the index cannot resolve or whose spelling is not a
+		// plain by-value/const-reference parameter keeps the single-file edit.
+		struct ParamEdit
+		{
+			std::string uri;
+			std::size_t offset = 0;
+			std::size_t length = 0;
+			std::string replacement;
+			std::shared_ptr<const LineIndex> lines;
+		};
+		const auto sibling_param_edits =[&](const heimdall::Diagnostic& diagnostic)
+		{
+			std::vector<ParamEdit> extras;
+			if (diagnostic.code != "api/pass-by-const-reference" &&
+				diagnostic.code != "api/pass-by-value")
+			{
+				return extras;
+			}
+
+			const bool toConstRef = diagnostic.code == "api/pass-by-const-reference";
+			const heimdall::SemanticModel& model = context.Semantic();
+			const ParamSite site = FindParamSite(*tree, model, diagnostic.offset);
+			if (site.owner == heimdall::kNone || site.funcNameToken == heimdall::kNone)
+			{
+				return extras;
+			}
+
+			const std::string self_path = PathFromUri(uri_string).generic_string();
+			const auto snapshot         = mIndexStore.Snapshot();
+			if (!snapshot)
+			{
+				return extras;
+			}
+
+			const auto self_shard = snapshot->ShardFor(self_path);
+			if (self_shard == heimdall::index::kInvalid ||
+				snapshot->Shards()[self_shard]->ContentHash() !=
+				heimdall::index::HashBytes(*text))
+			{
+				return extras;
+			}
+
+			const std::uint32_t funcByte = tree->Tokens()[site.funcNameToken].offset;
+			bool have                    = false;
+			heimdall::index::SymbolHash hash = 0;
+			for (std::uint32_t symbol = 0;
+				symbol < snapshot->Shards()[self_shard]->Symbols().Size();
+				++symbol)
+			{
+				const auto& columns = snapshot->Shards()[self_shard]->Symbols();
+				if (columns.kind[symbol] == heimdall::SymbolKind::Function &&
+					columns.nameOffset[symbol] == funcByte)
+				{
+					hash = snapshot->HashOf({self_shard, symbol});
+					have = true;
+					break;
+				}
+			}
+
+			if (!have)
+			{
+				return extras;
+			}
+
+			const auto rename_context = RenameContext();
+			for (const auto& declaration : snapshot->Declarations(hash))
+			{
+				const auto& shard = *snapshot->Shards()[declaration.shard];
+				if (shard.Path() == self_path &&
+					shard.Symbols().nameOffset[declaration.symbol] == funcByte)
+				{
+					continue;
+				}
+
+				if (rename_context.editable && !rename_context.editable(shard.Path()))
+				{
+					continue;
+				}
+
+				const std::string otherUri = UriFromPath(shard.Path());
+				std::shared_ptr<const std::string> otherText;
+				std::shared_ptr<const LineIndex> otherLines;
+				if (const auto open = GetDocument(otherUri))
+				{
+					otherText  = open->text;
+					otherLines = open->lines;
+				}
+				else if (auto contents = ReadWorkspaceFile(shard.Path()))
+				{
+					otherText = std::make_shared<const std::string>(std::move(*contents));
+					auto built = std::make_shared<LineIndex>();
+					built->Build(*otherText);
+					otherLines = std::move(built);
+				}
+				else
+				{
+					continue;
+				}
+
+				const auto* otherCommand = CommandFor(otherUri);
+				const auto otherTree =
+					heimdall::ParseTree::Parse(*otherText, ParserOptionsFor(otherCommand));
+				const auto otherModel = heimdall::Binder::Bind(otherTree);
+				DeclEdit sibling;
+				if (!SiblingParamEdit(otherTree, otherModel,
+					shard.Symbols().nameOffset[declaration.symbol], site.ordinal,
+					site.paramCount, toConstRef, sibling) ||
+					sibling.end > otherText->size())
+				{
+					continue;
+				}
+
+				extras.push_back(
+					{otherUri, sibling.begin, sibling.end - sibling.begin,
+					std::move(sibling.text), std::move(otherLines)});
+			}
+
+			return extras;
+		};
 		const auto selection_end = lines->OffsetFromPosition(
 			{static_cast<std::size_t>(PositionNumber(end_object, "line")),
 				static_cast<std::size_t>(PositionNumber(end_object, "character"))});
@@ -3151,7 +3739,23 @@ namespace heimdall::lsp
 				response);
 			response += "},\"newText\":";
 			QuoteJson(diagnostic.fix.replacement, response);
-			response += "}]}}}";
+			response += "}]";
+			// Signature fixes also rewrite the sibling declarations resolved
+			// through the workspace index; unrelated edits stay single-file.
+			for (const auto& extra : sibling_param_edits(diagnostic))
+			{
+				response += ',';
+				QuoteJson(extra.uri, response);
+				response += ":[{\"range\":{\"start\":";
+				AppendPosition(extra.lines->ToPosition(extra.offset), response);
+				response += ",\"end\":";
+				AppendPosition(extra.lines->ToPosition(extra.offset + extra.length), response);
+				response += "},\"newText\":";
+				QuoteJson(extra.replacement, response);
+				response += "}]";
+			}
+
+			response += "}}}";
 		}
 
 		response += ']';

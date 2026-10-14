@@ -459,6 +459,37 @@ TEST(ApiPassByConstReference, SilentWhenModifiedOrCheapOrMoved)
         .empty());
 }
 
+TEST(ApiPassByConstReference, SilentForConstructorsIncludingOutOfLineDefinitions)
+{
+    // In-class definition: the binder flags the constructor.
+    EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("struct Tracer { int x; };\nstruct Holder {\n"
+              "    int copy_;\n"
+              "    Holder(Tracer tracer) { copy_ = tracer.x; }\n"
+              "};\n")
+        .flow)
+        .empty());
+    // Out-of-line definition: `Holder::Holder` carries no constructor flag,
+    // but the sink still owns its argument.
+    EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("struct Tracer { int x; };\nstruct Holder {\n"
+              "    int copy_;\n"
+              "    Holder(Tracer tracer);\n"
+              "};\n"
+              "Holder::Holder(Tracer tracer) { copy_ = tracer.x; }\n")
+        .flow)
+        .empty());
+    // Moved through the member-initializer list (the AnalysisContext shape).
+    EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("struct Snapshot { int x; };\nstruct Context {\n"
+              "    Snapshot snapshot_;\n"
+              "    Context(Snapshot snapshot);\n"
+              "};\n"
+              "Context::Context(Snapshot snapshot) : snapshot_(std::move(snapshot)) {}\n")
+        .flow)
+        .empty());
+}
+
 TEST(ApiPassByConstReference, SilentForScalarFixedWidthIntegerAliases)
 {
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(

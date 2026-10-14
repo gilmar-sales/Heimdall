@@ -1,13 +1,14 @@
-#include <Heimdall/LineTable.hpp>
 #include <Heimdall/SemanticRules.hpp>
-
-#include "detail/TokenView.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <Heimdall/LineTable.hpp>
+
+#include "detail/TokenView.hpp"
 
 namespace heimdall
 {
@@ -102,7 +103,9 @@ namespace heimdall
 
 		// End of the declarator: just after the parameter list and its
 		// cv/ref/noexcept/trailing-return parts, where `override` is written.
-		bool OverrideInsertionOffset(const ParseTree& tree, std::uint32_t name_token,
+		bool OverrideInsertionOffset(
+			const ParseTree& tree,
+			std::uint32_t name_token,
 			std::size_t& offset)
 		{
 			const auto& tokens = tree.Tokens();
@@ -1010,7 +1013,9 @@ namespace heimdall
 		// The expression a control statement tests, or kNone when the statement is
 		// not a plain `if`/`while`/classic `for` or the grammar did not give the
 		// condition a node of its own (declaration conditions, C-style casts).
-		std::uint32_t ConditionOf(const SemanticModel& model, const TokenView& view,
+		std::uint32_t ConditionOf(
+			const SemanticModel& model,
+			const TokenView& view,
 			std::uint32_t stmt)
 		{
 			const auto[begin, end] = view.Range(stmt);
@@ -1174,7 +1179,9 @@ namespace heimdall
 
 		// Picks a name for the loop variable that nothing in the loop or the file
 		// already uses.
-		std::string FreshElementName(const SemanticModel& model, const TokenView& view,
+		std::string FreshElementName(
+			const SemanticModel& model,
+			const TokenView& view,
 			const ForLoop& loop)
 		{
 			for (const std::string_view candidate :
@@ -2465,7 +2472,8 @@ namespace heimdall
 		return Analyze(model, Typer::Type(model));
 	}
 
-	std::vector<Diagnostic> SemanticRules::Analyze(const SemanticModel& model,
+	std::vector<Diagnostic> SemanticRules::Analyze(
+		const SemanticModel& model,
 		const TypeModel& types)
 	{
 		const auto flow = Flow::Build(types);
@@ -2499,6 +2507,7 @@ namespace heimdall
 				AnalyzeIntegerToPointer(model),
 				AnalyzeCallArguments(model),
 				AnalyzeCallArgumentTypes(types),
+				AnalyzeTemplateSubstitution(types),
 				AnalyzeDotOnPointer(types),
 				AnalyzeAccessControl(types),
 				AnalyzeConflictingDeclarations(types),

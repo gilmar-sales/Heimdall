@@ -1,5 +1,8 @@
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include <Heimdall/Workspace.hpp>
 
 namespace heimdall

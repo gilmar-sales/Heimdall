@@ -822,6 +822,8 @@ namespace heimdall
 				"semantic", false, "function call with an incorrect number of arguments"},
 			{RuleId::CallArgumentType, "cpp/call-argument-type", "cpp", Severity::Error,
 				"semantic", false, "function argument without a valid implicit conversion"},
+			{RuleId::TemplateSubstitution, "cpp/template-substitution", "cpp", Severity::Error,
+				"semantic", false, "proven template instantiation failures or no viable local overload"},
 			{RuleId::DotOnPointer, "cpp/dot-on-pointer", "cpp", Severity::Error,
 				"semantic", false, "member accessed with '.' on a pointer (use '->')"},
 			{RuleId::InaccessibleMember, "cpp/access-control", "cpp", Severity::Error,

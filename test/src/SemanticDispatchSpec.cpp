@@ -20,8 +20,10 @@ namespace
         return options;
     }
 
-    std::vector<Diagnostic> Legacy(const AnalysisContext& context, const RuleEngine& engine,
-                                   const ProjectContext& project = {})
+    std::vector<Diagnostic> Legacy(
+        const AnalysisContext& context,
+        const RuleEngine& engine,
+        const ProjectContext& project = {})
     {
         auto all = engine.Analyze(context.Syntax());
         auto semantic = SemanticRules::Analyze(context.Semantic(), context.Types(), project);
@@ -38,7 +40,8 @@ namespace
         return all;
     }
 
-    void ExpectEquivalent(const std::vector<Diagnostic>& actual,
+    void ExpectEquivalent(
+        const std::vector<Diagnostic>& actual,
         const std::vector<Diagnostic>& expected)
     {
         ASSERT_EQ(actual.size(), expected.size());
@@ -125,7 +128,7 @@ namespace
             AnalysisContext context(workspace.Snapshot(), *id);
             (void) AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
             const bool typed =
-                rule.id == RuleId::NoImplicitBoolConversion ||
+                rule.id == RuleId::NoImplicitBoolConversion || rule.id == RuleId::TemplateSubstitution ||
                 rule.id == RuleId::ModernizeRangeLoop || rule.id == RuleId::ModernizeLoopConvert ||
                 rule.id == RuleId::ModernizeConst || rule.id == RuleId::ModernizeConstexpr ||
                 rule.id == RuleId::ModernizeSpan || rule.id == RuleId::ModernizeAttributes ||
@@ -133,9 +136,9 @@ namespace
                 rule.id == RuleId::ApiPassByConstReference ||
                 rule.id == RuleId::ApiConstCorrectness || rule.id == RuleId::ApiUnsafeDowncast ||
                 rule.id == RuleId::ApiSlicing || rule.id == RuleId::CallArgumentType ||
-				 rule.id == RuleId::DotOnPointer || rule.id == RuleId::InaccessibleMember ||
-				 rule.id == RuleId::ConflictingDeclaration ||
-				 rule.id == RuleId::UnreachableCode || rule.id == RuleId::MissingReturn ||
+                rule.id == RuleId::DotOnPointer || rule.id == RuleId::InaccessibleMember ||
+                rule.id == RuleId::ConflictingDeclaration ||
+                rule.id == RuleId::UnreachableCode || rule.id == RuleId::MissingReturn ||
                 rule.id == RuleId::ReturnType;
             EXPECT_EQ(context.Snapshot().Metrics().bind_count, 1);
             EXPECT_EQ(context.Snapshot().Metrics().type_count, typed ? 1 : 0);

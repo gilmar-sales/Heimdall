@@ -1,5 +1,9 @@
 #pragma once
 
+#include <expected>
+#include <string>
+#include <vector>
+
 #include <Heimdall/PluginApi.hpp>
 #include <Heimdall/RuleScheduler.hpp>
 

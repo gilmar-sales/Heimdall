@@ -3,6 +3,8 @@
 #include <expected>
 #include <functional>
 #include <span>
+#include <stop_token>
+#include <string>
 
 #include <Heimdall/AnalysisContext.hpp>
 #include <Heimdall/LineTable.hpp>

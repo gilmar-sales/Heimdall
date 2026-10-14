@@ -81,7 +81,8 @@ namespace
     };
 
     std::vector<heimdall::Diagnostic> ImplicitBoolWith(
-        const std::string& source, std::shared_ptr<const heimdall::TypeNameOracle> oracle)
+        const std::string& source,
+        std::shared_ptr<const heimdall::TypeNameOracle> oracle)
     {
         heimdall::ParserOptions options;
         options.type_names = std::move(oracle);
@@ -131,7 +132,8 @@ TEST(Typer, TypesUnnamedPrototypeParametersAndPreservesReferences)
 
 TEST(TypeModel, PreservesSymbolicParametersPointersAndQualifiedNames)
 {
-    const Typed typed("template<class T> struct Box { T value; T* pointer; typename T::type nested; };");
+    const Typed typed(
+        "template<class T> struct Box { T value; T* pointer; typename T::type nested; };");
     const auto& table = typed.types.Types();
 
     EXPECT_EQ(table.Kind(typed.types.SymbolType(typed.Find("value"))),
@@ -139,12 +141,13 @@ TEST(TypeModel, PreservesSymbolicParametersPointersAndQualifiedNames)
     EXPECT_TRUE(table.IsDependent(typed.types.SymbolType(typed.Find("pointer"))));
     EXPECT_FALSE(table.IsKnown(typed.types.SymbolType(typed.Find("pointer"))));
     EXPECT_EQ(table.Kind(typed.types.SymbolType(typed.Find("nested"))),
-              heimdall::TypeKind::DependentName);
+              heimdall::TypeKind::DependentMember);
 }
 
 TEST(TypeModel, CanonicalizesConcreteClassTemplateIdsAndSubstitutesFields)
 {
-    const Typed typed("template<class T> struct Box { T value; }; void f() { Box<int> a; Box<int> b; auto result = a.value; }");
+    const Typed typed(
+        "template<class T> struct Box { T value; }; void f() { Box<int> a; Box<int> b; auto result = a.value; }");
     const auto& instances = typed.types.Instantiations();
 
     ASSERT_EQ(instances.primary.size(), 1u);
@@ -177,7 +180,8 @@ TEST(TypeModel, BoundsIncompleteRecursiveTemplateBaseInstantiation)
 
 TEST(TypeModel, SelectsExplicitSpecializationsWithoutConflatingTheirMembers)
 {
-    const Typed typed("template<class T> struct Box { int value; }; template<> struct Box<int> { bool value; }; void f() { Box<int> a; Box<float> b; auto first = a.value; auto second = b.value; }");
+    const Typed typed(
+        "template<class T> struct Box { int value; }; template<> struct Box<int> { bool value; }; void f() { Box<int> a; Box<float> b; auto first = a.value; auto second = b.value; }");
     const auto& instances = typed.types.Instantiations();
 
     ASSERT_EQ(instances.primary.size(), 2u);
@@ -187,13 +191,11 @@ TEST(TypeModel, SelectsExplicitSpecializationsWithoutConflatingTheirMembers)
     EXPECT_EQ(typed.Of("second"), "int");
 }
 
-TEST(TypeModel, RefusesToGuessPartialSpecializationsPacksAndConstraints)
+TEST(TypeModel, RefusesToGuessUnmodeledClassPacksAndConstraints)
 {
     for (const auto source :
         {
-            "template<class T> struct Box { int value; }; template<class T> struct Box<T*> { int value; }; Box<int*> a;",
-            "template<class... T> struct Box { int value; }; Box<int> a;",
-            "template<class T> requires true struct Box { int value; }; Box<int> a;"
+            "template<class... T> struct Box { int value; }; Box<int> a;"
     })
     {
         const Typed typed(source);
@@ -214,7 +216,9 @@ TEST(TypeModel, KeepsDistinctDependentBindingsAndWorkspaceCoverage)
             false, true
     })
     {
-        const Typed typed(std::string("struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
+        const Typed typed(
+            std::string(
+            "struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
         const auto& references = typed.types.DependentReferences();
 
         ASSERT_EQ(references.token.size(), 1u);
@@ -228,7 +232,8 @@ TEST(TypeModel, KeepsDistinctDependentBindingsAndWorkspaceCoverage)
 
 TEST(TypeModel, SubstitutesEarlierTypeParametersInDefaults)
 {
-    const Typed typed("template<class T = int, class U = T*> struct Box { U value; }; void f() { Box<> a; auto result = a.value; }");
+    const Typed typed(
+        "template<class T = int, class U = T*> struct Box { U value; }; void f() { Box<> a; auto result = a.value; }");
 
     EXPECT_EQ(typed.Of("a"), "Box<int, int*>");
     EXPECT_EQ(typed.Of("result"), "int*");
@@ -256,7 +261,8 @@ TEST(TypeModel, ComputesDependentBaseMemberViewsWithoutChangingDeclarationIdenti
 
 TEST(TypeModel, DependentMethodOverloadsRetainAmbiguousProofStates)
 {
-    const Typed typed("struct A { int value(); int value(int); }; template<class T> struct Box { int get(T object) { return object.value(); } }; Box<A> a;");
+    const Typed typed(
+        "struct A { int value(); int value(int); }; template<class T> struct Box { int get(T object) { return object.value(); } }; Box<A> a;");
     const auto& references = typed.types.DependentReferences();
 
     ASSERT_EQ(references.bindingCount.size(), 1u);
@@ -266,7 +272,8 @@ TEST(TypeModel, DependentMethodOverloadsRetainAmbiguousProofStates)
 
 TEST(TypeModel, OneDependentSourceCanBindTheSameInheritedMemberInDistinctInstances)
 {
-    const Typed typed("struct A { int value; }; struct B : A {}; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<B> b;");
+    const Typed typed(
+        "struct A { int value; }; struct B : A {}; template<class T> struct Box { int get(T object) { return object.value; } }; Box<A> a; Box<B> b;");
     const auto& references = typed.types.DependentReferences();
 
     ASSERT_EQ(references.bindingCount.size(), 1u);
@@ -366,7 +373,9 @@ TEST(TypeTable, ClassifiesBuiltinTypes)
 
 TEST(Typer, ReadsBuiltinTypes)
 {
-    const Typed typed(Body("int a; unsigned long b; const char* c; long long d; unsigned char e; "
+    const Typed typed(
+        Body(
+        "int a; unsigned long b; const char* c; long long d; unsigned char e; "
         "bool f; double g; float h;\n"
         "unsigned u; short s; long double ld; signed char sc; unsigned short "
         "us; char8_t c8; wchar_t w;\n"
@@ -392,7 +401,9 @@ TEST(Typer, ReadsBuiltinTypes)
 
 TEST(Typer, ReadsPointersReferencesAndArrays)
 {
-    const Typed typed(Body("int* p; int** pp; int x = 0; const int& r = x; int a[3]; char* "
+    const Typed typed(
+        Body(
+        "int* p; int** pp; int x = 0; const int& r = x; int a[3]; char* "
         "names[2]; int* const cp = 0;\n"
         "int m[2][3]; int&& rr = 1; const char* const s = 0;"));
     EXPECT_EQ(typed.Of("p"), "int*");
@@ -439,7 +450,9 @@ TEST(Typer, ResolvesClassesEnumsAndAliases)
 
 TEST(Typer, KeepsLibraryTypesAsExternal)
 {
-    const Typed typed(Body("std::vector<int> v; std::string s; std::map<int, std::vector<int>> m; "
+    const Typed typed(
+        Body(
+        "std::vector<int> v; std::string s; std::map<int, std::vector<int>> m; "
         "std::size_t n; size_t k;\n"
         "std::unique_ptr<int> up;"));
     EXPECT_EQ(typed.Of("v"), "std::vector<int>");
@@ -453,7 +466,8 @@ TEST(Typer, KeepsLibraryTypesAsExternal)
 
 TEST(Typer, SeparatesDependentParametersFromUndeclaredTypes)
 {
-    const Typed typed("template <class T> void g(T a, T* b, T& c) {}\n"
+    const Typed typed(
+        "template <class T> void g(T a, T* b, T& c) {}\n"
         "void f() { Foo x; ns::Bar y; Box<int> z; typename T::type w; }\n");
     EXPECT_EQ(typed.Of("a"), "T");
     EXPECT_EQ(typed.Of("b"), "T*");
@@ -466,7 +480,8 @@ TEST(Typer, SeparatesDependentParametersFromUndeclaredTypes)
 
 TEST(Typer, ConcreteTemplateClassesAreKnownAndUnsupportedAliasesStayUnknown)
 {
-    const Typed typed("template <class T> struct Box {};\n"
+    const Typed typed(
+        "template <class T> struct Box {};\n"
         "template <class T> using Vec = std::vector<T>;\n"
         "void f() { Box<int> b; Vec<int> v; }\n");
     EXPECT_EQ(typed.Of("b"), "Box<int>");
@@ -475,7 +490,8 @@ TEST(Typer, ConcreteTemplateClassesAreKnownAndUnsupportedAliasesStayUnknown)
 
 TEST(Typer, CyclesTerminateAsUnknown)
 {
-    const Typed typed("using A = A;\n"
+    const Typed typed(
+        "using A = A;\n"
         "using B = C;\n"
         "using C = B;\n"
         "void f() { A a; B b; auto x = x; }\n");
@@ -488,7 +504,9 @@ TEST(Typer, CyclesTerminateAsUnknown)
 
 TEST(Typer, TypesLiterals)
 {
-    const Typed typed(Body("auto a = 1; auto b = 1u; auto c = 1.5; auto d = 1.5f; auto e = 'x'; "
+    const Typed typed(
+        Body(
+        "auto a = 1; auto b = 1u; auto c = 1.5; auto d = 1.5f; auto e = 'x'; "
         "auto f = true; auto g = \"s\";\n"
         "auto h = nullptr; auto i = 5L; auto j = 5ull; auto k = 0x10; auto l = "
         "3000000000; auto m = 1e3;\n"
@@ -522,7 +540,9 @@ TEST(Typer, TypesLiterals)
 
 TEST(Typer, AutoDropsReferencesAndTopLevelConst)
 {
-    const Typed typed(Body("int x = 0; const int cx = 0; int& rx = x; int arr[3] = {};\n"
+    const Typed typed(
+        Body(
+        "int x = 0; const int cx = 0; int& rx = x; int arr[3] = {};\n"
         "auto a = x; auto b = cx; auto c = rx; auto d = arr; const auto e = x; "
         "auto& f = x; const auto& g = x;\n"
         "auto& h = cx;"));
@@ -538,7 +558,9 @@ TEST(Typer, AutoDropsReferencesAndTopLevelConst)
 
 TEST(Typer, AutoPointerDeduction)
 {
-    const Typed typed(Body("int x = 0; const int cx = 0; int arr[3] = {};\n"
+    const Typed typed(
+        Body(
+        "int x = 0; const int cx = 0; int arr[3] = {};\n"
         "auto* p = &x; const auto* q = &x; auto* r = arr; auto* const s = &x; "
         "auto* t = &cx; auto* u = x;"));
     EXPECT_EQ(typed.Of("p"), "int*");
@@ -551,7 +573,9 @@ TEST(Typer, AutoPointerDeduction)
 
 TEST(Typer, ConstrainedAutoDeducesLikePlainAuto)
 {
-    const Typed typed(Body("int x = 0; const int cx = 0;\n"
+    const Typed typed(
+        Body(
+        "int x = 0; const int cx = 0;\n"
         "Hashable auto a = x; Hashable auto b = cx; Hashable auto& c = x; "
         "Hashable auto& d = cx; Hashable auto* e = &x;\n"
         "Hashable auto f; Hashable decltype(auto) g = x;"));
@@ -568,7 +592,8 @@ TEST(Typer, ConstrainedAutoDeducesLikePlainAuto)
 
 TEST(Typer, AutoDeducesNewExpressions)
 {
-    const Typed typed("struct Node { Node* next; int value; };\n"
+    const Typed typed(
+        "struct Node { Node* next; int value; };\n"
         "void f(void* buffer) {\n"
         "auto a = new Node;\n"
         "auto b = new Node();\n"
@@ -590,7 +615,8 @@ TEST(Typer, AutoDeducesNewExpressions)
 TEST(Typer, AutoForwardingReferences)
 {
     const Typed typed(
-        Body("int x = 0; const int cx = 0;\n"
+        Body(
+        "int x = 0; const int cx = 0;\n"
         "auto&& a = x; auto&& b = cx; auto&& c = 1; auto&& d = x + 1; const auto&& e = 2;"));
     EXPECT_EQ(typed.Of("a"), "int&");
     EXPECT_EQ(typed.Of("b"), "const int&");
@@ -601,7 +627,9 @@ TEST(Typer, AutoForwardingReferences)
 
 TEST(Typer, AutoWithDirectAndBraceInitialization)
 {
-    const Typed typed(Body("int x = 0; double d = 0;\n"
+    const Typed typed(
+        Body(
+        "int x = 0; double d = 0;\n"
         "auto a{x}; auto b{d}; auto c = {x}; auto e{1, 2}; auto& f{x};"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "double");
@@ -612,7 +640,8 @@ TEST(Typer, AutoWithDirectAndBraceInitialization)
 
 TEST(Typer, AutoInRangeFor)
 {
-    const Typed typed(Body(
+    const Typed typed(
+        Body(
         "int arr[3] = {}; const int carr[2] = {};\n"
         "for (auto a : arr) {}\n"
         "for (auto& b : arr) {}\n"
@@ -671,7 +700,9 @@ TEST(Typer, AutoReturnTypeIsDeducedFromTheBody)
 
 TEST(Typer, AppliesTheUsualArithmeticConversions)
 {
-    const Typed typed(Body("int i = 0; long l = 0; double d = 0; unsigned u = 0; char c = 0; float "
+    const Typed typed(
+        Body(
+        "int i = 0; long l = 0; double d = 0; unsigned u = 0; char c = 0; float "
         "fl = 0; short sh = 0; bool b = true;\n"
         "unsigned long ul = 0; long long ll = 0; std::size_t sz = 0;\n"
         "auto s1 = i + l; auto s2 = i + d; auto s3 = i + u; auto s4 = c + c; "
@@ -701,7 +732,9 @@ TEST(Typer, AppliesTheUsualArithmeticConversions)
 
 TEST(Typer, TypesComparisonsAndLogicalOperators)
 {
-    const Typed typed(Body("int i = 0; long l = 0; int* p = 0; double d = 0;\n"
+    const Typed typed(
+        Body(
+        "int i = 0; long l = 0; int* p = 0; double d = 0;\n"
         "auto c1 = i < l; auto c2 = p == nullptr; auto c3 = d != i; auto c4 = i "
         "&& l; auto c5 = !i; auto c6 = p || d;\n"
         "auto c7 = !p;"));
@@ -716,7 +749,8 @@ TEST(Typer, TypesComparisonsAndLogicalOperators)
 
 TEST(Typer, TypesUnaryOperators)
 {
-    const Typed typed(Body(
+    const Typed typed(
+        Body(
         "int i = 0; char c = 0; int* p = 0; int a[2] = {}; unsigned u = 0; const int* cp = 0; "
         "double d = 0;\n"
         "auto u1 = -c; auto u2 = +u; auto u3 = ~c; auto u4 = &i; auto u5 = *p; auto u6 = *a; auto "
@@ -738,7 +772,8 @@ TEST(Typer, TypesUnaryOperators)
 
 TEST(Typer, ReflectionOperatorProducesMetaInfoForTypesAndEntities)
 {
-    const Typed typed("struct Widget { int value; };\n"
+    const Typed typed(
+        "struct Widget { int value; };\n"
         "void f() { Widget widget; auto type = ^^Widget; "
         "auto builtin = ^^int; auto unsigned_type = ^^unsigned long; "
         "auto pointer = ^^const int*; "
@@ -760,7 +795,9 @@ TEST(Typer, ReflectionOperatorProducesMetaInfoForTypesAndEntities)
 
 TEST(Typer, TypesPointerArithmeticSubscriptsAndConditionals)
 {
-    const Typed typed(Body("int i = 0; long l = 0; int* p = 0; int a[4] = {}; char* s = 0;\n"
+    const Typed typed(
+        Body(
+        "int i = 0; long l = 0; int* p = 0; int a[4] = {}; char* s = 0;\n"
         "auto p1 = p + 1; auto p2 = 1 + p; auto p3 = p - 1; auto p4 = a[1]; "
         "auto p5 = p[i]; auto p6 = s[0];\n"
         "auto p7 = i ? l : i; auto p8 = i ? p : nullptr; auto p9 = i ? p : s; "
@@ -782,7 +819,9 @@ TEST(Typer, TypesPointerArithmeticSubscriptsAndConditionals)
 
 TEST(Typer, TypesAssignmentsAndCasts)
 {
-    const Typed typed(Body("int i = 0; long l = 0; double d = 0;\n"
+    const Typed typed(
+        Body(
+        "int i = 0; long l = 0; double d = 0;\n"
         "auto a1 = (i = 2); auto a2 = (l += i); auto a3 = static_cast<char>(i); "
         "auto a4 = static_cast<double>(i);\n"
         "auto a5 = reinterpret_cast<long*>(&i); auto a6 = static_cast<const "
@@ -828,7 +867,8 @@ TEST(Typer, TypesMembersAndCalls)
 
 TEST(Typer, FindsInheritedMembers)
 {
-    const Typed typed("struct B { int bx; long bf(); };\n"
+    const Typed typed(
+        "struct B { int bx; long bf(); };\n"
         "struct D : B { double dx; };\n"
         "void f(D d, D* dp) { auto a = d.bx; auto b = d.bf(); auto c = dp->dx; auto "
         "e = dp->bx; }\n");
@@ -840,7 +880,8 @@ TEST(Typer, FindsInheritedMembers)
 
 TEST(Typer, TypesThisAndImplicitMembers)
 {
-    const Typed typed("struct S {\n"
+    const Typed typed(
+        "struct S {\n"
         "    int v;\n"
         "    int m() { auto t = this; auto w = v; auto z = this->v; return w; }\n"
         "};\n"
@@ -854,7 +895,8 @@ TEST(Typer, TypesThisAndImplicitMembers)
 TEST(Typer, MemberSymbolResolvesFieldsThroughObjectsPointersAndInheritance)
 {
     using namespace heimdall;
-    const Typed typed("struct Base { int base_field; };\n"
+    const Typed typed(
+        "struct Base { int base_field; };\n"
         "struct Derived : Base { int own; };\n"
         "struct Holder { Derived value; Derived* ptr; };\n"
         "int f(Holder h) {\n"
@@ -894,7 +936,8 @@ TEST(Typer, MemberSymbolResolvesFieldsThroughObjectsPointersAndInheritance)
 TEST(Typer, MemberSymbolIsUnknownForUnknowableReceivers)
 {
     using namespace heimdall;
-    const Typed typed("struct Opaque;\n"
+    const Typed typed(
+        "struct Opaque;\n"
         "void f(Opaque* p) { p->x = 1; }\n"
         "void g() { missing.m = 2; }\n");
     const auto& soa = typed.tree.NodesSoA();
@@ -913,18 +956,21 @@ TEST(Typer, MemberSymbolIsUnknownForUnknowableReceivers)
 
 TEST(Typer, OverloadsShareAReturnTypeOrAreUnknown)
 {
-    const Typed typed("int same(int); int same(double);\n"
+    const Typed typed(
+        "int same(int); int same(double);\n"
         "int mixed(); long mixed(int);\n"
         "template <class T> int generic(T);\n"
         "void f() { auto a = same(1); auto b = mixed(); auto c = generic(1); }\n");
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "<unknown>");
-    EXPECT_EQ(typed.Of("c"), "<unknown>");
+    EXPECT_EQ(typed.Of("c"), "int");
 }
 
 TEST(Typer, KnowsStandardContainerObservers)
 {
-    const Typed typed(Body("std::vector<int> v; std::string s; std::deque<int> d; std::array<int, "
+    const Typed typed(
+        Body(
+        "std::vector<int> v; std::string s; std::deque<int> d; std::array<int, "
         "3> a; std::list<int> l;\n"
         "auto n = v.size(); auto e = v.empty(); auto len = s.length(); auto c = "
         "d.size(); auto f = a.size();\n"
@@ -941,14 +987,17 @@ TEST(Typer, KnowsStandardContainerObservers)
 
 TEST(Typer, UsesTheOperatorSubscriptOfAClass)
 {
-    const Typed typed("struct Grid { long operator[](int); };\n"
+    const Typed typed(
+        "struct Grid { long operator[](int); };\n"
         "void f(Grid g) { auto a = g[1]; }\n");
     EXPECT_EQ(typed.Of("a"), "long");
 }
 
 TEST(Typer, UnknownPropagatesThroughExpressions)
 {
-    const Typed typed(Body("int i = 0; auto a = missing(); auto b = a + 1; auto c = i + a; auto d "
+    const Typed typed(
+        Body(
+        "int i = 0; auto a = missing(); auto b = a + 1; auto c = i + a; auto d "
         "= unknown.field; auto e = i < a;\n"
         "auto f = a ? i : i; auto g = -a; auto h = *a; auto m = a[0]; auto n = "
         "i + unknown_global;"));
@@ -966,7 +1015,8 @@ TEST(Typer, UnknownPropagatesThroughExpressions)
 
 TEST(Typer, ClassOperatorsAreNotGuessed)
 {
-    const Typed typed("struct V {};\n"
+    const Typed typed(
+        "struct V {};\n"
         "void f(V a, V b) { auto s = a + b; auto c = a < b; auto n = !a; auto p = "
         "&a; auto m = a && b; }\n");
     EXPECT_EQ(typed.Of("s"), "<unknown>");
@@ -980,7 +1030,9 @@ TEST(Typer, BuiltinCastsTypeTheirWholeExpression)
 {
     // Before the parser knew `(int)` was a cast these read as the operand's type, so
     // the Typer answered Unknown to stay safe; now the cast is its own node.
-    const Typed typed(Body("double d = 0; int i = 0;\n"
+    const Typed typed(
+        Body(
+        "double d = 0; int i = 0;\n"
         "auto a = (int)d; auto b = (double)i / 2; auto c = (long)i + 1;"));
     EXPECT_EQ(typed.Of("a"), "int");
     EXPECT_EQ(typed.Of("b"), "double");
@@ -1264,7 +1316,8 @@ TEST(ImplicitBool, ToleratesBrokenInput)
 
 TEST(Typer, MapsFixedWidthIntegerAliasesToBuiltins)
 {
-    const Typed typed("void f(std::uint32_t a, uint32_t b, std::int64_t c, "
+    const Typed typed(
+        "void f(std::uint32_t a, uint32_t b, std::int64_t c, "
         "std::size_t d, intptr_t e, std::int16_t g) {}");
     EXPECT_EQ(typed.Of("a"), "unsigned int");
     EXPECT_EQ(typed.Of("b"), "unsigned int");
@@ -1877,7 +1930,8 @@ TEST(TyperRules, TypeModelIsIndependentOfTheRuleThatAsksForIt)
 
 TEST(Typer, CStyleCastsTakeTheCastType)
 {
-    const Typed typed("struct Foo { int v; };\n"
+    const Typed typed(
+        "struct Foo { int v; };\n"
         "void f(void* p, double d) {\n"
         "    auto a = (Foo*)p; auto b = (int)d; auto c = (unsigned long)d; auto e = "
         "(const Foo*)p;\n"

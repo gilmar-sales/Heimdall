@@ -1,10 +1,10 @@
 #include <Heimdall/RuleScheduler.hpp>
 
-#include <Heimdall/LineTable.hpp>
-
 #include <algorithm>
 #include <array>
 #include <chrono>
+
+#include <Heimdall/LineTable.hpp>
 
 namespace heimdall
 {
@@ -14,7 +14,7 @@ namespace heimdall
 		std::vector<Diagnostic>& diagnostics,
 		RuleMetrics& metrics,
 		const LineTable& lines) :
-	m_context(context), m_rule(rule), m_diagnostics(diagnostics), m_metrics(metrics),
+		m_context(context), m_rule(rule), m_diagnostics(diagnostics), m_metrics(metrics),
 		m_lines(lines) {}
 
 	bool DiagnosticSink::Emit(Diagnostic diagnostic)
@@ -117,12 +117,7 @@ namespace heimdall
 				return;
 			}
 
-			DiagnosticSink sink(
-				context,
-				m_rules[i].metadata,
-				result.diagnostics,
-				metrics,
-				lines);
+			DiagnosticSink sink(context, m_rules[i].metadata, result.diagnostics, metrics, lines);
 			const auto before  = result.diagnostics.size();
 			const auto emitted = metrics.diagnostics_emitted;
 			const auto start = profiling ? std::chrono::steady_clock::now()

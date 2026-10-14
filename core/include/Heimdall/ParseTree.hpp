@@ -89,7 +89,9 @@ namespace heimdall
 		// CompoundStatement child. Arguments are not parsed.
 		MacroInvocation,
 		/// An immediate compound statement introduced by consteval.
-		ConstevalBlock
+		ConstevalBlock,
+		/// An unevaluated decltype operand, distinct from decltype(auto).
+		DecltypeSpecifier
 	};
 
 	// Classification of one `...;` inside a `requires { ... }` body, by first

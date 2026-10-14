@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <vector>
+
 #include <Heimdall/AnalysisContext.hpp>
 #include <Heimdall/Completion.hpp>
 #include <Heimdall/Navigation.hpp>

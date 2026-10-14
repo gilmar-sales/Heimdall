@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -19,6 +20,60 @@ namespace heimdall
 	// comparison is integer comparison. `TypeTable::Unknown` (0) means "not known":
 	// unresolved or beyond what this engine models. Modeled dependence has its own kinds.
 	using TypeId = std::uint32_t;
+
+	/** The protection applies only to invalid formation in an immediate substitution context. */
+	enum class SubstitutionContext : std::uint8_t
+	{
+		Immediate, Instantiation
+	};
+
+	/** Unknown and dependent results never prove that a candidate may be discarded. */
+	enum class SubstitutionState : std::uint8_t
+	{
+		Success, Dependent, Incomplete, DeductionFailure, SubstitutionFailure,
+		ConstraintUnsatisfied, Ambiguous, HardError, NoMatch
+	};
+
+	/** A structured cause, independent of diagnostic formatting and call-site spelling. */
+	enum class SubstitutionReason : std::uint8_t
+	{
+		None, UnknownType, Unsupported, DepthLimit, MissingMember, WrongMemberKind,
+		AccessDenied, PointerToReference, ReferenceToVoid, InvalidArrayElement,
+		ZeroArrayBound, UnknownArrayBound, ConflictingDeduction, ArgumentCount, InvalidExpression,
+		VoidParameter, InvalidFunctionReturn
+	};
+
+	/** One canonical type argument associated with its declaration identity. */
+	struct TypeBinding
+	{
+		TemplateParameterId parameter = kNone;
+		TypeId type                   = 0;
+	};
+
+	/** Checked substitution retains its cause; failure never returns a usable type. */
+	struct SubstitutionResult
+	{
+		TypeId type               = 0;
+		SubstitutionState state   = SubstitutionState::Incomplete;
+		SubstitutionReason reason = SubstitutionReason::UnknownType;
+	};
+
+	/** A call's proven outcome, kept separate from the inferred expression type. */
+	struct TemplateCallResult
+	{
+		SymbolId selected          = kNone;
+		SubstitutionState state    = SubstitutionState::Incomplete;
+		SubstitutionReason reason  = SubstitutionReason::UnknownType;
+		std::uint32_t failureToken = kNone;
+		TypeId returnType          = 0;
+	};
+
+	/** Sparse call outcomes belong to the same immutable snapshot as the type model. */
+	struct TemplateCallRecord
+	{
+		std::uint32_t node = kNone;
+		TemplateCallResult result;
+	};
 
 	enum class TypeKind : std::uint8_t
 	{
@@ -36,7 +91,9 @@ namespace heimdall
 		TemplateParameter,
 		TemplateId,
 		DependentName,
-		InjectedClass
+		InjectedClass,
+		DependentMember,
+		DecltypeExpression
 	};
 
 	enum class BuiltinType : std::uint8_t
@@ -104,8 +161,28 @@ namespace heimdall
 		/** Qualified dependent spelling, not a concrete external type. */
 		[[nodiscard]] TypeId DependentName(NameId spelling, ScopeId definitionScope);
 
+		/** A qualified type member retains receiver identity rather than just spelling. */
+		[[nodiscard]] TypeId DependentMember(TypeId receiver, NameId name);
+
+		/** An unevaluated operand keeps its source node and the special unparenthesized rule. */
+		[[nodiscard]] TypeId DecltypeExpression(std::uint32_t node, bool unparenthesized);
+
 		/** Distinguishes dependent types from both concrete and unknown types. */
 		[[nodiscard]] bool IsDependent(TypeId type) const noexcept;
+
+		/** Substitute structural types; qualified lookup and template effects require the typer. */
+		[[nodiscard]] SubstitutionResult Substitute(
+			TypeId type,
+			std::span<const TypeBinding> bindings,
+			SubstitutionContext context = SubstitutionContext::Immediate,
+			std::uint32_t remainingDepth = 64);
+
+		/** Form a wrapper only after its operand has been substituted and validated. */
+		[[nodiscard]] SubstitutionResult FormSubstitutedType(
+			TypeKind kind,
+			SubstitutionResult inner,
+			std::uint32_t extent,
+			SubstitutionContext context);
 
 		std::size_t Size() const noexcept
 		{
@@ -251,7 +328,13 @@ namespace heimdall
 		std::pmr::vector<TemplateId> selected;
 		std::pmr::vector<std::uint32_t> firstArgument;
 		std::pmr::vector<std::uint32_t> argumentCount;
+		/** Bindings of the selected partial specialization are independent of primary arguments. */
+		std::pmr::vector<std::uint32_t> firstSubstitution;
+		std::pmr::vector<std::uint32_t> substitutionCount;
 		std::pmr::vector<TemplateResolution> state;
+		/** Formation failures remain distinct from unresolved specialization selection. */
+		std::pmr::vector<SubstitutionState> checkState;
+		std::pmr::vector<SubstitutionReason> reason;
 		std::pmr::vector<std::uint32_t> firstBase;
 		std::pmr::vector<std::uint32_t> baseCount;
 		std::pmr::vector<TypeId> baseType;
@@ -319,6 +402,24 @@ namespace heimdall
 		[[nodiscard]] const DependentReferenceTable& DependentReferences() const noexcept
 		{
 			return mDependentReferences;
+		}
+
+		/** Proven template-call outcomes; an absent record denotes an unexamined call. */
+		[[nodiscard]] std::span<const TemplateCallRecord> TemplateCalls() const noexcept
+		{
+			return mTemplateCalls;
+		}
+
+		/** Query a source call without mutating the model or requiring candidate re-evaluation. */
+		[[nodiscard]] TemplateCallResult TemplateCall(std::uint32_t node) const noexcept
+		{
+			const auto found = std::lower_bound(mTemplateCalls.begin(), mTemplateCalls.end(), node,
+				[](const TemplateCallRecord& record, std::uint32_t value)
+				{
+					return record.node < value;
+			});
+			return found != mTemplateCalls.end() && found->node == node ? found->result
+			: TemplateCallResult {};
 		}
 
 		/** Resolve a field only when the selected member view is complete. */
@@ -420,6 +521,7 @@ namespace heimdall
 		TemplateArgumentTable mTemplateArguments;
 		InstantiationTable mInstantiations;
 		DependentReferenceTable mDependentReferences;
+		std::pmr::vector<TemplateCallRecord> mTemplateCalls;
 		std::pmr::vector<TypeId> m_symbol_type;
 		std::pmr::vector<TypeId> m_node_type;
 		std::pmr::vector<SymbolId> m_member_symbol;

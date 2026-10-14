@@ -1,4 +1,4 @@
-#include "SemanticRuleDispatch.hpp"
+#include <Heimdall/SemanticRuleDispatch.hpp>
 
 #include <algorithm>
 #include <array>
@@ -62,6 +62,7 @@ namespace heimdall::detail
 			Entry {RuleId::NoIntegerToPointer, &SemanticRules::AnalyzeIntegerToPointer},
 			Entry {RuleId::CallArgumentCount, &SemanticRules::AnalyzeProjectCallArguments},
 			Entry {RuleId::CallArgumentType, &SemanticRules::AnalyzeCallArgumentTypes},
+			Entry {RuleId::TemplateSubstitution, &SemanticRules::AnalyzeTemplateSubstitution},
 			Entry {RuleId::DotOnPointer, &SemanticRules::AnalyzeDotOnPointer},
 			Entry {RuleId::InaccessibleMember, &SemanticRules::AnalyzeAccessControl},
 			Entry {RuleId::ConflictingDeclaration, &SemanticRules::AnalyzeConflictingDeclarations},
@@ -97,7 +98,9 @@ namespace heimdall::detail
 	} // namespace
 
 	std::vector<Diagnostic> AnalyzeSelectedSemantic(
-		const AnalysisContext& context, const RuleEngine& engine, const ProjectContext& project)
+		const AnalysisContext& context,
+		const RuleEngine& engine,
+		const ProjectContext& project)
 	{
 		std::array<bool, entries.size() > selected {};
 		bool needs_binding = false;
@@ -130,6 +133,8 @@ namespace heimdall::detail
 			flow.emplace(Flow::Build(*types));
 		}
 
+		auto configuredProject        = project;
+		configuredProject.ruleOptions = &engine.Options();
 		std::vector<Diagnostic> local, project_diagnostics, documentation;
 		for (std::size_t i = 0; i < entries.size(); ++i)
 		{
@@ -153,7 +158,7 @@ namespace heimdall::detail
 			}
 			else if (const auto * project_rule = std::get_if<ProjectRule>(&callback))
 			{
-				Append(project_diagnostics, (*project_rule)(model, project));
+				Append(project_diagnostics, (*project_rule)(model, configuredProject));
 			}
 			else if (const auto * doc = std::get_if<DocumentationRule>(&callback))
 			{

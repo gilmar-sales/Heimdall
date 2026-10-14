@@ -30,7 +30,7 @@ target_precompile_headers(CoreBench PRIVATE
   ${PROJECT_SOURCE_DIR}/cmake/pch.hpp
 )
 
-add_executable(SemanticBench src/SemanticBench.cpp)
+add_executable(SemanticBench src/SemanticBench.cpp src/SfinaeBench.cpp)
 target_link_libraries(SemanticBench PRIVATE heimdall::core heimdall::semantic benchmark::benchmark benchmark::benchmark_main)
 target_compile_definitions(SemanticBench PRIVATE HEIMDALL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
 target_compile_features(SemanticBench PRIVATE cxx_std_26)

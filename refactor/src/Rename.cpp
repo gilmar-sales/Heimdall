@@ -668,6 +668,22 @@ namespace heimdall
 					return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
 						"Template constraints or unsupported parameter syntax are not fully modeled"));
 				}
+
+				// Associated constraints are satisfaction-checked for overload
+				// resolution, but rename still requires an unconstrained proof:
+				// a satisfied constraint does not certify every instantiation.
+				if (declaration != kNone && declaration < model.Templates().node.size())
+				{
+					const auto root = model.Templates().node[declaration];
+					for (auto node = root; node < soa.SubtreeEnd(root); ++node)
+					{
+						if (soa.Kind(node) == GrammarKind::RequiresClause)
+						{
+							return std::unexpected(Error(RefactoringErrorCode::IncompleteAnalysis,
+								"Template constraints or unsupported parameter syntax are not fully modeled"));
+						}
+					}
+				}
 			}
 
 			SymbolOccurrences result {target,

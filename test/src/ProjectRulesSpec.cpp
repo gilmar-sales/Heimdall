@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <Heimdall/HeaderSummary.hpp>
+#include <Heimdall/AnalysisFeatures.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
 #include <Heimdall/ProjectIndex.hpp>
 #include <Heimdall/RuleEngine.hpp>
@@ -9,6 +10,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -59,8 +61,10 @@ namespace
             return &m_command;
         }
 
-        std::vector<heimdall::Diagnostic> Iwyu(std::string_view source,
-                                               const std::string& file = "main.cpp") const
+        std::vector<heimdall::Diagnostic> Iwyu(
+            std::string_view source,
+            const std::string& file = "main.cpp",
+            const heimdall::RuleOptions* ruleOptions = nullptr) const
         {
             const auto tree = heimdall::ParseTree::Parse(source, {});
             const auto model = heimdall::Binder::Bind(tree);
@@ -68,7 +72,7 @@ namespace
                 heimdall::IncludeAnalyzer::BuildProfile(File(file), tree, &m_command);
             const heimdall::ProjectContext context
             {
-                File(file), profile.get(), &m_command
+                File(file), profile.get(), &m_command, ruleOptions
             };
             return heimdall::SemanticRules::AnalyzeIncludeWhatYouUse(model, context);
         }
@@ -82,8 +86,9 @@ namespace
                                                                         {File("main.cpp"), profile.get(), &m_command});
         }
 
-        std::vector<heimdall::Diagnostic> Final(std::string_view source,
-                                                const std::string& file = "main.cpp",
+        std::vector<heimdall::Diagnostic> Final(
+            std::string_view source,
+            const std::string& file = "main.cpp",
             bool with_profile = true) const
         {
             const auto tree = heimdall::ParseTree::Parse(source, {});
@@ -138,9 +143,9 @@ TEST(ProjectRulesSpec, HeaderOverloadsParticipateInArgumentCounts)
 
     EXPECT_TRUE(project.Calls("#include <api.hpp>\nnamespace A { int Parse(int, int) { return 0; } void Test() { Parse(1); Parse(1, 2); } int Parse(int) { return 0; } }").empty());
     EXPECT_EQ(project.Calls("#include <api.hpp>\nnamespace A { int Parse(int, int); void Test() { Parse(); Parse(1, 2, 3); } }").size(),
-        2u);
+              2u);
     EXPECT_EQ(project.Calls("#include <api.hpp>\nnamespace B { int Parse(int, int); void Test() { Parse(1); } }").size(),
-        1u);
+              1u);
 }
 
 TEST(ProjectRulesSpec, HeaderDefaultsAndVariadicsPreserveKnownArity)
@@ -150,7 +155,7 @@ TEST(ProjectRulesSpec, HeaderDefaultsAndVariadicsPreserveKnownArity)
 
     EXPECT_TRUE(project.Calls("#include <api.hpp>\nvoid Defaults(int, int); void Variadic(int); void Test() { Defaults(1); Variadic(1, 2, 3); }").empty());
     EXPECT_EQ(project.Calls("#include <api.hpp>\nvoid Defaults(int, int); void Variadic(int); void Test() { Defaults(); Variadic(); }").size(),
-        2u);
+              2u);
 }
 
 TEST(ProjectRulesSpec, HeaderOverloadsNominatedByUsingDirectiveCount)
@@ -366,7 +371,7 @@ TEST(IncludeWhatYouUseSpec, ReportsProjectHeaderReachedOnlyThroughAnotherInclude
     ASSERT_TRUE(diagnostics[0].has_fix);
     EXPECT_FALSE(diagnostics[0].fix_is_safe);
     EXPECT_EQ(Apply(source, diagnostics[0]),
-              "#include <wrapper.hpp>\n#include <core.hpp>\n"
+              "#include <core.hpp>\n#include <wrapper.hpp>\n"
         "Core value;\n");
 }
 
@@ -599,7 +604,7 @@ TEST(IncludeWhatYouUseSpec, IgnoresInactiveBranchesAndCommentsAndStrings)
         .empty());
 }
 
-TEST(IncludeWhatYouUseSpec, FixKeepsTheFileLineEndingsAndGoesAfterTheLastInclude)
+TEST(IncludeWhatYouUseSpec, FixKeepsTheFileLineEndingsAndStaysOutsideConditionalIncludes)
 {
     Project project;
     project.Header("core.hpp", "#pragma once\nstruct Core {};\n");
@@ -614,7 +619,7 @@ TEST(IncludeWhatYouUseSpec, FixKeepsTheFileLineEndingsAndGoesAfterTheLastInclude
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(Apply(source, diagnostics[0]),
-              "#include <wrap.hpp>\r\n#include <core.hpp>\r\n"
+              "#include <core.hpp>\r\n#include <wrap.hpp>\r\n"
         "#ifdef X\r\n"
         "#include <extra.hpp>\r\n"
         "#endif\r\n"
@@ -631,7 +636,7 @@ TEST(IncludeWhatYouUseSpec, FixAddsALineBreakWhenTheLastIncludeEndsTheFile)
     const auto diagnostics = project.Iwyu(source);
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(Apply(source, diagnostics[0]),
-              "Core value;\n#include <wrap.hpp>\n#include <core.hpp>");
+              "Core value;\n#include <core.hpp>\n#include <wrap.hpp>");
 }
 
 TEST(IncludeWhatYouUseSpec, FixSpellsTheIncludeTheWayTheProjectDoes)
@@ -643,12 +648,14 @@ TEST(IncludeWhatYouUseSpec, FixSpellsTheIncludeTheWayTheProjectDoes)
     // Angled includes of project headers elsewhere in the file: stay angled.
     auto diagnostics = project.Iwyu("#include <mylib/wrap.hpp>\nCore value;\n");
     ASSERT_EQ(diagnostics.size(), 1);
-    EXPECT_EQ(diagnostics[0].fix.replacement, "#include <mylib/core.hpp>\n");
+    EXPECT_EQ(Apply("#include <mylib/wrap.hpp>\nCore value;\n", diagnostics[0]),
+              "#include <mylib/core.hpp>\n#include <mylib/wrap.hpp>\nCore value;\n");
 
     // Only quoted project includes in the file: quoted.
     diagnostics = project.Iwyu("#include \"mylib/wrap.hpp\"\nCore value;\n");
     ASSERT_EQ(diagnostics.size(), 1);
-    EXPECT_EQ(diagnostics[0].fix.replacement, "#include \"mylib/core.hpp\"\n");
+    EXPECT_EQ(Apply("#include \"mylib/wrap.hpp\"\nCore value;\n", diagnostics[0]),
+              "#include \"mylib/core.hpp\"\n#include \"mylib/wrap.hpp\"\nCore value;\n");
 }
 
 TEST(IncludeWhatYouUseSpec, ReportsStandardNamesTakenFromAProjectHeader)
@@ -665,12 +672,117 @@ TEST(IncludeWhatYouUseSpec, ReportsStandardNamesTakenFromAProjectHeader)
     EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "vector");
     EXPECT_NE(diagnostics[0].message.find("std::vector"), std::string::npos);
     EXPECT_EQ(Apply(source, diagnostics[0]),
-              "#include <wrapper.hpp>\n#include <vector>\n"
+              "#include <vector>\n#include <wrapper.hpp>\n"
         "std::vector<int> values;\n");
 
     EXPECT_TRUE(
         project.Iwyu("#include <wrapper.hpp>\n#include <vector>\nstd::vector<int> values;\n")
         .empty());
+}
+
+TEST(IncludeWhatYouUseSpec, FixGroupsStandardHeaderBeforeQualifiedProjectIncludes)
+{
+    Project project;
+    project.Header("memory", "#pragma once\n");
+    project.Header("Heimdall/Workspace.hpp", "#pragma once\n#include <memory>\n");
+    constexpr std::string_view source =
+        "#pragma once\n\n#include <Heimdall/Workspace.hpp>\n\nstd::shared_ptr<int> value;\n";
+
+    const auto diagnostics = project.Iwyu(source, "AnalysisContext.hpp");
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    ASSERT_TRUE(diagnostics[0].has_fix);
+    EXPECT_EQ(Apply(source, diagnostics[0]),
+              "#pragma once\n\n#include <memory>\n\n#include <Heimdall/Workspace.hpp>\n\n"
+        "std::shared_ptr<int> value;\n");
+}
+
+TEST(IncludeWhatYouUseSpec, FixRespectsConfiguredGroupOrderAndCaseSensitivity)
+{
+    Project project;
+    project.Header("memory", "#pragma once\n");
+    project.Header("Zebra", "#pragma once\n");
+    project.Header("wrapper.hpp", "#pragma once\n#include <memory>\n");
+    heimdall::RuleOptions options;
+    options.include_order = {heimdall::IncludeGroup::Quote, heimdall::IncludeGroup::Angle};
+    options.include_case_insensitive = false;
+    constexpr std::string_view source =
+        "#include \"wrapper.hpp\"\n\n#include <Zebra>\n\nstd::shared_ptr<int> value;\n";
+
+    const auto diagnostics = project.Iwyu(source, "main.cpp", &options);
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(Apply(source, diagnostics[0]),
+              "#include \"wrapper.hpp\"\n\n#include <Zebra>\n#include <memory>\n\n"
+        "std::shared_ptr<int> value;\n");
+}
+
+TEST(IncludeWhatYouUseSpec, FixPreservesPrimaryHeaderAndCommentBoundaries)
+{
+    Project project;
+    project.Header("memory", "#pragma once\n");
+    project.Header("Heimdall/Context.hpp", "#pragma once\n");
+    project.Header("Heimdall/Workspace.hpp", "#pragma once\n#include <memory>\n");
+    constexpr std::string_view source =
+        "#include <Heimdall/Context.hpp>\n\n#include <Heimdall/Workspace.hpp>\n"
+        "// Keep this boundary\nstd::shared_ptr<int> value;\n";
+
+    const auto diagnostics = project.Iwyu(source, "Context.cpp");
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(Apply(source, diagnostics[0]),
+              "#include <Heimdall/Context.hpp>\n\n#include <memory>\n\n"
+        "#include <Heimdall/Workspace.hpp>\n"
+        "// Keep this boundary\nstd::shared_ptr<int> value;\n");
+}
+
+TEST(IncludeWhatYouUseSpec, AnalysisDispatchPassesConfiguredIncludeOrderToFix)
+{
+    Project project;
+    project.Header("memory", "#pragma once\n");
+    project.Header("wrapper.hpp", "#pragma once\n#include <memory>\n");
+    constexpr std::string_view source =
+        "#include \"wrapper.hpp\"\nstd::shared_ptr<int> value;\n";
+    const auto tree = std::make_shared<const heimdall::ParseTree>(
+        heimdall::ParseTree::Parse(source, {}));
+    const auto file = project.File("main.cpp");
+    const auto profile = heimdall::IncludeAnalyzer::BuildProfile(file, *tree, project.Command());
+    const heimdall::AnalysisContext analysis(
+        heimdall::AnalysisSnapshot::FromSyntax(tree, {}, file),
+        0);
+    heimdall::RuleOptions options;
+    for (const auto& rule : heimdall::RuleCatalog())
+    {
+        options.overrides.push_back({std::string(rule.code),
+                                    rule.id == heimdall::RuleId::IncludeWhatYouUse, rule.default_severity});
+    }
+
+    options.include_order = {heimdall::IncludeGroup::Quote, heimdall::IncludeGroup::Angle};
+
+    const auto diagnostics = heimdall::AnalysisFeatures::Diagnostics(analysis,
+        heimdall::RuleEngine(options), true, {file, profile.get(), project.Command()});
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(Apply(source, diagnostics[0]),
+              "#include \"wrapper.hpp\"\n\n#include <memory>\nstd::shared_ptr<int> value;\n");
+}
+
+TEST(IncludeWhatYouUseSpec, FixDoesNotReorderIncludesAcrossComments)
+{
+    Project project;
+    project.Header("memory", "#pragma once\n");
+    project.Header("Zebra", "#pragma once\n");
+    project.Header("Heimdall/Workspace.hpp", "#pragma once\n#include <memory>\n");
+    constexpr std::string_view source =
+        "#include <Zebra>\n// Separate section\n#include <Heimdall/Workspace.hpp>\n"
+        "std::shared_ptr<int> value;\n";
+
+    const auto diagnostics = project.Iwyu(source);
+
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(Apply(source, diagnostics[0]),
+              "#include <Zebra>\n// Separate section\n#include <memory>\n\n"
+        "#include <Heimdall/Workspace.hpp>\nstd::shared_ptr<int> value;\n");
 }
 
 TEST(IncludeWhatYouUseSpec, StandardNamesNeedTheHeaderSomewhereInTheClosure)
@@ -1002,7 +1114,7 @@ TEST(IncludeWhatYouUseSpec, MacroRuleIsSilentForGuardsOwnDefinitionsAndDirectInc
 {
     Project project;
     project.Header("limits.hpp",
-        "#ifndef LIMITS_HPP\n#define LIMITS_HPP\n#define MAX_ITEMS 64\n#endif\n");
+                   "#ifndef LIMITS_HPP\n#define LIMITS_HPP\n#define MAX_ITEMS 64\n#endif\n");
     project.Header("wrapper.hpp", "#pragma once\n#include <limits.hpp>\n");
 
     EXPECT_TRUE(project.Iwyu("#include <wrapper.hpp>\n#include <limits.hpp>\nint a[MAX_ITEMS];\n").empty());

@@ -6,7 +6,7 @@
 namespace heimdall
 {
 	AnalysisContext::AnalysisContext(AnalysisSnapshot snapshot, DocumentId document) :
-	m_snapshot(std::move(snapshot)), m_document(document), m_syntax(m_snapshot.Syntax(document)) {}
+		m_snapshot(std::move(snapshot)), m_document(document), m_syntax(m_snapshot.Syntax(document)) {}
 
 	const ParseTree& AnalysisContext::Syntax() const
 	{
@@ -117,7 +117,7 @@ namespace heimdall
 			}
 
 			const auto& token = tokens[refs.token[i]];
-			ranges.push_back({token.offset, token.length});
+			ranges.emplace_back(token.offset, token.length);
 		}
 
 		return ranges;
