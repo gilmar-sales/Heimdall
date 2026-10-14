@@ -27,6 +27,67 @@ let client: LanguageClient | undefined;
 let output: vscode.LogOutputChannel;
 let sourceWatcher: vscode.FileSystemWatcher | undefined;
 let indexStatus: vscode.StatusBarItem | undefined;
+// Dimmed ranges of `#if`-excluded code, keyed by document URI string.
+const inactiveRanges = new Map<string, vscode.Range[]>();
+let inactiveDecoration: vscode.TextEditorDecorationType | undefined;
+
+interface InactiveRegionsParams {
+    uri: string;
+    regions: { start: { line: number; character: number }; end: { line: number; character: number } }[];
+}
+
+function dimInactiveCodeEnabled(): boolean {
+    return vscode.workspace.getConfiguration('heimdall').get<boolean>('dimInactiveCode', true);
+}
+
+function ensureInactiveDecoration(): vscode.TextEditorDecorationType {
+    if (!inactiveDecoration) {
+        inactiveDecoration = vscode.window.createTextEditorDecorationType({ opacity: '0.5' });
+    }
+    return inactiveDecoration;
+}
+
+function applyInactiveDecorations(editor?: vscode.TextEditor): void {
+    if (!inactiveDecoration) {
+        return;
+    }
+    const enabled = dimInactiveCodeEnabled();
+    const editors = editor ? [editor] : vscode.window.visibleTextEditors;
+    for (const visible of editors) {
+        const ranges = enabled ? (inactiveRanges.get(visible.document.uri.toString()) ?? []) : [];
+        visible.setDecorations(inactiveDecoration, ranges);
+    }
+}
+
+function handleInactiveRegions(params: InactiveRegionsParams): void {
+    try {
+        const ranges = (params.regions ?? []).map(
+            region =>
+                new vscode.Range(
+                    region.start.line,
+                    region.start.character,
+                    region.end.line,
+                    region.end.character,
+                ),
+        );
+        if (ranges.length === 0) {
+            inactiveRanges.delete(params.uri);
+        } else {
+            inactiveRanges.set(params.uri, ranges);
+        }
+        if (!dimInactiveCodeEnabled()) {
+            return;
+        }
+        ensureInactiveDecoration();
+        for (const visible of vscode.window.visibleTextEditors) {
+            if (visible.document.uri.toString() === params.uri) {
+                visible.setDecorations(inactiveDecoration!, ranges);
+            }
+        }
+    } catch (error) {
+        output.appendLine(`Heimdall could not apply inactive regions: ${String(error)}`);
+    }
+}
 // Rulers this extension wrote, keyed by `${folder}|${language}`, so user-owned
 // `editor.rulers` values are never touched and ours can be withdrawn again.
 const appliedRulers = new Map<string, number[]>();
@@ -414,6 +475,12 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
 
     client = new LanguageClient('heimdall', 'Heimdall', serverOptions, clientOptions);
     client.onNotification('heimdall/indexStatus', (status: IndexStatus) => showIndexStatus(status));
+    client.onNotification('textDocument/inactiveRegions', (params: InactiveRegionsParams) =>
+        handleInactiveRegions(params),
+    );
+    if (dimInactiveCodeEnabled()) {
+        ensureInactiveDecoration();
+    }
     client.setTrace(trace === 'verbose' ? Trace.Verbose : trace === 'messages' ? Trace.Messages : Trace.Off);
     context.subscriptions.push(client);
 
@@ -510,14 +577,21 @@ function syncRulersInner(): void {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     output = vscode.window.createOutputChannel('Heimdall', { log: true });
     context.subscriptions.push(output);
+    ensureInactiveDecoration();
+    context.subscriptions.push(inactiveDecoration!);
     await startClient(context);
     syncRulers();
+    applyInactiveDecorations();
     const configWatcher = vscode.workspace.createFileSystemWatcher('**/.heimdall.json');
     context.subscriptions.push(
         configWatcher,
         configWatcher.onDidChange(() => syncRulers()),
         configWatcher.onDidCreate(() => syncRulers()),
         configWatcher.onDidDelete(() => syncRulers()),
+        vscode.window.onDidChangeVisibleTextEditors(() => applyInactiveDecorations()),
+        vscode.workspace.onDidCloseTextDocument(document => {
+            inactiveRanges.delete(document.uri.toString());
+        }),
     );
 
     context.subscriptions.push(vscode.commands.registerCommand('heimdall.installServer', async () => {
@@ -555,6 +629,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }));
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
+        if (event.affectsConfiguration('heimdall.dimInactiveCode')) {
+            if (dimInactiveCodeEnabled()) {
+                ensureInactiveDecoration();
+            }
+            applyInactiveDecorations();
+            return;
+        }
         if (event.affectsConfiguration('heimdall.dynamicRulers')) {
             syncRulers();
             return;

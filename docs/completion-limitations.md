@@ -81,3 +81,19 @@ this file is the engineering record so the details are not lost.
   iterators, lambdas and `operator->` overloads other than the standard
   smart pointers, structured bindings, range-for variables, macros that expand
   to real code, access control (private members are listed).
+
+## 5. Requires-expressions: locals complete, dependent members do not
+
+- **Files:** `core/src/GrammarParser.cpp` (local parameters become
+  `ParameterDeclaration` children of `RequiresExpression`),
+  `semantic/src/Binder.cpp` (`DeclareParameter`, `RequiresExpression` scope),
+  `core/src/Completion.cpp` (`MakeTagItem`, concept `= constraint` detail).
+- **How it works:** local parameters (`requires (T a, U&& u)`) are declared
+  in the requirement's own scope, so `a`/`u` complete and resolve inside the
+  requirements; concept names complete as types with their definition shown
+  (`concept Small = sizeof(T) > 1`), and constrained functions show their
+  requires-clause in hover/completion detail.
+- **Not covered:** member access on local parameters (`a.` inside a
+  requirement) lists nothing when `a`'s type depends on a template parameter
+  — same dependent-type limit as §4. Satisfying a constraint is never
+  attempted: completion describes syntax and scope, not satisfaction.

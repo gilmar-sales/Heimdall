@@ -55,6 +55,9 @@ namespace heimdall
 			case GrammarKind::SwitchStatement:
 			case GrammarKind::TryStatement:
 			case GrammarKind::LambdaExpression:
+			// A requires-expression owns its local parameters (`requires (T a)`
+			// declares `a` for the requirements only).
+			case GrammarKind::RequiresExpression:
 				return true;
 			default:
 				return false;
@@ -200,6 +203,8 @@ namespace heimdall
 		void DeclareParameter(std::uint32_t node);
 
 		void DeclareFunction(std::uint32_t node);
+
+		void DeclareConcept(std::uint32_t node);
 
 		void DeclareUsing(std::uint32_t node);
 
@@ -1439,6 +1444,22 @@ namespace heimdall
 				continue;
 			}
 
+			if (kind == GrammarKind::RequiresExpression)
+			{
+				// Local parameter: visible only within the requirements, in
+				// the requirement's own scope. No linkage, storage or lifetime.
+				const auto declarator = FindChild(node, GrammarKind::Declarator);
+				const auto name       = DeclaredNameToken(declarator);
+				if (name == kNone)
+				{
+					return;
+				}
+
+				Declare(m_model.m_names.Intern(Text(name)), SymbolKind::Parameter, ScopeFor(current),
+					PointerFlags(declarator), name, node, kNone, true);
+				return;
+			}
+
 			if (kind != GrammarKind::FunctionDefinition && kind != GrammarKind::LambdaExpression)
 			{
 				return;
@@ -1859,12 +1880,58 @@ namespace heimdall
 		}
 	}
 
+	void BinderImpl::DeclareConcept(std::uint32_t node)
+	{
+		// `concept Name = ...`: the name right after `concept`.
+		const auto[begin, end] = NodeSig(node);
+		if (begin >= end || !Is(m_sig[begin], Tok::KwConcept))
+		{
+			return;
+		}
+
+		std::uint32_t name = kNone;
+		for (auto i = begin + 1; i < end; ++i)
+		{
+			if (IsIdent(m_sig[i]))
+			{
+				name = m_sig[i];
+				break;
+			}
+		}
+
+		if (name == kNone)
+		{
+			return;
+		}
+
+		// Like functions, concepts live in the scope enclosing the template,
+		// not in the template's own scope.
+		auto scope = ParentScopeFor(node);
+		if (m_model.m_scopes.kind[scope] == ScopeKind::Template)
+		{
+			scope = m_model.m_scopes.parent[scope];
+		}
+
+		std::uint32_t flags = 0;
+		const auto parent   = m_tree.NodesSoA().Parent(node);
+		if (parent < m_tree.NodesSoA().size() && KindOf(parent) == GrammarKind::TemplateDeclaration)
+		{
+			flags |= SymbolFlag::Template;
+		}
+
+		Declare(m_model.m_names.Intern(Text(name)), SymbolKind::Concept, scope, flags, name, node,
+			kNone, true);
+	}
+
 	void BinderImpl::DeclareNode(std::uint32_t node)
 	{
 		switch (KindOf(node))
 		{
 		case GrammarKind::TemplateDeclaration:
 			DeclareTemplateParameters(node);
+			break;
+		case GrammarKind::ConceptDefinition:
+			DeclareConcept(node);
 			break;
 		case GrammarKind::FunctionDeclaration:
 		case GrammarKind::FunctionDefinition:

@@ -2,7 +2,7 @@
   "name": "heimdall-vscode",
   "displayName": "Heimdall - C++ Lint and Format",
   "description": "C++ diagnostics, quick fixes, formatting, and code completion powered by Heimdall.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "publisher": "gilmar-sales",
   "license": "MIT",
   "repository": {
@@ -129,6 +129,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show inferred type hints for auto variables and parameter name hints at call arguments."
+        },
+        "heimdall.dimInactiveCode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Dim code excluded by #if/#ifdef conditional compilation (inactive regions reported by the server)."
         },
         "heimdall.compileCommands": {
           "type": "string",

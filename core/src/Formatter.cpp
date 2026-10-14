@@ -725,6 +725,28 @@ namespace heimdall
 		// Gap decision between two adjacent significant tokens of one chunk.
 		// Returns -1 to preserve the original gap (exactly one space iff the source
 		// had whitespace there), 0 for no space, 1 for exactly one space.
+		// `{ req } -> Constraint` (compound requirement) keeps spaces around
+		// `->`, while a member call on a braced temporary (`T{}->make()`)
+		// stays tight: the constraint starts with a type keyword or with a
+		// name continued by `<`/`::`, never with a call open parenthesis.
+		bool IsRequirementArrow(const std::vector<Sig>& sigs, std::size_t arrow)
+		{
+			if (arrow == 0 || arrow + 1 >= sigs.size() || sigs[arrow - 1].text != "}" ||
+				sigs[arrow].text != "->")
+			{
+				return false;
+			}
+
+			const auto& next = sigs[arrow + 1];
+			if (IsTypeKeyword(next.text))
+			{
+				return true;
+			}
+
+			return next.kind == TokenKind::Identifier && arrow + 2 < sigs.size() &&
+				(sigs[arrow + 2].text == "<" || sigs[arrow + 2].text == "::");
+		}
+
 		int SpacingGap(
 			const std::vector<Sig>& sigs,
 			std::size_t prev,
@@ -782,15 +804,18 @@ namespace heimdall
 				return 0;
 			}
 
-			// `->` after `)` (trailing return `) -> int`): space before, none after.
+			// `->` after `)` (trailing return `) -> int`) or after `}` (compound
+			// requirement `{ req } -> Constraint`): space before, none after,
+			// except the requirement keeps a space on both sides.
 			if (right == "->")
 			{
-				return IsTrailingReturnArrow(sigs, cur) ? 1 : 0;
+				return IsTrailingReturnArrow(sigs, cur) || IsRequirementArrow(sigs, cur) ? 1 : 0;
 			}
 
 			if (left == "->")
 			{
-				return IsTrailingReturnArrow(sigs, prev) ? 1 : 0;
+				return IsTrailingReturnArrow(sigs, prev) || IsRequirementArrow(sigs, prev) ? 1
+				: 0;
 			}
 
 			// Member access never takes spaces: `a.b`, `a->b`, `a.*pm`, `a->*pm`.

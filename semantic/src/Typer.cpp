@@ -1767,6 +1767,19 @@ namespace heimdall
 			{
 				type = TypeTable::Unknown;
 			}
+
+			// A constrained placeholder (`Concept auto`, `C decltype(auto)`):
+			// the constraint does not change deduction, so `auto` deduces
+			// from the initializer exactly like plain `auto`.
+			if (At(pos) == Tok::KwAuto)
+			{
+				result.is_auto = true;
+				++pos;
+			}
+			else if (At(pos) == Tok::KwDecltype && pos + 1 < end && At(pos + 1) == Tok::LParen)
+			{
+				pos = MatchParen(pos + 1, end) + 1;
+			}
 		}
 
 		skip_qualifiers();

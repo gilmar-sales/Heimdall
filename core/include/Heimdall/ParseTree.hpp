@@ -90,6 +90,18 @@ namespace heimdall
 		MacroInvocation
 	};
 
+	// Classification of one `...;` inside a `requires { ... }` body, by first
+	// token: `{` is compound, `typename` is type, `requires` is nested
+	// (a requirement starting with `requires` is always nested), anything
+	// else is simple. See ParseTree::RequirementKindOf.
+	enum class RequirementKind : std::uint8_t
+	{
+		Simple,
+		Type,
+		Compound,
+		Nested
+	};
+
 	// AoS layout (kept for backward compatibility)
 	struct GrammarNode
 	{
@@ -451,6 +463,10 @@ namespace heimdall
 		}
 
 		std::vector<std::size_t> Children(std::size_t node_index) const;
+
+		// Classifies a GrammarKind::Requirement node (see RequirementKind).
+		// Anything else answers Simple.
+		[[nodiscard]] RequirementKind RequirementKindOf(std::size_t node) const noexcept;
 
 		// Allocation-free direct-child traversal. The tree must outlive the range.
 		class ChildRange

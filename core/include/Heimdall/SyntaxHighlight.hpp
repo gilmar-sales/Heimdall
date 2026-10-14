@@ -71,7 +71,10 @@ namespace heimdall
 		[[nodiscard]] static std::vector<HighlightSpan> Extract(const ParseTree& tree);
 
 		/// As above, with macros resolved through `context` (any header, any `-D`) and spans
-		/// in inactive groups marked `kHighlightInactive` and left without identifier kinds.
+		/// in inactive groups marked `kHighlightInactive`. Identifiers keep their
+		/// normal kind plus the inactive flag; names without a reliable kind are
+		/// emitted as `variable` only inside inactive groups so the client can dim
+		/// the whole region.
 		[[nodiscard]] static std::vector<HighlightSpan> Extract(
 			const ParseTree& tree,
 			const HighlightContext& context);

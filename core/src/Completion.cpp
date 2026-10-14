@@ -2808,6 +2808,82 @@ namespace heimdall
 
 		// `int add(int left, int right)` for a function name, or empty when the shape
 		// is unexpected (callers fall back to the plain kind detail).
+		// ConceptDefinition for `node` itself, its parent, or (through a
+		// TemplateDeclaration wrapper) its first such child. NoIndex otherwise.
+		std::size_t ConceptDefinitionOf(const ParseTree& tree, std::size_t node)
+		{
+			const auto& nodes = tree.NodesSoA();
+			if (node < nodes.size() && nodes.Kind(node) == GrammarKind::ConceptDefinition)
+			{
+				return node;
+			}
+
+			const auto parent = node < nodes.size() ? nodes.Parent(node) : NoIndex;
+			if (parent < nodes.size() && nodes.Kind(parent) == GrammarKind::ConceptDefinition)
+			{
+				return parent;
+			}
+
+			if (node < nodes.size() && nodes.Kind(node) == GrammarKind::TemplateDeclaration)
+			{
+				return FindChild(tree, node, GrammarKind::ConceptDefinition);
+			}
+
+			return NoIndex;
+		}
+
+		// `concept Name = constraint` in one line, capped for `detail` fields.
+		std::string ConceptDefinitionText(
+			const ParseTree& tree,
+			std::size_t node,
+			std::string_view name)
+		{
+			constexpr std::size_t kMaxConceptLen = 160;
+			const auto conceptNode               = ConceptDefinitionOf(tree, node);
+			if (conceptNode == NoIndex)
+			{
+				return {};
+			}
+
+			const auto ref     = tree.NodesSoA()[conceptNode];
+			const auto first   = ref.GetFirstToken();
+			const auto count   = ref.GetTokenCount();
+			const auto& tokens = tree.Tokens();
+			std::size_t equals = NoIndex;
+			for (std::size_t token = first; token < first + count && token < tokens.size();
+				++token)
+			{
+				if (tokens[token].tok == Tok::Eq)
+				{
+					equals = token;
+					break;
+				}
+			}
+
+			if (equals == NoIndex)
+			{
+				return {};
+			}
+
+			auto last = first + count;
+			if (last > equals + 1 && last - 1 < tokens.size() && tokens[last - 1].tok == Tok::Semi)
+			{
+				--last;
+			}
+
+			std::string definition("concept ");
+			definition += name;
+			definition += " = ";
+			definition += CompactWs(SliceRange(tree, equals + 1, last -(equals + 1)),
+				kMaxConceptLen);
+			if (definition.size() > kMaxDetailLen)
+			{
+				definition.resize(kMaxDetailLen);
+			}
+
+			return definition;
+		}
+
 		std::string FunctionSignature(
 			const ParseTree& tree,
 			std::size_t node,
@@ -3911,14 +3987,80 @@ namespace heimdall
 			std::string_view name,
 			CompletionKind kind)
 		{
-			constexpr std::size_t kMaxDocLen = 1000;
-			std::string detail               = KindDetail(kind);
+			constexpr std::size_t kMaxDocLen        = 1000;
+			constexpr std::size_t kMaxConstraintLen = 96;
+			std::string detail                      = KindDetail(kind);
 			if (kind == CompletionKind::Function)
 			{
 				const std::string signature = FunctionSignature(tree, node, name);
 				if (!signature.empty())
 				{
 					detail = signature;
+				}
+
+				// Associated constraints belong to the signature: show the
+				// requires-clause (leading or trailing) with the function.
+				const std::size_t clause = FindInSubtree(tree, node, GrammarKind::RequiresClause);
+				if (clause == NoIndex)
+				{
+					// Trailing clauses may sit beside the declarator rather
+					// than under it; look from the enclosing function.
+					auto function = tree.NodesSoA().Parent(node);
+					for (std::size_t depth = 0;
+						depth < kMaxParentWalkDepth && function < tree.NodesSoA().size();
+						++depth)
+					{
+						const GrammarKind parentKind = tree.NodesSoA().Kind(function);
+						if (parentKind == GrammarKind::FunctionDefinition ||
+							parentKind == GrammarKind::FunctionDeclaration)
+						{
+							break;
+						}
+
+						function = tree.NodesSoA().Parent(function);
+					}
+
+					if (function < tree.NodesSoA().size() &&
+						(tree.NodesSoA().Kind(function) == GrammarKind::FunctionDefinition ||
+						tree.NodesSoA().Kind(function) == GrammarKind::FunctionDeclaration))
+					{
+						const std::size_t outer =
+							FindInSubtree(tree, function, GrammarKind::RequiresClause);
+						if (outer != NoIndex)
+						{
+							const auto clauseRef = tree.NodesSoA()[outer];
+							const std::string constraint = CompactWs(
+								SliceRange(tree, clauseRef.GetFirstToken(),
+								clauseRef.GetTokenCount()),
+								kMaxConstraintLen);
+							if (!constraint.empty())
+							{
+								detail += ' ';
+								detail += constraint;
+							}
+						}
+					}
+				}
+				else
+				{
+					const auto clauseRef = tree.NodesSoA()[clause];
+					const std::string constraint = CompactWs(
+						SliceRange(tree, clauseRef.GetFirstToken(), clauseRef.GetTokenCount()),
+						kMaxConstraintLen);
+					if (!constraint.empty())
+					{
+						detail += ' ';
+						detail += constraint;
+					}
+				}
+			}
+			else if (kind == CompletionKind::Type && ConceptDefinitionOf(tree, node) != NoIndex)
+			{
+				// Concepts read as their definition: `concept Name = constraint`.
+				const std::string definition = ConceptDefinitionText(tree, node, name);
+				if (!definition.empty())
+				{
+					detail = definition;
 				}
 			}
 			else if (kind == CompletionKind::Variable)
@@ -4142,6 +4284,40 @@ namespace heimdall
 					++begin;
 				}
 
+				if (begin < tokens.size() && TokenText(source, tokens[begin]) == "=")
+				{
+					++begin;
+					std::size_t end = begin;
+					while (end < tokens.size() && TokenText(source, tokens[end]) != ";")
+					{
+						++end;
+					}
+
+					if (end > begin)
+					{
+						item.type_text = CompactWs(
+							std::string(source.substr(
+							tokens[begin].offset,
+							tokens[end - 1].offset + tokens[end - 1].length -
+							tokens[begin].offset)),
+							kMaxTypeTextLen);
+						item.detail += " = " + item.type_text;
+					}
+				}
+			}
+
+			// Concepts read as their definition (`concept Name = constraint`),
+			// mirroring the `using` alias handling above.
+			if (tag.intro == "concept")
+			{
+				std::size_t begin = tag.name_token + 1;
+				while (begin < tokens.size() && tokens[begin].kind == TokenKind::Whitespace)
+				{
+					++begin;
+				}
+
+				// An explicit specialization (`concept C<int> = ...`) is not a
+				// definition to complete from; leave the bare detail.
 				if (begin < tokens.size() && TokenText(source, tokens[begin]) == "=")
 				{
 					++begin;

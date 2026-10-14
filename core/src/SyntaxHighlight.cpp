@@ -156,7 +156,11 @@ namespace heimdall
 			{
 				if (length != 0)
 				{
-					if (Inactive(offset))
+					// Conditional directive lines (`#if`/`#else`/`#endif`, ...) are
+					// always compiled text (as in MacroScanner): never dim them,
+					// even when the standalone preprocessor leaves them out of the
+					// active ranges.
+					if (!mLineConditional && Inactive(offset))
 					{
 						modifiers |= kHighlightInactive;
 					}
@@ -384,6 +388,9 @@ namespace heimdall
 				}
 
 				const std::string_view word = Text(name);
+				mLineConditional = word == "if" || word == "ifdef" || word == "ifndef" ||
+					word == "elif" || word == "elifdef" || word == "elifndef" ||
+					word == "else" || word == "endif";
 				Emit(mTokens[hash].offset, mTokens[name].offset + mTokens[name].length -
 					mTokens[hash].offset, HighlightKind::Macro);
 				mExpectMacroName = word == "define" || word == "undef" || word == "ifdef" ||
@@ -431,6 +438,7 @@ namespace heimdall
 						{
 							lineStart = true;
 							mExpectMacroName = mExpectDefine = mExpectHeader = false;
+							mLineConditional = false;
 						}
 
 						continue;
@@ -505,11 +513,6 @@ namespace heimdall
 					return;
 				}
 
-				if (mContext != nullptr && !mContext->activeRanges.empty() && Inactive(token.offset))
-				{
-					return;
-				}
-
 				if (mContext != nullptr && mContext->findMacro &&
 					mContext->findMacro(Text(index), token.offset) != nullptr)
 				{
@@ -526,6 +529,17 @@ namespace heimdall
 				if (const auto kind = ClassifyIdentifier(index))
 				{
 					Emit(token.offset, token.length, *kind);
+					return;
+				}
+
+				// Identifiers without a reliable kind (locals, parameters) stay
+				// unclassified in live code so the client's TextMate grammar applies.
+				// In inactive groups emit a generic span so the client can dim the
+				// whole region instead of leaving holes in the highlighting.
+				if (mContext != nullptr && !mContext->activeRanges.empty() &&
+					Inactive(token.offset))
+				{
+					Emit(token.offset, token.length, HighlightKind::Variable);
 				}
 			}
 
@@ -540,6 +554,7 @@ namespace heimdall
 			bool mExpectMacroName            = false;
 			bool mExpectDefine               = false;
 			bool mExpectHeader               = false;
+			bool mLineConditional            = false;
 			const HighlightContext* mContext = nullptr;
 			std::size_t mActiveCursor        = 0;
 		};

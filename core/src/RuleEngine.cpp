@@ -845,6 +845,24 @@ namespace heimdall
 				true,
 				"Doxygen comment that breaks good practice: brief, @param, @tparam, @return, "
 					"@throws, style (opt-in)"},
+			{RuleId::ConceptRecursion, "cpp/concept-recursive", "cpp", Severity::Error,
+				"semantic", false, "concept that refers to itself in its own definition"},
+			{RuleId::ConceptConstrained, "cpp/concept-constrained", "cpp", Severity::Error,
+				"semantic", false, "concept definition with a requires-clause or constrained parameters"},
+			{RuleId::ConceptPlacement, "cpp/concept-placement", "cpp", Severity::Error,
+				"semantic", false, "concept defined outside namespace scope"},
+			{RuleId::ConceptSpecialization, "cpp/concept-specialization", "cpp", Severity::Error,
+				"semantic", false, "concept that is explicitly specialized or instantiated"},
+			{RuleId::RequiresForm, "cpp/requires-form", "cpp", Severity::Error,
+				"semantic", false, "call with template arguments in a requires-clause without parentheses"},
+			{RuleId::RequiresParameter, "cpp/requires-parameter", "cpp", Severity::Error,
+				"semantic", false, "requires-expression parameter with a default or trailing ellipsis"},
+			{RuleId::ConceptArity, "cpp/concept-arity", "cpp", Severity::Error,
+				"semantic", false, "concept-id used with the wrong number of arguments"},
+			{RuleId::RequiresValidity, "cpp/requires-unknown-type", "cpp", Severity::Error,
+				"semantic", false, "type requirement naming an unknown type outside templates"},
+			{RuleId::ConceptRedeclaration, "cpp/concept-redeclaration", "cpp", Severity::Warning,
+				"semantic", false, "constrained redeclaration with a different constraint spelling"},
 		};
 		return catalog;
 	}

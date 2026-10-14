@@ -68,7 +68,10 @@ namespace heimdall
 		TemplateParameter,
 		// A `#define`d name. Only the index creates these (never the binder): a macro is not
 		// part of any scope, but names every use of itself across files.
-		Macro
+		Macro,
+		// A C++20 concept (`template<...> concept Name = ...`). Declared by the
+		// binder like classes and functions so uses resolve to the definition.
+		Concept
 	};
 
 	enum class AccessLevel : std::uint8_t

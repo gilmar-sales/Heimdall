@@ -1437,6 +1437,17 @@ namespace heimdall
 					{
 						i        = after;
 						saw_type = true;
+						// A constraint followed by its placeholder (`Hashable auto`,
+						// `C decltype(auto)`): `auto`/`decltype` are specifiers, not
+						// the declarator name. Keep scanning so their own branches
+						// absorb them instead of stranding the real name.
+						if (Is(look, "auto") ||
+							(Is(look, "decltype") && look + 1 < end && Is(look + 1, "(") &&
+							m_match[look + 1] != Invalid))
+						{
+							continue;
+						}
+
 						break;
 					}
 
@@ -2421,8 +2432,47 @@ namespace heimdall
 
 			if (trailing_req != Invalid)
 			{
-				ParseRequiresConstraint(trailing_req, end, parent);
-				return end;
+				// `S() requires C = default;`: `= default` / `= delete` / `= 0`
+				// are the function specifiers, not part of the constraint. End
+				// the clause before them so the remainder parses as usual.
+				auto clause_end = end;
+				for (auto k = trailing_req + 1; k < end;)
+				{
+					if ((Is(k, "(") || Is(k, "[") || Is(k, "{")) && m_match[k] != Invalid &&
+						m_match[k] > k)
+					{
+						k = m_match[k] + 1;
+						continue;
+					}
+
+					if (Is(k, "<") && k > trailing_req + 1 && IsIdentifierToken(k - 1))
+					{
+						const auto close = FindTemplateClose(k, end);
+						if (close != Invalid)
+						{
+							k = close + 1;
+							continue;
+						}
+					}
+
+					if (Is(k, "=") && k + 1 < end &&
+						(Is(k + 1, "default") || Is(k + 1, "delete") ||
+						(k + 1 < end && Text(k + 1) == "0")))
+					{
+						clause_end = k;
+						break;
+					}
+
+					++k;
+				}
+
+				ParseRequiresConstraint(trailing_req, clause_end, parent);
+				if (clause_end == end)
+				{
+					return end;
+				}
+
+				init_pos = clause_end;
 			}
 
 			if (init_pos < end && Is(init_pos, "="))
@@ -3038,6 +3088,35 @@ namespace heimdall
 				{
 					const auto close = m_match[body];
 					const auto node  = Add(GrammarKind::RequiresExpression, pos, close + 1, parent);
+					// Local parameters `requires (T a, U&& u)`: parse like function
+					// parameters so names resolve; they have no linkage and are
+					// only notation for the requirements.
+					if (Is(pos + 1, "(") && m_match[pos + 1] != Invalid &&
+						m_match[pos + 1] < close)
+					{
+						const auto open  = pos + 1;
+						const auto paren = m_match[open];
+						auto part        = open + 1;
+						while (part < paren)
+						{
+							const auto comma    = FindComma(part, paren);
+							const bool ellipsis = comma == part + 1 && Is(part, "...");
+							if (!ellipsis && comma > part)
+							{
+								const auto parameter =
+									Add(GrammarKind::ParameterDeclaration, part, comma, node);
+								AddTypeAndDeclarator(part, comma, parameter);
+							}
+
+							if (comma == paren)
+							{
+								break;
+							}
+
+							part = comma + 1;
+						}
+					}
+
 					auto requirement = body + 1;
 					while (requirement < close)
 					{

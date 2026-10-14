@@ -79,6 +79,12 @@ Hover over supported symbols to see information about them. Completion details c
 include signatures and documentation written with `///` or `/** ... */` comments.
 Inlay hints show inferred types for `auto` variables and parameter names at calls.
 
+Code excluded by `#if`/`#ifdef` conditional compilation is dimmed in the editor:
+the server reports inactive regions (`textDocument/inactiveRegions`, the same
+notification clangd sends) and marks the same spans with the `inactive` semantic
+token modifier, so the whole region fades instead of only its keywords. Set
+`heimdall.dimInactiveCode` to `false` to turn the dimming off.
+
 **Member completion after `.` or `->` is not currently modeled.** Do not expect the
 same completion coverage as a full compiler-backed C++ language service.
 
@@ -163,6 +169,7 @@ Open **Settings** and search for `heimdall`, or edit `.vscode/settings.json`.
 | `heimdall.workspaceDiagnostics` | `true` | Check project files in the background, not just open files. |
 | `heimdall.workspaceSymbols` | `true` | Enable project-wide symbol indexing. Turning it off keeps the current file's Outline available. |
 | `heimdall.inlayHints` | `true` | Show inferred types and parameter name hints. |
+| `heimdall.dimInactiveCode` | `true` | Dim code excluded by `#if`/`#ifdef` conditional compilation. |
 | `heimdall.compileCommands` | `"build/compile_commands.json"` | Locate your compilation database. |
 | `heimdall.dynamicRulers` | `true` | Follow the configured column limit with an editor guide. |
 | `heimdall.autoInstallServer` | `true` | Download a matching server when none is found. |

@@ -171,6 +171,16 @@ namespace heimdall::lsp
 			std::shared_ptr<const std::string> text,
 			std::int64_t version);
 
+		/// Notifies `textDocument/inactiveRegions` (clangd-compatible) with the
+		/// complement of `activeRanges`, so clients can dim `#if`-excluded code.
+		/// Conditional directive lines themselves are never inactive.
+		void PublishInactiveRegions(
+			const std::string& uri,
+			std::string_view text,
+			const std::vector<heimdall::ActiveSourceRange>& activeRanges,
+			const std::vector<heimdall::PreprocessorDirective>& directives,
+			const LineIndex& lines);
+
 		bool DocumentParams(
 			simdjson::dom::element request,
 			std::string_view& uri,

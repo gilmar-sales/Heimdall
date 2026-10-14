@@ -582,6 +582,42 @@ TEST(CompletionSpec, HoverReturnsSignatureAndDocs)
     EXPECT_EQ(hovered->documentation, "Adds two numbers.");
 }
 
+TEST(CompletionSpec, HoverOnConceptShowsItsDefinition)
+{
+    constexpr std::string_view source =
+        "template <typename T> concept Small = sizeof(T) > 1;\n";
+    const std::size_t pos = source.find("Small") + 1;
+    const auto hovered = heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions {}, pos);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "Small");
+    EXPECT_EQ(hovered->detail, "concept Small = sizeof(T) > 1");
+}
+
+TEST(CompletionSpec, HoverOnConstrainedFunctionShowsRequiresClause)
+{
+    constexpr std::string_view source =
+        "template <typename T> concept C = true;\n"
+        "template <typename T> void f(T value) requires C<T> {}\n"
+        "int x = f(1);\n";
+    const std::size_t pos = source.rfind("f") + 0;
+    const auto hovered = heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions {}, pos);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "f");
+    EXPECT_EQ(hovered->detail, "void f(T value) requires C<T>");
+}
+
+TEST(CompletionSpec, ConceptCompletionShowsItsDefinition)
+{
+    constexpr std::string_view source =
+        "template <typename T> concept Small = sizeof(T) > 1;\n"
+        "template <Sma U> void f(U value) {}\n";
+    const auto items =
+        heimdall::CompletionEngine::Complete(source, source.find("Sma") + 3);
+    const auto* item = Find(items, "Small");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "concept Small = sizeof(T) > 1");
+}
+
 TEST(CompletionSpec, HoverOnReflectionOperatorShowsMetaInfoAndOperand)
 {
     constexpr std::string_view source =

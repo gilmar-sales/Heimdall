@@ -225,7 +225,7 @@ TEST(SyntaxHighlightSpec, ResolvesMacrosDefinedOutsideTheFile)
     EXPECT_TRUE(IsKind(source, spans, "Local", HighlightKind::Function));
 }
 
-TEST(SyntaxHighlightSpec, MarksInactiveGroupsAndSkipsTheirIdentifiers)
+TEST(SyntaxHighlightSpec, MarksInactiveGroupsWithFullCoverage)
 {
     constexpr std::string_view source = "int a;\n#if 0\nint dead = Call(1);\n#endif\nint c;\n";
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
@@ -244,7 +244,12 @@ TEST(SyntaxHighlightSpec, MarksInactiveGroupsAndSkipsTheirIdentifiers)
     const auto dead = SpanOf(source, spans, "int", 1);
     ASSERT_TRUE(dead);
     EXPECT_EQ(dead->modifiers & heimdall::kHighlightInactive, heimdall::kHighlightInactive);
-    EXPECT_FALSE(SpanOf(source, spans, "Call"));
+    const auto call = SpanOf(source, spans, "Call");
+    ASSERT_TRUE(call);
+    EXPECT_EQ(call->modifiers & heimdall::kHighlightInactive, heimdall::kHighlightInactive);
+    const auto deadVar = SpanOf(source, spans, "dead");
+    ASSERT_TRUE(deadVar);
+    EXPECT_EQ(deadVar->modifiers & heimdall::kHighlightInactive, heimdall::kHighlightInactive);
     const auto live = SpanOf(source, spans, "int", 0);
     ASSERT_TRUE(live);
     EXPECT_EQ(live->modifiers & heimdall::kHighlightInactive, 0);

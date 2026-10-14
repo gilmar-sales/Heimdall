@@ -338,6 +338,33 @@ namespace heimdall
 		return children;
 	}
 
+	RequirementKind ParseTree::RequirementKindOf(std::size_t node) const noexcept
+	{
+		if (node >= m_nodes_soa.size() || m_nodes_soa.Kind(node) != GrammarKind::Requirement)
+		{
+			return RequirementKind::Simple;
+		}
+
+		const auto first   = m_nodes_soa.FirstToken(node);
+		const auto& tokens = Tokens();
+		if (first >= tokens.size())
+		{
+			return RequirementKind::Simple;
+		}
+
+		switch (tokens[first].tok)
+		{
+		case Tok::LBrace:
+			return RequirementKind::Compound;
+		case Tok::KwTypename:
+			return RequirementKind::Type;
+		case Tok::KwRequires:
+			return RequirementKind::Nested;
+		default:
+			return RequirementKind::Simple;
+		}
+	}
+
 	ParseTree::ChildRange ParseTree::DirectChildren(std::size_t node_index) const noexcept
 	{
 		if (node_index >= m_nodes_soa.size())

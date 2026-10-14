@@ -435,6 +435,40 @@ TEST(Binder, ResolvesLocalsParametersAndGlobals)
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("g", 1)), g);
 }
 
+TEST(Binder, ConceptDefinitionsDeclareConceptSymbols)
+{
+    Bound bound("template <typename T> concept Small = sizeof(T) > 1;\n");
+    const auto small = bound.Find("Small", heimdall::SymbolKind::Concept);
+
+    ASSERT_NE(small, heimdall::kNone);
+    EXPECT_TRUE(bound.Has(small, heimdall::SymbolFlag::Template));
+    EXPECT_EQ(bound.model.Symbols().scope[small], heimdall::SemanticModel::TranslationUnitScope);
+}
+
+TEST(Binder, ConstrainedTemplateParametersDeclareTheirNames)
+{
+    Bound bound("template <Hashable T> void f(T t) {}\n");
+
+    EXPECT_NE(bound.Find("T", heimdall::SymbolKind::TemplateParameter), heimdall::kNone);
+    EXPECT_NE(bound.Find("t", heimdall::SymbolKind::Parameter), heimdall::kNone);
+    EXPECT_NE(bound.Find("f", heimdall::SymbolKind::Function), heimdall::kNone);
+}
+
+TEST(Binder, RequiresLocalsResolveInsideTheirRequirements)
+{
+    Bound bound("template <typename T> concept C = requires (T a, T b) { a + b; };\n");
+    const auto a = bound.Find("a", heimdall::SymbolKind::Parameter);
+    const auto b = bound.Find("b", heimdall::SymbolKind::Parameter);
+
+    ASSERT_NE(a, heimdall::kNone);
+    ASSERT_NE(b, heimdall::kNone);
+    // First spelling of each name is the declaration; the second is the use.
+    EXPECT_EQ(bound.model.ResolveToken(bound.Token("a", 1)), a);
+    EXPECT_EQ(bound.model.ResolveToken(bound.Token("b", 1)), b);
+    // Locals live in the requirement's own scope, not the enclosing one.
+    EXPECT_NE(bound.model.Symbols().scope[a], heimdall::SemanticModel::TranslationUnitScope);
+}
+
 TEST(Binder, InnerBlockShadowsOuterDeclaration)
 {
     Bound bound("void f() {\n"

@@ -358,6 +358,108 @@ TEST(ParseTreeSpec, TrailingRequiresExpressionDoesNotBecomeFunctionBody)
     EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
 }
 
+TEST(ParseTreeSpec, ConstrainedPlaceholdersKeepTheDeclaredName)
+{
+    constexpr std::string_view source =
+        "Hashable auto x = 1;\n"
+        "Hashable auto& rx = x;\n"
+        "Hashable auto* p = nullptr;\n"
+        "Hashable decltype(auto) z = x;\n"
+        "void k(Hashable auto b) {}\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    std::vector<std::string_view> names;
+    for (const auto& node : tree.Nodes())
+    {
+        if (node.kind == heimdall::GrammarKind::DeclaredName)
+        {
+            names.push_back(tree.Text(tree.Tokens()[node.first_token]));
+        }
+    }
+
+    // No stray `auto`: every declared entity keeps its own name.
+    EXPECT_EQ(names,
+        (std::vector<std::string_view> {"x", "rx", "p", "z", "k", "b"}));
+}
+
+TEST(ParseTreeSpec, RequiresClauseBeforeDefaultedDefinitionParses)
+{
+    constexpr std::string_view source =
+        "template <typename T> struct S { S() requires C<T> = default; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 1);
+}
+
+TEST(ParseTreeSpec, ClassifiesRequirementKinds)
+{
+    constexpr std::string_view source =
+        "template <typename T> concept C = requires (T a) { a + 1; typename T::inner; "
+        "{ a.f() } -> Same<int>; requires C<T>; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    std::vector<heimdall::RequirementKind> kinds;
+    for (std::size_t i = 0; i < tree.NodesSoA().size(); ++i)
+    {
+        if (tree.NodesSoA().Kind(i) == heimdall::GrammarKind::Requirement)
+        {
+            kinds.push_back(tree.RequirementKindOf(i));
+        }
+    }
+
+    EXPECT_EQ(kinds,
+        (std::vector<heimdall::RequirementKind> {heimdall::RequirementKind::Simple,
+            heimdall::RequirementKind::Type, heimdall::RequirementKind::Compound,
+            heimdall::RequirementKind::Nested}));
+    EXPECT_EQ(tree.RequirementKindOf(0), heimdall::RequirementKind::Simple);
+}
+
+TEST(ParseTreeSpec, RequiresExpressionsParseLocalParameters)
+{
+    constexpr std::string_view source =
+        "template <typename T> concept C = requires (T a, U&& u) { a + u; };";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
+    std::vector<std::string_view> names;
+    for (const auto& node : tree.Nodes())
+    {
+        if (node.kind == heimdall::GrammarKind::DeclaredName)
+        {
+            names.push_back(tree.Text(tree.Tokens()[node.first_token]));
+        }
+    }
+
+    EXPECT_EQ(names, (std::vector<std::string_view> {"a", "u"}));
+}
+
+TEST(ParseTreeSpec, ParsesConstrainedTemplatesAndAbbreviatedForms)
+{
+    constexpr std::string_view source =
+        "template <Hashable T> void f(T t) {}\n"
+        "void g(Hashable auto x) {}\n"
+        "template <typename T> void v(T t) requires true {}\n"
+        "template <typename T> requires requires (T x) { x + x; } T add(T a, T b) "
+        "{ return a + b; }\n";
+
+    const auto tree = heimdall::ParseTree::Parse(source);
+
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateDeclaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresExpression), 1);
+}
+
 TEST(ParseTreeSpec, ParsesDependentTemplateMemberCalls)
 {
     constexpr std::string_view source =

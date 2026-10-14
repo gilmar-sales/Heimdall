@@ -801,6 +801,28 @@ TEST(FormatterSpec, SpacesTrailingReturnArrow)
     check("auto f()->int;\n", "auto f() -> int;\n");
 }
 
+TEST(FormatterSpec, SpacesCompoundRequirementArrow)
+{
+    // F11: `{ req } -> Constraint` keeps spaces, while member access on a
+    // braced temporary (`T{}->make()`) stays tight.
+    const heimdall::Formatter formatter;
+    const std::string formatted = formatter.Format(
+        "template <typename T> concept C = requires (T a) { { a + a } -> std::same_as<T>; };\n");
+
+    EXPECT_NE(formatted.find("} -> std::same_as<T>;"), std::string::npos);
+    EXPECT_EQ(formatted.find("}->"), std::string::npos);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+
+    const auto check =[&](std::string_view source, std::string_view expected)
+    {
+        const std::string output = formatter.Format(source);
+        EXPECT_EQ(output, expected);
+        EXPECT_EQ(formatter.Format(output), output);
+    };
+    check("int f() { return Tmp{}->make(); }\n", "int f()\n{\n    return Tmp {}->make();\n}\n");
+    check("int f() { return Tmp{}->value; }\n", "int f()\n{\n    return Tmp {}->value;\n}\n");
+}
+
 TEST(FormatterSpec, CreatedSingleLineBlocksFollowTheBraceStyle)
 {
     // The collapsed block itself stays brace-free on one line while the

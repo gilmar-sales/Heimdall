@@ -549,6 +549,23 @@ TEST(Typer, AutoPointerDeduction)
     EXPECT_EQ(typed.Of("u"), "<unknown>"); // ill-formed: not a pointer
 }
 
+TEST(Typer, ConstrainedAutoDeducesLikePlainAuto)
+{
+    const Typed typed(Body("int x = 0; const int cx = 0;\n"
+        "Hashable auto a = x; Hashable auto b = cx; Hashable auto& c = x; "
+        "Hashable auto& d = cx; Hashable auto* e = &x;\n"
+        "Hashable auto f; Hashable decltype(auto) g = x;"));
+    EXPECT_EQ(typed.Of("a"), "int");
+    EXPECT_EQ(typed.Of("b"), "int");
+    EXPECT_EQ(typed.Of("c"), "int&");
+    EXPECT_EQ(typed.Of("d"), "const int&");
+    EXPECT_EQ(typed.Of("e"), "int*");
+    // No initializer: nothing to deduce, like plain `auto` without one.
+    EXPECT_EQ(typed.Of("f"), "<unknown>");
+    // Constrained `decltype(auto)` behaves like plain `decltype(auto)`.
+    EXPECT_EQ(typed.Of("g"), "<unknown>");
+}
+
 TEST(Typer, AutoDeducesNewExpressions)
 {
     const Typed typed("struct Node { Node* next; int value; };\n"

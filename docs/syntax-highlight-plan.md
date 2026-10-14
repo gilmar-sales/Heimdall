@@ -38,3 +38,12 @@ cliente LSP (VS Code, Neovim, Helix...), sem depender de gramática TextMate.
 ## Atualização
 
 As macros agora vêm do `MacroEnvironment` (ver `docs/macro-support-plan.md`): o realce reconhece macros definidas em qualquer header, `-D` ou builtin do compilador, e marca código excluído por `#if` com o modificador `inactive`.
+
+A cobertura é total: identificadores em grupos inativos mantêm sua classificação
+mais o modificador `inactive` (nomes sem classificação confiável saem como
+`variable` só ali, para não deixar buracos), e as linhas das diretivas
+condicionais (`#if`/`#else`/`#endif`, ...) nunca são esmaecidas. O servidor também
+publica `textDocument/inactiveRegions` (mesmo formato do clangd) a cada
+`publishDiagnostics`, com fallback para as faixas do próprio arquivo quando o
+ambiente de macros não existe; a extensão aplica uma decoração com opacidade
+(`heimdall.dimInactiveCode`, padrão ligado).

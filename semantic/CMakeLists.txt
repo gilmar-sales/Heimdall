@@ -29,6 +29,7 @@ add_library(heimdall_semantic STATIC
   src/MemberAccess.cpp
   src/AccessControl.cpp
   src/UndeclaredType.cpp
+  src/ConceptRules.cpp
   src/ControlFlowRules.cpp
   src/Documentation.cpp
   src/TypeHierarchy.cpp

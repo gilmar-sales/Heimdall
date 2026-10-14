@@ -78,6 +78,15 @@ namespace heimdall
 		ReturnType,
 		DocRequireComment,
 		DocDoxygenStyle,
+		ConceptRecursion,
+		ConceptConstrained,
+		ConceptPlacement,
+		ConceptSpecialization,
+		RequiresForm,
+		RequiresParameter,
+		ConceptArity,
+		RequiresValidity,
+		ConceptRedeclaration,
 		// Experimental external rules use their string code as identity.
 		External
 	};

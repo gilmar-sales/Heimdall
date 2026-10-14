@@ -1194,6 +1194,131 @@ namespace heimdall::lsp
 		}
 
 		Send(message);
+		PublishInactiveRegions(uri, *text, tree->ActiveRanges(), tree->Directives(), lines);
+	}
+
+	void LanguageServer::PublishInactiveRegions(
+		const std::string& uri,
+		std::string_view text,
+		const std::vector<heimdall::ActiveSourceRange>& activeRanges,
+		const std::vector<heimdall::PreprocessorDirective>& directives,
+		const LineIndex& lines)
+	{
+		std::string notification =
+			"{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+			"inactiveRegions\",\"params\":{\"uri\":";
+		QuoteJson(uri, notification);
+		notification += ",\"regions\":[";
+		bool first = true;
+		if (!activeRanges.empty())
+		{
+			std::size_t cursor      = 0;
+			std::size_t directiveAt = 0;
+			const auto isConditional = ([](heimdall::DirectiveKind kind)
+				{
+					return kind == heimdall::DirectiveKind::If ||
+					kind == heimdall::DirectiveKind::Ifdef || kind == heimdall::DirectiveKind::Ifndef ||
+					kind == heimdall::DirectiveKind::Elif || kind == heimdall::DirectiveKind::Else ||
+					kind == heimdall::DirectiveKind::Endif;
+			});
+			const auto emit =[&](std::size_t begin, std::size_t end)
+			{
+				if (end <= begin || begin >= text.size())
+				{
+					return;
+				}
+
+				end = end > text.size() ? text.size() : end;
+				if (end <= begin)
+				{
+					return;
+				}
+
+				if (!first)
+				{
+					notification += ',';
+				}
+
+				first = false;
+				notification += "{\"start\":";
+				AppendPosition(lines.ToPosition(begin), notification);
+				notification += ",\"end\":";
+				AppendPosition(lines.ToPosition(end), notification);
+				notification += '}';
+			};
+			// A gap between active ranges covers directive lines too (the
+			// standalone preprocessor keeps them out of the ranges). Cut the
+			// conditional directives back out: they are always compiled text.
+			const auto append =[&](std::size_t begin, std::size_t end)
+			{
+				if (end <= begin || begin >= text.size())
+				{
+					return;
+				}
+
+				end               = end > text.size() ? text.size() : end;
+				std::size_t piece = begin;
+				while (directiveAt < directives.size() &&
+					directives[directiveAt].offset + directives[directiveAt].length <= piece)
+				{
+					++directiveAt;
+				}
+
+				for (std::size_t scan = directiveAt;
+					scan < directives.size() && directives[scan].offset < end; ++scan)
+				{
+					const auto& directive = directives[scan];
+					if (!isConditional(directive.kind))
+					{
+						continue;
+					}
+
+					const std::size_t directiveEnd = directive.offset + directive.length;
+					if (directiveEnd <= piece)
+					{
+						continue;
+					}
+
+					if (directive.offset > piece)
+					{
+						emit(piece, directive.offset);
+						piece = directiveEnd;
+					}
+					else
+					{
+						piece = directiveEnd > piece ? directiveEnd : piece;
+					}
+				}
+
+				emit(piece, end);
+			};
+			for (const auto& range : activeRanges)
+			{
+				if (range.offset > cursor)
+				{
+					append(cursor, range.offset);
+				}
+
+				const std::size_t rangeEnd = range.offset + range.length;
+				if (rangeEnd > cursor)
+				{
+					cursor = rangeEnd;
+				}
+
+				if (cursor >= text.size())
+				{
+					break;
+				}
+			}
+
+			if (cursor < text.size())
+			{
+				append(cursor, text.size());
+			}
+		}
+
+		notification += "]}}";
+		Send(notification);
 	}
 
 	bool LanguageServer::DocumentParams(
@@ -1632,6 +1757,11 @@ namespace heimdall::lsp
 		QuoteJson(uri, message);
 		message += ",\"diagnostics\":[]}}";
 		Send(message);
+		std::string inactive = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/"
+			"inactiveRegions\",\"params\":{\"uri\":";
+		QuoteJson(uri, inactive);
+		inactive += ",\"regions\":[]}}";
+		Send(inactive);
 	}
 
 	int LanguageServer::PublishWorkspaceFile(
@@ -6176,6 +6306,12 @@ namespace heimdall::lsp
 				return environment->Find(name, offset);
 			};
 			context.activeRanges = environment->Main().activeRanges;
+		}
+		else
+		{
+			// Without a macro environment (cancelled build) still dim what the
+			// file's own directives exclude, so `#if 0` works with no database.
+			context.activeRanges = tree->ActiveRanges();
 		}
 
 		const auto spans = heimdall::SyntaxHighlight::Extract(*tree, context);

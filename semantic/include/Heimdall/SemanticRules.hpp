@@ -62,6 +62,101 @@ namespace heimdall
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUndeclaredType(
 			const SemanticModel& model);
 
+		/** Reports ill-formed concepts, requires-clauses and requirements
+		 * (cpp/concept-*): recursive or constrained concept definitions,
+		 * concepts outside namespace scope or specialized, malformed
+		 * requires-clause forms and requirement parameters, concept-ids with
+		 * the wrong arity, unknown types in type requirements outside
+		 * templates, and constrained redeclarations with a different
+		 * syntactic form. Only reports what name resolution proves; unknown
+		 * names stay silent. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConcepts(const SemanticModel& model);
+
+		/** One dispatch entry per cpp/concept-* code sharing the ConceptRules
+		 * traversals, so enabling several concept rules never repeats
+		 * diagnostics. */
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptRecursion(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptConstrained(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptPlacement(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptSpecialization(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeRequiresForm(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeRequiresParameter(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptArity(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeRequiresValidity(
+			const SemanticModel& model);
+
+		[[nodiscard]] static std::vector<Diagnostic> AnalyzeConceptRedeclaration(
+			const SemanticModel& model);
+
+		/** One atomic constraint: `expression` is the unsubstituted source
+		 * text and `provenance` names where it was written (the defining
+		 * concept for expanded atoms, the enclosing declaration for inline
+		 * ones), so the Meowable/BadMeowableCat distinction holds.
+		 * `arguments` is the ambient parameter mapping, spelled
+		 * positionally. */
+		struct ConstraintAtom
+		{
+			std::string provenance;
+			std::string expression;
+			std::vector<std::string> arguments;
+		};
+
+		/** Normalized constraint: a tree of conjunctions (All) and
+		 * disjunctions (Any) over atomic constraints. */
+		struct NormalizedConstraint
+		{
+			enum class Kind : std::uint8_t
+			{
+				Atom,
+				All,
+				Any
+			};
+
+			Kind kind = Kind::Atom;
+			ConstraintAtom atom;
+			std::vector<NormalizedConstraint> operands;
+		};
+
+		/** Normalizes the constraint of a RequiresClause or ConceptDefinition
+		 * node (conjunctions/disjunctions of atomic constraints, concept
+		 * bodies substituted with their parameter mappings, depth-limited).
+		 * Anything else normalizes its own token range opaquely. */
+		[[nodiscard]] static NormalizedConstraint NormalizeConstraint(
+			const SemanticModel& model,
+			std::uint32_t node);
+
+		/** Gathers the associated constraints of a function in canonical
+		 * order (constrained template parameters, requires-clause after
+		 * `<>`, abbreviated parameters, trailing requires-clause) as one
+		 * conjunction. Head and abbreviated positions stay opaque atoms
+		 * (their deduced type is implicit); clauses normalize fully.
+		 * Empty (single empty atom) when the function has no constraints. */
+		[[nodiscard]] static NormalizedConstraint NormalizeAssociatedConstraints(
+			const SemanticModel& model,
+			SymbolId function);
+
+		/** Whether `general` subsumes `specific`: every disjunctive clause
+		 * of the general constraint in disjunctive normal form subsumes
+		 * every conjunctive clause of the specific one in conjunctive normal
+		 * form, over atomic identity. Gives up (false) past 64 clauses. */
+		[[nodiscard]] static bool ConstraintSubsumes(
+			const NormalizedConstraint& general,
+			const NormalizedConstraint& specific);
+
 		/** Reports unreachable statements in complete control-flow graphs. */
 		[[nodiscard]] static std::vector<Diagnostic> AnalyzeUnreachable(const FlowModel& flow);
 

@@ -2503,6 +2503,7 @@ namespace heimdall
 				AnalyzeAccessControl(types),
 				AnalyzeConflictingDeclarations(types),
 				AnalyzeUndeclaredType(model),
+				AnalyzeConcepts(model),
 				AnalyzeUnreachable(flow),
 				AnalyzeMissingReturn(flow),
 				AnalyzeReturnTypes(flow)
