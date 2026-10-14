@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <iterator>
 
-#include "SemanticRuleDispatch.hpp"
+#include <Heimdall/SemanticRuleDispatch.hpp>
 
 namespace heimdall
 {

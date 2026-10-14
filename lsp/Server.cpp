@@ -301,7 +301,56 @@ namespace heimdall::lsp
 			std::size_t begin = 0;
 			std::size_t end   = 0;
 			std::string text;
+			std::string rawType; // trimmed type spelling before the surgery
 		};
+
+		// `const Foo &` and `Foo` spell the same type: drops whitespace,
+		// cv-qualifiers, reference markers and a leading `::` so sibling
+		// declarations can be matched across spelling variations.
+		std::string NormalizedType(std::string_view raw)
+		{
+			std::string out;
+			std::string word;
+			const auto flush =[&]
+			{
+				if (!word.empty() && word != "const" && word != "volatile")
+				{
+					out += word;
+				}
+
+				word.clear();
+			};
+			for (const char c : raw)
+			{
+				if (c == '&' || c == '*')
+				{
+					flush();
+					continue;
+				}
+
+				if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+					(c >= '0' && c <= '9') || c == '_')
+				{
+					word += c;
+				}
+				else
+				{
+					flush();
+					if (!IsSpace(c))
+					{
+						out += c;
+					}
+				}
+			}
+
+			flush();
+			while (out.starts_with("::"))
+			{
+				out.erase(0, 2);
+			}
+
+			return out;
+		}
 
 		// Recomputes the definition's type surgery on one sibling declaration,
 		// keeping that declaration's own type spelling. False means "leave this
@@ -349,46 +398,149 @@ namespace heimdall::lsp
 			const auto& soa  = tree.NodesSoA();
 			const auto first = soa.FirstToken(node);
 			const auto count = soa.TokenCount(node);
-			std::fprintf(stderr, "[paramfix] node span=%s first=%s count=%u params=%zu ordinal=%zu\n",
-				std::string(tree.Source().substr(
-				tokens[first].offset,
-					tokens[std::min(first + count, static_cast<std::uint32_t>(tokens.size())) - 1].offset +
-					tokens[std::min(first + count, static_cast<std::uint32_t>(tokens.size())) - 1].length -
-					tokens[first].offset))
-				.c_str(),
-				std::string(tree.Text(tokens[first])).c_str(), count, parameters.size(),
-				ordinal);
 			if (count == 0 || first >= tokens.size())
 			{
 				return false;
 			}
 
 			const auto last = std::min(first + count, static_cast<std::uint32_t>(tokens.size()));
-			std::uint32_t name = heimdall::kNone;
-			for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+			// The binder only keeps parameter symbols for definitions, so a
+			// pure declaration (`int Read(Snapshot);`) has no symbol to read
+			// the name from: resolve it from the tokens instead. The span ends
+			// before any default argument; brackets make it complex.
+			std::uint32_t spanEnd = last;
 			{
-				if (symbols.kind[symbol] == heimdall::SymbolKind::Parameter &&
-					symbols.decl_node[symbol] == node && symbols.name[symbol] != heimdall::kNone)
+				std::size_t depth = 0;
+				for (auto i = first; i < last; ++i)
 				{
-					name = symbols.decl_token[symbol];
-					break;
+					const auto tok = tokens[i].tok;
+					if (tok == heimdall::Tok::LParen || tok == heimdall::Tok::LBracket ||
+						tok == heimdall::Tok::LBrace)
+					{
+						++depth;
+					}
+					else if (tok == heimdall::Tok::RParen || tok == heimdall::Tok::RBracket ||
+						tok == heimdall::Tok::RBrace)
+					{
+						depth = depth == 0 ? 0 : depth - 1;
+					}
+					else if (tok == heimdall::Tok::Eq && depth == 0)
+					{
+						spanEnd = i;
+						break;
+					}
+				}
+			}
+
+			const auto isPlainIdent = [&](std::uint32_t i)
+			{
+				return tokens[i].kind == heimdall::TokenKind::Identifier &&
+					tokens[i].tok == heimdall::Tok::None;
+			};
+			// Preferred: the definition's own spelling, still at depth 0 and
+			// behind an actual type (a lone match is the type itself, as in an
+			// undecorated `Snapshot`).
+			std::uint32_t name = heimdall::kNone;
+			{
+				std::size_t depth       = 0;
+				std::uint32_t firstSig  = heimdall::kNone;
+				std::uint32_t candidate = heimdall::kNone;
+				for (auto i = first; i < spanEnd; ++i)
+				{
+					const auto tok = tokens[i].tok;
+					if (tok == heimdall::Tok::LParen || tok == heimdall::Tok::LBracket ||
+						tok == heimdall::Tok::LBrace)
+					{
+						++depth;
+					}
+					else if (tok == heimdall::Tok::RParen || tok == heimdall::Tok::RBracket ||
+						tok == heimdall::Tok::RBrace)
+					{
+						depth = depth == 0 ? 0 : depth - 1;
+					}
+					else if (tokens[i].kind == heimdall::TokenKind::Whitespace)
+					{
+						continue;
+					}
+					else
+					{
+						if (firstSig == heimdall::kNone)
+						{
+							firstSig = i;
+						}
+
+						if (depth == 0 && isPlainIdent(i) &&
+							tree.Text(tokens[i]) == defParamName)
+						{
+							candidate = i;
+						}
+					}
+				}
+
+				if (candidate != heimdall::kNone && candidate != firstSig)
+				{
+					name = candidate;
 				}
 			}
 
 			std::string paramName;
-			std::uint32_t scanEnd = last;
+			std::uint32_t scanEnd = spanEnd;
 			if (name != heimdall::kNone)
 			{
-				if (name < first || name >= last)
+				scanEnd   = name;
+				paramName = std::string(defParamName);
+			}
+			else
+			{
+				// Last significant token of the span: a trailing identifier
+				// beside a real type is a renamed parameter (`Snapshot s`);
+				// a lone identifier or one behind only cv-qualifiers is the
+				// type itself (`Snapshot`, `const Foo`) and stays unnamed.
+				std::uint32_t trailing = heimdall::kNone;
+				std::uint32_t significant = 0;
+				bool realType = false;
+				for (auto i = first; i < spanEnd; ++i)
 				{
-					return false;
+					const auto& token = tokens[i];
+					if (token.kind == heimdall::TokenKind::Whitespace)
+					{
+						continue;
+					}
+
+					++significant;
+					trailing = i;
+					if (token.tok != heimdall::Tok::KwConst &&
+						token.tok != heimdall::Tok::KwVolatile)
+					{
+						realType = true;
+					}
 				}
 
-				scanEnd = name;
-				paramName = std::string(tree.Text(tokens[name]));
+				if (trailing != heimdall::kNone && significant > 1 && realType &&
+					isPlainIdent(trailing))
+				{
+					// Not the definition's spelling, but unmistakably a name:
+					// keep it instead of renaming.
+					bool typeBefore = false;
+					for (auto i = first; i < trailing; ++i)
+					{
+						if (tokens[i].kind != heimdall::TokenKind::Whitespace)
+						{
+							typeBefore = true;
+							break;
+						}
+					}
+
+					if (typeBefore)
+					{
+						name      = trailing;
+						scanEnd   = trailing;
+						paramName = std::string(tree.Text(tokens[trailing]));
+					}
+				}
 			}
 
-			bool hasConst = false, hasRef = false, veto = false;
+			bool hasConst = false, hasRef = false, hasRealType = false, veto = false;
 			std::uint32_t typeToken = heimdall::kNone;
 			std::size_t lastSigEnd  = 0;
 			for (auto i = first; i < scanEnd; ++i)
@@ -434,6 +586,12 @@ namespace heimdall::lsp
 					break;
 				}
 
+				if (token.tok != heimdall::Tok::KwConst &&
+					token.tok != heimdall::Tok::KwVolatile)
+				{
+					hasRealType = true;
+				}
+
 				if (typeToken == heimdall::kNone)
 				{
 					typeToken = i;
@@ -442,7 +600,9 @@ namespace heimdall::lsp
 				lastSigEnd = token.offset + token.length;
 			}
 
-			if (veto || typeToken == heimdall::kNone || lastSigEnd == 0)
+			// A lone qualifier (`const Foo` read as type `const`, name `Foo`)
+			// has no type to rewrite: leave it alone.
+			if (veto || typeToken == heimdall::kNone || lastSigEnd == 0 || !hasRealType)
 			{
 				return false;
 			}
@@ -487,10 +647,7 @@ namespace heimdall::lsp
 					replacement += paramName;
 				}
 
-				std::fprintf(stderr, "[paramfix] raw=%s name=%s repl=%s range=[%zu,%zu)\n",
-					raw.c_str(), paramName.c_str(), replacement.c_str(), typeBegin,
-					rangeEnd);
-				edit = {typeBegin, rangeEnd, std::move(replacement)};
+				edit = {typeBegin, rangeEnd, std::move(replacement), raw};
 				return true;
 			}
 
@@ -511,8 +668,9 @@ namespace heimdall::lsp
 				return false;
 			}
 
+			const std::string raw(Trimmed(source.substr(typeBegin, typeEnd - typeBegin)));
 			const std::string stripped =
-				StripConstRef(Trimmed(source.substr(typeBegin, typeEnd - typeBegin)));
+				StripConstRef(raw);
 			if (stripped.empty())
 			{
 				return false;
@@ -525,7 +683,7 @@ namespace heimdall::lsp
 				replacement += paramName;
 			}
 
-			edit = {typeBegin, rangeEnd, std::move(replacement)};
+			edit = {typeBegin, rangeEnd, std::move(replacement), raw};
 			return true;
 		}
 
@@ -3309,6 +3467,21 @@ namespace heimdall::lsp
 			}
 
 			const bool toConstRef = diagnostic.code == "api/pass-by-const-reference";
+			// The definition's own type spelling, used to confirm a sibling
+			// declaration really is the same overload before touching it.
+			if (diagnostic.fix.length <= diagnostic.length ||
+				diagnostic.fix.offset + diagnostic.fix.length > text->size())
+			{
+				return extras;
+			}
+
+			const std::string wanted = NormalizedType(Trimmed(std::string_view(*text).substr(
+				diagnostic.fix.offset, diagnostic.fix.length - diagnostic.length)));
+			if (wanted.empty())
+			{
+				return extras;
+			}
+
 			const heimdall::SemanticModel& model = context.Semantic();
 			const ParamSite site = FindParamSite(*tree, model, diagnostic.offset);
 			if (site.owner == heimdall::kNone || site.funcNameToken == heimdall::kNone)
@@ -3331,19 +3504,19 @@ namespace heimdall::lsp
 				return extras;
 			}
 
+			const auto& selfColumns = snapshot->Shards()[self_shard]->Symbols();
 			const std::uint32_t funcByte = tree->Tokens()[site.funcNameToken].offset;
 			bool have                    = false;
 			heimdall::index::SymbolHash hash = 0;
-			for (std::uint32_t symbol = 0;
-				symbol < snapshot->Shards()[self_shard]->Symbols().Size();
-				++symbol)
+			std::uint32_t selfSymbol         = heimdall::index::kInvalid;
+			for (std::uint32_t symbol = 0; symbol < selfColumns.Size(); ++symbol)
 			{
-				const auto& columns = snapshot->Shards()[self_shard]->Symbols();
-				if (columns.kind[symbol] == heimdall::SymbolKind::Function &&
-					columns.nameOffset[symbol] == funcByte)
+				if (selfColumns.kind[symbol] == heimdall::SymbolKind::Function &&
+					selfColumns.nameOffset[symbol] == funcByte)
 				{
-					hash = snapshot->HashOf({self_shard, symbol});
-					have = true;
+					hash       = snapshot->HashOf({self_shard, symbol});
+					selfSymbol = symbol;
+					have       = true;
 					break;
 				}
 			}
@@ -3353,8 +3526,36 @@ namespace heimdall::lsp
 				return extras;
 			}
 
+			// Exact identities first; then the same qualified name for entities
+			// the binder spells differently per file (an out-of-line `A::A`
+			// carries no constructor flag, so its hash differs from the
+			// in-class declaration's). The normalized-type check below keeps
+			// same-named overloads untouched.
+			std::vector<heimdall::index::SymbolRef> candidates =
+				snapshot->Declarations(hash);
+			const std::string qualified(
+				snapshot->Shards()[self_shard]->Qualified(selfSymbol));
+			for (const auto& named : snapshot->Named(qualified))
+			{
+				const auto& columns = snapshot->Shards()[named.shard]->Symbols();
+				if (columns.kind[named.symbol] != heimdall::SymbolKind::Function)
+				{
+					continue;
+				}
+
+				if (columns.paramMax[named.symbol] != heimdall::index::kNoArity &&
+					(site.paramCount < columns.paramMin[named.symbol] ||
+					site.paramCount > columns.paramMax[named.symbol]))
+				{
+					continue;
+				}
+
+				candidates.push_back(named);
+			}
+
+			std::set<std::pair<std::string, std::size_t>> seen;
 			const auto rename_context = RenameContext();
-			for (const auto& declaration : snapshot->Declarations(hash))
+			for (const auto& declaration : candidates)
 			{
 				const auto& shard = *snapshot->Shards()[declaration.shard];
 				if (shard.Path() == self_path &&
@@ -3395,8 +3596,10 @@ namespace heimdall::lsp
 				DeclEdit sibling;
 				if (!SiblingParamEdit(otherTree, otherModel,
 					shard.Symbols().nameOffset[declaration.symbol], site.ordinal,
-					site.paramCount, toConstRef, sibling) ||
-					sibling.end > otherText->size())
+					site.paramCount, toConstRef, site.name, sibling) ||
+					sibling.end > otherText->size() ||
+					NormalizedType(sibling.rawType) != wanted ||
+					!seen.emplace(otherUri, sibling.begin).second)
 				{
 					continue;
 				}
