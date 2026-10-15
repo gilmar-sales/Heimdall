@@ -417,7 +417,7 @@ namespace heimdall
 				[](const TemplateCallRecord& record, std::uint32_t value)
 				{
 					return record.node < value;
-			});
+				});
 			return found != mTemplateCalls.end() && found->node == node ? found->result
 			: TemplateCallResult {};
 		}

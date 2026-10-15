@@ -1,22 +1,24 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include <Heimdall/HeaderSummary.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/SemanticRules.hpp>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 #include "detail/ImplicitConversion.hpp"
 #include "detail/TokenView.hpp"
 
 namespace heimdall
 {
-	[[nodiscard]] detail::ParameterCount detail::CountParameters(const SemanticModel& model,
+	[[nodiscard]] detail::ParameterCount detail::CountParameters(
+		const SemanticModel& model,
 		const detail::TokenView& view,
 		SymbolId symbol)
 	{
@@ -114,8 +116,10 @@ namespace heimdall
 		// The node-child count cannot be used: an argument the parser split
 		// (a cast to a type unknown without its header, as `(Mode)event->mod`)
 		// still contributes a single comma-separated argument.
-		[[nodiscard]] std::size_t CountSuppliedArguments(const detail::TokenView& view,
-			std::size_t end, std::size_t callEnd)
+		[[nodiscard]] std::size_t CountSuppliedArguments(
+			const detail::TokenView& view,
+			std::size_t end,
+			std::size_t callEnd)
 		{
 			if (view.At(end) != Tok::LParen || view.At(callEnd - 1) != Tok::RParen)
 			{
@@ -194,7 +198,8 @@ namespace heimdall
 			RValue
 		};
 
-		[[nodiscard]] ArgumentCategory CategoryOf(const TypeModel& types,
+		[[nodiscard]] ArgumentCategory CategoryOf(
+			const TypeModel& types,
 			const detail::TokenView& view,
 			std::uint32_t node)
 		{
@@ -230,7 +235,8 @@ namespace heimdall
 			return ArgumentCategory::Unknown;
 		}
 
-		[[nodiscard]] bool IsNullLiteral(const SemanticModel& model,
+		[[nodiscard]] bool IsNullLiteral(
+			const SemanticModel& model,
 			const detail::TokenView& view,
 			std::uint32_t node)
 		{
@@ -403,7 +409,8 @@ namespace heimdall
 		}
 
 		[[nodiscard]] ClassInstance ClassOfExpression(
-			const TypeModel& types, std::uint32_t expression)
+			const TypeModel& types,
+			std::uint32_t expression)
 		{
 			const auto& model   = types.Model();
 			const auto& tree    = model.Tree();
@@ -655,7 +662,8 @@ namespace heimdall
 		}
 	}
 
-	detail::ConversionResult detail::CheckImplicitConversion(const TypeModel& types,
+	detail::ConversionResult detail::CheckImplicitConversion(
+		const TypeModel& types,
 		std::uint32_t expression,
 		TypeId target)
 	{
@@ -676,7 +684,8 @@ namespace heimdall
 		return AnalyzeProjectCallArguments(model, {});
 	}
 
-	std::vector<Diagnostic> SemanticRules::AnalyzeProjectCallArguments(const SemanticModel& model,
+	std::vector<Diagnostic> SemanticRules::AnalyzeProjectCallArguments(
+		const SemanticModel& model,
 		const ProjectContext& context)
 	{
 		std::vector<Diagnostic> diagnostics;
@@ -716,7 +725,7 @@ namespace heimdall
 					[&](const auto& candidate)
 					{
 						return candidate.offset == includes[entry].directive_offset;
-				});
+					});
 				if (directive == model.Tree().Directives().end() ||!directive->active ||
 					include.header.empty())
 				{
@@ -853,7 +862,9 @@ namespace heimdall
 			}
 
 			std::unordered_set<std::string> visibleNamespaces {""};
-			std::vector<std::string_view> outerFirst(namespaceParts.rbegin(), namespaceParts.rend());
+			std::vector<std::string_view> outerFirst(
+				namespaceParts.rbegin(),
+				namespaceParts.rend());
 			for (std::size_t depth = 1; depth <= outerFirst.size(); ++depth)
 			{
 				visibleNamespaces.insert(JoinNamespace(std::vector<std::string_view>(
@@ -1174,7 +1185,8 @@ namespace heimdall
 	}
 
 	std::vector<Diagnostic> SemanticRules::AnalyzeIndexedCallArgumentTypes(
-		const TypeModel& types, const ScopeIndex& external)
+		const TypeModel& types,
+		const ScopeIndex& external)
 	{
 		const auto& tree   = types.Model().Tree();
 		const auto& nodes  = tree.NodesSoA();
@@ -1214,7 +1226,7 @@ namespace heimdall
 				[](char value)
 				{
 					return value == ' ' || value == '\t' || value == '\n';
-				}), parameter.end());
+					}), parameter.end());
 			if (!parameter.ends_with('&') || parameter.ends_with("&&") ||
 				parameter.starts_with("const") || parameter.find_first_of("<,()*") != std::string::npos)
 			{
@@ -1264,7 +1276,7 @@ namespace heimdall
 						{
 							return (member.kind == CompletionKind::Type || member.kind == CompletionKind::Namespace) &&
 							member.label == scope.path.back() && member.is_definition;
-					});
+						});
 				}
 
 				for (const auto& member : scope.members)
@@ -1278,7 +1290,7 @@ namespace heimdall
 						std::ranges::any_of(scope.template_params,[&](const std::string& name)
 						{
 							return member.label.find(name) != std::string::npos;
-					}))
+						}))
 					{
 						proven = false;
 					}

@@ -17,11 +17,11 @@ namespace heimdall
 
 		std::vector<Edit> edits;
 		const std::string newline = source.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
-		const auto token_end =[&](std::size_t token)
+		const auto token_end = [&](std::size_t token)
 		{
 			return tokens[token].offset + tokens[token].length;
 		};
-		const auto whitespace =[](char c)
+		const auto whitespace = [](char c)
 		{
 			return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 		};
@@ -117,12 +117,12 @@ namespace heimdall
 					continue;
 				}
 
-				const auto tokenText =[&](std::size_t t)->std::string_view
+				const auto tokenText = [&](std::size_t t)->std::string_view
 				{
 					return std::string_view(source).substr(
 						tokens[t].offset, tokens[t].length);
 				};
-				const auto isWordish =[&](std::size_t t) -> bool
+				const auto isWordish = [&](std::size_t t) -> bool
 				{
 					const auto kind = tokens[t].kind;
 					return kind == TokenKind::Identifier || kind == TokenKind::Number ||
@@ -131,7 +131,7 @@ namespace heimdall
 						kind == TokenKind::RawStringLiteral ||
 						kind == TokenKind::BlockComment;
 				};
-				const auto gapWidth =[&](std::string_view left, std::string_view right,
+				const auto gapWidth = [&](std::string_view left, std::string_view right,
 					bool leftWord, bool rightWord)->std::size_t
 				{
 					if (right == "," || right == ";" || right == ")" || right == "]" ||
@@ -581,7 +581,7 @@ namespace heimdall
 			[](const Edit& a, const Edit& b)
 			{
 				return a.offset > b.offset;
-		});
+			});
 		std::string output(source);
 		std::size_t boundary = source.size();
 		for (const auto& edit : edits)

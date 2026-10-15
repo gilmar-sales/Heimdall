@@ -214,7 +214,7 @@ TEST(SyntaxHighlightSpec, ResolvesMacrosDefinedOutsideTheFile)
     ASSERT_TRUE(external);
     const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
     heimdall::HighlightContext context;
-    context.findMacro =[&](std::string_view name, std::size_t)->const heimdall::MacroDef *
+    context.findMacro = [&](std::string_view name, std::size_t)->const heimdall::MacroDef *
     {
         return name == "EXTERNAL_LIMIT" ? & *external : nullptr;
     };

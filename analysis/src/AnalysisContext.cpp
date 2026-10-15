@@ -66,7 +66,7 @@ namespace heimdall
 			[](std::size_t value, const Token& token)
 			{
 				return value < token.offset;
-		});
+			});
 		if (found == tokens.begin())
 		{
 			return kNone;

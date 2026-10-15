@@ -135,48 +135,49 @@ TEST(MacroProtocolSpec, LocatesTheNameInsideItsDefineLine)
 
 TEST(MacroProtocolSpec, ExpansionEditReplacesTheWholeInvocation)
 {
-	const std::string text = "#define SQ(x) ((x) * (x))\n#define K 3\nint v = SQ(K + 1);\nint w = K;\n";
-	const auto env         = Environment(text);
+    const std::string text = "#define SQ(x) ((x) * (x))\n#define K 3\nint v = SQ(K + 1);\nint w = K;\n";
+    const auto env = Environment(text);
 
-	const auto call   = IdentifierAt(text, Find(text, "SQ(K"));
-	const auto object = IdentifierAt(text, Find(text, "K;"));
-	const auto callEdit = heimdall::lsp::MacroExpansionForEdit(env, text, *call, *MacroAt(env, text, *call));
-	const auto objectEdit =
-		heimdall::lsp::MacroExpansionForEdit(env, text, *object, *MacroAt(env, text, *object));
+    const auto call = IdentifierAt(text, Find(text, "SQ(K"));
+    const auto object = IdentifierAt(text, Find(text, "K;"));
+    const auto callEdit = heimdall::lsp::MacroExpansionForEdit(env, text, *call,
+        *MacroAt(env, text, *call));
+    const auto objectEdit =
+        heimdall::lsp::MacroExpansionForEdit(env, text, *object, *MacroAt(env, text, *object));
 
-	ASSERT_TRUE(callEdit);
-	EXPECT_EQ(text.substr(callEdit->begin, callEdit->end - callEdit->begin), "SQ(K + 1)");
-	EXPECT_EQ(callEdit->text, "((3 + 1) * (3 + 1))");
-	ASSERT_TRUE(objectEdit);
-	EXPECT_EQ(objectEdit->text, "3");
+    ASSERT_TRUE(callEdit);
+    EXPECT_EQ(text.substr(callEdit->begin, callEdit->end - callEdit->begin), "SQ(K + 1)");
+    EXPECT_EQ(callEdit->text, "((3 + 1) * (3 + 1))");
+    ASSERT_TRUE(objectEdit);
+    EXPECT_EQ(objectEdit->text, "3");
 }
 
 TEST(MacroProtocolSpec, ExpansionEditIsRefusedWhereItWouldBeWrong)
 {
-	const std::string text = "#define F(a, b) a b\n#define G(x) x\nint a = F(1);\nint b = G;\n#if G(1)\n#endif\n";
-	const auto env         = Environment(text);
+    const std::string text = "#define F(a, b) a b\n#define G(x) x\nint a = F(1);\nint b = G;\n#if G(1)\n#endif\n";
+    const auto env = Environment(text);
 
-	const auto wrongArity = IdentifierAt(text, Find(text, "F(1)"));
-	const auto notCalled  = IdentifierAt(text, Find(text, "G;"));
-	const auto directive  = IdentifierAt(text, Find(text, "G(1)"));
+    const auto wrongArity = IdentifierAt(text, Find(text, "F(1)"));
+    const auto notCalled = IdentifierAt(text, Find(text, "G;"));
+    const auto directive = IdentifierAt(text, Find(text, "G(1)"));
 
-	EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *wrongArity,
-		*MacroAt(env, text, *wrongArity)));
-	EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *notCalled,
-		*MacroAt(env, text, *notCalled)));
-	EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *directive,
-		*MacroAt(env, text, *directive)));
+    EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *wrongArity,
+                                                      *MacroAt(env, text, *wrongArity)));
+    EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *notCalled,
+                                                      *MacroAt(env, text, *notCalled)));
+    EXPECT_FALSE(heimdall::lsp::MacroExpansionForEdit(env, text, *directive,
+                                                      *MacroAt(env, text, *directive)));
 }
 
 TEST(MacroProtocolSpec, ExpansionEditKeepsNeighbouringOperatorsApart)
 {
-	const std::string text = "#define NEG -1\nint a = 5 -NEG;\n";
-	const auto env         = Environment(text);
+    const std::string text = "#define NEG -1\nint a = 5 -NEG;\n";
+    const auto env = Environment(text);
 
-	const auto word = IdentifierAt(text, Find(text, "NEG;"));
-	const auto edit =
-		heimdall::lsp::MacroExpansionForEdit(env, text, *word, *MacroAt(env, text, *word));
+    const auto word = IdentifierAt(text, Find(text, "NEG;"));
+    const auto edit =
+        heimdall::lsp::MacroExpansionForEdit(env, text, *word, *MacroAt(env, text, *word));
 
-	ASSERT_TRUE(edit);
-	EXPECT_EQ(edit->text, " -1");
+    ASSERT_TRUE(edit);
+    EXPECT_EQ(edit->text, " -1");
 }

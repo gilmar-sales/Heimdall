@@ -43,8 +43,8 @@ namespace
     {
         const std::string n = std::to_string(index);
         return "int background" + n + "(int param" + n + ")\n{\n    int helper" + n +
-               " = param" + n + " + " + n + ";\n    int local" + n + " = helper" + n +
-               " * 2;\n    return local" + n + " + helper" + n + ";\n}\n";
+            " = param" + n + " + " + n + ";\n    int local" + n + " = helper" + n +
+            " * 2;\n    return local" + n + " + helper" + n + ";\n}\n";
     }
 
     std::string Corpus(int background, int uses)
@@ -60,15 +60,15 @@ namespace
 
     struct Fixture
     {
-        Workspace                          workspace;
-        DocumentId                         id;
+        Workspace workspace;
+        DocumentId id;
         std::shared_ptr<const std::string> source;
-        std::size_t                        offset = 0;
+        std::size_t offset = 0;
 
         explicit Fixture(std::string text)
-            : source(std::make_shared<const std::string>(std::move(text)))
+        : source(std::make_shared<const std::string>(std::move(text)))
         {
-            id     = *workspace.Open("rename.cpp", source, 1);
+            id = *workspace.Open("rename.cpp", source, 1);
             offset = source->find("targetVar");
         }
 
@@ -83,7 +83,7 @@ namespace
     void BM_RenameLocal(benchmark::State& state)
     {
         Fixture fixture(Corpus(static_cast<int>(state.range(0)), 20));
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         // Warm the snapshot caches so every iteration measures the rename
         // itself, not the first parse/bind of the document.
         if (!RefactoringService::RenameLocal(snapshot, fixture.id, fixture.offset, "renamedValue"))
@@ -108,9 +108,9 @@ namespace
         }
 
         const auto syntax = snapshot.Syntax(fixture.id);
-        state.counters["edits"]   = static_cast<double>(edits);
-        state.counters["tokens"]  = static_cast<double>(syntax->Tokens().size());
-        state.counters["nodes"]   = static_cast<double>(syntax->NodesSoA().size());
+        state.counters["edits"] = static_cast<double>(edits);
+        state.counters["tokens"] = static_cast<double>(syntax->Tokens().size());
+        state.counters["nodes"] = static_cast<double>(syntax->NodesSoA().size());
         state.counters["symbols"] = static_cast<double>(snapshot.Semantic(fixture.id)->Symbols().Size());
         state.SetBytesProcessed(
             static_cast<std::int64_t>(state.iterations() * fixture.source->size()));
@@ -121,7 +121,7 @@ namespace
     void BM_LocalReferences(benchmark::State& state)
     {
         Fixture fixture(Corpus(static_cast<int>(state.range(0)), 20));
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
 
         std::size_t tokens = 0;
         for (auto _ : state)
@@ -146,21 +146,21 @@ namespace
     // (O(file) memmove each); the target is a single reserved pass.
     void BM_PreviewApply(benchmark::State& state)
     {
-        const int   edits_wanted = static_cast<int>(state.range(0));
-        Fixture     fixture(Corpus(2000, 0));
-        auto        snapshot = fixture.Snapshot();
-        const auto& source   = *fixture.source;
+        const int edits_wanted = static_cast<int>(state.range(0));
+        Fixture fixture(Corpus(2000, 0));
+        auto snapshot = fixture.Snapshot();
+        const auto& source = *fixture.source;
 
-        RefactoringPlan plan { "bench", snapshot.Revision(), {} };
-        DocumentEdits   edits { fixture.id, snapshot.Path(fixture.id),
-                                snapshot.Version(fixture.id), fixture.source, {}, {} };
+        RefactoringPlan plan {"bench", snapshot.Revision(), {}};
+        DocumentEdits edits {fixture.id, snapshot.Path(fixture.id),
+            snapshot.Version(fixture.id), fixture.source, {}, {}};
         for (std::size_t pos = source.find("return "), count = 0;
-             pos != std::string::npos && count < static_cast<std::size_t>(edits_wanted);
-             pos = source.find("return ", pos + 1), ++count)
+            pos != std::string::npos && count < static_cast<std::size_t>(edits_wanted);
+            pos = source.find("return ", pos + 1), ++count)
         {
             // Shortening replacement: every applied edit shifts the whole tail,
             // which is O(file) per edit with a naive replace-in-loop apply.
-            edits.edits.push_back({ pos, 6, "return", "ret" });
+            edits.edits.push_back({pos, 6, "return", "ret"});
         }
 
         if (edits.edits.empty())
@@ -230,8 +230,8 @@ namespace
     std::string MemberCorpus(int background, int uses)
     {
         std::string source = "struct Item { int price; int weight; };\n"
-                             "int target(Item item) {\n"
-                             "    int total = item.price;\n";
+            "int target(Item item) {\n"
+            "    int total = item.price;\n";
         for (int i = 0; i < uses; ++i)
         {
             source += "    total += item.price + " + std::to_string(i) + ";\n";
@@ -249,7 +249,7 @@ namespace
     void BM_ExtractVariable(benchmark::State& state)
     {
         Fixture fixture(ExtractCorpus(static_cast<int>(state.range(0))));
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("1 + 2");
         if (offset == std::string::npos)
         {
@@ -286,7 +286,7 @@ namespace
     void BM_InlineVariable(benchmark::State& state)
     {
         Fixture fixture(InlineCorpus(static_cast<int>(state.range(0))));
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("value");
         if (offset == std::string::npos)
         {
@@ -322,8 +322,8 @@ namespace
     void BM_ExtractFunction(benchmark::State& state)
     {
         Fixture fixture(ExtractFunctionCorpus(static_cast<int>(state.range(0))));
-        auto    snapshot = fixture.Snapshot();
-        const auto found  = fixture.source->find("return 42");
+        auto snapshot = fixture.Snapshot();
+        const auto found = fixture.source->find("return 42");
         if (found == std::string::npos)
         {
             state.SkipWithError("extract-function site not found");
@@ -363,7 +363,7 @@ namespace
     void BM_RenameMember(benchmark::State& state)
     {
         Fixture fixture(MemberCorpus(static_cast<int>(state.range(0)), 20));
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("price");
         if (offset == std::string::npos)
         {
@@ -403,14 +403,14 @@ namespace
     void BM_RenameCrossFile(benchmark::State& state)
     {
         Workspace workspace;
-        auto      impl = workspace.Open("impl.cpp",
-             std::make_shared<const std::string>("int cross_add(int a, int b) { return a + b; }"),
-             1);
-        auto      caller = workspace.Open("caller.cpp",
-             std::make_shared<const std::string>(
-                 "int cross_add(int a, int b);\nint run() { return cross_add(1, 2); }"),
-             1);
-        if (!impl || !caller)
+        auto impl = workspace.Open("impl.cpp",
+            std::make_shared<const std::string>("int cross_add(int a, int b) { return a + b; }"),
+            1);
+        auto caller = workspace.Open("caller.cpp",
+            std::make_shared<const std::string>(
+            "int cross_add(int a, int b);\nint run() { return cross_add(1, 2); }"),
+            1);
+        if (!impl ||!caller)
         {
             state.SkipWithError("workspace open failed");
             return;
@@ -425,16 +425,16 @@ namespace
             }
 
             if (!workspace.Open("background" + std::to_string(i) + ".cpp",
-                    std::make_shared<const std::string>(std::move(background)), 1))
+                                std::make_shared<const std::string>(std::move(background)), 1))
             {
                 state.SkipWithError("background open failed");
                 return;
             }
         }
 
-        auto       snapshot = workspace.Snapshot();
-        const auto source   = snapshot.Source(*impl);
-        const auto offset   = source->find("cross_add");
+        auto snapshot = workspace.Snapshot();
+        const auto source = snapshot.Source(*impl);
+        const auto offset = source->find("cross_add");
         if (!RefactoringService::RenameLocal(snapshot, *impl, offset, "cross_sum"))
         {
             state.SkipWithError("cross-file rename failed on warmup");
@@ -442,7 +442,7 @@ namespace
         }
 
         std::size_t documents = 0;
-        std::size_t edits     = 0;
+        std::size_t edits = 0;
         for (auto _ : state)
         {
             auto plan = RefactoringService::RenameLocal(snapshot, *impl, offset, "cross_sum");
@@ -453,7 +453,7 @@ namespace
             }
 
             documents = plan->documents.size();
-            edits     = 0;
+            edits = 0;
             for (const auto& renamed : plan->documents)
             {
                 edits += renamed.edits.size();
@@ -463,7 +463,7 @@ namespace
         }
 
         state.counters["documents"] = static_cast<double>(documents);
-        state.counters["edits"]     = static_cast<double>(edits);
+        state.counters["edits"] = static_cast<double>(edits);
     }
 
     void BM_InlineFunction(benchmark::State& state)
@@ -476,9 +476,9 @@ namespace
             source += BackgroundFunction(i);
         }
 
-        Fixture     fixture(std::move(source));
-        auto        snapshot = fixture.Snapshot();
-        const auto  offset   = fixture.source->find("twice(x)");
+        Fixture fixture(std::move(source));
+        auto snapshot = fixture.Snapshot();
+        const auto offset = fixture.source->find("twice(x)");
         if (offset == std::string::npos)
         {
             state.SkipWithError("inline site not found");
@@ -510,19 +510,19 @@ namespace
     void BM_ExtractStatements(benchmark::State& state)
     {
         std::string source = "int statements_target(int x) {\n"
-                             "    int a = x + 1;\n"
-                             "    int b = a * 2;\n"
-                             "    return b;\n"
-                             "}\n";
+            "    int a = x + 1;\n"
+            "    int b = a * 2;\n"
+            "    return b;\n"
+            "}\n";
         for (int i = 0; i < static_cast<int>(state.range(0)); ++i)
         {
             source += BackgroundFunction(i);
         }
 
-        Fixture    fixture(std::move(source));
-        auto       snapshot = fixture.Snapshot();
-        const auto start    = fixture.source->find("int a");
-        const auto end      = fixture.source->find("return b");
+        Fixture fixture(std::move(source));
+        auto snapshot = fixture.Snapshot();
+        const auto start = fixture.source->find("int a");
+        const auto end = fixture.source->find("return b");
         if (start == std::string::npos || end == std::string::npos || end <= start)
         {
             state.SkipWithError("statement range not found");
@@ -560,9 +560,9 @@ namespace
             source += BackgroundFunction(i);
         }
 
-        Fixture    fixture(std::move(source));
-        auto       snapshot = fixture.Snapshot();
-        const auto offset   = fixture.source->find("42");
+        Fixture fixture(std::move(source));
+        auto snapshot = fixture.Snapshot();
+        const auto offset = fixture.source->find("42");
         if (offset == std::string::npos)
         {
             state.SkipWithError("constant site not found");
@@ -601,9 +601,9 @@ namespace
             source += BackgroundFunction(i);
         }
 
-        Fixture    fixture(std::move(source));
-        auto       snapshot = fixture.Snapshot();
-        const auto offset   = fixture.source->find("value + 1");
+        Fixture fixture(std::move(source));
+        auto snapshot = fixture.Snapshot();
+        const auto offset = fixture.source->find("value + 1");
         if (offset == std::string::npos)
         {
             state.SkipWithError("method site not found");
@@ -636,14 +636,14 @@ namespace
     void BM_AddParameter(benchmark::State& state)
     {
         Workspace workspace;
-        auto      impl = workspace.Open("impl.cpp",
-             std::make_shared<const std::string>("int bench_add(int a, int b) { return a + b; }"),
-             1);
-        auto      caller = workspace.Open("caller.cpp",
-             std::make_shared<const std::string>(
-                 "int bench_add(int a, int b);\nint run() { return bench_add(1, 2); }"),
-             1);
-        if (!impl || !caller)
+        auto impl = workspace.Open("impl.cpp",
+            std::make_shared<const std::string>("int bench_add(int a, int b) { return a + b; }"),
+            1);
+        auto caller = workspace.Open("caller.cpp",
+            std::make_shared<const std::string>(
+            "int bench_add(int a, int b);\nint run() { return bench_add(1, 2); }"),
+            1);
+        if (!impl ||!caller)
         {
             state.SkipWithError("workspace open failed");
             return;
@@ -658,16 +658,16 @@ namespace
             }
 
             if (!workspace.Open("background" + std::to_string(i) + ".cpp",
-                    std::make_shared<const std::string>(std::move(background)), 1))
+                                std::make_shared<const std::string>(std::move(background)), 1))
             {
                 state.SkipWithError("background open failed");
                 return;
             }
         }
 
-        auto       snapshot = workspace.Snapshot();
-        const auto source   = snapshot.Source(*impl);
-        const auto offset   = source->find("bench_add(int");
+        auto snapshot = workspace.Snapshot();
+        const auto source = snapshot.Source(*impl);
+        const auto offset = source->find("bench_add(int");
         if (!RefactoringService::AddParameter(snapshot, *impl, offset, "int", "c", "0"))
         {
             state.SkipWithError("add-parameter failed on warmup");
@@ -703,9 +703,9 @@ namespace
             source += BackgroundFunction(i);
         }
 
-        Fixture    fixture(std::move(source));
-        auto       snapshot = fixture.Snapshot();
-        const auto offset   = fixture.source->find("move_target(int");
+        Fixture fixture(std::move(source));
+        auto snapshot = fixture.Snapshot();
+        const auto offset = fixture.source->find("move_target(int");
         if (offset == std::string::npos)
         {
             state.SkipWithError("move site not found");
@@ -740,9 +740,10 @@ namespace
     // (plus RefactoringSpec) needs updating — hence the loud skip.
     void BM_RenameRejectsLambda(benchmark::State& state)
     {
-        Fixture fixture("int f() { int candidate = 1; auto g = [candidate]() { return "
-                        "candidate + 1; }; return g(); }\n");
-        auto    snapshot = fixture.Snapshot();
+        Fixture fixture(
+            "int f() { int candidate = 1; auto g = [candidate]() { return "
+            "candidate + 1; }; return g(); }\n");
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("candidate");
         for (auto _ : state)
         {
@@ -761,7 +762,7 @@ namespace
     void BM_RenameRejectsTemplate(benchmark::State& state)
     {
         Fixture fixture("template<class T> T f(T candidate) { return candidate; }\n");
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("candidate");
         for (auto _ : state)
         {
@@ -780,7 +781,7 @@ namespace
     void BM_ExtractRejectsMacro(benchmark::State& state)
     {
         Fixture fixture("#define LIMIT 100\nint f() { return 1 + 2; }\n");
-        auto    snapshot = fixture.Snapshot();
+        auto snapshot = fixture.Snapshot();
         const auto offset = fixture.source->find("1 + 2");
         for (auto _ : state)
         {

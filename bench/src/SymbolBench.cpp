@@ -25,7 +25,7 @@ namespace
     using heimdall::lsp::WorkspaceSymbolIndex;
 
     constexpr std::size_t kSymbolsPerFile = 40;
-    constexpr std::size_t kStbLines       = 20000;
+    constexpr std::size_t kStbLines = 20000;
 
     // A header-sized synthetic file: a namespace with a few types and free functions, so the
     // vocabulary (and therefore the match rate of a query) is spread over many files.
@@ -36,8 +36,8 @@ namespace
         {
             const std::string suffix = std::to_string(file) + "_" + std::to_string(i);
             source += "struct Widget" + suffix + "\n{\n    int count" + suffix + ";\n" +
-                      "    void Run" + suffix + "(int times) const;\n" +
-                      "    static int Create" + suffix + "();\n};\n";
+                "    void Run" + suffix + "(int times) const;\n" +
+                "    static int Create" + suffix + "();\n};\n";
         }
 
         source += "}\n";
@@ -80,16 +80,16 @@ namespace
         }
 
         const heimdall::ParseTree tree = heimdall::ParseTree::Parse(*document);
-        std::size_t symbols            = 0;
+        std::size_t symbols = 0;
         for (auto _ : state)
         {
             auto outline = heimdall::SymbolOutline::Extract(tree);
-            symbols      = outline.size();
+            symbols = outline.size();
             benchmark::DoNotOptimize(outline);
         }
 
-        state.counters["symbols"]     = static_cast<double>(symbols);
-        state.counters["lines"]       = static_cast<double>(heimdall::bench::CountLines(*document));
+        state.counters["symbols"] = static_cast<double>(symbols);
+        state.counters["lines"] = static_cast<double>(heimdall::bench::CountLines(*document));
         state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations() * document->size()));
     }
 
@@ -105,7 +105,7 @@ namespace
         for (auto _ : state)
         {
             const heimdall::ParseTree tree = heimdall::ParseTree::Parse(*document);
-            auto outline                   = heimdall::SymbolOutline::Extract(tree);
+            auto outline = heimdall::SymbolOutline::Extract(tree);
             benchmark::DoNotOptimize(outline);
         }
 
@@ -122,7 +122,7 @@ namespace
         }
 
         const heimdall::ParseTree tree = heimdall::ParseTree::Parse(*document);
-        const auto outline             = heimdall::SymbolOutline::Extract(tree);
+        const auto outline = heimdall::SymbolOutline::Extract(tree);
         for (auto _ : state)
         {
             LineIndex lines;
@@ -135,7 +135,7 @@ namespace
     void BM_ReplaceOpenBuffer(benchmark::State& state)
     {
         const std::size_t files = static_cast<std::size_t>(state.range(0));
-        auto& index             = SyntheticIndex(files);
+        auto& index = SyntheticIndex(files);
         const IndexedFilePtr buffer = IndexSource(1);
         for (auto _ : state)
         {
@@ -148,34 +148,47 @@ namespace
     void BM_Query(benchmark::State& state, std::string_view query)
     {
         const std::size_t files = static_cast<std::size_t>(state.range(0));
-        const auto& index       = SyntheticIndex(files);
-        std::size_t hits        = 0;
+        const auto& index = SyntheticIndex(files);
+        std::size_t hits = 0;
         for (auto _ : state)
         {
             auto result = index.Query(query);
-            hits        = result.size();
+            hits = result.size();
             benchmark::DoNotOptimize(result);
         }
 
-        state.counters["files"]   = static_cast<double>(files);
+        state.counters["files"] = static_cast<double>(files);
         state.counters["symbols"] = static_cast<double>(files * (kSymbolsPerFile + 1));
-        state.counters["hits"]    = static_cast<double>(hits);
+        state.counters["hits"] = static_cast<double>(hits);
     }
 
 } // namespace
 
 BENCHMARK(BM_ExtractOutlineStb20k)->Unit(benchmark::kMillisecond);
+
 BENCHMARK(BM_ParseAndExtractStb20k)->Unit(benchmark::kMillisecond);
+
 BENCHMARK(BM_BuildIndexedFileStb20k)->Unit(benchmark::kMillisecond);
+
 BENCHMARK(BM_ReplaceOpenBuffer)->Arg(1000)->Arg(20000)->Unit(benchmark::kMicrosecond);
+
 BENCHMARK_CAPTURE(BM_Query, Substring, "widget1")
-    ->Arg(1000)
-    ->Arg(5000)
-    ->Arg(20000)
-    ->Unit(benchmark::kMillisecond);
+->Arg(1000)
+->Arg(
+    5000)
+->Arg(
+    20000)
+->Unit(
+    benchmark::kMillisecond);
+
 BENCHMARK_CAPTURE(BM_Query, ShortQuery, "w")->Arg(1000)->Arg(20000)->Unit(benchmark::kMillisecond);
+
 BENCHMARK_CAPTURE(BM_Query, Qualified, "module5::widget5_1")
-    ->Arg(1000)
-    ->Arg(20000)
-    ->Unit(benchmark::kMillisecond);
+->Arg(
+    1000)
+->Arg(
+    20000)
+->Unit(
+    benchmark::kMillisecond);
+
 BENCHMARK_CAPTURE(BM_Query, NoMatch, "zzzzq")->Arg(1000)->Arg(20000)->Unit(benchmark::kMillisecond);

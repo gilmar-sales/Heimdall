@@ -80,7 +80,7 @@ namespace heimdall
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 		return diagnostics;
 	}
 } // namespace heimdall

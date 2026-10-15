@@ -105,8 +105,8 @@ namespace
         for (auto _ : state)
         {
             const auto snapshot = idx::IndexSnapshot::Build(shards);
-			auto* resolution = &snapshot->Resolved(static_cast<std::uint32_t>(shards.size()) - 1);
-			benchmark::DoNotOptimize(resolution);
+            auto* resolution = &snapshot->Resolved(static_cast<std::uint32_t>(shards.size()) - 1);
+            benchmark::DoNotOptimize(resolution);
         }
     }
 
@@ -139,58 +139,67 @@ namespace
 
     BENCHMARK(ReferencesQuery)->Arg(50)->Arg(250);
 
-	void RenameAndPreview(benchmark::State& state)
-	{
-		const auto headers = static_cast<int>(state.range(0));
-		constexpr int kSourcesPerHeader = 4;
-		std::map<std::string, std::shared_ptr<const std::string>> documents;
-		for (int i = 0; i < headers; ++i)
-		{
-			documents.emplace("h" + std::to_string(i) + ".hpp", std::make_shared<const std::string>(HeaderText(i)));
-		}
-		for (int i = 0; i < headers * kSourcesPerHeader; ++i)
-		{
-			documents.emplace("s" + std::to_string(i) + ".cpp", std::make_shared<const std::string>(SourceText(i, headers)));
-		}
-		std::vector<std::shared_ptr<const idx::FileShard>> shards;
-		shards.reserve(documents.size());
-		for (const auto& [path, source] : documents)
-		{
-			shards.push_back(Make(path, *source));
-		}
-		const auto snapshot = idx::IndexSnapshot::Build(std::move(shards));
-		heimdall::IndexRenameContext context;
-		context.complete = true;
-		context.document = [&documents](const std::string& path) -> std::optional<heimdall::IndexedDocument>
-		{
-			const auto found = documents.find(path);
-			if (found == documents.end())
-			{
-				return std::nullopt;
-			}
-			heimdall::IndexedDocument document;
-			document.text = found->second;
-			return document;
-		};
-		const auto offset = documents.at("h0.hpp")->find("T0");
-		for (auto _ : state)
-		{
-			const auto plan = heimdall::IndexRename::Rename(*snapshot, "h0.hpp", offset, "RenamedT0", context);
-			if (!plan)
-			{
-				state.SkipWithError(plan.error().message.c_str());
-				break;
-			}
-			const auto preview = heimdall::IndexRename::Preview(*snapshot, *plan, context);
-			if (!preview)
-			{
-				state.SkipWithError(preview.error().message.c_str());
-				break;
-			}
-			benchmark::DoNotOptimize(preview->data());
-		}
-		state.counters["shards"] = static_cast<double>(documents.size());
-	}
+    void RenameAndPreview(benchmark::State& state)
+    {
+        const auto headers = static_cast<int>(state.range(0));
+        constexpr int kSourcesPerHeader = 4;
+        std::map<std::string, std::shared_ptr<const std::string>> documents;
+        for (int i = 0; i < headers; ++i)
+        {
+            documents.emplace("h" + std::to_string(i) + ".hpp",
+                              std::make_shared<const std::string>(HeaderText(i)));
+        }
 
-	BENCHMARK(RenameAndPreview)->Arg(25)->Arg(100);
+        for (int i = 0; i < headers * kSourcesPerHeader; ++i)
+        {
+            documents.emplace("s" + std::to_string(i) + ".cpp",
+                              std::make_shared<const std::string>(SourceText(i, headers)));
+        }
+
+        std::vector<std::shared_ptr<const idx::FileShard>> shards;
+        shards.reserve(documents.size());
+        for (const auto& [path, source] : documents)
+        {
+            shards.push_back(Make(path, *source));
+        }
+
+        const auto snapshot = idx::IndexSnapshot::Build(std::move(shards));
+        heimdall::IndexRenameContext context;
+        context.complete = true;
+        context.document = [&documents](const std::string& path)->std::optional<heimdall::IndexedDocument>
+        {
+            const auto found = documents.find(path);
+            if (found == documents.end())
+            {
+                return std::nullopt;
+            }
+
+            heimdall::IndexedDocument document;
+            document.text = found->second;
+            return document;
+        };
+        const auto offset = documents.at("h0.hpp")->find("T0");
+        for (auto _ : state)
+        {
+            const auto plan = heimdall::IndexRename::Rename(*snapshot, "h0.hpp", offset, "RenamedT0", context);
+            if (!plan)
+            {
+                state.SkipWithError(plan.error().message.c_str());
+                break;
+            }
+
+            const auto preview = heimdall::IndexRename::Preview(*snapshot, *plan, context);
+            if (!preview)
+            {
+                state.SkipWithError(preview.error().message.c_str());
+                break;
+            }
+
+            benchmark::DoNotOptimize(preview->data());
+        }
+
+        state.counters["shards"] = static_cast<double>(documents.size());
+    }
+
+    BENCHMARK(RenameAndPreview)->Arg(25)->Arg(100);
 } // namespace

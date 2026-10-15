@@ -71,7 +71,9 @@ namespace heimdall
 		// Names the binder does not record as references: type uses, and members
 		// reached through a receiver (`a.name`, `a->name`).
 		SymbolId ResolveByContext(
-			const SemanticModel& model, const TypeModel& types, std::uint32_t token)
+			const SemanticModel& model,
+			const TypeModel& types,
+			std::uint32_t token)
 		{
 			const auto& sig = model.Significant();
 			const auto at   = std::ranges::lower_bound(sig, token);
@@ -119,7 +121,9 @@ namespace heimdall
 	}
 
 	SymbolId TypeHierarchy::FindClassAt(
-		const SemanticModel& model, const TypeModel& types, std::uint32_t token)
+		const SemanticModel& model,
+		const TypeModel& types,
+		std::uint32_t token)
 	{
 		const auto& symbols = model.Symbols();
 		SymbolId symbol     = model.ResolveToken(token);
@@ -138,7 +142,7 @@ namespace heimdall
 			return kNone;
 		}
 
-		const auto ownerClass =[&](SymbolId member)
+		const auto ownerClass = [&](SymbolId member)
 		{
 			const auto scope = symbols.scope[member];
 			return scope < model.Scopes().Size() && model.Scopes().kind[scope] == ScopeKind::Class

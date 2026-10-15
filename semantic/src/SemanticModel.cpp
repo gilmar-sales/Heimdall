@@ -49,7 +49,8 @@ namespace heimdall
 	SymbolTable::SymbolTable(std::pmr::memory_resource* resource) :
 		name(resource), scope(resource), kind(resource), flags(resource), access(resource),
 		decl_token(resource),
-		decl_node(resource), member_scope(resource), signature(resource), signatureText(resource), first_base(resource),
+		decl_node(resource), member_scope(resource), signature(resource), signatureText(resource),
+		first_base(resource),
 		base_count(resource), next_same_name(resource) {}
 
 	ScopeTable::ScopeTable(std::pmr::memory_resource* resource) :

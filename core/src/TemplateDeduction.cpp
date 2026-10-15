@@ -334,7 +334,7 @@ namespace heimdall
 					{
 						reflectedSource += word;
 						reflectedSource += ' ';
-				});
+					});
 
 				reflectedSource += ';';
 				ParserOptions options;
@@ -405,7 +405,7 @@ namespace heimdall
 					[&](const auto& item)
 					{
 						return item.kind == CompletionKind::Variable && item.label == words[index + 1];
-				});
+					});
 				if (member == record->members.end())
 				{
 					return {};

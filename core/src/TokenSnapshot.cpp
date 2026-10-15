@@ -206,7 +206,7 @@ namespace heimdall
 		compact.copiedTokens = storage.copiedTokens;
 		std::vector<Token> pending;
 		pending.reserve(kBlockTokens);
-		const auto flush =[&]
+		const auto flush = [&]
 		{
 			AppendTokens(compact, pending);
 			pending.clear();

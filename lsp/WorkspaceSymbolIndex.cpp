@@ -83,7 +83,7 @@ namespace heimdall::lsp
 				std::ranges::equal(needle, text,[](char a, char b)
 				{
 					return a == Lower(b);
-			});
+				});
 		}
 
 		[[nodiscard]] bool PrefixInsensitive(
@@ -364,7 +364,7 @@ namespace heimdall::lsp
 		std::erase_if(mDisk,[&](const auto& entry)
 			{
 				return entry.first == key || entry.first.starts_with(folder);
-		});
+			});
 	}
 
 	void WorkspaceSymbolIndex::SetOpen(const std::string& key, IndexedFilePtr file)
@@ -436,7 +436,7 @@ namespace heimdall::lsp
 			}
 		}
 
-		const auto before =[&files](const Candidate& a, const Candidate& b)
+		const auto before = [&files](const Candidate& a, const Candidate& b)
 		{
 			if (a.key != b.key)
 			{
@@ -468,7 +468,7 @@ namespace heimdall::lsp
 		// worst one kept costs a single comparison, however many symbols match.
 		std::vector<Candidate> candidates;
 		candidates.reserve(std::min<std::size_t>(limit, kReserveCap) + 1);
-		const auto consider =[&](int rank, std::size_t fileIndex, std::size_t index,
+		const auto consider = [&](int rank, std::size_t fileIndex, std::size_t index,
 			std::size_t nameLength)
 		{
 			const Candidate candidate

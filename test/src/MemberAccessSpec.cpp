@@ -17,7 +17,7 @@ namespace
         std::erase_if(diagnostics,[](const auto& diagnostic)
             {
                 return diagnostic.code != "cpp/dot-on-pointer";
-        });
+            });
         return diagnostics;
     }
 }

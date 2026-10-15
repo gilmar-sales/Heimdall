@@ -26,7 +26,7 @@ namespace
         MacroScanCallbacks Callbacks()
         {
             MacroScanCallbacks callbacks;
-            callbacks.include =[this](const IncludeRequest& request)
+            callbacks.include = [this](const IncludeRequest& request)
             {
                 const auto it = headers.find(request.header);
                 if (it == headers.end())
@@ -38,7 +38,7 @@ namespace
                 (void) MacroScanner::Scan(it->second, request.header, *table, Callbacks());
                 return true;
             };
-            callbacks.hasInclude =[this](const IncludeRequest& request)
+            callbacks.hasInclude = [this](const IncludeRequest& request)
             {
                 return headers.contains(request.header);
             };

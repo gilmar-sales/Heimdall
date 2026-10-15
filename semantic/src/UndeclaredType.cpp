@@ -14,7 +14,7 @@ namespace heimdall
 		const auto& tokens  = tree.Tokens();
 		const auto& nodes   = tree.NodesSoA();
 		const auto& symbols = model.Symbols();
-		const auto equalIgnoringCase =[](std::string_view left, std::string_view right)
+		const auto equalIgnoringCase = [](std::string_view left, std::string_view right)
 		{
 			if (left.size() != right.size())
 			{
@@ -32,7 +32,7 @@ namespace heimdall
 
 			return true;
 		};
-		const auto nextSignificant =[&](std::size_t token)
+		const auto nextSignificant = [&](std::size_t token)
 		{
 			while (token < tokens.size() &&
 				(tokens[token].kind == TokenKind::Whitespace ||

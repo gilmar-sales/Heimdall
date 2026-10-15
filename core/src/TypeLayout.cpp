@@ -229,7 +229,7 @@ namespace heimdall
 				return std::nullopt;
 			}
 
-			const auto of =[](std::uint64_t size, std::uint64_t align = 0)
+			const auto of = [](std::uint64_t size, std::uint64_t align = 0)
 			{
 				return TypeLayout {size, align == 0 ? size : align, false};
 			};
@@ -356,7 +356,7 @@ namespace heimdall
 
 	LayoutTarget LayoutTarget::FromMacros(const Preprocessor::MacroMap& macros)
 	{
-		const auto has =[&](std::string_view name)
+		const auto has = [&](std::string_view name)
 		{
 			return macros.find(name) != macros.end();
 		};
@@ -473,7 +473,7 @@ namespace heimdall
 					[](const std::string& element)
 					{
 						return element.empty();
-				}))
+					}))
 				{
 					continue;
 				}
@@ -1022,7 +1022,7 @@ namespace heimdall
 			[](const CompletionItem* left, const CompletionItem* right)
 			{
 				return left->offset < right->offset;
-		});
+			});
 		for (const CompletionItem* field : fields)
 		{
 			const auto layout = OfTypeImpl(field->layout_type, scope->path, true, depth + 1);

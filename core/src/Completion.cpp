@@ -320,12 +320,12 @@ namespace heimdall
 			map.ForEach([&](std::uint32_t, const CompletionItem& value)
 				{
 					sorted.push_back(&value);
-			});
+				});
 			std::sort(sorted.begin(), sorted.end(),
 				[](const CompletionItem* left, const CompletionItem* right)
 				{
 					return left->label < right->label;
-			});
+				});
 			std::vector<CompletionItem> items;
 			items.reserve(sorted.size());
 			for (const CompletionItem* item : sorted)
@@ -345,17 +345,17 @@ namespace heimdall
 			map.ForEach([&](std::uint32_t key, const CompletionItem& value)
 				{
 					items.push_back(value);
-			});
+				});
 			std::sort(items.begin(), items.end(),
 				[&](const CompletionItem& left, const CompletionItem& right)
 				{
 					if (left.label != right.label)
 					{
 						return left.label < right.label;
-				}
+					}
 
 					return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-			});
+				});
 			return items;
 		}
 
@@ -599,15 +599,15 @@ namespace heimdall
 
 			const char previous = name[at - 1];
 			const char current  = name[at];
-			const auto is_lower =[](char c)
+			const auto is_lower = [](char c)
 			{
 				return c >= 'a' && c <= 'z';
 			};
-			const auto is_upper =[](char c)
+			const auto is_upper = [](char c)
 			{
 				return c >= 'A' && c <= 'Z';
 			};
-			const auto is_digit =[](char c)
+			const auto is_digit = [](char c)
 			{
 				return c >= '0' && c <= '9';
 			};
@@ -763,7 +763,7 @@ namespace heimdall
 				[](const auto& left, const auto& right)
 				{
 					return left.first > right.first;
-			});
+				});
 			items.clear();
 			for (auto& [quality, item] : ranked)
 			{
@@ -911,7 +911,7 @@ namespace heimdall
 				True
 			};
 
-			const auto evaluate =[](std::string_view condition)
+			const auto evaluate = [](std::string_view condition)
 			{
 				while (!condition.empty() && (condition.front() == ' ' || condition.front() == '\t'))
 				{
@@ -1008,7 +1008,7 @@ namespace heimdall
 			return std::any_of(frames.begin(), frames.end(),[](const Frame& frame)
 				{
 					return !frame.active;
-			});
+				});
 		}
 
 		// `int na|`: the word being typed names a new variable or parameter.
@@ -1236,7 +1236,7 @@ namespace heimdall
 				return parameters;
 			}
 
-			const auto trim =[](std::string_view text)
+			const auto trim = [](std::string_view text)
 			{
 				while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
 				{
@@ -1250,7 +1250,7 @@ namespace heimdall
 
 				return text;
 			};
-			const auto add =[&](std::string_view parameter)
+			const auto add = [&](std::string_view parameter)
 			{
 				const std::string_view whole = trim(parameter);
 				int depth                    = 0;
@@ -1743,11 +1743,11 @@ namespace heimdall
 				significant.push_back(i);
 			}
 
-			auto text =[&](std::size_t token)->std::string_view
+			auto text = [&](std::size_t token)->std::string_view
 			{
 				return tree.Text(tree.Tokens()[token]);
 			};
-			auto is_identifier =[&](std::size_t token)
+			auto is_identifier = [&](std::size_t token)
 			{
 				return tree.Tokens()[token].kind == TokenKind::Identifier;
 			};
@@ -1809,7 +1809,7 @@ namespace heimdall
 				}
 
 				// `class [[nodiscard]] name`, `struct alignas(8) name`, `__attribute__((...))`.
-				const auto count_of =[&](std::string_view piece, char bracket)
+				const auto count_of = [&](std::string_view piece, char bracket)
 				{
 					return !piece.empty() &&
 						piece.find_first_not_of(bracket) == std::string_view::npos
@@ -2027,7 +2027,7 @@ namespace heimdall
 				std::erase_if(out,[&](const NamespaceAlias& existing)
 					{
 						return existing.name == alias.name;
-				});
+					});
 				out.push_back(std::move(alias));
 				t = end;
 			}
@@ -2223,10 +2223,10 @@ namespace heimdall
 					if (left.start != right.start)
 					{
 						return left.start < right.start;
-				}
+					}
 
 					return left.end > right.end;
-			});
+				});
 			return intervals;
 		}
 
@@ -2409,7 +2409,7 @@ namespace heimdall
 					[](const ScopeInterval& left, const ScopeInterval& right)
 					{
 						return left.start < right.start;
-				});
+					});
 				for (const auto& interval : hidden)
 				{
 					if (!mMerged.empty() && interval.start <= mMerged.back().end)
@@ -2428,7 +2428,7 @@ namespace heimdall
 					[](std::size_t value, const ScopeInterval& interval)
 					{
 						return value < interval.start;
-				});
+					});
 				return after != mMerged.begin() && offset < std::prev(after) -> end;
 			}
 
@@ -2550,13 +2550,13 @@ namespace heimdall
 				words.push_back({TokenText(source, token), token.offset, i});
 			}
 
-			auto is_word =[](std::string_view value)
+			auto is_word = [](std::string_view value)
 			{
 				return !value.empty() && IsIdentStart(value.front());
 			};
 			for (std::size_t i = 0; i < words.size(); ++i)
 			{
-				auto emit =[&](std::size_t index, std::string_view intro,
+				auto emit = [&](std::size_t index, std::string_view intro,
 					std::size_t intro_token)
 				{
 					if (index < words.size() && is_word(words[index].text))
@@ -3215,7 +3215,7 @@ namespace heimdall
 						std::none_of(content.begin(), content.end(),[](char c)
 						{
 							return IsIdentChar(c) || c == ' ';
-					});
+						});
 					if (ruler || total + content.size() > kCap)
 					{
 						break;
@@ -3490,7 +3490,7 @@ namespace heimdall
 			const std::size_t end =
 				std::min<std::size_t>(nodes.FirstToken(wrapper) + nodes.TokenCount(wrapper),
 				tokens.size());
-			const auto text =[&](std::size_t i)
+			const auto text = [&](std::size_t i)
 			{
 				return tree.Text(tokens[i]);
 			};
@@ -3674,7 +3674,7 @@ namespace heimdall
 				return {};
 			}
 
-			const auto trivia =[&](std::size_t i)
+			const auto trivia = [&](std::size_t i)
 			{
 				return tokens[i].kind == TokenKind::Whitespace ||
 					tokens[i].kind == TokenKind::LineComment ||
@@ -3702,7 +3702,7 @@ namespace heimdall
 
 			std::string dims;
 			std::size_t k = name + 1;
-			const auto skip_trivia =[&]
+			const auto skip_trivia = [&]
 			{
 				while (k < tokens.size() && trivia(k))
 				{
@@ -4701,7 +4701,7 @@ namespace heimdall
 			const std::size_t end =
 				std::min<std::size_t>(grammar.GetFirstToken() + grammar.GetTokenCount(),
 				tokens.size());
-			const auto significant_after =[&](std::size_t t)
+			const auto significant_after = [&](std::size_t t)
 			{
 				std::size_t next = t + 1;
 				while (next < end && (tokens[next].kind == TokenKind::Whitespace ||
@@ -4974,7 +4974,7 @@ namespace heimdall
 			return {};
 		}
 
-		auto significant =[&](std::size_t t)
+		auto significant = [&](std::size_t t)
 		{
 			while (++t < tokens.size())
 			{
@@ -5056,7 +5056,7 @@ namespace heimdall
 		ScopeIndex index;
 
 		std::unordered_map<std::string, std::size_t> entry_pos;
-		auto path_key =[](const std::vector<std::string>& path)
+		auto path_key = [](const std::vector<std::string>& path)
 		{
 			std::string key;
 			for (const auto& element : path)
@@ -5520,10 +5520,10 @@ namespace heimdall
 					if (left.label != right.label)
 					{
 						return left.label < right.label;
-				}
+					}
 
 					return static_cast<int>(left.kind) < static_cast<int>(right.kind);
-			});
+				});
 			// Merge same (label, kind) duplicates, keeping documentation. Function
 			// overloads (different parameter types) stay separate entries.
 			std::vector<CompletionItem> merged;
@@ -6016,7 +6016,7 @@ namespace heimdall
 				nominated.ForEach([&](std::uint32_t, const CompletionItem& item)
 					{
 						InsertItem(interner, best, item);
-				});
+					});
 				CollectUsingMembers(tree, source, tokens, scope_paths, target, prefix, external,
 					interner, best, depth + 1);
 			}
@@ -6063,8 +6063,8 @@ namespace heimdall
 						if (item.label == declaration.name)
 						{
 							InsertItem(interner, best, item);
-					}
-				});
+						}
+					});
 			}
 		}
 
@@ -6344,7 +6344,7 @@ namespace heimdall
 				return false;
 			} // unknown qualifier (`std::`): no guesses
 
-			auto is_target =[&](std::size_t node)
+			auto is_target = [&](std::size_t node)
 			{
 				for (const auto target : targets)
 				{
@@ -6534,7 +6534,7 @@ namespace heimdall
 		{
 			TypeName result;
 			const std::vector<Token> toks = Lexer(text).Lex();
-			auto sig =[&](std::size_t k)
+			auto sig = [&](std::size_t k)
 			{
 				while (k < toks.size() && IsTrivia(toks[k].kind))
 				{
@@ -6543,7 +6543,7 @@ namespace heimdall
 
 				return k;
 			};
-			auto txt =[&](std::size_t k)
+			auto txt = [&](std::size_t k)
 			{
 				return text.substr(toks[k].offset, toks[k].length);
 			};
@@ -6990,7 +6990,7 @@ namespace heimdall
 							[&](const auto& member)
 							{
 								return member.file == item.file && member.offset == item.offset && member.label == item.label;
-						});
+							});
 						if (found == scope->members.end())
 						{
 							continue;
@@ -7000,7 +7000,7 @@ namespace heimdall
 						if (std::any_of(overloads.begin(), overloads.end(),[&](const auto& candidate)
 							{
 								return candidate.file != item.file || candidate.offset != item.offset;
-						}))
+							}))
 						{
 							return;
 						}
@@ -7580,7 +7580,7 @@ namespace heimdall
 				std::stable_sort(fields.begin(), fields.end(),[](const auto& left, const auto& right)
 					{
 						return left.offset < right.offset;
-				});
+					});
 				return fields;
 			}
 
@@ -8282,7 +8282,7 @@ namespace heimdall
 								[](const Token& candidate, std::uint32_t offset)
 								{
 									return candidate.offset < offset;
-							});
+								});
 							if (token != m_tokens.end() && token->offset == found.item->offset)
 							{
 								return ResolveInitializerAfter(static_cast<std::size_t>(token - m_tokens.begin()), depth + 1);
@@ -8307,7 +8307,7 @@ namespace heimdall
 								[](const Token& candidate, std::uint32_t offset)
 								{
 									return candidate.offset < offset;
-							});
+								});
 							if (token != m_tokens.end() && token->offset == found.item->offset)
 							{
 								return ResolveInitializerAfter(static_cast<std::size_t>(token - m_tokens.begin()), depth + 1);
@@ -8588,7 +8588,7 @@ namespace heimdall
 							if (std::any_of(overloads.begin(), overloads.end(),[&](const auto& candidate)
 								{
 									return candidate.file != found.item->file || candidate.offset != found.item->offset;
-							}))
+								}))
 							{
 								return {};
 							}
@@ -8651,7 +8651,7 @@ namespace heimdall
 						const auto longs = std::count_if(ending.begin(), ending.end(),[](char character)
 							{
 								return character == 'l' || character == 'L';
-						});
+							});
 						return std::string(unsignedValue ? "unsigned " : "") +(longs >= 2 ? "long long" : longs == 1 ? "long" : "int");
 					}
 
@@ -9510,7 +9510,7 @@ namespace heimdall
 				name                    = angle == NoIndex ? tokens.size() : PreviousSignificant(tokens, angle, source);
 			}
 
-			const auto construct =[&](std::string_view type_text)
+			const auto construct = [&](std::string_view type_text)
 			{
 				const Resolved type = resolver.ResolveTypeText(type_text);
 				if (type.ok)
@@ -9520,7 +9520,7 @@ namespace heimdall
 					callee.functions = resolver.FunctionsNamed(type.path, type.path.back(), false);
 				}
 			};
-			const auto text_between =[&](std::size_t first, std::size_t last)
+			const auto text_between = [&](std::size_t first, std::size_t last)
 			{
 				return std::string_view(source).substr(
 					tokens[first].offset, tokens[last].offset + tokens[last].length -
@@ -9753,7 +9753,7 @@ namespace heimdall
 				auto same = std::find_if(overloads.begin(), overloads.end(),[&](const auto& other)
 					{
 						return ParameterTypesKey(other) == key;
-				});
+					});
 				if (same == overloads.end())
 				{
 					overloads.push_back(function);
@@ -9818,7 +9818,7 @@ namespace heimdall
 
 			// Overloads that cannot take the argument being typed are dropped while
 			// another one can.
-			const auto viable =[&](const SignatureInfo& signature)
+			const auto viable = [&](const SignatureInfo& signature)
 			{
 				return argument < signature.parameters.size() || IsVariadicSignature(signature) ||
 					(argument == 0 && signature.parameters.empty());
@@ -9828,7 +9828,7 @@ namespace heimdall
 				std::erase_if(help.signatures,[&](const SignatureInfo& signature)
 					{
 						return !viable(signature);
-				});
+					});
 			}
 
 			const SignatureInfo& active = help.signatures.front();
@@ -9859,7 +9859,7 @@ namespace heimdall
 
 			const std::string_view declared = item.type_text;
 			const auto at                   = declared.find("auto");
-			const auto is_word =[&](std::size_t i)
+			const auto is_word = [&](std::size_t i)
 			{
 				return i < declared.size() && IsIdentChar(declared[i]);
 			};
@@ -9874,7 +9874,7 @@ namespace heimdall
 				[](const Token& t, std::uint32_t value)
 				{
 					return t.offset < value;
-			});
+				});
 			if (token == tokens.end() || token->offset != item.offset)
 			{
 				return;
@@ -9904,7 +9904,7 @@ namespace heimdall
 
 			// `auto` never deduces a reference; it keeps the function's const only when
 			// the declaration does not add its own (`const auto`) or drop it (plain `auto`).
-			const auto strip =[&](std::string_view part, bool front)
+			const auto strip = [&](std::string_view part, bool front)
 			{
 				if (front ? deduced.starts_with(part) : deduced.ends_with(part))
 				{
@@ -9934,8 +9934,10 @@ namespace heimdall
 		class IndexedTypeNames final : public TypeNameOracle
 		{
 		public:
-			explicit IndexedTypeNames(std::unordered_set<std::string> names) :
-			m_names(std::move(names))
+			explicit IndexedTypeNames(
+				std::unordered_set<std::string> names,
+				std::unordered_map<std::string, std::string> aliases) :
+				m_names(std::move(names)), m_aliases(std::move(aliases))
 			{
 				// Order-independent, so equal indexes have equal fingerprints.
 				for (const auto& name : m_names)
@@ -9951,6 +9953,12 @@ namespace heimdall
 				return m_names.find(std::string(name)) != m_names.end();
 			}
 
+			std::string_view AliasTarget(std::string_view name) const noexcept override
+			{
+				const auto found = m_aliases.find(std::string(name));
+				return found == m_aliases.end() ? std::string_view {}: found->second;
+			}
+
 			std::uint64_t Fingerprint() const noexcept override
 			{
 				return m_fingerprint;
@@ -9958,6 +9966,7 @@ namespace heimdall
 
 		private:
 			std::unordered_set<std::string> m_names;
+			std::unordered_map<std::string, std::string> m_aliases;
 			std::uint64_t m_fingerprint = 0;
 		};
 
@@ -9969,7 +9978,7 @@ namespace heimdall
 		// parent lists it as a Namespace member in the first case and as a Type in the
 		// second. Records list their members as Types too (nested classes, member
 		// aliases): only namespace-level names are visible without a qualifier.
-		const auto key_of =[](const std::vector<std::string>& path, std::string_view last)
+		const auto key_of = [](const std::vector<std::string>& path, std::string_view last)
 		{
 			std::string key;
 			for (const auto& part : path)
@@ -9994,6 +10003,7 @@ namespace heimdall
 		}
 
 		std::unordered_set<std::string> names;
+		std::unordered_map<std::string, std::string> aliases;
 		for (const auto& scope : index)
 		{
 			if (!scope.path.empty() &&
@@ -10009,11 +10019,15 @@ namespace heimdall
 					member.label.front() != '_')
 				{
 					names.insert(member.label);
+					if (!member.type_text.empty())
+					{
+						aliases.try_emplace(member.label, member.type_text);
+					}
 				}
 			}
 		}
 
-		return std::make_shared<const IndexedTypeNames>(std::move(names));
+		return std::make_shared<const IndexedTypeNames>(std::move(names), std::move(aliases));
 	}
 
 	std::string CompletionEngine::PrefixAt(std::string_view source, std::size_t offset)
@@ -10073,7 +10087,8 @@ namespace heimdall
 			if (!std::all_of(inside.begin(), inside.end(),[](char c)
 				{
 					return IsIdentChar(c);
-			}))
+				})
+			)
 			{
 				return result;
 			}
@@ -10188,7 +10203,7 @@ namespace heimdall
 					[&](const CompletionItem& item)
 					{
 						return item.label == label;
-				});
+					});
 				if (seen)
 				{
 					continue;
@@ -10202,7 +10217,7 @@ namespace heimdall
 			std::sort(items.begin(), items.end(),[](const auto& left, const auto& right)
 				{
 					return left.label < right.label;
-			});
+				});
 			return items;
 		}
 	} // namespace
@@ -10331,7 +10346,7 @@ namespace heimdall
 						[](const Token& candidate)
 						{
 							return !IsTrivia(candidate.kind);
-					});
+						});
 					const bool splice = next != tokens.end() && TokenText(source, *next) == ":";
 					frames.emplace_back("]", splice, !splice);
 				}
@@ -10392,28 +10407,28 @@ namespace heimdall
 					(item.kind == CompletionKind::Variable && !item.has_location && item.type_text.empty()))
 					{
 						return !resolver.IsReflectionNamespace(item.label);
-				}
+					}
 
 					if (item.kind != CompletionKind::Variable && item.kind != CompletionKind::Function)
 					{
 						return true;
-				}
+					}
 
 					const auto value = resolver.CompletionValueType(item);
 					if (resolver.HasReflectionIndirection(value))
 					{
 						return true;
-				}
+					}
 
 					const std::vector<std::string> reflectionPath
 					{
 						"std", "meta", "info"
-				};
+					};
 					const auto& text = value.text.empty() ? item.type_text : value.text;
 					return !(IsReflectionValueType(text, resolver) || resolver.HasImplicitReflectionConversion(value) ||
 					(value.ok && value.path == reflectionPath && value.args.empty() &&
 					text.find('*') == std::string::npos && text.find('[') == std::string::npos));
-			});
+				});
 		}
 	}
 
@@ -10665,7 +10680,7 @@ namespace heimdall
 				return std::nullopt;
 			}
 
-			const auto trim =[](std::string_view text)
+			const auto trim = [](std::string_view text)
 			{
 				while (!text.empty() &&
 					(text.front() == ' ' || text.front() == '\t' || text.front() == '\n'))
@@ -10687,7 +10702,7 @@ namespace heimdall
 				!std::all_of(member.begin(), member.end(),[](char c)
 				{
 					return IsIdentChar(c);
-			}))
+				}))
 			{
 				return std::nullopt;
 			}
@@ -10853,7 +10868,7 @@ namespace heimdall
 				[&](std::uint32_t token, std::size_t offset)
 				{
 					return tokens[token].offset < offset;
-			});
+				});
 			if (found == identifiers.end() || tokens[*found].offset != start)
 			{
 				return std::nullopt;

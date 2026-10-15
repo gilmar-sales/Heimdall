@@ -4,7 +4,9 @@
 
 namespace heimdall::detail
 {
-    // Internal native adapter; algorithms remain in semantic, never depend on analysis.
-    std::vector<Diagnostic> AnalyzeSelectedSemantic(
-        const AnalysisContext& context, const RuleEngine& engine, const ProjectContext& project);
+	// Internal native adapter; algorithms remain in semantic, never depend on analysis.
+	std::vector<Diagnostic> AnalyzeSelectedSemantic(
+		const AnalysisContext& context,
+		const RuleEngine& engine,
+		const ProjectContext& project);
 } // namespace heimdall::detail

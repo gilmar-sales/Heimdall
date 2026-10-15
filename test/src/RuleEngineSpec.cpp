@@ -33,7 +33,7 @@ TEST(RuleEngineSpec, IgnoresIncludesInsideSeparateRawStringsButReportsRealDuplic
     const auto count = std::count_if(diagnostics.begin(), diagnostics.end(),[](const auto& diagnostic)
         {
             return diagnostic.code == "cpp/no-duplicate-include";
-    });
+        });
     EXPECT_EQ(count, 1);
     for (const auto& diagnostic : diagnostics)
     {
@@ -406,7 +406,7 @@ namespace
                 [](const heimdall::Diagnostic& d)
                 {
                     return d.has_fix;
-            });
+                });
             if (it == diagnostics.end())
             {
                 break;

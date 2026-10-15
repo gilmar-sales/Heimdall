@@ -18,7 +18,7 @@ namespace
             {
                 return diagnostic.code != "cpp/call-argument-count" &&
                 diagnostic.code != "cpp/call-argument-type";
-        });
+            });
         return diagnostics;
     }
 }

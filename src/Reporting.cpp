@@ -66,7 +66,7 @@ namespace heimdall::cli
 		constexpr int kExitUsageError = 2;
 		bool failed                   = false;
 		bool has_diagnostics          = false;
-		const auto severity_name =[](heimdall::Severity severity)
+		const auto severity_name = [](heimdall::Severity severity)
 		{
 			return severity == heimdall::Severity::Error ? "error" : "warning";
 		};

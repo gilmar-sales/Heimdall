@@ -83,7 +83,7 @@ namespace heimdall
 				[](const auto* a, const auto* b)
 				{
 					return a->offset < b->offset;
-			});
+				});
 			for (std::size_t i = 1; i < edits.size(); ++i)
 			{
 				if (edits[i]->offset == edits[i - 1]->offset ||

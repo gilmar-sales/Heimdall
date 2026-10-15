@@ -35,7 +35,7 @@ namespace
     heimdall::MacroTable MakeTable()
     {
         heimdall::MacroTable table;
-        const auto define =[&table](const std::string& text)
+        const auto define = [&table](const std::string& text)
         {
             if (auto parsed = heimdall::MacroTable::ParseDefinition(text))
             {
@@ -288,7 +288,7 @@ namespace
         heimdall::HighlightContext context;
         if (resolver)
         {
-            context.findMacro =[&resolver](std::string_view name, std::size_t offset)
+            context.findMacro = [&resolver](std::string_view name, std::size_t offset)
             {
                 return resolver->Find(name, offset);
             };
@@ -357,7 +357,7 @@ namespace
         options.macro_resolver = resolver;
         const auto tree = heimdall::ParseTree::Parse(source, options);
         heimdall::HighlightContext context;
-        context.findMacro =[&resolver](std::string_view name, std::size_t offset)
+        context.findMacro = [&resolver](std::string_view name, std::size_t offset)
         {
             return resolver->Find(name, offset);
         };

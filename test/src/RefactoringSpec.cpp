@@ -39,8 +39,10 @@ namespace
     // compile database so preprocessor verification can run per document.
     struct CrossFile
     {
-        explicit CrossFile(std::string_view header_text, std::string_view impl_text,
-                           std::string_view caller_text)
+        explicit CrossFile(
+            std::string_view header_text,
+            std::string_view impl_text,
+            std::string_view caller_text)
         {
             const auto compiler =
                 std::filesystem::path(HEIMDALL_TEST_CXX_COMPILER).stem().string();
@@ -53,7 +55,7 @@ namespace
                    ("heimdall-rename-cross-" +
                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
             std::filesystem::create_directory(root);
-            const auto write =[&](const char* name, std::string_view text)
+            const auto write = [&](const char* name, std::string_view text)
             {
                 std::ofstream file(root / name, std::ios::binary);
                 file << text;
@@ -83,7 +85,7 @@ namespace
             }
 
             workspace.SetCompilationDatabase(std::make_shared<const CompileDatabase>(*database));
-            auto open =[&](const char* name, std::string_view text)
+            auto open = [&](const char* name, std::string_view text)
             {
                 std::ifstream input(root / name, std::ios::binary);
                 const std::string content
@@ -121,7 +123,8 @@ namespace
 
     TEST(RenameSpec, RenamesOnlyTheLocalEntityAndPreservesTrivia)
     {
-        Fixture f("int f(int input)\r\n{\r\n    // input remains a comment\r\n    int value = "
+        Fixture f(
+            "int f(int input)\r\n{\r\n    // input remains a comment\r\n    int value = "
             "input;\r\n    return value + input;\r\n}\r\n");
         const auto plan = f.Rename("input", "argument");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -135,7 +138,8 @@ namespace
 
     TEST(RenameSpec, KeepsShadowedVariablesAndOtherFunctionsUntouched)
     {
-        Fixture f("int f() { int value = 1; { int value = 2; value++; } return value; }\n"
+        Fixture f(
+            "int f() { int value = 1; { int value = 2; value++; } return value; }\n"
             "int g() { int value = 3; return value; }");
         const auto plan = f.Rename("value", "renamed");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -255,7 +259,8 @@ namespace
 
     TEST(RenameSpec, RefusesUnresolvedDependentTemplateMembers)
     {
-        Fixture f("template<class T> struct Box { int value; "
+        Fixture f(
+            "template<class T> struct Box { int value; "
             "int get(T object) { return object.value; } };");
         const auto result = f.Rename("value", "renamed");
 
@@ -265,7 +270,8 @@ namespace
 
     TEST(RenameSpec, RenamesPrimaryFieldsAcrossConcreteInstantiationsAndThis)
     {
-        Fixture f("template<class T> struct Box { T value; T get() { return this->value; } }; void f() { Box<int> a; Box<float>* b; a.value; b->value; }");
+        Fixture f(
+            "template<class T> struct Box { T value; T get() { return this->value; } }; void f() { Box<int> a; Box<float>* b; a.value; b->value; }");
 
         const auto result = f.Rename("value", "renamed");
 
@@ -275,7 +281,8 @@ namespace
 
     TEST(RenameSpec, LeavesExplicitSpecializationAndConcreteHomonymsUntouched)
     {
-        Fixture f("template<class T> struct Box { int value; }; template<> struct Box<int> { int value; }; struct Other { int value; }; void f() { Box<float> a; Box<int> b; Other c; a.value; b.value; c.value; }");
+        Fixture f(
+            "template<class T> struct Box { int value; }; template<> struct Box<int> { int value; }; struct Other { int value; }; void f() { Box<float> a; Box<int> b; Other c; a.value; b.value; c.value; }");
 
         const auto result = f.Rename("value", "renamed");
 
@@ -290,7 +297,9 @@ namespace
                 false, true
         })
         {
-            Fixture f(std::string("struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T* object) { return object->value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
+            Fixture f(
+                std::string(
+                "struct A { int value; }; struct B { int value; }; template<class T> struct Box { int get(T* object) { return object->value; } }; Box<A> a; Box<") +(different ? "B" : "A") + "> b;");
 
             const auto result = f.Rename("value", "renamed");
 
@@ -328,8 +337,10 @@ namespace
 
     TEST(RenameSpec, RefusesTemplateHeaderEditsWithoutCrossDocumentInstantiationCoverage)
     {
-        CrossFile files("template<class T> struct Box { int value; };\n",
-                        "#include \"add.hpp\"\nBox<int> a;\n", "#include \"add.hpp\"\nBox<float> b;\n");
+        CrossFile files(
+            "template<class T> struct Box { int value; };\n",
+            "#include \"add.hpp\"\nBox<int> a;\n",
+            "#include \"add.hpp\"\nBox<float> b;\n");
         if (!files.Ready())
         {
             GTEST_SKIP();
@@ -421,7 +432,8 @@ namespace
         const auto plan = f.Rename("value", "result");
         ASSERT_FALSE(plan);
         EXPECT_EQ(plan.error().code, RefactoringErrorCode::IncompleteAnalysis);
-        Fixture unrelated("int result; int f(int value) { return value; } int g() { int "
+        Fixture unrelated(
+            "int result; int f(int value) { return value; } int g() { int "
             "data[]{result}; return result; }");
         const auto allowed = unrelated.Rename("value", "result");
         ASSERT_TRUE(allowed) << allowed.error().message;
@@ -429,7 +441,8 @@ namespace
 
     TEST(RenameSpec, RenamesForInitVariable)
     {
-        Fixture f("int f() { int total = 0; for (int count = 0; count < 3; ++count) { "
+        Fixture f(
+            "int f() { int total = 0; for (int count = 0; count < 3; ++count) { "
             "total += count; } return total; }");
         const auto plan = f.Rename("count", "index");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -441,7 +454,8 @@ namespace
 
     TEST(RenameSpec, RenamesRangeForVariable)
     {
-        Fixture f("int f() { int total = 0; for (int item : items) { total += item; } "
+        Fixture f(
+            "int f() { int total = 0; for (int item : items) { total += item; } "
             "return total; }");
         const auto plan = f.Rename("item", "each");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -458,7 +472,8 @@ namespace
 
     TEST(RenameSpec, RenamesCatchParameter)
     {
-        Fixture f("int f() { try { throw 1; } catch (const int& err) { return err; } "
+        Fixture f(
+            "int f() { try { throw 1; } catch (const int& err) { return err; } "
             "return 0; }");
         const auto plan = f.Rename("err", "code");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -470,7 +485,8 @@ namespace
 
     TEST(RenameSpec, RejectsAmbiguousSiblingCatchParameters)
     {
-        Fixture f("int f() { try { throw 1; } catch (int& dup) { return dup; } "
+        Fixture f(
+            "int f() { try { throw 1; } catch (int& dup) { return dup; } "
             "catch (long& dup) { return dup; } }");
         const auto plan = f.Rename("dup", "renamed");
         ASSERT_FALSE(plan);
@@ -484,13 +500,15 @@ namespace
         ASSERT_TRUE(if_plan) << if_plan.error().message;
         EXPECT_EQ(if_plan->documents.front().edits.size(), 2u);
 
-        Fixture switch_case("int f(int c) { switch (int key = c) { case 0: return key; "
+        Fixture switch_case(
+            "int f(int c) { switch (int key = c) { case 0: return key; "
             "default: return 1; } }");
         const auto switch_plan = switch_case.Rename("key", "code");
         ASSERT_TRUE(switch_plan) << switch_plan.error().message;
         EXPECT_EQ(switch_plan->documents.front().edits.size(), 2u);
 
-        Fixture while_case("int f() { int n = 3; while (int left = n) { n = left - 1; } "
+        Fixture while_case(
+            "int f() { int n = 3; while (int left = n) { n = left - 1; } "
             "return n; }");
         const auto while_plan = while_case.Rename("left", "rest");
         ASSERT_TRUE(while_plan) << while_plan.error().message;
@@ -507,7 +525,8 @@ namespace
         ASSERT_TRUE(preview);
         EXPECT_NE(preview->front().source.find("auto [first, beta]"), std::string::npos);
 
-        Fixture loop("int f() { int total = 0; for (auto [kk, vv] : items) { total += "
+        Fixture loop(
+            "int f() { int total = 0; for (auto [kk, vv] : items) { total += "
             "kk + vv; } return total; }");
         const auto loop_plan = loop.Rename("kk", "key");
         ASSERT_TRUE(loop_plan) << loop_plan.error().message;
@@ -516,13 +535,15 @@ namespace
 
     TEST(RenameSpec, AllowsCoroutineTokenOutsideTargetScope)
     {
-        Fixture f("int f(bool which) { if (which) { int keep = 1; return keep; } "
+        Fixture f(
+            "int f(bool which) { if (which) { int keep = 1; return keep; } "
             "co_return 0; }");
         const auto plan = f.Rename("keep", "held");
         ASSERT_TRUE(plan) << plan.error().message;
         EXPECT_EQ(plan->documents.front().edits.size(), 2u);
 
-        Fixture inside("int f(bool which) { if (which) { int keep = 1; co_return keep; } "
+        Fixture inside(
+            "int f(bool which) { if (which) { int keep = 1; co_return keep; } "
             "co_return 0; }");
         const auto blocked = inside.Rename("keep", "held");
         ASSERT_FALSE(blocked);
@@ -533,7 +554,8 @@ namespace
     {
         // The lambda captures an unrelated parameter; it sits outside the
         // renamed local's scope subtree, so it no longer vetoes the rename.
-        Fixture f("int f(bool w) { auto g = [w] { return w; }; if (w) { int keep = 1; "
+        Fixture f(
+            "int f(bool w) { auto g = [w] { return w; }; if (w) { int keep = 1; "
             "return keep; } return 0; }");
         const auto plan = f.Rename("keep", "held");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -554,7 +576,8 @@ namespace
     {
         // `[&]` would capture the renamed target: the pre-existing use binds
         // to the global today and to the target after the rename.
-        Fixture f("int helper;\n"
+        Fixture f(
+            "int helper;\n"
             "int f(int old) { auto g = [&] { return helper; }; return old; }");
         const auto plan = f.Rename("old", "helper");
         ASSERT_FALSE(plan);
@@ -603,13 +626,15 @@ namespace
 
     TEST(RenameSpec, RejectsFieldNameCapturedInLambda)
     {
-        Fixture f("int helper;\n"
+        Fixture f(
+            "int helper;\n"
             "struct S { int m; void run() { auto g = [&] { return helper; }; m = 1; } };");
         const auto plan = f.Rename("m", "helper");
         ASSERT_FALSE(plan);
         EXPECT_EQ(plan.error().code, RefactoringErrorCode::IncompleteAnalysis);
 
-        Fixture shadowed("struct S { int m; void run() { auto g = [&](int helper) { "
+        Fixture shadowed(
+            "struct S { int m; void run() { auto g = [&](int helper) { "
             "return helper; }; m = 1; } };");
         const auto allowed = shadowed.Rename("m", "helper");
         ASSERT_TRUE(allowed) << allowed.error().message;
@@ -641,7 +666,8 @@ namespace
 
     TEST(RenameSpec, RenamesInheritedField)
     {
-        Fixture f("struct B { int base; };\n"
+        Fixture f(
+            "struct B { int base; };\n"
             "struct D : B { int own; };\n"
             "int f(D d) { return d.base + d.own; }");
         const auto plan = f.Rename("base", "basis");
@@ -651,7 +677,8 @@ namespace
 
     TEST(RenameSpec, RenamesFieldUsedBareAndThroughThisInMemberFunctions)
     {
-        Fixture f("struct S { int m; int get() { return m; } int getThis() { return "
+        Fixture f(
+            "struct S { int m; int get() { return m; } int getThis() { return "
             "this->m; } void set(int v) { m = v; } };");
         const auto plan = f.Rename("m", "value");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -660,7 +687,8 @@ namespace
 
     TEST(RenameSpec, KeepsLocalShadowingAFieldUntouched)
     {
-        Fixture f("struct S { int m; int get() { int m = 0; return m; } void set(int "
+        Fixture f(
+            "struct S { int m; int get() { int m = 0; return m; } void set(int "
             "v) { m = v; } };");
         const auto plan = f.Rename("m", "value");
         ASSERT_TRUE(plan) << plan.error().message;
@@ -682,7 +710,8 @@ namespace
         ASSERT_FALSE(same);
         EXPECT_EQ(same.error().code, RefactoringErrorCode::NameCollision);
 
-        Fixture base("struct B { int val; };\n"
+        Fixture base(
+            "struct B { int val; };\n"
             "struct D : B { int old; };\n"
             "void f(D d) { d.val = 1; d.old = 2; }");
         const auto hidden = base.Rename("old", "val");
@@ -707,8 +736,11 @@ namespace
 
     TEST(RenameCrossFileSpec, RenamesFreeFunctionAcrossThreeDocuments)
     {
-        CrossFile files("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
+        CrossFile files(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
@@ -895,8 +927,11 @@ namespace
 
     TEST(RenameCrossFileSpec, RenamesGlobalVariableAcrossDocuments)
     {
-        CrossFile files("extern int total;\n", "#include \"add.hpp\"\n"
-            "int total = 0;\n", "#include \"add.hpp\"\n"
+        CrossFile files(
+            "extern int total;\n",
+            "#include \"add.hpp\"\n"
+            "int total = 0;\n",
+            "#include \"add.hpp\"\n"
             "int get() { return total; }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
@@ -909,10 +944,12 @@ namespace
 
     TEST(RenameCrossFileSpec, RejectsOverloadsAndCollisionsAcrossFiles)
     {
-        CrossFile overloaded("int add(int a, int b);\ndouble add(double a, double b);\n",
-                             "#include \"add.hpp\"\n"
+        CrossFile overloaded(
+            "int add(int a, int b);\ndouble add(double a, double b);\n",
+            "#include \"add.hpp\"\n"
             "int add(int a, int b) { return a + b; }\n"
-            "double add(double a, double b) { return a + b; }\n", "#include \"add.hpp\"\n"
+            "double add(double a, double b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(overloaded.Ready());
         const auto over_snapshot = overloaded.workspace.Snapshot();
@@ -922,8 +959,11 @@ namespace
         ASSERT_FALSE(over_plan);
         EXPECT_EQ(over_plan.error().code, RefactoringErrorCode::IncompleteAnalysis);
 
-        CrossFile files("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
+        CrossFile files(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
@@ -936,8 +976,11 @@ namespace
 
     TEST(ChangeSignatureSpec, AddsDefaultedParameterToDeclarationAndDefinition)
     {
-        CrossFile files("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
+        CrossFile files(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
@@ -969,8 +1012,11 @@ namespace
 
     TEST(ChangeSignatureSpec, RemovesUnusedParameterAndRewritesCalls)
     {
-        CrossFile files("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a; }\n", "#include \"add.hpp\"\n"
+        CrossFile files(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2) + add(3, 4); }\n");
         ASSERT_TRUE(files.Ready());
         const auto snapshot = files.workspace.Snapshot();
@@ -997,8 +1043,11 @@ namespace
 
     TEST(ChangeSignatureSpec, RejectsUsedParametersAddressTakersAndOverloads)
     {
-        CrossFile used("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
+        CrossFile used(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(used.Ready());
         const auto used_snapshot = used.workspace.Snapshot();
@@ -1006,8 +1055,11 @@ namespace
         EXPECT_FALSE(RefactoringService::RemoveParameter(
             used_snapshot, *used.impl, used_source->find("add(int"), "b"));
 
-        CrossFile taken("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a; }\n", "#include \"add.hpp\"\n"
+        CrossFile taken(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a; }\n",
+            "#include \"add.hpp\"\n"
             "auto taken = &add;\nint run() { return taken(1, 2); }\n");
         ASSERT_TRUE(taken.Ready());
         const auto taken_snapshot = taken.workspace.Snapshot();
@@ -1017,8 +1069,11 @@ namespace
         EXPECT_FALSE(RefactoringService::RemoveParameter(
             taken_snapshot, *taken.impl, taken_source->find("add(int"), "b"));
 
-        CrossFile collision("int add(int a, int b);\n", "#include \"add.hpp\"\n"
-            "int add(int a, int b) { return a + b; }\n", "#include \"add.hpp\"\n"
+        CrossFile collision(
+            "int add(int a, int b);\n",
+            "#include \"add.hpp\"\n"
+            "int add(int a, int b) { return a + b; }\n",
+            "#include \"add.hpp\"\n"
             "int run() { return add(1, 2); }\n");
         ASSERT_TRUE(collision.Ready());
         const auto collision_snapshot = collision.workspace.Snapshot();
@@ -1128,7 +1183,8 @@ namespace
 
     TEST(RenameSpec, RenameFromAnyUseChangesOnlyBoundOccurrences)
     {
-        Fixture f("int f(int value) { return value + value; }\n"
+        Fixture f(
+            "int f(int value) { return value + value; }\n"
             "int g(int value) { return value; }");
         const auto snapshot = f.Snapshot();
         const auto source = snapshot.Source(f.id);
@@ -1248,7 +1304,7 @@ namespace
             ASSERT_TRUE(std::filesystem::create_directory(root / name));
         }
 
-        const auto write =[&](const std::filesystem::path& path, std::string_view text)
+        const auto write = [&](const std::filesystem::path& path, std::string_view text)
         {
             std::ofstream file(path, std::ios::binary);
             file << text;
@@ -1273,7 +1329,7 @@ namespace
             "int f(int value) { return value; }";
         const auto document = workspace.Open(path, std::make_shared<const std::string>(source), 1);
         ASSERT_TRUE(document);
-        const auto rename =[&]
+        const auto rename = [&]
         {
             return RefactoringService::RenameLocal(
                 workspace.Snapshot(), *document, source.find("value"), "renamed");
@@ -1448,7 +1504,8 @@ namespace
             after.Snapshot(), after.id, after.At("42"), 2, "result");
         ASSERT_TRUE(after_plan) << after_plan.error().message;
 
-        Fixture loop("int f(int n) { int i = 0; again: i = n + 1; if (i < 10) goto "
+        Fixture loop(
+            "int f(int n) { int i = 0; again: i = n + 1; if (i < 10) goto "
             "again; return 42; }");
         const auto loop_plan = RefactoringService::ExtractVariable(
             loop.Snapshot(), loop.id, loop.At("42"), 2, "result");
@@ -1490,7 +1547,8 @@ namespace
 
     TEST(ExtractVariableSpec, ExtractsConstexprCallsWithPureArguments)
     {
-        Fixture f("constexpr int twice(int v) { return v * 2; }\n"
+        Fixture f(
+            "constexpr int twice(int v) { return v * 2; }\n"
             "int f(int x) { return twice(x) + 1; }");
         const auto plan = RefactoringService::ExtractVariable(
             f.Snapshot(), f.id, f.At("twice(x) + 1"), 12, "result");
@@ -1709,7 +1767,8 @@ namespace
 
     TEST(ExtractFunctionSpec, ExtractsStatementRangesWithOneLiveOutput)
     {
-        Fixture f("int f(int x) {\n"
+        Fixture f(
+            "int f(int x) {\n"
             "    int a = x + 1;\n"
             "    int b = a * 2;\n"
             "    return b;\n"
@@ -1733,7 +1792,8 @@ namespace
     TEST(ExtractFunctionSpec, RejectsStatementRangesWithoutSingleOutput)
     {
         // Two live outputs.
-        Fixture two("int f(int x) {\n"
+        Fixture two(
+            "int f(int x) {\n"
             "    int a = x + 1;\n"
             "    int b = a * 2;\n"
             "    return a + b;\n"
@@ -1758,7 +1818,8 @@ namespace
         }
 
         // Same spelling, different values (plain read vs member read).
-        Fixture conflict("struct S { int x; };\n"
+        Fixture conflict(
+            "struct S { int x; };\n"
             "int f(S s, int x) {\n"
             "    int a = x + s.x;\n"
             "    return a;\n"
@@ -1771,7 +1832,8 @@ namespace
         }
 
         // Control flow inside the range.
-        Fixture flow("int f(int x) {\n"
+        Fixture flow(
+            "int f(int x) {\n"
             "    int a = x + 1;\n"
             "    if (a) { return a; }\n"
             "    return 0;\n"
@@ -1784,7 +1846,8 @@ namespace
         }
 
         // Later case label crossed by the moved span.
-        Fixture cases("int f(int x) {\n"
+        Fixture cases(
+            "int f(int x) {\n"
             "    switch (x) {\n"
             "    case 0:\n"
             "        int a = 1;\n"
@@ -1803,7 +1866,8 @@ namespace
 
     TEST(InlineFunctionSpec, InlinesSingleReturnFunctionsWithParenthesizedArguments)
     {
-        Fixture f("static int twice(int v) { return v * 2; }\n"
+        Fixture f(
+            "static int twice(int v) { return v * 2; }\n"
             "int f(int x) { return twice(x) + 1; }");
         const auto snapshot = f.Snapshot();
         const auto plan = RefactoringService::InlineFunction(
@@ -1815,7 +1879,8 @@ namespace
                   "static int twice(int v) { return v * 2; }\n"
             "int f(int x) { return ((x) * 2) + 1; }");
 
-        Fixture precedence("static int add(int a, int b) { return a + b; }\n"
+        Fixture precedence(
+            "static int add(int a, int b) { return a + b; }\n"
             "int f(int x) { return add(x, 1) * 2; }");
         const auto precedence_snapshot = precedence.Snapshot();
         const auto precedence_plan = RefactoringService::InlineFunction(

@@ -29,7 +29,7 @@ namespace heimdall::detail
 			[](unsigned char c)
 			{
 				return static_cast<char>(std::tolower(c));
-		});
+			});
 		return text;
 	}
 
@@ -45,7 +45,7 @@ namespace heimdall::detail
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 	}
 
 	// Builds the diagnostics of the project-level rules; the line table is

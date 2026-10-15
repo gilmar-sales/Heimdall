@@ -204,7 +204,7 @@ namespace heimdall
 		[[nodiscard]] constexpr std::array<Entry, kTableSize> BuildTable()
 		{
 			std::array<Entry, kTableSize> table {};
-			const auto insert =[&table](std::string_view text, Tok tok)
+			const auto insert = [&table](std::string_view text, Tok tok)
 			{
 				std::size_t slot = Hash(text) & (kTableSize - 1);
 				while (table[slot].tok != Tok::None)

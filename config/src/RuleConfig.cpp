@@ -1,9 +1,9 @@
+#include <Heimdall/RuleConfig.hpp>
+
 #include <algorithm>
 #include <limits>
 #include <simdjson.h>
 #include <vector>
-
-#include <Heimdall/RuleConfig.hpp>
 
 namespace heimdall
 {
@@ -313,11 +313,11 @@ namespace heimdall
 			for (const auto field : format)
 			{
 				const std::string_view key = field.key;
-				const auto mark_override =[&]
+				const auto mark_override = [&]
 				{
 					configuration.format_overrides.emplace_back(key);
 				};
-				const auto read_boolean =[&](bool& setting)->std::expected<void, std::string> {
+				const auto read_boolean = [&](bool& setting)->std::expected<void, std::string> {
 					if (field.value.get_bool().get(setting))
 					{
 						return std::unexpected("'" + std::string(key) +

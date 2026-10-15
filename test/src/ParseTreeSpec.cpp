@@ -936,7 +936,7 @@ TEST(ParseTreeSpec, ReportsSemicolonInsteadOfCommaInDesignatedInitializer)
     const auto error = std::ranges::find_if(tree.Diagnostics(),[](const auto& diagnostic)
         {
             return diagnostic.message == "expected '}' before ';' token [-Wtemplate-body]";
-    });
+        });
     ASSERT_NE(error, tree.Diagnostics().end());
     EXPECT_EQ(error->offset, source.find("value;}") + std::string_view("value").size());
 }
@@ -1709,7 +1709,7 @@ TEST(ParseTreeSpec, ConcurrentCompatibilityReadersSeeTheSameCompleteNodes)
         readers.push_back(std::async(std::launch::async,[&]
             {
                 return tree.Nodes().size();
-        }));
+            }));
     }
 
     for (auto& reader : readers)
@@ -1731,7 +1731,7 @@ TEST(ParseTreeSpec, DeepExpressionProducesAnErrorInsteadOfExhaustingTheStack)
                             [](const auto& diagnostic)
         {
             return diagnostic.message == "maximum grammar nesting exceeded";
-    }));
+        }));
     EXPECT_FALSE(tree.NodesSoA().empty());
 }
 

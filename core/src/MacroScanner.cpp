@@ -924,7 +924,7 @@ namespace heimdall
 			const bool lineInComment = inBlock;
 			const bool hasCode       = ScanLine(line, inBlock);
 			const bool directive     = !lineInComment && !trimmed.empty() && trimmed.front() == '#';
-			const auto record =[&](bool counts)
+			const auto record = [&](bool counts)
 			{
 				if (!counts)
 				{

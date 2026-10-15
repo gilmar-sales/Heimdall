@@ -102,7 +102,7 @@ namespace heimdall
 				{
 					return std::tolower(static_cast<unsigned char>(a)) <
 					std::tolower(static_cast<unsigned char>(b));
-			});
+				});
 		}
 
 		struct Include

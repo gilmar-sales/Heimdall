@@ -14,17 +14,17 @@ TEST(Cpp26FeaturesSpec, ReportsAvailableRevisions)
     for (const auto& feature : features)
     {
         std::cout << feature.name << ": " << feature.value << " (minimum " << feature.required
-                  << ") " << (feature.Available() ? "available" : "unavailable") << '\n';
+        << ") " <<(feature.Available() ? "available" : "unavailable") << '\n';
         EXPECT_EQ(feature.Available(), feature.value >= feature.required);
     }
 
-    const auto embed = std::ranges::find(features, std::string_view { "__cpp_pp_embed" },
-                                         &heimdall::Cpp26Feature::name);
+    const auto embed = std::ranges::find(features, std::string_view {"__cpp_pp_embed"},
+        &heimdall::Cpp26Feature::name);
     ASSERT_NE(embed, features.end());
     EXPECT_EQ(embed->Available(), HEIMDALL_HAS_CPP26_EMBED != 0);
 
-    const auto reflection = std::ranges::find(features, std::string_view { "__cpp_impl_reflection" },
-                                              &heimdall::Cpp26Feature::name);
+    const auto reflection = std::ranges::find(features, std::string_view {"__cpp_impl_reflection"},
+        &heimdall::Cpp26Feature::name);
     ASSERT_NE(reflection, features.end());
     EXPECT_EQ(reflection->Available(), HEIMDALL_HAS_CPP26_REFLECTION != 0);
 }

@@ -19,16 +19,16 @@ namespace
 
     constexpr std::string_view kSample =
         "#include <vector>\n"
-    "namespace demo {\n"
-    "template <typename T> struct Box { T value; int get() const { return value; } };\n"
-    "enum class Color { Red, Green = 2 };\n"
-    "int add(int left, int right) {\n"
-    "    if (left > right) { return left - right; }\n"
-    "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
-    "    auto lambda = [&](int x) { return x + left; };\n"
-    "    return lambda(right) + (left ? right : 0);\n"
-    "}\n"
-    "}\n";
+        "namespace demo {\n"
+        "template <typename T> struct Box { T value; int get() const { return value; } };\n"
+        "enum class Color { Red, Green = 2 };\n"
+        "int add(int left, int right) {\n"
+        "    if (left > right) { return left - right; }\n"
+        "    for (int i = 0; i < right; ++i) { left += i * 2; }\n"
+        "    auto lambda = [&](int x) { return x + left; };\n"
+        "    return lambda(right) + (left ? right : 0);\n"
+        "}\n"
+        "}\n";
 
     std::size_t CountErrors(const heimdall::ParseTree& tree)
     {
@@ -36,7 +36,7 @@ namespace
             std::count_if(tree.Nodes().begin(), tree.Nodes().end(),[](const auto& node)
             {
                 return node.kind == GrammarKind::Error || node.kind == GrammarKind::ErrorExpression;
-        }));
+            }));
     }
 
     TEST(ParserTruncation, EveryPrefixParsesWithBoundedErrorsAndTime)
@@ -57,12 +57,12 @@ namespace
             ASSERT_FALSE(tree.Cancelled());
             ASSERT_FALSE(tree.Nodes().empty()) << "prefix of " << length << " bytes";
             ASSERT_EQ(tree.Nodes()[heimdall::ParseTree::RootNode].kind,
-                GrammarKind::TranslationUnit);
+                      GrammarKind::TranslationUnit);
             for (const auto& node : tree.Nodes())
             {
                 ASSERT_LE(node.subtree_end, tree.Nodes().size());
                 ASSERT_LE(static_cast<std::size_t>(node.first_token) + node.token_count,
-                    tree.Tokens().size());
+                          tree.Tokens().size());
             }
 
             const std::size_t errors = CountErrors(tree);
@@ -108,8 +108,8 @@ namespace
         // file's line endings).
         constexpr std::string_view plain_view = "#ifndef INCLUDE_STB_C_LEXER_H";
         constexpr std::string_view renamed_view = "#ifndef INCLUDE_STB_C_LEXER_H_COPY1";
-        const std::string          plain(plain_view);
-        const std::string          renamed(renamed_view);
+        const std::string plain(plain_view);
+        const std::string renamed(renamed_view);
         const auto first = heimdall::bench::LoadUnit(dir, heimdall::bench::kStbUnits[0], 0);
         ASSERT_TRUE(first);
         EXPECT_NE(first->find(plain), std::string::npos);
@@ -119,10 +119,11 @@ namespace
         EXPECT_NE(second->find(renamed), std::string::npos);
         EXPECT_EQ(second->find(renamed), second->rfind(renamed));
         for (std::size_t at = second->find(plain); at != std::string::npos;
-             at             = second->find(plain, at + 1))
+            at = second->find(plain, at + 1))
         {
             EXPECT_EQ((*second)[at + plain.size()], '_');
         }
+
         // End to end: 40000 lines force whole-file repeats (three units no
         // longer reach 90% of 20000 since the vendored headers grew).
         const auto large = heimdall::bench::BuildDocument(dir, 40000);
@@ -130,7 +131,7 @@ namespace
         // The lexer is emitted twice; the second copy must not collide with the first.
         EXPECT_NE(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"), std::string::npos);
         EXPECT_EQ(large->find("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"),
-            large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
+                  large->rfind("#ifndef INCLUDE_STB_C_LEXER_H_COPY1"));
     }
 
     TEST(StbCorpus, MissingDirectoryYieldsNullopt)

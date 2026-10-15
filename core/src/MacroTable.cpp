@@ -77,7 +77,7 @@ namespace heimdall
 		std::uint64_t HashDefinition(const MacroDef& def)
 		{
 			std::uint64_t hash = kFnvBasis;
-			const auto mix =[&hash](std::string_view text)
+			const auto mix = [&hash](std::string_view text)
 			{
 				for (const char c : text)
 				{
@@ -206,7 +206,7 @@ namespace heimdall
 				space = false;
 			}
 
-			const auto text =[&def](const MacroBodyToken& token)
+			const auto text = [&def](const MacroBodyToken& token)
 			{
 				return std::string_view(def.body).substr(token.token.offset, token.token.length);
 			};
@@ -423,7 +423,7 @@ namespace heimdall
 	void MacroTable::ForEach(const std::function<void(const MacroDef&) > & visit) const
 	{
 		std::unordered_set<std::string_view> seen;
-		const auto visitEntries =[&](const Entries& entries)
+		const auto visitEntries = [&](const Entries& entries)
 		{
 			for (const auto& [name, def] : entries)
 			{
@@ -446,7 +446,7 @@ namespace heimdall
 		ForEach([&count](const MacroDef&)
 			{
 				++count;
-		});
+			});
 		return count;
 	}
 

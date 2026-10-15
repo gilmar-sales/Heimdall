@@ -377,7 +377,7 @@ namespace
         explicit ResponseReader(Child& child) : m_thread([this, &child]
             {
                 Loop(child);
-            }) {}
+                }) {}
 
         ~ResponseReader()
         {
@@ -399,7 +399,7 @@ namespace
                 m_cv.wait_for(lock, timeout,[&]
                 {
                     return m_closed || m_arrivals.contains(id);
-            });
+                });
             if (!ok ||!m_arrivals.contains(id))
             {
                 return false;
@@ -591,7 +591,7 @@ namespace
         for (int i = 1; i < argc; ++i)
         {
             const std::string_view flag = argv[i];
-            auto value =[&]()->const char *
+            auto value = [&]()->const char *
             {
                 return i + 1 < argc ? argv[++i] : nullptr;
             };
@@ -796,7 +796,7 @@ namespace
         child.Write(Frame("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"));
         const MemorySample idle = child.Memory();
 
-        auto complete =[&](const std::string& targetUri, std::size_t at_line,
+        auto complete = [&](const std::string& targetUri, std::size_t at_line,
             std::size_t at_column, Clock::time_point start, double& elapsed_ms)
         {
             const std::int64_t id = next_id++;

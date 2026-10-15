@@ -533,6 +533,70 @@ TEST(FormatterSpec, SplitsOneLineBlocks)
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
 
+TEST(FormatterSpec, KeepsEmptyLambdaBodiesCompact)
+{
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source =
+        "auto first = [] {};\nauto second = [](int value) {};\n";
+    constexpr std::string_view expected =
+        "auto first = [] {};\nauto second = [](int value) {};\n";
+
+    const std::string formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, SpacesAndAlignsMultilineLambdaBodies)
+{
+    const heimdall::Formatter formatter;
+    constexpr std::string_view source =
+        "void f()\n{\n"
+        "std::stable_sort(\n"
+        "diagnostics.begin(), diagnostics.end(),\n"
+        "[](const Diagnostic& a, const Diagnostic& b)\n"
+        "{\nreturn a.offset < b.offset;\n});\n}\n"
+        "std::sort(intervals.begin(), intervals.end(),\n"
+        "[](const CallableInterval& left, const CallableInterval& right)\n"
+        "{\nif (left.start != right.start)\n{return left.start < right.start;}\n"
+        "return left.end > right.end;\n});\n"
+        "const auto is_digit =[](char c)\n{\nreturn c >= '0' && c <= '9';\n};\n"
+        "const auto typed_digit =[](char c) -> bool\n{\nreturn c >= '0' && c <= '9';\n};\n";
+    constexpr std::string_view expected =
+        "void f()\n{\n"
+        "    std::stable_sort(\n"
+        "        diagnostics.begin(), diagnostics.end(),\n"
+        "        [](const Diagnostic& a, const Diagnostic& b)\n"
+        "        {\n"
+        "            return a.offset < b.offset;\n"
+        "        });\n"
+        "}\n\n"
+        "std::sort(\n"
+        "    intervals.begin(),\n"
+        "    intervals.end(),\n"
+        "    [](const CallableInterval& left, const CallableInterval& right)\n"
+        "    {\n"
+        "        if (left.start != right.start)\n"
+        "        {\n"
+        "            return left.start < right.start;\n"
+        "        }\n\n"
+        "        return left.end > right.end;\n"
+        "    });\n"
+        "const auto is_digit = [](char c)\n"
+        "{\n"
+        "    return c >= '0' && c <= '9';\n"
+        "};\n"
+        "const auto typed_digit = [](char c) -> bool\n"
+        "{\n"
+        "    return c >= '0' && c <= '9';\n"
+        "};\n";
+
+    const std::string formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, expected);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
 TEST(FormatterSpec, SupportsAllmanBraces)
 {
     constexpr std::string_view source = "int main() {\nreturn 0;\n}\n";
@@ -644,7 +708,7 @@ TEST(FormatterSpec, SplitsBracesAfterFunctionSuffixes)
     const heimdall::Formatter allman(
         {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep});
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -676,7 +740,7 @@ TEST(FormatterSpec, IndentsConstructorInitializerListAfterTrailingColon)
     // Regression: the member init following a trailing ctor-initializer `:`
     // used to dedent to column 0 instead of continuing one level deeper.
     const heimdall::Formatter formatter;
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -707,7 +771,7 @@ TEST(FormatterSpec, SplitsBracesOfNamedScopes)
     const heimdall::Formatter allman(
         {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep});
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -736,7 +800,7 @@ TEST(FormatterSpec, KeepsInitializerBracesAttached)
         {.brace_style = heimdall::BraceStyle::Allman,
             .single_line_style = heimdall::SingleLineStyle::Keep,
             .space_before_cpp11_braced_list = false});
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -789,7 +853,7 @@ TEST(FormatterSpec, KeepsMultilineAggregateElementsWithoutReflow)
 TEST(FormatterSpec, SpacesTrailingReturnArrow)
 {
     const heimdall::Formatter formatter;
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -813,7 +877,7 @@ TEST(FormatterSpec, SpacesCompoundRequirementArrow)
     EXPECT_EQ(formatted.find("}->"), std::string::npos);
     EXPECT_EQ(formatter.Format(formatted), formatted);
 
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string output = formatter.Format(source);
         EXPECT_EQ(output, expected);
@@ -879,7 +943,7 @@ TEST(FormatterSpec, AlignsReferencesAfterQualifiedTypes)
         "x = a * b();\n"
         "f(a * b());\n";
 
-    const auto check =[](heimdall::FormatOptions options, std::string_view expected)
+    const auto check = [](heimdall::FormatOptions options, std::string_view expected)
     {
         options.blank_line_between_methods = false; // isolate pointer/reference spacing
         const heimdall::Formatter formatter(options);
@@ -919,7 +983,7 @@ TEST(FormatterSpec, AlignsRangeForReferencesAndSpacesSeparator)
         "for (auto nodes = Get(); const auto & node: nodes) {}\n"
         "for (auto value: enabled?first:second) {}\n"
         "if (a & b) {}\nwhile (a && b) {}\n";
-    const auto check =[&](heimdall::ReferenceAlignment alignment, std::string_view expected)
+    const auto check = [&](heimdall::ReferenceAlignment alignment, std::string_view expected)
     {
         const heimdall::Formatter formatter(
             {.reference_alignment = alignment,.blank_line_after_control_block = false});
@@ -1010,7 +1074,7 @@ TEST(FormatterSpec, AlignsReturnTypesBeforeQualifiedMethodNames)
         "ns::Model && ns::Context::Take() { return model; }\n"
         "const ns::Model * ns::Context::Get() { return ptr; }\n"
         "x = a & ns::value;\nx = a * ns::Make();\nx = a && ns::Ready();\n";
-    const auto check =[&](heimdall::FormatOptions options, std::string_view expected)
+    const auto check = [&](heimdall::FormatOptions options, std::string_view expected)
     {
         options.blank_line_between_methods = false;
         const heimdall::Formatter formatter(options);
@@ -1037,7 +1101,7 @@ TEST(FormatterSpec, AlignsPointersAndReferencesIndependently)
     constexpr std::string_view source =
         "int*x;\nint &r=x;\nvoid f(int&&v);\nint*const p=nullptr;\n";
 
-    const auto check =[](heimdall::FormatOptions options, std::string_view expected)
+    const auto check = [](heimdall::FormatOptions options, std::string_view expected)
     {
         const heimdall::Formatter formatter(options);
         const std::string formatted = formatter.Format(source);
@@ -1461,7 +1525,7 @@ TEST(FormatterSpec, SpacesTernaryOperatorsOnBothSides)
 {
     const heimdall::Formatter formatter(
         {.brace_style = heimdall::BraceStyle::Attach,.blank_line_after_control_block = false});
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = formatter.Format(source);
         EXPECT_EQ(formatted, expected);
@@ -1484,7 +1548,7 @@ TEST(FormatterSpec, NeverBreaksEmptyBracePairs)
 {
     const heimdall::Formatter allman(
         {.brace_style = heimdall::BraceStyle::Allman,.blank_line_after_control_block = false});
-    const auto check =[&](std::string_view source, std::string_view expected)
+    const auto check = [&](std::string_view source, std::string_view expected)
     {
         const std::string formatted = allman.Format(source);
         EXPECT_EQ(formatted, expected);

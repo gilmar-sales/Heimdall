@@ -1,3 +1,4 @@
+#include <Heimdall/Completion.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticRules.hpp>
 
@@ -8,6 +9,14 @@
 
 namespace
 {
+
+    heimdall::ParserOptions HeaderOptions(std::string_view header)
+    {
+        heimdall::ParserOptions options;
+        options.type_names = heimdall::CompletionEngine::TypeNamesOf(
+            heimdall::CompletionEngine::IndexScopes(header, options));
+        return options;
+    }
 
     using Analyzer = std::vector<heimdall::Diagnostic>(*)(const heimdall::SemanticModel&);
 
@@ -42,8 +51,8 @@ namespace
     // fixture is never moved because the layers reference each other.
     struct Typed
     {
-        explicit Typed(std::string text) :
-            source(std::move(text)), tree(heimdall::ParseTree::Parse(source)),
+        explicit Typed(std::string text, heimdall::ParserOptions options = {}) :
+            source(std::move(text)), tree(heimdall::ParseTree::Parse(source, options)),
             model(heimdall::Binder::Bind(tree)), types(heimdall::Typer::Type(model)),
             flow(heimdall::Flow::Build(types)) {}
 
@@ -505,6 +514,34 @@ TEST(ApiPassByConstReference, SilentForScalarFixedWidthIntegerAliases)
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
         Typed("int f(std::size_t first) { int y = first; return y; }\n").flow)
         .empty());
+}
+
+TEST(ApiPassByConstReference, SilentForScalarAliasResolvedFromHeaderOracle)
+{
+    EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("SymbolId f(SymbolId symbol) { return symbol; }\n",
+              HeaderOptions("using SymbolId = std::uint32_t;\n"))
+        .flow)
+        .empty());
+}
+
+TEST(ApiPassByConstReference, SilentForEnums)
+{
+    EXPECT_TRUE(heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("enum class Status { Ready, Done };\n"
+        "Status f(Status status) { return status; }\n")
+        .flow)
+        .empty());
+}
+
+TEST(ApiPassByConstReference, StillReportsComplexExternalTypes)
+{
+    const auto diagnostics = heimdall::SemanticRules::AnalyzePassByConstReference(
+        Typed("int f(HeaderRecord record) { int value = record.value; return value; }\n",
+              HeaderOptions("struct HeaderRecord { int value; };\n"))
+        .flow);
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "api/pass-by-const-reference");
 }
 
 // ---- api/const-correctness ---------------------------------------------------

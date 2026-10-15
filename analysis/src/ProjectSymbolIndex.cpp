@@ -400,7 +400,7 @@ namespace heimdall
 		std::ranges::sort(documents,[&](auto a, auto b)
 			{
 				return PathKey(snapshot.Path(a)) < PathKey(snapshot.Path(b));
-		});
+			});
 		ProjectSymbolIndex result;
 		result.m_revision = snapshot.Revision();
 		std::vector<UnitData> data;
@@ -1057,7 +1057,7 @@ namespace heimdall
 					const auto bound = model.ResolveToken(token);
 					const auto bound_entity =
 						bound == kNone ? InvalidEntity : result.EntityFor(coverage.document, bound);
-					const auto available =[&](EntityId id)
+					const auto available = [&](EntityId id)
 					{
 						for (const auto& [declared_unit, symbol] : declarations[id])
 						{
@@ -1238,7 +1238,7 @@ namespace heimdall
 		auto found = std::upper_bound(begin, end, offset,[](auto at, const auto& occurrence)
 			{
 				return at < occurrence.offset;
-		});
+			});
 		if (found == begin)
 		{
 			return nullptr;
@@ -1258,9 +1258,11 @@ namespace heimdall
 	{
 		return m_issues.empty() && std::ranges::all_of(m_units,[](const auto& unit)
 			{
-				return unit.unresolved == 0 && unit.ambiguous == 0 && unit.dependent == 0 &&
+				return unit.unresolved == 0 &&
+				unit.ambiguous == 0 &&
+				unit.dependent == 0 &&
 				unit.unsupported == 0;
-		});
+			});
 	}
 
 	bool ProjectSymbolIndex::HasCompleteCoverageFor(EntityId entity) const noexcept

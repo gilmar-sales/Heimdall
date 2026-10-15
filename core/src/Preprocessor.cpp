@@ -700,7 +700,7 @@ namespace heimdall
 				const auto directive_name = ReadWord(trimmed);
 				const auto kind           = KindOf(directive_name);
 				result.directives.push_back({kind, line_start, line.size(), active});
-				const auto evaluate =[&]
+				const auto evaluate = [&]
 				{
 					IfExpression expression(trimmed, scope, stop);
 					const auto condition = expression.Evaluate();

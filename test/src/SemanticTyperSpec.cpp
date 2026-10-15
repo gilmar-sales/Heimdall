@@ -174,7 +174,7 @@ TEST(TypeModel, BoundsIncompleteRecursiveTemplateBaseInstantiation)
                                         [](auto count)
             {
                 return count == 0;
-            })) << source;
+                })) << source;
     }
 }
 
@@ -355,7 +355,7 @@ TEST(TypeTable, ClassifiesBuiltinTypes)
 {
     heimdall::Arena arena;
     heimdall::TypeTable table(arena.Resource());
-    const auto of =[&](heimdall::BuiltinType type)
+    const auto of = [&](heimdall::BuiltinType type)
     {
         return table.Builtin(type);
     };

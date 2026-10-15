@@ -221,7 +221,7 @@ namespace heimdall
 				[]
 			{
 				std::unordered_map<std::string_view, std::vector<std::string_view>> result;
-				const auto words =[](std::string_view text)
+				const auto words = [](std::string_view text)
 				{
 					std::vector<std::string_view> out;
 					while (!text.empty())
@@ -840,7 +840,7 @@ namespace heimdall
 						[&](const auto& included)
 						{
 							return Key(included) == Key(header);
-					}))
+						}))
 					{
 						return true;
 					}
@@ -863,7 +863,7 @@ namespace heimdall
 					[&](const std::string& tail)
 					{
 						return EndsWithPath(key, tail);
-				});
+					});
 				// Same file under another spelling (symlink, letter case).
 				for (std::size_t i = 0; !satisfied && i < m_direct_headers.size(); ++i)
 				{
@@ -938,7 +938,7 @@ namespace heimdall
 					m_context.file.has_parent_path() ? m_context.file.parent_path()
 				: std::filesystem::path();
 				std::vector<std::string> candidates;
-				const auto add =[&](const std::filesystem::path& dir, bool angled)
+				const auto add = [&](const std::filesystem::path& dir, bool angled)
 				{
 					if (dir.empty())
 					{
@@ -975,7 +975,7 @@ namespace heimdall
 					[](const std::string& a, const std::string& b)
 					{
 						return a.size() < b.size();
-				});
+					});
 				for (const auto& candidate : candidates)
 				{
 					const auto resolved = IncludeIndex::ResolveIncludeAt(
@@ -1037,7 +1037,7 @@ namespace heimdall
 		std::erase_if(all,[](const Diagnostic& diagnostic)
 			{
 				return diagnostic.rule == RuleId::CallArgumentCount;
-		});
+			});
 		for (auto&& part :
 			{
 				AnalyzeProjectCallArguments(model, context), AnalyzeFinal(model, context),

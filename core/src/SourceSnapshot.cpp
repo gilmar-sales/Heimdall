@@ -117,7 +117,7 @@ namespace heimdall
 		Storage compact;
 		compact.copiedBytes = storage.copiedBytes;
 		std::string pending;
-		const auto flush =[&]
+		const auto flush = [&]
 		{
 			if (!pending.empty())
 			{

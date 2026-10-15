@@ -57,7 +57,9 @@ namespace
     };
 
     std::shared_ptr<const idx::FileShard> Shard(
-        std::string path, std::string source, std::shared_ptr<const heimdall::MacroResolver> resolver = {})
+        std::string path,
+        std::string source,
+        std::shared_ptr<const heimdall::MacroResolver> resolver = {})
     {
         const auto text = std::make_shared<const std::string>(std::move(source));
         heimdall::ParserOptions options;
@@ -281,7 +283,7 @@ TEST(IndexMacros, ConditionsOnHeaderMacrosAreEvaluatedWithTheTranslationUnitsMac
     heimdall::ParserOptions withEnvironment;
     withEnvironment.macro_resolver = std::make_shared<heimdall::MacroEnvironmentResolver>(environment);
 
-    const auto names =[&](const heimdall::ParserOptions& options)
+    const auto names = [&](const heimdall::ParserOptions& options)
     {
         const auto tree = heimdall::ParseTree::Parse(source, options);
         const auto model = heimdall::Binder::Bind(tree);

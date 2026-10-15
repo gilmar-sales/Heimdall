@@ -22,12 +22,14 @@ namespace
         return heimdall::SymbolOutline::Extract(tree);
     }
 
-    const OutlineSymbol* Named(const std::vector<OutlineSymbol>& symbols, std::string_view name,
-                               std::size_t nth = 0)
+    const OutlineSymbol* Named(
+        const std::vector<OutlineSymbol>& symbols,
+        std::string_view name,
+        std::size_t nth = 0)
     {
         for (const OutlineSymbol& symbol : symbols)
         {
-            if (symbol.name == name && nth-- == 0)
+            if (symbol.name == name && nth--== 0)
             {
                 return &symbol;
             }
@@ -68,20 +70,20 @@ TEST(SymbolOutlineSpec, EmptySourceHasNoSymbols)
 TEST(SymbolOutlineSpec, NestsMembersUnderNamespaceAndType)
 {
     constexpr std::string_view source = "namespace app {\n"
-                                        "class Widget\n"
-                                        "{\n"
-                                        "public:\n"
-                                        "    Widget();\n"
-                                        "    ~Widget();\n"
-                                        "    void Run(int times) const;\n"
-                                        "    int count;\n"
-                                        "};\n"
-                                        "}\n";
+        "class Widget\n"
+        "{\n"
+        "public:\n"
+        "    Widget();\n"
+        "    ~Widget();\n"
+        "    void Run(int times) const;\n"
+        "    int count;\n"
+        "};\n"
+        "}\n";
 
     const auto symbols = Outline(source);
 
     ASSERT_EQ(Names(symbols), (std::vector<std::string> {"app", "Widget", "Widget", "~Widget",
-                                                         "Run", "count"}));
+                               "Run", "count"}));
     EXPECT_EQ(symbols[0].kind, OutlineKind::Namespace);
     EXPECT_EQ(symbols[0].parent, kNoOutlineParent);
     EXPECT_EQ(symbols[1].kind, OutlineKind::Class);
@@ -104,7 +106,7 @@ TEST(SymbolOutlineSpec, SelectsTheNameAndCoversTheDeclaration)
     const auto symbols = Outline(source);
 
     const OutlineSymbol* point = Named(symbols, "Point");
-    const OutlineSymbol* add   = Named(symbols, "Add");
+    const OutlineSymbol* add = Named(symbols, "Add");
     ASSERT_NE(point, nullptr);
     ASSERT_NE(add, nullptr);
     EXPECT_EQ(NameText(source, *point), "Point");
@@ -116,8 +118,8 @@ TEST(SymbolOutlineSpec, SelectsTheNameAndCoversTheDeclaration)
 TEST(SymbolOutlineSpec, ListsEveryOverloadSeparately)
 {
     constexpr std::string_view source = "void Log(int value);\n"
-                                        "void Log(const char* text);\n"
-                                        "void Log(int value, int level) {}\n";
+        "void Log(const char* text);\n"
+        "void Log(int value, int level) {}\n";
 
     const auto symbols = Outline(source);
 
@@ -126,18 +128,21 @@ TEST(SymbolOutlineSpec, ListsEveryOverloadSeparately)
     EXPECT_EQ(symbols[1].detail, "(const char* text)");
     EXPECT_EQ(symbols[2].detail, "(int value, int level)");
     EXPECT_TRUE(std::ranges::all_of(
-        symbols, [](const OutlineSymbol& symbol) { return symbol.kind == OutlineKind::Function; }));
+        symbols,[](const OutlineSymbol& symbol)
+        {
+            return symbol.kind == OutlineKind::Function;
+        }));
 }
 
 TEST(SymbolOutlineSpec, ListsEnumeratorsUnderTheirEnum)
 {
     constexpr std::string_view source = "enum class Mode : char { Fast, Slow = 2 };\n"
-                                        "enum Legacy { Old, Older };\n";
+        "enum Legacy { Old, Older };\n";
 
     const auto symbols = Outline(source);
 
     ASSERT_EQ(Names(symbols), (std::vector<std::string> {"Mode", "Fast", "Slow", "Legacy", "Old",
-                                                         "Older"}));
+                               "Older"}));
     EXPECT_EQ(symbols[0].kind, OutlineKind::Enum);
     EXPECT_EQ(symbols[1].kind, OutlineKind::EnumMember);
     EXPECT_EQ(symbols[1].parent, 0u);
@@ -149,10 +154,10 @@ TEST(SymbolOutlineSpec, ListsEnumeratorsUnderTheirEnum)
 TEST(SymbolOutlineSpec, KeepsTheQualifierOfOutOfLineDefinitions)
 {
     constexpr std::string_view source = "namespace app {\n"
-                                        "void Widget::Run() {}\n"
-                                        "Widget::Widget() {}\n"
-                                        "Widget::~Widget() {}\n"
-                                        "}\n";
+        "void Widget::Run() {}\n"
+        "Widget::Widget() {}\n"
+        "Widget::~Widget() {}\n"
+        "}\n";
 
     const auto symbols = Outline(source);
 
@@ -181,17 +186,17 @@ TEST(SymbolOutlineSpec, RecognizesConstructorAtTheStartOfTheFile)
 TEST(SymbolOutlineSpec, NamesOperatorsAsWritten)
 {
     constexpr std::string_view source = "struct Foo\n"
-                                        "{\n"
-                                        "    bool operator==(const Foo&) const;\n"
-                                        "    int operator()(int) const;\n"
-                                        "    operator bool() const;\n"
-                                        "};\n"
-                                        "Foo operator+(Foo a, Foo b);\n";
+        "{\n"
+        "    bool operator==(const Foo&) const;\n"
+        "    int operator()(int) const;\n"
+        "    operator bool() const;\n"
+        "};\n"
+        "Foo operator+(Foo a, Foo b);\n";
 
     const auto symbols = Outline(source);
 
     ASSERT_EQ(Names(symbols), (std::vector<std::string> {"Foo", "operator==", "operator()",
-                                                         "operator bool", "operator+"}));
+                               "operator bool", "operator+"}));
     for (std::size_t i = 1; i < symbols.size(); ++i)
     {
         EXPECT_EQ(symbols[i].kind, OutlineKind::Operator) << symbols[i].name;
@@ -203,10 +208,10 @@ TEST(SymbolOutlineSpec, NamesOperatorsAsWritten)
 TEST(SymbolOutlineSpec, ListsAliasesAndTypedefs)
 {
     constexpr std::string_view source = "using Id = unsigned long;\n"
-                                        "typedef int Count;\n"
-                                        "template <typename T> using Vec = Box<T>;\n"
-                                        "using namespace std;\n"
-                                        "using std::string;\n";
+        "typedef int Count;\n"
+        "template <typename T> using Vec = Box<T>;\n"
+        "using namespace std;\n"
+        "using std::string;\n";
 
     const auto symbols = Outline(source);
 
@@ -221,11 +226,11 @@ TEST(SymbolOutlineSpec, ListsAliasesAndTypedefs)
 TEST(SymbolOutlineSpec, ExtendsTheRangeOverTheTemplateHeader)
 {
     constexpr std::string_view source = "template <typename T>\nclass Box { T value; };\n"
-                                        "template <typename T>\nT Twice(T v) { return v; }\n";
+        "template <typename T>\nT Twice(T v) { return v; }\n";
 
     const auto symbols = Outline(source);
 
-    const OutlineSymbol* box   = Named(symbols, "Box");
+    const OutlineSymbol* box = Named(symbols, "Box");
     const OutlineSymbol* twice = Named(symbols, "Twice");
     ASSERT_NE(box, nullptr);
     ASSERT_NE(twice, nullptr);
@@ -237,8 +242,8 @@ TEST(SymbolOutlineSpec, ExtendsTheRangeOverTheTemplateHeader)
 TEST(SymbolOutlineSpec, NamesAnonymousScopes)
 {
     constexpr std::string_view source = "namespace { int hidden; }\n"
-                                        "struct { int a; } instance;\n"
-                                        "enum { Value };\n";
+        "struct { int a; } instance;\n"
+        "enum { Value };\n";
 
     const auto symbols = Outline(source);
 
@@ -257,7 +262,7 @@ TEST(SymbolOutlineSpec, NamesAnonymousScopes)
 TEST(SymbolOutlineSpec, ParsesInlineNamespacesAsNamespaces)
 {
     constexpr std::string_view source = "inline namespace v1 { void Stable(); }\n"
-                                        "namespace outer { inline namespace v2 { int Value; } }\n";
+        "namespace outer { inline namespace v2 { int Value; } }\n";
 
     const auto symbols = Outline(source);
 
@@ -281,12 +286,12 @@ TEST(SymbolOutlineSpec, WrittenQualifiedNamespaceIsOneSymbol)
 TEST(SymbolOutlineSpec, OmitsLocalsAndParameters)
 {
     constexpr std::string_view source = "int Compute(int input)\n"
-                                        "{\n"
-                                        "    int local = input;\n"
-                                        "    struct Hidden { int inner; };\n"
-                                        "    auto fn = [](int p) { return p; };\n"
-                                        "    return local;\n"
-                                        "}\n";
+        "{\n"
+        "    int local = input;\n"
+        "    struct Hidden { int inner; };\n"
+        "    auto fn = [](int p) { return p; };\n"
+        "    return local;\n"
+        "}\n";
 
     const auto symbols = Outline(source);
 
@@ -297,13 +302,13 @@ TEST(SymbolOutlineSpec, OmitsLocalsAndParameters)
 TEST(SymbolOutlineSpec, SkipsForwardAndFriendDeclarations)
 {
     constexpr std::string_view source = "struct Forward;\n"
-                                        "enum Opaque : int;\n"
-                                        "class Guard\n"
-                                        "{\n"
-                                        "    friend void Peek(Guard&);\n"
-                                        "    friend class Other;\n"
-                                        "    int secret;\n"
-                                        "};\n";
+        "enum Opaque : int;\n"
+        "class Guard\n"
+        "{\n"
+        "    friend void Peek(Guard&);\n"
+        "    friend class Other;\n"
+        "    int secret;\n"
+        "};\n";
 
     const auto symbols = Outline(source);
 
@@ -325,16 +330,16 @@ TEST(SymbolOutlineSpec, ListsEveryDeclaratorOfOneDeclaration)
 TEST(SymbolOutlineSpec, DistinguishesVariablesFromFunctions)
 {
     constexpr std::string_view source = "int values[4];\n"
-                                        "int (*callback)(int);\n"
-                                        "template <typename T> constexpr T pi = T(3);\n"
-                                        "int Compute(int);\n";
+        "int (*callback)(int);\n"
+        "template <typename T> constexpr T pi = T(3);\n"
+        "int Compute(int);\n";
 
     const auto symbols = Outline(source);
 
-    const OutlineSymbol* values   = Named(symbols, "values");
+    const OutlineSymbol* values = Named(symbols, "values");
     const OutlineSymbol* callback = Named(symbols, "callback");
-    const OutlineSymbol* pi       = Named(symbols, "pi");
-    const OutlineSymbol* compute  = Named(symbols, "Compute");
+    const OutlineSymbol* pi = Named(symbols, "pi");
+    const OutlineSymbol* compute = Named(symbols, "Compute");
     ASSERT_NE(values, nullptr);
     ASSERT_NE(callback, nullptr);
     ASSERT_NE(pi, nullptr);
@@ -365,8 +370,8 @@ TEST(SymbolOutlineSpec, SeesThroughLanguageLinkage)
 TEST(SymbolOutlineSpec, SkipsExportMacrosBeforeTheTypeName)
 {
     constexpr std::string_view source = "class DLL_API Exported { int v; };\n"
-                                        "struct [[nodiscard]] Tagged { int w; };\n"
-                                        "struct alignas(16) Aligned { int x; };\n";
+        "struct [[nodiscard]] Tagged { int w; };\n"
+        "struct alignas(16) Aligned { int x; };\n";
 
     const auto symbols = Outline(source);
 
@@ -379,7 +384,7 @@ TEST(SymbolOutlineSpec, SkipsExportMacrosBeforeTheTypeName)
 TEST(SymbolOutlineSpec, KeepsTemplateArgumentsOfSpecializations)
 {
     constexpr std::string_view source = "template <typename T> struct Box {};\n"
-                                        "template <> struct Box<int> { int v; };\n";
+        "template <> struct Box<int> { int v; };\n";
 
     const auto symbols = Outline(source);
 
@@ -392,7 +397,7 @@ TEST(SymbolOutlineSpec, TruncatesVeryLongDetails)
     std::string source = "void Wide(";
     for (int i = 0; i < 60; ++i)
     {
-        source += "int parameter" + std::to_string(i) + (i < 59 ? ", " : "");
+        source += "int parameter" + std::to_string(i) +(i < 59 ? ", " : "");
     }
 
     source += ");\n";
@@ -407,12 +412,12 @@ TEST(SymbolOutlineSpec, TruncatesVeryLongDetails)
 TEST(SymbolOutlineSpec, KeepsRangesAndOrderConsistent)
 {
     constexpr std::string_view source = "namespace n {\n"
-                                        "struct A { int x; void f(); struct B { int y; }; };\n"
-                                        "enum E { P, Q };\n"
-                                        "template <typename T> class C { T t; };\n"
-                                        "void A::f() {}\n"
-                                        "}\n"
-                                        "int z;\n";
+        "struct A { int x; void f(); struct B { int y; }; };\n"
+        "enum E { P, Q };\n"
+        "template <typename T> class C { T t; };\n"
+        "void A::f() {}\n"
+        "}\n"
+        "int z;\n";
 
     const auto symbols = Outline(source);
 
@@ -423,7 +428,7 @@ TEST(SymbolOutlineSpec, KeepsRangesAndOrderConsistent)
         const OutlineSymbol& symbol = symbols[i];
         EXPECT_GE(symbol.nameOffset, symbol.rangeOffset) << symbol.name;
         EXPECT_LE(symbol.nameOffset + symbol.nameLength, symbol.rangeOffset + symbol.rangeLength)
-            << symbol.name;
+        << symbol.name;
         EXPECT_LE(symbol.rangeOffset + symbol.rangeLength, source.size()) << symbol.name;
         if (symbol.parent != kNoOutlineParent)
         {
@@ -431,7 +436,7 @@ TEST(SymbolOutlineSpec, KeepsRangesAndOrderConsistent)
             const OutlineSymbol& parent = symbols[symbol.parent];
             EXPECT_GE(symbol.rangeOffset, parent.rangeOffset) << symbol.name;
             EXPECT_LE(symbol.rangeOffset + symbol.rangeLength, parent.rangeOffset + parent.rangeLength)
-                << symbol.name;
+            << symbol.name;
         }
 
         const std::size_t slot = symbol.parent == kNoOutlineParent ? symbols.size() : symbol.parent;
@@ -443,9 +448,9 @@ TEST(SymbolOutlineSpec, KeepsRangesAndOrderConsistent)
 TEST(SymbolOutlineSpec, RecoversSymbolsFromIncompleteCode)
 {
     constexpr std::string_view source = "namespace app {\n"
-                                        "struct Done { int a; };\n"
-                                        "struct Broken {\n"
-                                        "    void half(int\n";
+        "struct Done { int a; };\n"
+        "struct Broken {\n"
+        "    void half(int\n";
 
     const auto symbols = Outline(source);
 
@@ -462,18 +467,18 @@ TEST(SymbolOutlineSpec, SurvivesGarbage)
 
 TEST(SymbolOutlineSpec, ListsActiveDefinesAsMacroSymbolsInSourceOrder)
 {
-	constexpr std::string_view source = "#define LIMIT 8\nnamespace app\n{\nint value;\n}\n"
-										"#define SQUARE(x) ((x) * (x))\n#if 0\n#define HIDDEN 1\n#endif\n";
+    constexpr std::string_view source = "#define LIMIT 8\nnamespace app\n{\nint value;\n}\n"
+        "#define SQUARE(x) ((x) * (x))\n#if 0\n#define HIDDEN 1\n#endif\n";
 
-	const auto symbols = Outline(source);
+    const auto symbols = Outline(source);
 
-	EXPECT_EQ(Names(symbols), (std::vector<std::string> { "LIMIT", "app", "value", "SQUARE" }));
-	const OutlineSymbol* limit = Named(symbols, "LIMIT");
-	ASSERT_NE(limit, nullptr);
-	EXPECT_EQ(limit->kind, OutlineKind::Macro);
-	EXPECT_EQ(NameText(source, *limit), "LIMIT");
-	EXPECT_EQ(limit->detail, "8");
-	EXPECT_EQ(Named(symbols, "SQUARE")->detail, "(x)");
-	EXPECT_EQ(symbols[2].parent, 1u);
-	EXPECT_EQ(Named(symbols, "HIDDEN"), nullptr);
+    EXPECT_EQ(Names(symbols), (std::vector<std::string> {"LIMIT", "app", "value", "SQUARE"}));
+    const OutlineSymbol* limit = Named(symbols, "LIMIT");
+    ASSERT_NE(limit, nullptr);
+    EXPECT_EQ(limit->kind, OutlineKind::Macro);
+    EXPECT_EQ(NameText(source, *limit), "LIMIT");
+    EXPECT_EQ(limit->detail, "8");
+    EXPECT_EQ(Named(symbols, "SQUARE") -> detail, "(x)");
+    EXPECT_EQ(symbols[2].parent, 1u);
+    EXPECT_EQ(Named(symbols, "HIDDEN"), nullptr);
 }

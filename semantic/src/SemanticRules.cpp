@@ -58,7 +58,7 @@ namespace heimdall
 			const auto& symbols = model.Symbols();
 			const auto& bases   = model.Bases();
 			std::vector<SymbolId> pending;
-			const auto push_bases =[&](SymbolId klass)
+			const auto push_bases = [&](SymbolId klass)
 			{
 				for (std::uint32_t i = 0; i < symbols.base_count[klass]; ++i)
 				{
@@ -109,7 +109,7 @@ namespace heimdall
 			std::size_t& offset)
 		{
 			const auto& tokens = tree.Tokens();
-			const auto next =[&](std::size_t from)
+			const auto next = [&](std::size_t from)
 			{
 				while (from < tokens.size() && IsTrivia(tokens[from]))
 				{
@@ -261,7 +261,7 @@ namespace heimdall
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 		return diagnostics;
 	}
 
@@ -336,7 +336,7 @@ namespace heimdall
 					[](const Diagnostic& a, const Diagnostic& b)
 					{
 						return a.offset < b.offset;
-				});
+					});
 				return std::move(m_diagnostics);
 			}
 
@@ -484,7 +484,7 @@ namespace heimdall
 	{
 		Reporter reporter(model);
 		const TokenView view(model);
-		const auto report =[&](std::size_t first, std::size_t last)
+		const auto report = [&](std::size_t first, std::size_t last)
 		{
 			const auto offset = view.Offset(first);
 			reporter.Report(RuleId::ModernizeNullptr, "cpp/modernize-nullptr",
@@ -551,7 +551,7 @@ namespace heimdall
 		const TokenView view(model);
 		const auto& symbols = model.Symbols();
 		const auto& nodes   = model.Tree().NodesSoA();
-		const auto report =[&](std::size_t position, std::string_view context)
+		const auto report = [&](std::size_t position, std::string_view context)
 		{
 			const auto offset = view.Offset(position);
 			const auto length = view.End(position) - offset;
@@ -561,7 +561,7 @@ namespace heimdall
 				offset, length, offset, length, "nullptr", true,
 				"Replace " + std::string(view.Text(position)) + " with nullptr");
 		};
-		const auto is_pointer =[&](SymbolId symbol)
+		const auto is_pointer = [&](SymbolId symbol)
 		{
 			return symbol != kNone && (symbols.flags[symbol] & SymbolFlag::Pointer) != 0 &&
 				(symbols.kind[symbol] == SymbolKind::Variable ||
@@ -672,7 +672,7 @@ namespace heimdall
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 		return diagnostics;
 	}
 
@@ -682,7 +682,7 @@ namespace heimdall
 		const TokenView view(model);
 		const auto& symbols = model.Symbols();
 		const auto& nodes   = model.Tree().NodesSoA();
-		const auto is_integer =[&](std::size_t position)
+		const auto is_integer = [&](std::size_t position)
 		{
 			if (view.KindAt(position) != TokenKind::Number || view.IsZeroLiteral(position))
 			{
@@ -697,7 +697,7 @@ namespace heimdall
 
 			return text.find_first_not_of("0123456789'uUlLzZ") == std::string_view::npos;
 		};
-		const auto report =[&](std::size_t position)
+		const auto report = [&](std::size_t position)
 		{
 			const auto offset = view.Offset(position);
 			const auto length = view.End(position) - offset;
@@ -706,7 +706,7 @@ namespace heimdall
 				" cannot be converted to a pointer",
 				offset, length);
 		};
-		const auto is_pointer =[&](SymbolId symbol)
+		const auto is_pointer = [&](SymbolId symbol)
 		{
 			return symbol != kNone && (symbols.flags[symbol] & SymbolFlag::Pointer) != 0 &&
 				(symbols.kind[symbol] == SymbolKind::Variable ||
@@ -762,7 +762,7 @@ namespace heimdall
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 		return diagnostics;
 	}
 
@@ -1162,7 +1162,7 @@ namespace heimdall
 			std::size_t end,
 			SymbolId variable)
 		{
-			const auto names =[&](std::size_t position)
+			const auto names = [&](std::size_t position)
 			{
 				return view.IsWord(position) &&
 					model.ResolveToken(view.TokenAt(position)) == variable;
@@ -1297,7 +1297,7 @@ namespace heimdall
 				[](const Diagnostic& a, const Diagnostic& b)
 				{
 					return a.offset < b.offset;
-			});
+				});
 		}
 
 	} // namespace
@@ -1309,7 +1309,7 @@ namespace heimdall
 		const auto& nodes = model.Tree().NodesSoA();
 		Reporter reporter(model);
 		const TokenView view(model);
-		const auto check =[&](std::uint32_t operand, std::string_view context)
+		const auto check = [&](std::uint32_t operand, std::string_view context)
 		{
 			if (operand >= nodes.size() || nodes.Kind(operand) == GrammarKind::LiteralExpression)
 			{
@@ -1492,7 +1492,7 @@ namespace heimdall
 		LineTable lines;
 		bool lines_built = false;
 
-		const auto indexable =[&](SymbolId symbol, bool allow_array)
+		const auto indexable = [&](SymbolId symbol, bool allow_array)
 		{
 			if (symbol == kNone ||(symbols.kind[symbol] != SymbolKind::Variable &&
 				symbols.kind[symbol] != SymbolKind::Parameter))
@@ -1881,14 +1881,14 @@ namespace heimdall
 		static constexpr std::string_view kSizeNames[] = {
 			"size", "length", "len", "count", "num", "n", "extent",
 		};
-		auto is_size_name =[](std::string_view name)
+		auto is_size_name = [](std::string_view name)
 		{
 			std::string lower(name);
 			std::transform(lower.begin(), lower.end(), lower.begin(),
 				[](unsigned char c)
 				{
 					return static_cast<char>(std::tolower(c));
-			});
+				});
 			for (const auto candidate : kSizeNames)
 			{
 				if (lower == candidate)
@@ -1915,10 +1915,10 @@ namespace heimdall
 				if (symbols.scope[left] != symbols.scope[right])
 				{
 					return symbols.scope[left] < symbols.scope[right];
-			}
+				}
 
 				return symbols.decl_token[left] < symbols.decl_token[right];
-		});
+			});
 		for (std::size_t i = 0; i + 1 < ordered.size(); ++i)
 		{
 			const SymbolId first  = ordered[i];
@@ -2034,7 +2034,7 @@ namespace heimdall
 				continue;
 			}
 
-			auto is_spelling_word =[](std::string_view text)
+			auto is_spelling_word = [](std::string_view text)
 			{
 				return text == "const" || text == "volatile" || text == "unsigned" ||
 					text == "signed" || text == "int" || text == "char" || text == "short" ||
@@ -2236,14 +2236,14 @@ namespace heimdall
 			"make", "create", "clone", "copy", "exists", "equal", "compare",
 			"starts", "ends", "first", "last", "peek",
 		};
-		auto is_query_name =[](std::string_view name)
+		auto is_query_name = [](std::string_view name)
 		{
 			std::string lower(name);
 			std::transform(lower.begin(), lower.end(), lower.begin(),
 				[](unsigned char c)
 				{
 					return static_cast<char>(std::tolower(c));
-			});
+				});
 			for (const auto prefix : kQueryPrefixes)
 			{
 				if (lower.size() >= prefix.size() && lower.compare(0, prefix.size(), prefix) == 0 &&
@@ -2343,7 +2343,7 @@ namespace heimdall
 		const auto& scopes  = model.Scopes();
 		const detail::TokenView view(model);
 		Reporter reporter(model);
-		auto is_arithmetic_word =[](std::string_view word)
+		auto is_arithmetic_word = [](std::string_view word)
 		{
 			return word == "int" || word == "char" || word == "short" || word == "long" ||
 				word == "signed" || word == "unsigned" || word == "float" || word == "double" ||
@@ -2524,7 +2524,7 @@ namespace heimdall
 		std::stable_sort(all.begin(), all.end(),[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 		return all;
 	}
 

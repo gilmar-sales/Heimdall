@@ -24,7 +24,10 @@ namespace
         return idx::ShardBuilder::Build(model, std::move(path));
     }
 
-    idx::SymbolHash HashOf(const idx::FileShard& shard, std::string_view name, std::size_t nth = 0)
+    idx::SymbolHash HashOf(
+        const idx::FileShard& shard,
+        std::string_view name,
+        std::size_t nth = 0)
     {
         for (std::uint32_t i = 0; i < shard.Symbols().Size(); ++i)
         {
@@ -38,7 +41,8 @@ namespace
     }
 
     std::vector<std::string> Paths(
-        const idx::IndexSnapshot& snapshot, const std::vector<idx::Location>& locations)
+        const idx::IndexSnapshot& snapshot,
+        const std::vector<idx::Location>& locations)
     {
         std::vector<std::string> result;
         for (const auto& location : locations)
@@ -101,7 +105,7 @@ TEST(FileShard, ForwardDeclaredClassIsNeverADefinition)
 {
     const auto shard = Shard("a.hpp", "struct Fwd;\nstruct Full {};\n");
 
-    const auto role =[&](std::string_view name)
+    const auto role = [&](std::string_view name)
     {
         for (std::uint32_t i = 0; i < shard->Symbols().Size(); ++i)
         {
@@ -169,7 +173,7 @@ TEST(IndexSnapshot, CrossFileUsesAreResolvedThroughTheIncludeClosure)
         [&](const idx::Location& l)
         {
             return snapshot->Shards()[l.shard]->Path() == "use.cpp";
-    });
+        });
     ASSERT_NE(use, references.end());
     EXPECT_EQ(use->resolution, idx::Resolution::Resolved);
 }
@@ -234,7 +238,7 @@ TEST(IndexSnapshot, SearchRanksExactThenPrefixThenSubstring)
     const auto hits = snapshot->Search("size", 10);
 
     ASSERT_EQ(hits.size(), 3u);
-    const auto name =[&](std::size_t i)
+    const auto name = [&](std::size_t i)
     {
         return shard->Name(hits[i].symbol);
     };
@@ -508,7 +512,7 @@ TEST(FileShard, FunctionsRecordRequiredAndMaximumParameters)
     const auto shard = Shard("a.cpp",
         "void none();\nvoid v(void);\nvoid two(int, int = 1);\nvoid var(int, ...);\n");
 
-    const auto bounds =[&](std::string_view name)
+    const auto bounds = [&](std::string_view name)
     {
         for (std::uint32_t i = 0; i < shard->Symbols().Size(); ++i)
         {
@@ -529,14 +533,16 @@ TEST(FileShard, FunctionsRecordRequiredAndMaximumParameters)
 
 namespace
 {
-    bool UsedIn(const idx::IndexSnapshot& snapshot, const std::vector<idx::Location>& locations,
+    bool UsedIn(
+        const idx::IndexSnapshot& snapshot,
+        const std::vector<idx::Location>& locations,
         std::string_view path)
     {
         return std::ranges::any_of(locations,
                                    [&](const idx::Location& l)
             {
                 return snapshot.Shards()[l.shard]->Path() == path;
-        });
+            });
     }
 } // namespace
 
@@ -574,66 +580,69 @@ TEST(IndexStore, SnapshotsPinTheirGenerationAcrossUpdates)
 
 TEST(IndexSnapshot, HashCollisionsNeverMergeDifferentIdentityKeys)
 {
-	const auto first = Shard("a.hpp", "struct First {};\n");
-	auto second = std::make_shared<idx::FileShard>(*Shard("b.hpp", "struct Second {};\n"));
-	auto& symbols = const_cast<idx::SymbolColumns&>(second->Symbols());
-	symbols.hash.front() = first->Symbols().hash.front();
+    const auto first = Shard("a.hpp", "struct First {};\n");
+    auto second = std::make_shared<idx::FileShard>(*Shard("b.hpp", "struct Second {};\n"));
+    auto& symbols = const_cast<idx::SymbolColumns&>(second->Symbols());
+    symbols.hash.front() = first->Symbols().hash.front();
 
-	const auto snapshot = idx::IndexSnapshot::Build({first, second});
+    const auto snapshot = idx::IndexSnapshot::Build({first, second});
 
-	EXPECT_TRUE(snapshot->Declarations(first->Symbols().hash.front()).empty());
-	EXPECT_TRUE(snapshot->References(first->Symbols().hash.front()).empty());
-	EXPECT_EQ(snapshot->Named("First").size(), 1u);
-	EXPECT_EQ(snapshot->Named("Second").size(), 1u);
+    EXPECT_TRUE(snapshot->Declarations(first->Symbols().hash.front()).empty());
+    EXPECT_TRUE(snapshot->References(first->Symbols().hash.front()).empty());
+    EXPECT_EQ(snapshot->Named("First").size(), 1u);
+    EXPECT_EQ(snapshot->Named("Second").size(), 1u);
 }
 
 TEST(FileShard, FunctionIdentityKeepsParameterSpellingAndCvRefWithoutNamesOrDefaults)
 {
-	const auto declared = Shard("a.hpp", "struct A { int Run(int value = 1) const &; };\n");
-	const auto defined = Shard("a.cpp", "int A::Run(int other) const & { return other; }\n");
-	const auto different = Shard("b.hpp", "struct A { int Run(long value) const &; };\n");
+    const auto declared = Shard("a.hpp", "struct A { int Run(int value = 1) const &; };\n");
+    const auto defined = Shard("a.cpp", "int A::Run(int other) const & { return other; }\n");
+    const auto different = Shard("b.hpp", "struct A { int Run(long value) const &; };\n");
 
-	EXPECT_EQ(HashOf(*declared, "Run"), HashOf(*defined, "Run"));
-	EXPECT_NE(HashOf(*declared, "Run"), HashOf(*different, "Run"));
+    EXPECT_EQ(HashOf(*declared, "Run"), HashOf(*defined, "Run"));
+    EXPECT_NE(HashOf(*declared, "Run"), HashOf(*different, "Run"));
 }
 
 TEST(IndexSnapshot, ExactIncludeTargetsDoNotExposeHomonymousHeaders)
 {
-	const auto first = Shard("first/widget.hpp", "struct First {};\n");
-	const auto second = Shard("second/widget.hpp", "struct Second {};\n");
-	const auto tree = heimdall::ParseTree::Parse("#include \"widget.hpp\"\nSecond value;\n");
-	const auto model = heimdall::Binder::Bind(tree);
-	const auto user = idx::ShardBuilder::Build(model, "use.cpp", 0,
-		[](std::string_view, bool, std::uint32_t) -> std::optional<std::string>
-		{
-			return "second/widget.hpp";
-		});
+    const auto first = Shard("first/widget.hpp", "struct First {};\n");
+    const auto second = Shard("second/widget.hpp", "struct Second {};\n");
+    const auto tree = heimdall::ParseTree::Parse("#include \"widget.hpp\"\nSecond value;\n");
+    const auto model = heimdall::Binder::Bind(tree);
+    const auto user = idx::ShardBuilder::Build(model, "use.cpp", 0,
+        [](std::string_view, bool, std::uint32_t)->std::optional<std::string>
+        {
+            return "second/widget.hpp";
+    });
 
-	const auto snapshot = idx::IndexSnapshot::Build({first, second, user});
-	const auto visible = snapshot->Visible(2);
+    const auto snapshot = idx::IndexSnapshot::Build({first, second, user});
+    const auto visible = snapshot->Visible(2);
 
-	EXPECT_TRUE(user->ExactIncludes());
-	EXPECT_FALSE(visible[0]);
-	EXPECT_TRUE(visible[1]);
+    EXPECT_TRUE(user->ExactIncludes());
+    EXPECT_FALSE(visible[0]);
+    EXPECT_TRUE(visible[1]);
 }
 
 TEST(FileShard, ConfigurationFingerprintIsStableAndSensitiveToSearchOrder)
 {
-	heimdall::ParserOptions first;
-	first.predefined_macros.emplace("FIRST", "1");
-	first.predefined_macros.emplace("SECOND", "2");
-	heimdall::ParserOptions reordered;
-	reordered.predefined_macros.emplace("SECOND", "2");
-	reordered.predefined_macros.emplace("FIRST", "1");
-	heimdall::CompileCommand command;
-	command.include_directories = {"first", "second"};
-	auto other = command;
-	std::ranges::reverse(other.include_directories);
+    heimdall::ParserOptions first;
+    first.predefined_macros.emplace("FIRST", "1");
+    first.predefined_macros.emplace("SECOND", "2");
+    heimdall::ParserOptions reordered;
+    reordered.predefined_macros.emplace("SECOND", "2");
+    reordered.predefined_macros.emplace("FIRST", "1");
+    heimdall::CompileCommand command;
+    command.include_directories = {"first", "second"};
+    auto other = command;
+    std::ranges::reverse(other.include_directories);
 
-	EXPECT_EQ(idx::ShardBuilder::ConfigurationHash(first), idx::ShardBuilder::ConfigurationHash(reordered));
-	EXPECT_NE(idx::ShardBuilder::ConfigurationHash(first, &command), idx::ShardBuilder::ConfigurationHash(first, &other));
-	reordered.predefined_macros["FIRST"] = "3";
-	EXPECT_NE(idx::ShardBuilder::ConfigurationHash(first), idx::ShardBuilder::ConfigurationHash(reordered));
+    EXPECT_EQ(idx::ShardBuilder::ConfigurationHash(first),
+              idx::ShardBuilder::ConfigurationHash(reordered));
+    EXPECT_NE(idx::ShardBuilder::ConfigurationHash(first, &command),
+              idx::ShardBuilder::ConfigurationHash(first, &other));
+    reordered.predefined_macros["FIRST"] = "3";
+    EXPECT_NE(idx::ShardBuilder::ConfigurationHash(first),
+              idx::ShardBuilder::ConfigurationHash(reordered));
 }
 
 TEST(IndexResolution, InnerScopeHidesOuterDeclaration)
@@ -646,7 +655,7 @@ TEST(IndexResolution, InnerScopeHidesOuterDeclaration)
     const auto outer = snapshot->References(HashOf(*header, "Item", 0));
     const auto inner = snapshot->References(HashOf(*header, "Item", 1));
 
-    const auto usesIn =[&](const std::vector<idx::Location>& locations)
+    const auto usesIn = [&](const std::vector<idx::Location>& locations)
     {
         std::size_t count = 0;
         for (const auto& l : locations)
@@ -674,7 +683,7 @@ TEST(IndexResolution, UsingNamespaceBringsNamesIntoScope)
         [&](const idx::Location& l)
         {
             return snapshot->Shards()[l.shard]->Path() == "bare.cpp";
-    });
+        });
     ASSERT_NE(fallback, refs.end());
     EXPECT_EQ(fallback->resolution, idx::Resolution::Unresolved);
 }
@@ -725,7 +734,8 @@ TEST(IndexResolution, CallArityChoosesTheMatchingOverload)
 TEST(IndexResolution, EquallyGoodOverloadsAreAmbiguous)
 {
     const auto header = Shard("h.hpp", "int Add(int);\nint Add(long);\n");
-    const auto user = Shard("use.cpp", "#include \"h.hpp\"\nint a(short value) { return Add(value); }\n");
+    const auto user = Shard("use.cpp",
+        "#include \"h.hpp\"\nint a(short value) { return Add(value); }\n");
     const auto snapshot = idx::IndexSnapshot::Build({header, user});
 
     const auto refs = snapshot->References(HashOf(*header, "Add", 0));
@@ -734,7 +744,7 @@ TEST(IndexResolution, EquallyGoodOverloadsAreAmbiguous)
         [&](const idx::Location& l)
         {
             return snapshot->Shards()[l.shard]->Path() == "use.cpp";
-    });
+        });
     ASSERT_NE(use, refs.end());
     EXPECT_EQ(use->resolution, idx::Resolution::Ambiguous);
 }
@@ -773,7 +783,7 @@ TEST(IndexResolution, UnknownReceiverDoesNotResolveToTheOnlyVisibleMember)
     const auto use = std::ranges::find_if(references,[](const idx::Location& location)
         {
             return location.shard == 1;
-    });
+        });
     ASSERT_NE(use, references.end());
     EXPECT_EQ(use->resolution, idx::Resolution::Unresolved);
 }
@@ -890,7 +900,7 @@ TEST(IndexResolution, ConcurrentResolutionOfOneShardIsSafe)
         workers.emplace_back([&]
             {
                 resolved += static_cast<int>(snapshot->References(HashOf(*header, "Compute")).size());
-        });
+            });
     }
 
     for (auto& worker : workers)

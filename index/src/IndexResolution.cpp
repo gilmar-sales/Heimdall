@@ -45,7 +45,7 @@ namespace heimdall::index
 			[&]
 			{
 				ResolveShard(shard, mResolution[shard]);
-		});
+			});
 		return mResolution[shard];
 	}
 
@@ -101,7 +101,7 @@ namespace heimdall::index
 		// Whether the occurrence being resolved names a macro: macros only match macros and
 		// every other name never matches a macro.
 		bool macroUse = false;
-		const auto find =[&](std::string_view qualified, std::vector<Candidate>& found)
+		const auto find = [&](std::string_view qualified, std::vector<Candidate>& found)
 		{
 			const auto key   = HashBytes(qualified);
 			const auto range = std::ranges::equal_range(mQualHash, key);
@@ -124,14 +124,14 @@ namespace heimdall::index
 					{
 						return c.hash == hash && mShards[c.symbol.shard]->Identity(c.symbol.symbol) ==
 						mShards[candidateShard]->Identity(symbol);
-				}))
+					}))
 				{
 					found.push_back({hash, {candidateShard, symbol}});
 				}
 			}
 		};
 
-		const auto fits =[&](const Candidate& candidate, std::uint8_t args)
+		const auto fits = [&](const Candidate& candidate, std::uint8_t args)
 		{
 			const auto& symbols = mShards[candidate.symbol.shard]->Symbols();
 			const auto symbol   = candidate.symbol.symbol;
@@ -147,7 +147,7 @@ namespace heimdall::index
 
 		std::function<bool(SymbolRef, std::string_view, std::vector<Candidate>&,
 			std::set<SymbolHash>&) > collectMembers;
-		const auto lookup =[&](std::uint32_t sourceShard, std::uint32_t scope, std::uint32_t offset,
+		const auto lookup = [&](std::uint32_t sourceShard, std::uint32_t scope, std::uint32_t offset,
 			std::string_view written,
 			std::vector<Candidate>& found, bool inherited = true)
 		{
@@ -213,7 +213,7 @@ namespace heimdall::index
 			return true;
 		};
 
-		collectMembers =[&](SymbolRef owner, std::string_view name, std::vector<Candidate>& found,
+		collectMembers = [&](SymbolRef owner, std::string_view name, std::vector<Candidate>& found,
 			std::set<SymbolHash>& active)
 		{
 			const auto hash = HashOf(owner);
@@ -352,7 +352,7 @@ namespace heimdall::index
 								{
 									return c.hash == hash && mShards[c.symbol.shard]->Identity(c.symbol.symbol) ==
 									mShards[s]->Identity(symbol);
-							}))
+								}))
 							{
 								found.push_back({hash, {s, symbol}});
 							}
@@ -371,7 +371,7 @@ namespace heimdall::index
 				std::erase_if(found,[&](const Candidate& candidate)
 					{
 						return !fits(candidate, occ.argCount[i]);
-				});
+					});
 
 				state = found.empty() ||!receiverKnown ? Resolution::Unresolved
 				: found.size() == 1 ? Resolution::Resolved
@@ -383,7 +383,7 @@ namespace heimdall::index
 				std::erase_if(found,[&](const Candidate& candidate)
 					{
 						return !fits(candidate, occ.argCount[i]);
-				});
+					});
 				if (found.empty())
 				{
 					state = Resolution::Unresolved;
@@ -400,8 +400,8 @@ namespace heimdall::index
 				bool known = std::ranges::none_of(arguments,[](std::uint8_t type)
 					{
 						return type == kUnknownBuiltin;
-				});
-				const auto exact =[&](const Candidate& candidate)
+					});
+				const auto exact = [&](const Candidate& candidate)
 				{
 					const auto parameters = mShards[candidate.symbol.shard]->ParameterTypes(candidate.symbol.symbol);
 					return parameters.size() >= arguments.size() && std::ranges::equal(arguments,
@@ -419,7 +419,7 @@ namespace heimdall::index
 						known &= std::ranges::none_of(parameters.first(arguments.size()),[](std::uint8_t type)
 							{
 								return type == kUnknownBuiltin;
-						});
+							});
 					}
 				}
 
@@ -428,7 +428,7 @@ namespace heimdall::index
 					std::erase_if(found,[&](const Candidate& candidate)
 						{
 							return !exact(candidate);
-					});
+						});
 					state = Resolution::Resolved;
 				}
 			}

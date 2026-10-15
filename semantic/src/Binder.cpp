@@ -1857,7 +1857,7 @@ namespace heimdall
 				[&](auto token)
 				{
 					return Is(token, Tok::LParen) || Is(token, Tok::LBracket);
-			}))
+				}))
 			{
 				templates.complete.back() = 0;
 			}
@@ -2206,12 +2206,12 @@ namespace heimdall
 		std::sort(found.begin(), found.end(),[](const auto& left, const auto& right)
 			{
 				return std::get<0>(left) < std::get<0>(right);
-		});
+			});
 		found.erase(std::unique(found.begin(), found.end(),
 			[](const auto& a, const auto& b)
 			{
 				return std::get<0>(a) == std::get<0>(b);
-		}),
+			}),
 			found.end());
 		auto& refs = m_model.m_refs;
 		refs.token.reserve(found.size());

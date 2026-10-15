@@ -77,7 +77,8 @@ namespace
 
 TEST(FindClassAt, ClassNameAliasAndVariableAllNameTheClass)
 {
-    Hierarchy h("struct Child2 { int c; };\n"
+    Hierarchy h(
+        "struct Child2 { int c; };\n"
         "using Alias = Child2;\n"
         "int main() { Child2 child2; child2.c = 1; }\n");
 
@@ -97,7 +98,8 @@ TEST(FindClassAt, NonClassVariableIsNotAClass)
 
 TEST(FindClassAt, MethodNamesItsOwningClass)
 {
-    Hierarchy h("struct Child2 { void method(); void method(int x); };\n"
+    Hierarchy h(
+        "struct Child2 { void method(); void method(int x); };\n"
         "int main() { Child2 child2; child2.method(5); }\n");
 
     EXPECT_EQ(h.ClassAt("method", 0), h.Class("Child2"));
@@ -106,7 +108,8 @@ TEST(FindClassAt, MethodNamesItsOwningClass)
 
 TEST(FindClassAt, FieldDoesNotNameASingleClass)
 {
-    Hierarchy h("struct Child2 { int field; };\n"
+    Hierarchy h(
+        "struct Child2 { int field; };\n"
         "int main() { Child2 child2; child2.field = 5; }\n");
 
     EXPECT_EQ(h.ClassAt("field", 0), kNone);
@@ -115,7 +118,8 @@ TEST(FindClassAt, FieldDoesNotNameASingleClass)
 
 TEST(TypeParents, SimpleInheritance)
 {
-    Hierarchy h("struct Parent { int a; };\n"
+    Hierarchy h(
+        "struct Parent { int a; };\n"
         "struct Child1 : Parent { int b; };\n"
         "struct Child2 : Child1 { int c; };\n");
 
@@ -126,7 +130,8 @@ TEST(TypeParents, SimpleInheritance)
 
 TEST(TypeParents, MultipleInheritanceKeepsDeclarationOrder)
 {
-    Hierarchy h("struct Parent1 {};\n"
+    Hierarchy h(
+        "struct Parent1 {};\n"
         "struct Parent2 {};\n"
         "struct Parent3 : Parent2 {};\n"
         "struct Child : Parent1, Parent3 {};\n");
@@ -145,7 +150,8 @@ TEST(TypeParents, ClassTemplateHasItsBase)
 
 TEST(TypeParents, DependentBaseFallsBackToPrimaryTemplate)
 {
-    Hierarchy h("template <typename T> struct Parent {};\n"
+    Hierarchy h(
+        "template <typename T> struct Parent {};\n"
         "template <typename T> struct Child1 : Parent<T> {};\n"
         "template <typename T> struct Child2 : Parent<T>::Type {};\n"
         "template <typename T> struct Child3 : T {};\n");
@@ -163,7 +169,8 @@ TEST(TypeParents, IncompleteClassHasNoParents)
 
 TEST(TypeParents, SelfAndCyclicBasesTerminate)
 {
-    Hierarchy h("template <int N> struct S : S<N + 1> {};\n"
+    Hierarchy h(
+        "template <int N> struct S : S<N + 1> {};\n"
         "struct A : B {};\n"
         "struct B : A {};\n");
 
@@ -174,7 +181,8 @@ TEST(TypeParents, SelfAndCyclicBasesTerminate)
 
 TEST(TypeChildren, DirectDerivedClassesOnly)
 {
-    Hierarchy h("struct Parent {};\n"
+    Hierarchy h(
+        "struct Parent {};\n"
         "struct Child1a : Parent {};\n"
         "struct Child1b : Parent {};\n"
         "struct Child2 : Child1a {};\n");
@@ -186,7 +194,8 @@ TEST(TypeChildren, DirectDerivedClassesOnly)
 
 TEST(TypeChildren, MultipleInheritanceAppearsUnderEveryParent)
 {
-    Hierarchy h("struct Parent1 {};\n"
+    Hierarchy h(
+        "struct Parent1 {};\n"
         "struct Parent2 {};\n"
         "struct Parent3 : Parent2 {};\n"
         "struct Child : Parent1, Parent3 {};\n");
@@ -198,7 +207,8 @@ TEST(TypeChildren, MultipleInheritanceAppearsUnderEveryParent)
 
 TEST(TypeChildren, TemplateDerivedFromPrimaryTemplate)
 {
-    Hierarchy h("template <typename T> struct Parent {};\n"
+    Hierarchy h(
+        "template <typename T> struct Parent {};\n"
         "template <typename T> struct Child : Parent<T> {};\n");
 
     EXPECT_EQ(h.Children("Parent"), Ids {h.Class("Child")});

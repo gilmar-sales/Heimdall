@@ -73,7 +73,7 @@ namespace
     {
         for (const simdjson::dom::element symbol : symbols)
         {
-            const auto range     = symbol["range"];
+            const auto range = symbol["range"];
             const auto selection = symbol["selectionRange"];
             EXPECT_TRUE(Before(range["start"], selection["start"])) << Text(symbol, "name");
             EXPECT_TRUE(Before(selection["end"], range["end"])) << Text(symbol, "name");
@@ -114,10 +114,10 @@ TEST(SymbolProtocolSpec, EmptyDocumentIsAnEmptyArray)
 TEST(SymbolProtocolSpec, NestsChildrenAndKeepsSiblingsAfterThem)
 {
     constexpr std::string_view source = "namespace a {\n"
-                                        "struct A { int x; int y; };\n"
-                                        "int z;\n"
-                                        "}\n"
-                                        "int w;\n";
+        "struct A { int x; int y; };\n"
+        "int z;\n"
+        "}\n"
+        "int w;\n";
 
     Parsed parsed;
     ParseJson(parsed, HierarchicalJson(source));
@@ -144,17 +144,17 @@ TEST(SymbolProtocolSpec, NestsChildrenAndKeepsSiblingsAfterThem)
 TEST(SymbolProtocolSpec, EverySelectionRangeLiesInsideItsRange)
 {
     constexpr std::string_view source = "namespace n {\n"
-                                        "class C\n"
-                                        "{\n"
-                                        "public:\n"
-                                        "    C();\n"
-                                        "    void M(int a) const;\n"
-                                        "};\n"
-                                        "enum class E { One, Two };\n"
-                                        "template <typename T>\n"
-                                        "T Twice(T v) { return v; }\n"
-                                        "}\n"
-                                        "void C::M(int) const {}\n";
+        "class C\n"
+        "{\n"
+        "public:\n"
+        "    C();\n"
+        "    void M(int a) const;\n"
+        "};\n"
+        "enum class E { One, Two };\n"
+        "template <typename T>\n"
+        "T Twice(T v) { return v; }\n"
+        "}\n"
+        "void C::M(int) const {}\n";
 
     Parsed parsed;
     ParseJson(parsed, HierarchicalJson(source));

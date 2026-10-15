@@ -666,7 +666,7 @@ namespace heimdall
 				pending.clear();
 				visited.clear();
 				visited.insert(klass);
-				const auto push_bases =[&](SymbolId derived)
+				const auto push_bases = [&](SymbolId derived)
 				{
 					for (std::uint32_t i = 0; i < symbols.base_count[derived]; ++i)
 					{
@@ -780,7 +780,7 @@ namespace heimdall
 					}
 
 					const bool constructor = (symbols.flags[symbol] & SymbolFlag::Constructor) != 0;
-					const auto report_range =[&](std::size_t first, std::size_t last)
+					const auto report_range = [&](std::size_t first, std::size_t last)
 					{
 						for (auto q = first; q < last; ++q)
 						{
@@ -935,7 +935,7 @@ namespace heimdall
 					[position](const std::pair<std::size_t, std::size_t>& range)
 					{
 						return position >= range.first && position < range.second;
-				});
+					});
 			}
 
 			ApiAnalysis& m_analysis;
@@ -1135,7 +1135,7 @@ namespace heimdall
 				[](unsigned char c)
 				{
 					return static_cast<char>(std::tolower(c));
-			});
+				});
 			for (const auto prefix : kPrefixes)
 			{
 				if (lower.size() >= prefix.size() && lower.compare(0, prefix.size(), prefix) == 0 &&
@@ -1262,7 +1262,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -1495,7 +1495,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -1613,7 +1613,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -1961,7 +1961,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -2098,7 +2098,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -2358,7 +2358,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 
@@ -2462,7 +2462,7 @@ namespace heimdall
 				[](const Diagnostic& left, const Diagnostic& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			return diagnostics;
 		}
 

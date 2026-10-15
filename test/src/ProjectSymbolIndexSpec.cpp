@@ -10,10 +10,11 @@ namespace
 {
     using namespace heimdall;
 
-    DocumentId Open(Workspace&       workspace,
-                    std::string_view path,
-                    std::string_view source,
-                    ParserOptions    options = {})
+    DocumentId Open(
+        Workspace& workspace,
+        std::string_view path,
+        std::string_view source,
+        ParserOptions options = {})
     {
         auto result = workspace.Open(
             std::filesystem::path(path), std::make_shared<const std::string>(source), 1, options);
@@ -26,13 +27,13 @@ namespace
         for (const auto& issue : index.Issues())
         {
             ADD_FAILURE() << "coverage issue " << static_cast<int>(issue.kind) << " in "
-                          << issue.path;
+            << issue.path;
         }
 
         for (const auto& occurrence : index.Occurrences())
         {
             EXPECT_EQ(occurrence.resolution, OccurrenceResolution::Resolved)
-                << occurrence.name << " in document " << occurrence.document;
+            << occurrence.name << " in document " << occurrence.document;
         }
 
         EXPECT_TRUE(index.Complete());
@@ -43,7 +44,7 @@ namespace
         std::filesystem::path root =
             std::filesystem::temp_directory_path() /
             ("heimdall-symbol-project-" +
-             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         bool owned = std::filesystem::create_directory(root);
 
         DiskProject()
@@ -61,7 +62,10 @@ namespace
             Write("src/impl.cpp", "#include <api.hpp>\nint fresh(int value) { return value; }");
             Write("src/use.cpp", "#include <api.hpp>\nint run() { return fresh(1); }");
             std::string database = "[";
-            for (const auto name : { "impl", "use" })
+            for (const auto name :
+                {
+                    "impl", "use"
+            })
             {
                 if (database.size() > 1)
                 {
@@ -70,7 +74,7 @@ namespace
 
                 database +=
                     "{\"directory\":\"" + root.generic_string() + "\",\"file\":\"" +
-                    (root / "src" / (std::string(name) + ".cpp")).generic_string() +
+                    (root / "src" /(std::string(name) + ".cpp")).generic_string() +
                     "\",\"arguments\":[\"c++\",\"-std=c++20\",\"-I\",\"include\",\"-c\",\"src/" +
                     name + ".cpp\"]}";
             }
@@ -94,8 +98,11 @@ namespace
             }
 
             std::error_code error;
-            for (const auto name : { "src/impl.cpp", "src/use.cpp", "include/detail.hpp",
-                                     "include/api.hpp", "compile_commands.json", "src", "include" })
+            for (const auto name :
+                {
+                    "src/impl.cpp", "src/use.cpp", "include/detail.hpp",
+                    "include/api.hpp", "compile_commands.json", "src", "include"
+            })
             {
                 std::filesystem::remove(root / name, error);
             }
@@ -111,12 +118,12 @@ namespace
              "namespace api { int twice(int input); extern int count; }");
         Open(workspace, "symbol-project/api.cpp",
              "#include \"api.hpp\"\nnamespace api { "
-             "int twice(int argument) { return argument + argument; } int count = 1; }");
+            "int twice(int argument) { return argument + argument; } int count = 1; }");
         const std::string source = "#include \"api.hpp\"\nint run() { return api::twice(2); }";
-        const auto        use    = Open(workspace, "symbol-project/use.cpp", source);
-        auto              built  = workspace.Snapshot().SymbolIndex();
+        const auto use = Open(workspace, "symbol-project/use.cpp", source);
+        auto built = workspace.Snapshot().SymbolIndex();
         ASSERT_TRUE(built);
-        const auto& index = **built;
+        const auto& index = * *built;
         ASSERT_EQ(index.Named("api::twice").size(), 1u);
         const auto id = index.Named("api::twice").front();
         EXPECT_TRUE(index.Entities()[id].supported);
@@ -138,8 +145,8 @@ namespace
         Workspace workspace;
         Open(workspace, "visibility/hidden.hpp", "int hidden(int input);");
         const std::string source = "int run() { return hidden(1); }";
-        const auto        use    = Open(workspace, "visibility/use.cpp", source);
-        const auto        index  = ProjectSymbolIndex::Build(workspace.Snapshot());
+        const auto use = Open(workspace, "visibility/use.cpp", source);
+        const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         const auto* occurrence = index->At(use, source.find("hidden"));
         ASSERT_NE(occurrence, nullptr);
@@ -153,8 +160,8 @@ namespace
         Open(workspace, "overloads/api.hpp",
              "int calculate(int input); int calculate(double input);");
         const std::string source = "#include \"api.hpp\"\nint run() { return calculate(1); }";
-        const auto        use    = Open(workspace, "overloads/use.cpp", source);
-        const auto        index  = ProjectSymbolIndex::Build(workspace.Snapshot());
+        const auto use = Open(workspace, "overloads/use.cpp", source);
+        const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         EXPECT_EQ(index->Named("calculate").size(), 2u);
         const auto* occurrence = index->At(use, source.find("calculate"));
@@ -167,58 +174,59 @@ namespace
 
     TEST(ProjectSymbolIndexSpec, SeparatesInternalAndShadowedLocalEntities)
     {
-        Workspace         workspace;
+        Workspace workspace;
         const std::string source =
             "static int helper(int value) { { int value = 2; return value; } return value; }";
-        const auto a     = Open(workspace, "internal/a.cpp", source);
-        const auto b     = Open(workspace, "internal/b.cpp", source);
+        const auto a = Open(workspace, "internal/a.cpp", source);
+        const auto b = Open(workspace, "internal/b.cpp", source);
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         ASSERT_EQ(index->Named("helper").size(), 2u);
-        EXPECT_NE(index->At(a, source.find("helper"))->entity,
+        EXPECT_NE(index->At(a, source.find("helper")) -> entity,
                   index->At(b, source.find("helper"))->entity);
-        const auto parameter = index->At(a, source.find("value"))->entity;
-        const auto shadow    = index->At(a, source.find("value ="))->entity;
+        const auto parameter = index->At(a, source.find("value")) -> entity;
+        const auto shadow = index->At(a, source.find("value =")) -> entity;
         EXPECT_NE(parameter, shadow);
-        EXPECT_EQ(index->At(a, source.rfind("value"))->entity, parameter);
+        EXPECT_EQ(index->At(a, source.rfind("value")) -> entity, parameter);
     }
 
     TEST(ProjectSymbolIndexSpec, ObservesDirtyTransitiveHeadersAndPinsOldViews)
     {
-        Workspace  workspace;
+        Workspace workspace;
         const auto header = Open(workspace, "dirty/detail.hpp", "int fresh(int input);");
         Open(workspace, "dirty/api.hpp", "#include \"detail.hpp\"\n");
         const std::string source = "#include \"api.hpp\"\nint run() { return fresh(1); }";
-        const auto        use    = Open(workspace, "dirty/use.cpp", source);
-        const auto        old    = workspace.Snapshot();
-        const auto        before = old.SymbolIndex();
+        const auto use = Open(workspace, "dirty/use.cpp", source);
+        const auto old = workspace.Snapshot();
+        const auto before = old.SymbolIndex();
         ASSERT_TRUE(before);
-        EXPECT_EQ((*before)->At(use, source.find("fresh"))->resolution,
+        EXPECT_EQ((*before)->At(use, source.find("fresh")) -> resolution,
                   OccurrenceResolution::Resolved);
         ASSERT_TRUE(workspace.Update(
             header, std::make_shared<const std::string>("int changed(int input);"), 2));
         const auto after = workspace.Snapshot().SymbolIndex();
         ASSERT_TRUE(after);
         EXPECT_NE(before->get(), after->get());
-        EXPECT_EQ((*after)->At(use, source.find("fresh"))->resolution,
+        EXPECT_EQ((*after)->At(use, source.find("fresh")) -> resolution,
                   OccurrenceResolution::Unresolved);
         EXPECT_EQ((*before)->Named("fresh").size(), 1u);
         EXPECT_EQ((*before)->Units().front().version, 1);
-        ExpectComplete(**before);
+        ExpectComplete(* *before);
     }
 
     TEST(ProjectSymbolIndexSpec, RecordsCoverageGapsAndDependentOrUnsupportedUses)
     {
-        Workspace         workspace;
+        Workspace workspace;
         const std::string source =
             "#include \"missing.hpp\"\ntemplate<class T> int run(T value) { return value; }";
-        const auto use   = Open(workspace, "coverage/use.cpp", source);
+        const auto use = Open(workspace, "coverage/use.cpp", source);
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         EXPECT_FALSE(index->Complete());
-        EXPECT_TRUE(std::ranges::any_of(index->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::MissingInclude;
-        }));
+        EXPECT_TRUE(std::ranges::any_of(index->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::MissingInclude;
+            }));
         const auto* occurrence = index->At(use, source.rfind("value"));
         ASSERT_NE(occurrence, nullptr);
         EXPECT_EQ(occurrence->resolution, OccurrenceResolution::Dependent);
@@ -239,12 +247,14 @@ namespace
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         EXPECT_EQ(index->Named("calculate").size(), 2u);
-        EXPECT_TRUE(std::ranges::any_of(index->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::ConflictingDeclarations;
-        }));
-        EXPECT_TRUE(std::ranges::any_of(index->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::ConfigurationVariants;
-        }));
+        EXPECT_TRUE(std::ranges::any_of(index->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::ConflictingDeclarations;
+            }));
+        EXPECT_TRUE(std::ranges::any_of(index->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::ConfigurationVariants;
+            }));
         EXPECT_FALSE(index->Complete());
     }
 
@@ -258,8 +268,14 @@ namespace
                   SymbolIndexError::Cancelled);
         EXPECT_EQ(workspace.Snapshot().SymbolIndex(stop.get_token()).error(),
                   SymbolIndexError::Cancelled);
-        for (auto limits : { SymbolIndexLimits { 0, 10, 10 }, SymbolIndexLimits { 10, 0, 10 },
-                             SymbolIndexLimits { 10, 10, 0 } })
+        for (auto limits :
+            {
+                SymbolIndexLimits
+                {
+                    0, 10, 10
+                }, SymbolIndexLimits {10, 0, 10},
+                SymbolIndexLimits {10, 10, 0}
+        })
         {
             EXPECT_EQ(ProjectSymbolIndex::Build(workspace.Snapshot(), limits).error(),
                       SymbolIndexError::LimitReached);
@@ -268,22 +284,23 @@ namespace
 
     TEST(ProjectSymbolIndexSpec, ConcurrentReadersShareOneLazyIndex)
     {
-        Workspace  workspace;
+        Workspace workspace;
         const auto document =
             Open(workspace, "cache/a.cpp", "int run(int input) { return input; }");
-        const auto snapshot      = workspace.Snapshot();
+        const auto snapshot = workspace.Snapshot();
         const auto memory_before = snapshot.Memory().Total();
         std::vector<std::shared_ptr<const ProjectSymbolIndex>> results(8);
-        std::vector<std::jthread>                              threads;
+        std::vector<std::jthread> threads;
         for (std::size_t i = 0; i < results.size(); ++i)
         {
-            threads.emplace_back([&, i] {
-                auto result = snapshot.SymbolIndex();
-                if (result)
+            threads.emplace_back([&, i]
                 {
-                    results[i] = *result;
-                }
-            });
+                    auto result = snapshot.SymbolIndex();
+                    if (result)
+                    {
+                        results[i] = *result;
+                    }
+                });
         }
 
         threads.clear();
@@ -306,7 +323,7 @@ namespace
     TEST(ProjectSymbolIndexSpec, ImportsClosedTranslationUnitsWithoutOverwritingDirtyHeaders)
     {
         DiskProject project;
-        const auto  database = CompileDatabase::Load(project.root / "compile_commands.json");
+        const auto database = CompileDatabase::Load(project.root / "compile_commands.json");
         ASSERT_TRUE(database);
         Workspace workspace;
         workspace.SetCompilationDatabase(std::make_shared<const CompileDatabase>(*database));
@@ -314,12 +331,13 @@ namespace
             workspace.Open(project.root / "include/detail.hpp",
                            std::make_shared<const std::string>("int fresh(int input);"), 7);
         ASSERT_TRUE(header);
-        const auto before  = workspace.Snapshot();
+        const auto before = workspace.Snapshot();
         const auto partial = before.SymbolIndex();
         ASSERT_TRUE(partial);
-        EXPECT_TRUE(std::ranges::any_of((*partial)->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::MissingTranslationUnit;
-        }));
+        EXPECT_TRUE(std::ranges::any_of((*partial)->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::MissingTranslationUnit;
+            }));
         const auto loaded = workspace.LoadProjectSources();
         ASSERT_TRUE(loaded);
         EXPECT_EQ(loaded->added.size(), 3u);
@@ -332,7 +350,7 @@ namespace
         ASSERT_TRUE(index);
         ASSERT_EQ((*index)->Named("fresh").size(), 1u);
         EXPECT_EQ((*index)->Entities()[(*index)->Named("fresh").front()].occurrences.size(), 3u);
-        ExpectComplete(**index);
+        ExpectComplete(* *index);
         EXPECT_TRUE((*index)->Named("diskName").empty());
         const auto again = workspace.LoadProjectSources();
         ASSERT_TRUE(again);
@@ -343,12 +361,12 @@ namespace
     TEST(ProjectSymbolIndexSpec, ProjectLoadingCancellationAndLimitsAreTransactional)
     {
         DiskProject project;
-        const auto  database = CompileDatabase::Load(project.root / "compile_commands.json");
+        const auto database = CompileDatabase::Load(project.root / "compile_commands.json");
         ASSERT_TRUE(database);
         Workspace workspace;
         workspace.SetCompilationDatabase(std::make_shared<const CompileDatabase>(*database));
         const auto revision = workspace.Snapshot().Revision();
-        EXPECT_EQ(workspace.LoadProjectSources({ 1, 1024 }).error(),
+        EXPECT_EQ(workspace.LoadProjectSources({1, 1024}).error(),
                   ProjectLoadError::LimitReached);
         EXPECT_TRUE(workspace.Snapshot().Documents().empty());
         EXPECT_EQ(workspace.Snapshot().Revision(), revision);
@@ -383,16 +401,16 @@ namespace
         Workspace workspace;
         Open(workspace, "order/api.hpp", "int hidden();");
         const std::string late = "int run() { return hidden(); }\n#include \"api.hpp\"\n";
-        const auto        use  = Open(workspace, "order/use.cpp", late);
+        const auto use = Open(workspace, "order/use.cpp", late);
         const std::string shadow =
             "namespace api { int target(); } namespace inner { namespace api { int other(); } "
             "int run() { return api::target(); } }";
         const auto local = Open(workspace, "order/local.cpp", shadow);
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
-        EXPECT_EQ(index->At(use, late.find("hidden"))->resolution,
+        EXPECT_EQ(index->At(use, late.find("hidden")) -> resolution,
                   OccurrenceResolution::Unresolved);
-        EXPECT_EQ(index->At(local, shadow.rfind("target"))->resolution,
+        EXPECT_EQ(index->At(local, shadow.rfind("target")) -> resolution,
                   OccurrenceResolution::Unresolved);
         EXPECT_FALSE(index->Complete());
     }
@@ -402,14 +420,16 @@ namespace
         Workspace workspace;
         Open(workspace, "unsupported/api.hpp",
              "static int internal(); int variadic(int input, ...); "
-             "int adjusted(const int input); int safe() noexcept;");
+            "int adjusted(const int input); int safe() noexcept;");
         Open(workspace, "unsupported/auto.cpp",
              "auto deduced() { return 1; } const int localConstant = 1;");
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
         EXPECT_FALSE(index->Complete());
         for (const auto name :
-             { "internal", "variadic", "adjusted", "safe", "deduced", "localConstant" })
+            {
+                "internal", "variadic", "adjusted", "safe", "deduced", "localConstant"
+        })
         {
             const auto ids = index->Named(name);
             ASSERT_EQ(ids.size(), 1u) << name;
@@ -421,7 +441,10 @@ namespace
     {
         DiskProject project;
         std::string database = "[";
-        for (const auto flags : { "", ",\"-funsigned-char\"" })
+        for (const auto flags :
+            {
+                "", ",\"-funsigned-char\""
+        })
         {
             if (database.size() > 1)
             {
@@ -429,10 +452,10 @@ namespace
             }
 
             database += "{\"directory\":\"" + project.root.generic_string() + "\",\"file\":\"" +
-                        (project.root / "src/impl.cpp").generic_string() +
-                        "\",\"arguments\":[\"c++\",\"-I\",\"include\","
-                        "\"-c\",\"src/impl.cpp\"" +
-                        flags + "]}";
+                (project.root / "src/impl.cpp").generic_string() +
+                "\",\"arguments\":[\"c++\",\"-I\",\"include\","
+                "\"-c\",\"src/impl.cpp\"" +
+                flags + "]}";
         }
 
         database += "]";
@@ -444,9 +467,10 @@ namespace
         ASSERT_TRUE(workspace.LoadProjectSources());
         const auto index = workspace.Snapshot().SymbolIndex();
         ASSERT_TRUE(index);
-        EXPECT_TRUE(std::ranges::any_of((*index)->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::ConfigurationVariants;
-        }));
+        EXPECT_TRUE(std::ranges::any_of((*index)->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::ConfigurationVariants;
+            }));
         EXPECT_FALSE((*index)->Complete());
     }
 
@@ -456,8 +480,8 @@ namespace
         Open(workspace, "duplicates/b.cpp", "int run(int input) { return input; }");
         Open(workspace, "duplicates/a.cpp", "int run(int input) { return input; }");
         const auto snapshot = workspace.Snapshot();
-        const auto first    = ProjectSymbolIndex::Build(snapshot);
-        const auto second   = ProjectSymbolIndex::Build(snapshot);
+        const auto first = ProjectSymbolIndex::Build(snapshot);
+        const auto second = ProjectSymbolIndex::Build(snapshot);
         ASSERT_TRUE(first);
         ASSERT_TRUE(second);
         ASSERT_EQ(first->Entities().size(), second->Entities().size());
@@ -466,9 +490,10 @@ namespace
             EXPECT_EQ(first->Entities()[i].identity, second->Entities()[i].identity);
         }
 
-        EXPECT_TRUE(std::ranges::any_of(first->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::ConflictingDeclarations;
-        }));
+        EXPECT_TRUE(std::ranges::any_of(first->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::ConflictingDeclarations;
+            }));
         EXPECT_FALSE(first->Complete());
     }
 
@@ -482,9 +507,10 @@ namespace
              "#include \"api.hpp\"\nint run() { return external(1); }", options);
         const auto index = ProjectSymbolIndex::Build(workspace.Snapshot());
         ASSERT_TRUE(index);
-        EXPECT_TRUE(std::ranges::any_of(index->Issues(), [](const auto& issue) {
-            return issue.kind == SymbolIndexIssue::ConfigurationVariants;
-        }));
+        EXPECT_TRUE(std::ranges::any_of(index->Issues(),[](const auto& issue)
+            {
+                return issue.kind == SymbolIndexIssue::ConfigurationVariants;
+            }));
         EXPECT_FALSE(index->Complete());
     }
 } // namespace

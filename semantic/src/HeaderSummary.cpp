@@ -1,16 +1,16 @@
 #include <Heimdall/HeaderSummary.hpp>
 
-#include <Heimdall/ParseTree.hpp>
-#include <Heimdall/SemanticModel.hpp>
-
-#include "detail/ClassHead.hpp"
-#include "detail/TokenView.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
+
+#include <Heimdall/ParseTree.hpp>
+#include <Heimdall/SemanticModel.hpp>
+
+#include "detail/ClassHead.hpp"
+#include "detail/TokenView.hpp"
 
 namespace heimdall
 {
@@ -62,7 +62,7 @@ namespace heimdall
 				[](unsigned char c)
 				{
 					return static_cast<char>(std::tolower(c));
-			});
+				});
 			return extension == ".inc" || extension == ".def" || extension == ".inl" ||
 				extension == ".tpp" || extension == ".ipp" || extension == ".tcc";
 		}
@@ -72,7 +72,9 @@ namespace heimdall
 	class HeaderSummaryBuilder
 	{
 	public:
-		HeaderSummaryBuilder(HeaderSummary& summary, const ParseTree& tree,
+		HeaderSummaryBuilder(
+			HeaderSummary& summary,
+			const ParseTree& tree,
 			const SemanticModel& model) :
 			m_summary(summary), m_tree(tree), m_model(model), m_qualified(model.Scopes().Size()),
 			m_state(model.Scopes().Size(), 0) {}
@@ -406,7 +408,8 @@ namespace heimdall
 		std::vector<std::uint8_t> m_state;
 	};
 
-	std::shared_ptr<const HeaderSummary> HeaderSummary::FromSource(std::string_view source,
+	std::shared_ptr<const HeaderSummary> HeaderSummary::FromSource(
+		std::string_view source,
 		std::filesystem::path path)
 	{
 		const ParseTree tree      = ParseTree::Parse(source, ParserOptions {});
@@ -414,7 +417,8 @@ namespace heimdall
 		return FromModel(model, std::move(path));
 	}
 
-	std::shared_ptr<const HeaderSummary> HeaderSummary::FromModel(const SemanticModel& model,
+	std::shared_ptr<const HeaderSummary> HeaderSummary::FromModel(
+		const SemanticModel& model,
 		std::filesystem::path path)
 	{
 		const auto& tree       = model.Tree();

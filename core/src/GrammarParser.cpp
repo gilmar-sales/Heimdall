@@ -204,7 +204,7 @@ namespace heimdall
 					return token.kind != TokenKind::Whitespace &&
 					token.kind != TokenKind::LineComment &&
 					token.kind != TokenKind::BlockComment;
-			});
+				});
 			m_sig.reserve(static_cast<std::size_t>(significantCount));
 			for (std::size_t i = 0; i < tree.Tokens().size(); ++i)
 			{
@@ -1091,7 +1091,7 @@ namespace heimdall
 		std::size_t FindTopLevelRequires(std::size_t begin, std::size_t end) const
 		{
 			std::unordered_map<std::size_t, std::size_t> close_cache;
-			auto template_close =[&](std::size_t open)->std::size_t
+			auto template_close = [&](std::size_t open)->std::size_t
 			{
 				if (const auto hit = close_cache.find(open); hit != close_cache.end())
 				{
@@ -4783,7 +4783,7 @@ namespace heimdall
 		bool IsCastTypeId(std::size_t begin, std::size_t end) const
 		{
 			std::size_t i = begin;
-			const auto qualifiers =[&]()
+			const auto qualifiers = [&]()
 			{
 				while (i < end && (Is(i, "const") || Is(i, "volatile")))
 				{
@@ -4796,7 +4796,7 @@ namespace heimdall
 				return false;
 			}
 
-			const auto builtin =[&](std::size_t at)
+			const auto builtin = [&](std::size_t at)
 			{
 				const auto text = Text(at);
 				return IsBuiltinType(text) && text != "auto" && text != "decltype";
@@ -4992,7 +4992,7 @@ namespace heimdall
 				[&prev](const TopLevelItem& item, std::size_t value)
 				{
 					return prev.Tokens()[item.first_token].offset < value;
-			});
+				});
 			if (found == items.end() || prev.Tokens()[found->first_token].offset != old_offset ||
 				!found->reusable)
 			{
@@ -5135,7 +5135,7 @@ namespace heimdall
 				{
 					const MacroDef* nested = m_resolver->Find(name, offset);
 					return nested != nullptr && IsDecorationDefinition(*nested, offset, depth + 1);
-			});
+				});
 			if (!decoration && !macro.functionLike)
 			{
 				if (const auto table = m_resolver->TableAt(offset))

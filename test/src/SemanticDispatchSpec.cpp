@@ -36,7 +36,7 @@ namespace
         std::stable_sort(all.begin(), all.end(),[](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset < b.offset;
-        });
+            });
         return all;
     }
 
@@ -268,7 +268,7 @@ int undocumented(int argument) { return argument; }
                                        [](const Diagnostic& a, const Diagnostic& b)
             {
                 return a.offset == b.offset;
-            }) != expected.end());
+                }) != expected.end());
         ExpectEquivalent(AnalysisFeatures::Diagnostics(context, engine, true), expected);
     }
 } // namespace

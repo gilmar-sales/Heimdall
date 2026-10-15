@@ -1054,15 +1054,15 @@ TEST(ProjectRulesSpec, AnalyzeWithContextAddsTheProjectRulesInOffsetOrder)
     EXPECT_TRUE(std::is_sorted(with.begin(), with.end(),[](const auto& a, const auto& b)
         {
             return a.offset < b.offset;
-    }));
+        }));
     EXPECT_TRUE(std::any_of(with.begin(), with.end(),[](const auto& d)
         {
             return d.code == "cpp/include-what-you-use";
-    }));
+        }));
     EXPECT_TRUE(std::any_of(with.begin(), with.end(),[](const auto& d)
         {
             return d.code == "cpp/modernize-final";
-    }));
+        }));
 }
 
 TEST(ProjectRulesSpec, RulesAreInTheCatalogAndCanBeSwitchedOff)

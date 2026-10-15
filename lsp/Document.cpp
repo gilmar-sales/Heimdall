@@ -283,7 +283,7 @@ namespace heimdall::lsp
 
 		std::string decoded;
 		decoded.reserve(uri.size());
-		auto hex =[](char c) -> int
+		auto hex = [](char c) -> int
 		{
 			if (c >= '0' && c <= '9')
 			{

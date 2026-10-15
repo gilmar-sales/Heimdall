@@ -10,7 +10,7 @@ namespace
 
     std::vector<heimdall::Diagnostic> Order(const std::string& source)
     {
-        const auto tree  = heimdall::ParseTree::Parse(source);
+        const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeDesignatedInitOrder(model);
     }
@@ -52,13 +52,13 @@ TEST(DesignatedInitOrder, KeepsSeparatorsAndMultilineLayout)
 
 TEST(DesignatedInitOrder, WorksForVariablesWithEqualsAndNestedCommas)
 {
-    const std::string source      = "struct P { std::pair<int, int> pair; int z; int y; };\n"
-                                    "P p = { .y = 1, .z = 2, .pair = std::pair<int, int>{1, 2} };\n";
-    const auto        diagnostics = Order(source);
+    const std::string source = "struct P { std::pair<int, int> pair; int z; int y; };\n"
+        "P p = { .y = 1, .z = 2, .pair = std::pair<int, int>{1, 2} };\n";
+    const auto diagnostics = Order(source);
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(Fixed(source, diagnostics[0]),
               "struct P { std::pair<int, int> pair; int z; int y; };\n"
-              "P p = { .pair = std::pair<int, int>{1, 2}, .z = 2, .y = 1 };\n");
+        "P p = { .pair = std::pair<int, int>{1, 2}, .z = 2, .y = 1 };\n");
 }
 
 TEST(DesignatedInitOrder, SilentWhenAlreadyOrdered)
@@ -85,10 +85,13 @@ TEST(DesignatedInitOrder, SurvivesBrokenInput)
 TEST(DesignatedInitZeroAsNull, ReportsZeroAssignedToAPointerMember)
 {
     const std::string source = kNode + "Node n{ .next = 0, .value = 0 };\n";
-    const auto        tree   = heimdall::ParseTree::Parse(source);
-    const auto        model  = heimdall::Binder::Bind(tree);
-    for (const auto& diagnostics : { heimdall::SemanticRules::AnalyzeDesignatedZeroAsNull(model),
-                                     heimdall::SemanticRules::AnalyzeZeroAsNull(model) })
+    const auto tree = heimdall::ParseTree::Parse(source);
+    const auto model = heimdall::Binder::Bind(tree);
+    for (const auto& diagnostics :
+        {
+            heimdall::SemanticRules::AnalyzeDesignatedZeroAsNull(model),
+            heimdall::SemanticRules::AnalyzeZeroAsNull(model)
+    })
     {
         ASSERT_EQ(diagnostics.size(), 1u); // `.value = 0` is an int
         EXPECT_EQ(diagnostics[0].code, "cpp/no-zero-as-null");
@@ -100,8 +103,9 @@ TEST(DesignatedInitZeroAsNull, ReportsZeroAssignedToAPointerMember)
 
 TEST(DesignatedInitZeroAsNull, WorksWithNewAndSilentForNullptrOrUnknownClasses)
 {
-    const auto count = [](const std::string& source) {
-        const auto tree  = heimdall::ParseTree::Parse(source);
+    const auto count = [](const std::string& source)
+    {
+        const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeDesignatedZeroAsNull(model).size();
     };
@@ -115,7 +119,7 @@ namespace
 
     std::vector<heimdall::Diagnostic> IntegerToPointer(const std::string& source)
     {
-        const auto tree  = heimdall::ParseTree::Parse(source);
+        const auto tree = heimdall::ParseTree::Parse(source);
         const auto model = heimdall::Binder::Bind(tree);
         return heimdall::SemanticRules::AnalyzeIntegerToPointer(model);
     }
@@ -124,8 +128,8 @@ namespace
 
 TEST(IntegerToPointer, ReportsAnIntegerInADesignatedInitializerAsAnError)
 {
-    const std::string source      = kNode + "Node n{ .next = 20, .value = 20 };\n";
-    const auto        diagnostics = IntegerToPointer(source);
+    const std::string source = kNode + "Node n{ .next = 20, .value = 20 };\n";
+    const auto diagnostics = IntegerToPointer(source);
     ASSERT_EQ(diagnostics.size(), 1u); // `.value` is an int
     EXPECT_EQ(diagnostics[0].code, "cpp/no-integer-to-pointer");
     EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::NoIntegerToPointer);
@@ -150,7 +154,7 @@ TEST(IntegerToPointer, SilentForNullConstantsIntegersAndFloats)
     EXPECT_TRUE(IntegerToPointer(kNode + "Node n{ .next = 0, .value = 20 };\n").empty());
     EXPECT_TRUE(IntegerToPointer("Unknown n{ .next = 20 };\n").empty());
     EXPECT_TRUE(IntegerToPointer("struct S { int* p; };\nS s{ .p = reinterpret_cast<int*>(20) };\n")
-                    .empty());
+        .empty());
 }
 
 TEST(IntegerToPointer, IsRegisteredAsAnErrorRule)

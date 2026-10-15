@@ -298,7 +298,7 @@ namespace heimdall::index
 			std::vector<OpenScope> stack;
 			OpenScope pending;
 			bool hasPending = false;
-			const auto isName =[&](std::size_t at)
+			const auto isName = [&](std::size_t at)
 			{
 				return at < sig.size() && tokens[sig[at]].kind == TokenKind::Identifier &&
 					tokens[sig[at]].tok == Tok::None;
@@ -821,7 +821,7 @@ namespace heimdall::index
 
 			std::vector<Entry> entries;
 			std::vector<std::string> byScope(scopes.Size());
-			const auto qualifiedOf =[&](auto&& self, ScopeId scope)->std::string
+			const auto qualifiedOf = [&](auto&& self, ScopeId scope)->std::string
 			{
 				if (scope == kNone || scope >= scopes.Size() ||
 					scope == SemanticModel::TranslationUnitScope)
@@ -900,7 +900,7 @@ namespace heimdall::index
 				[](const Entry& a, const Entry& b)
 				{
 					return a.begin != b.begin ? a.begin < b.begin : a.end > b.end;
-			});
+				});
 			std::vector<std::uint32_t> open;
 			for (std::uint32_t i = 0; i < entries.size(); ++i)
 			{
@@ -941,7 +941,7 @@ namespace heimdall::index
 			const auto& sig    = mModel.Significant();
 			const auto& tokens = mModel.Tree().Tokens();
 			auto& out          = mShard->mUsings;
-			const auto isName =[&](std::size_t at)
+			const auto isName = [&](std::size_t at)
 			{
 				return at < sig.size() && tokens[sig[at]].kind == TokenKind::Identifier &&
 					tokens[sig[at]].tok == Tok::None;
@@ -1360,7 +1360,7 @@ namespace heimdall::index
 				[&](std::uint32_t token)
 				{
 					return tokens[token].offset;
-			});
+				});
 			if (at == sig.end() || tokens[*at].offset != offset)
 			{
 				out.qualifier.push_back(kInvalid);
@@ -1440,7 +1440,7 @@ namespace heimdall::index
 		bool IsMacroMention(std::uint32_t index) const
 		{
 			const auto& tokens = mModel.Tree().Tokens();
-			const auto previous =[&](std::size_t from)->std::optional<std::size_t>
+			const auto previous = [&](std::size_t from)->std::optional<std::size_t>
 			{
 				while (from > 0)
 				{
@@ -1454,7 +1454,7 @@ namespace heimdall::index
 
 				return std::nullopt;
 			};
-			const auto text =[&](std::size_t token)
+			const auto text = [&](std::size_t token)
 			{
 				return mModel.Tree().Text(tokens[token]);
 			};
@@ -1519,7 +1519,7 @@ namespace heimdall::index
 					[](const Token& token)
 					{
 						return token.offset;
-				});
+					});
 				std::size_t seen = 0;
 				while (at != tokens.end() && seen < kMaxDirectiveTokens &&
 					!(at->kind == TokenKind::Identifier && tree.Text(*at) == parsed->name))
@@ -1666,7 +1666,7 @@ namespace heimdall::index
 						std::ranges::any_of(defined,[&](const Defined& entry)
 						{
 							return entry.name == text;
-					});
+						});
 				}
 
 				if (found == nullptr && !mention && (resolver != nullptr || local == nullptr))
@@ -1759,14 +1759,14 @@ namespace heimdall::index
 				[&](const Pending& item)
 				{
 					return std::ranges::binary_search(macroOffsets, item.offset);
-			});
+				});
 			pending.insert(pending.end(), mMacroPending.begin(), mMacroPending.end());
 
 			std::ranges::stable_sort(pending,
 				[](const Pending& a, const Pending& b)
 				{
 					return a.offset < b.offset;
-			});
+				});
 			auto& out = mShard->mOccurrences;
 			out.offset.reserve(pending.size());
 			for (const auto& item : pending)
@@ -1912,7 +1912,7 @@ namespace heimdall::index
 		const CompileCommand* command)
 	{
 		std::uint64_t hash = HashBytes(std::to_string(static_cast<unsigned>(options.standard)));
-		const auto append =[&](std::string_view text)
+		const auto append = [&](std::string_view text)
 		{
 			hash = HashBytes(std::to_string(text.size()) + ':', hash);
 			hash = HashBytes(text, hash);

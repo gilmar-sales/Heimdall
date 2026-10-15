@@ -498,7 +498,7 @@ TEST(CompletionSpec, IndexScopesListsScopesAndMembers)
     const heimdall::ScopeIndex index =
         heimdall::CompletionEngine::IndexScopes(source, heimdall::ParserOptions {});
 
-    auto find_scope =[&](std::vector<std::string> path)->const heimdall::IndexedScope *
+    auto find_scope = [&](std::vector<std::string> path)->const heimdall::IndexedScope *
     {
         for (const auto& scope : index)
         {
@@ -826,7 +826,7 @@ TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
     EXPECT_TRUE(std::is_sorted(items.begin(), items.end(),[](const auto& left, const auto& right)
         {
             return left.label < right.label;
-    }));
+        }));
 }
 
 namespace
@@ -1051,7 +1051,7 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveEnumsAndEnumerators)
             header + use
     })
     {
-        auto hover =[&](std::string_view needle, const heimdall::ScopeIndex* index)
+        auto hover = [&](std::string_view needle, const heimdall::ScopeIndex* index)
         {
             return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, index);
         };
@@ -1100,7 +1100,7 @@ TEST(CompletionSpec, HoverShowsPlainCommentsAboveMethodsAndFields)
         "    int nodes;\n"
         "};\n"
         "void f() { Tree t; t.nodes; Tree::Parse(1, 2); t.count; }\n";
-    auto hover =[&](std::string_view needle, std::size_t skip = 1)
+    auto hover = [&](std::string_view needle, std::size_t skip = 1)
     {
         return heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + skip, nullptr);
     };
@@ -1177,7 +1177,7 @@ TEST(CompletionSpec, HeaderNamespaceMembersVisibleInNestedNamespaceOnly)
 {
     const auto index = heimdall::CompletionEngine::IndexScopes(
         "namespace heimdall::lsp {\nclass LanguageServer {};\n}\n", {});
-    auto hover =[&](std::string_view source)
+    auto hover = [&](std::string_view source)
     {
         return heimdall::CompletionEngine::Hover(
             source, {}, source.find("LanguageServer") + 3, &index);
@@ -1208,7 +1208,7 @@ TEST(CompletionSpec, HoverResolvesAutoFromTheCalledFunctionReturnType)
         "    auto made = lib::Config();\n"
         "    auto unknown = other();\n"
         "}\n";
-    const auto detail =[&](const char* needle)
+    const auto detail = [&](const char* needle)
     {
         const auto hover =
             heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1, &index);
@@ -1282,7 +1282,7 @@ TEST(CompletionSpec, IndexesRecordsWithAttributesBetweenKeywordAndName)
         "struct [[deprecated(\"x\")]] Old { int a; };\n"
         "class alignas(8) Aligned { public: int b; };\n"
         "}\n", {});
-    const auto members =[&](const std::vector<std::string>& path)
+    const auto members = [&](const std::vector<std::string>& path)
     {
         std::vector<std::string> labels;
         for (const auto& scope : index)
@@ -1441,7 +1441,7 @@ TEST(CompletionSpec, TemplateParametersAreFoundBehindDeclarationSpecifiers)
         "struct Config { bool root; };\n"
         "std::expected<Config, std::string> Load(const char *path);\n"
         "}\n", {});
-    const auto labels =[&](const std::string& statement)
+    const auto labels = [&](const std::string& statement)
     {
         const std::string source = "void run() {\n    " + statement + "\n    loaded.value().\n}\n";
         const auto cursor = source.find("value().") + 8;
@@ -1466,7 +1466,7 @@ TEST(CompletionSpec, HoverOfAutoFromANewExpressionIsAPointer)
         "    auto root = new Node{ .next = 0, .value = 10 };\n"
         "    auto plain = Node{ .next = 0, .value = 1 };\n"
         "}\n";
-    const auto detail =[&](const char* needle)
+    const auto detail = [&](const char* needle)
     {
         const auto hover = heimdall::CompletionEngine::Hover(source, {}, source.find(needle) + 1);
         return hover.has_value() ? hover->detail : std::string("<none>");
@@ -1525,7 +1525,7 @@ TEST(CompletionSpec, HoverOfDesignatorShowsTheFieldType)
         "\tnext.value = 30;\n"
         "\treturn 0;\n"
         "}\n";
-    const auto detail =[&](const char* needle, int occurrence = 0)
+    const auto detail = [&](const char* needle, int occurrence = 0)
     {
         std::size_t at = 0;
         for (int i = 0; i <= occurrence; ++i)
@@ -1550,7 +1550,7 @@ TEST(CompletionSpec, HoverOfDesignatorShowsTheFieldType)
 
 TEST(CompletionSpec, DesignatorsCompleteTheMembersOfTheInitializedClass)
 {
-    const auto labels =[](std::string source)
+    const auto labels = [](std::string source)
     {
         const auto at = source.find('|');
         source.erase(at, 1);
@@ -2086,7 +2086,7 @@ TEST(CompletionSpec, InfersIndexedServiceTemplateAndRangeBindingTypes)
         "std::unordered_map<int, Publisher*> publishers; "
         "for (auto [key, publisher] : publishers) {} }";
     const auto tree = heimdall::ParseTree::Parse(source);
-    const auto infer =[&](std::string_view name)
+    const auto infer = [&](std::string_view name)
     {
         for (std::size_t token = 0; token < tree.Tokens().size(); ++token)
         {
@@ -2130,7 +2130,7 @@ TEST(CompletionSpec, HoversIndexedRegistrationMethodsBeforeTemplateArguments)
         []
         {
             heimdall::ParserOptions options; options.predefined_macros["LIB_NAMESPACE"] = "skr"; return options;
-    }
+        }
         ());
     const std::string source =
         "namespace freyr { class Extension { void Configure(skr::ServiceCollection&); }; "

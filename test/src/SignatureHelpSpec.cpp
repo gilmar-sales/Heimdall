@@ -28,8 +28,9 @@ namespace
         return result;
     }
 
-    heimdall::SignatureHelp SignaturesAt(std::string_view text,
-                                         const heimdall::ScopeIndex* external = nullptr)
+    heimdall::SignatureHelp SignaturesAt(
+        std::string_view text,
+        const heimdall::ScopeIndex* external = nullptr)
     {
         const Annotated annotated = Annotate(text);
         const heimdall::ParserOptions options;

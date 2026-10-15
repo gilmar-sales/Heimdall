@@ -1,9 +1,3 @@
-#include <Heimdall/FlowModel.hpp>
-
-#include <Heimdall/MacroExpander.hpp>
-
-#include "detail/TokenView.hpp"
-
 #include <algorithm>
 #include <optional>
 #include <string>
@@ -12,23 +6,28 @@
 #include <utility>
 #include <vector>
 
+#include <Heimdall/FlowModel.hpp>
+#include <Heimdall/MacroExpander.hpp>
+
+#include "detail/TokenView.hpp"
+
 namespace heimdall
 {
 
 	FunctionTable::FunctionTable(std::pmr::memory_resource* resource) :
-	node(resource), body(resource), symbol(resource), entry(resource), exit(resource),
+		node(resource), body(resource), symbol(resource), entry(resource), exit(resource),
 		fallthrough(resource),
 		first_block(resource), block_count(resource), complete(resource) {}
 
 	BlockTable::BlockTable(std::pmr::memory_resource* resource) :
-	function(resource), first_event(resource), event_count(resource), first_succ(resource),
+		function(resource), first_event(resource), event_count(resource), first_succ(resource),
 		succ_count(resource), returns(resource) {}
 
 	EventTable::EventTable(std::pmr::memory_resource* resource) :
-	kind(resource), symbol(resource), token(resource), block(resource) {}
+		kind(resource), symbol(resource), token(resource), block(resource) {}
 
 	FlowModel::FlowModel(const TypeModel& types, std::size_t arena_hint) :
-	m_arena(std::make_unique<Arena>(arena_hint)), m_types(&types),
+		m_arena(std::make_unique<Arena>(arena_hint)), m_types(&types),
 		m_functions(m_arena->Resource()), m_blocks(m_arena->Resource()),
 		m_events(m_arena->Resource()), m_successors(m_arena->Resource()),
 		m_owner(m_arena->Resource()), m_symbol_begin(m_arena->Resource()),
@@ -319,7 +318,7 @@ namespace heimdall
 			std::stable_sort(result.begin(), result.end(),[&](std::uint32_t a, std::uint32_t b)
 				{
 					return nodes.FirstToken(a) < nodes.FirstToken(b);
-			});
+				});
 			return result;
 		}
 
@@ -412,7 +411,7 @@ namespace heimdall
 			const auto shape = ShapeOf(symbol);
 			bool nested =
 				false; // reached through `x[i]` or `x.m`: the object is changed, not replaced
-			const auto finish =[&](EventKind kind)
+			const auto finish = [&](EventKind kind)
 			{
 				return nested && kind == EventKind::Write ? EventKind::Modify : kind;
 			};
@@ -741,20 +740,25 @@ namespace heimdall
 
 		// Whether the argument tokens at [a, b) of an expansion are only read: not written,
 		// not bound to a reference, not handed to an unknown function.
-		static bool OnlyReadInExpansion(const std::vector<ExpandedToken>& expansion, std::size_t a,
-										std::size_t b)
+		static bool OnlyReadInExpansion(
+			const std::vector<ExpandedToken>& expansion,
+			std::size_t a,
+			std::size_t b)
 		{
-			static constexpr std::string_view kWrites[] = { "=",  "+=", "-=", "*=", "/=", "%=", "&=",
-															"|=", "^=", "<<=", ">>=", "++", "--", ".",
-															"->", "[",  "(" };
-			static constexpr std::string_view kReadOnlyOperators[] = { "sizeof", "alignof", "decltype",
-																	   "noexcept", "__typeof__" };
-			const auto text = [&](std::size_t k) { return expansion[k].text; };
+			static constexpr std::string_view kWrites[] = {"=", "+=", "-=", "*=", "/=", "%=", "&=",
+				"|=", "^=", "<<=", ">>=", "++", "--", ".",
+				"->", "[", "("};
+			static constexpr std::string_view kReadOnlyOperators[] = {"sizeof", "alignof", "decltype",
+				"noexcept", "__typeof__"};
+			const auto text = [&](std::size_t k)
+			{
+				return expansion[k].text;
+			};
 			// `(x)++` writes x as much as `x++` does: look past parentheses that only wrap it.
 			std::size_t left  = a;
 			std::size_t right = b;
 			while (left > 0 && right < expansion.size() && text(left - 1) == "(" &&
-				   text(right) == ")")
+				text(right) == ")")
 			{
 				--left;
 				++right;
@@ -798,7 +802,7 @@ namespace heimdall
 					{
 						const auto& callee = expansion[k - 2];
 						if (std::find(std::begin(kReadOnlyOperators), std::end(kReadOnlyOperators),
-									  callee.text) != std::end(kReadOnlyOperators))
+							callee.text) != std::end(kReadOnlyOperators))
 						{
 							return true;
 						}
@@ -818,9 +822,11 @@ namespace heimdall
 		// every token the argument contributes is traced back to the source, so `MIN(a, b)`
 		// that only compares leaves `a` and `b` untouched while `EXPECT_EQ(a, b)` that hands
 		// them to a function does not. Empty when the callee is not a macro with known text.
-		std::optional<EventKind> MacroArgumentContext(std::uint32_t callee, std::size_t index) const
+		std::optional<EventKind> MacroArgumentContext(
+			std::uint32_t callee,
+			std::size_t index) const
 		{
-			const ParseTree& tree = model.Tree();
+			const ParseTree& tree         = model.Tree();
 			const MacroResolver* resolver = tree.MacroResolverRef().get();
 			const auto call               = nodes.Parent(callee);
 			if (resolver == nullptr || call >= nodes.size() ||
@@ -829,10 +835,10 @@ namespace heimdall
 				return std::nullopt;
 			}
 
-			const auto& tokens   = tree.Tokens();
-			const Token& name    = tokens[view.TokenAt(view.Range(callee).first)];
+			const auto& tokens    = tree.Tokens();
+			const Token& name     = tokens[view.TokenAt(view.Range(callee).first)];
 			const MacroDef* macro = resolver->Find(tree.Text(name), name.offset);
-			if (macro == nullptr || !macro->functionLike)
+			if (macro == nullptr ||!macro->functionLike)
 			{
 				return std::nullopt;
 			}
@@ -845,8 +851,8 @@ namespace heimdall
 				return std::nullopt;
 			}
 
-			const Token& first = tokens[view.TokenAt(whole.first)];
-			const Token& last  = tokens[view.TokenAt(whole.second - 1)];
+			const Token& first  = tokens[view.TokenAt(whole.first)];
+			const Token& last   = tokens[view.TokenAt(whole.second - 1)];
 			const auto argument = view.Range(kids[index + 1]);
 			if (argument.second <= argument.first)
 			{
@@ -858,9 +864,9 @@ namespace heimdall
 			const std::size_t argumentEnd   = argumentLast.offset + argumentLast.length;
 			const std::string_view invocation =
 				tree.Source().substr(first.offset, last.offset + last.length - first.offset);
-			const std::vector<Token> lexed = Lexer(invocation).Lex();
+			const std::vector<Token> lexed  = Lexer(invocation).Lex();
 			const ExpansionResult expansion = MacroExpander(*table).Expand(invocation, lexed);
-			if (expansion.truncated || !expansion.diagnostics.empty())
+			if (expansion.truncated ||!expansion.diagnostics.empty())
 			{
 				return EventKind::Escape;
 			}
@@ -1091,7 +1097,9 @@ namespace heimdall
 
 		// Identifier nodes below `node`, not descending into function-like nodes,
 		// which are reported separately through `nested`.
-		void CollectRefs(std::uint32_t node, std::vector<std::uint32_t>& refs,
+		void CollectRefs(
+			std::uint32_t node,
+			std::vector<std::uint32_t>& refs,
 			std::vector<std::uint32_t>& nested)
 		{
 			std::vector<std::uint32_t> pending {node};
@@ -1166,7 +1174,7 @@ namespace heimdall
 				[](const RawEvent& a, const RawEvent& b)
 				{
 					return a.token < b.token;
-			});
+				});
 			m_events.insert(m_events.end(), local.begin(), local.end());
 		}
 
@@ -1898,7 +1906,7 @@ namespace heimdall
 					[&](std::uint32_t a, std::uint32_t b)
 					{
 						return events.token[a] < events.token[b];
-				});
+					});
 			}
 
 			// Nodes outside any function have no id.

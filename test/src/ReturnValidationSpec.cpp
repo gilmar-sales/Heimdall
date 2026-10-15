@@ -18,7 +18,7 @@ namespace
         std::erase_if(diagnostics,[](const auto& diagnostic)
             {
                 return diagnostic.code != "cpp/missing-return" && diagnostic.code != "cpp/return-type";
-        });
+            });
         return diagnostics;
     }
 
@@ -31,7 +31,7 @@ namespace
             [code](const auto& diagnostic)
             {
                 return diagnostic.code == code;
-        });
+            });
         ASSERT_NE(matching, diagnostics.end());
         EXPECT_EQ(matching->severity, heimdall::Severity::Error);
         EXPECT_FALSE(matching->has_fix);
@@ -55,7 +55,7 @@ TEST(ReturnValidationSpec, ReportsBareReturnAndFallthroughInTheSameNonVoidFuncti
     const auto bare = std::find_if(diagnostics.begin(), diagnostics.end(),[](const auto& diagnostic)
         {
             return diagnostic.code == "cpp/return-type";
-    });
+        });
     ASSERT_NE(bare, diagnostics.end());
     EXPECT_EQ(bare->offset, source.find("return;"));
     EXPECT_NE(bare->message.find("int"), std::string::npos);
@@ -64,7 +64,7 @@ TEST(ReturnValidationSpec, ReportsBareReturnAndFallthroughInTheSameNonVoidFuncti
         {
             return diagnostic.code == "cpp/missing-return" &&
             diagnostic.severity == heimdall::Severity::Error;
-    }));
+        }));
 }
 
 TEST(ReturnValidationSpec, ReportsNonVoidFunctionWithNoReturn)

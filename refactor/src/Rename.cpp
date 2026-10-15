@@ -30,12 +30,12 @@ namespace heimdall
 			bool uniqueWorkspaceName = false,
 			std::string_view qualifiedName = {})
 		{
-			const auto add =[&](std::size_t offset, std::size_t length)
+			const auto add = [&](std::size_t offset, std::size_t length)
 			{
 				if (std::none_of(edits.edits.begin(), edits.edits.end(),[offset](const auto& edit)
 					{
 						return edit.offset == offset;
-				}))
+					}))
 				{
 					edits.edits.push_back({offset, length, std::string(oldName), std::string(newName)});
 				}
@@ -75,7 +75,7 @@ namespace heimdall
 					[](const Token& token, std::size_t offset)
 					{
 						return token.offset < offset;
-				});
+					});
 				while (selected != tokens.begin())
 				{
 					--selected;
@@ -107,7 +107,7 @@ namespace heimdall
 							(end == std::string_view::npos || position < end);
 							position = text.find(oldName, position + oldName.size()))
 						{
-							const auto word =[](char value)
+							const auto word = [](char value)
 							{
 								return (value >= 'a' && value <= 'z') ||
 									(value >= 'A' && value <= 'Z') ||
@@ -144,7 +144,7 @@ namespace heimdall
 				return false;
 			}
 
-			const auto alpha =[](char c)
+			const auto alpha = [](char c)
 			{
 				return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z');
 			};
@@ -202,7 +202,7 @@ namespace heimdall
 
 			const auto& scopes = model.Scopes();
 			const auto& soa    = model.Tree().NodesSoA();
-			const auto outermost_body =[&](ScopeId body, ScopeId owner)
+			const auto outermost_body = [&](ScopeId body, ScopeId owner)
 			{
 				if (body >= scopes.Size() || owner >= scopes.Size() ||
 					scopes.kind[body] != ScopeKind::Block || scopes.parent[body] != owner)
@@ -1423,7 +1423,7 @@ namespace heimdall
 		const std::vector<Token>& tokens,
 		std::size_t offset)
 	{
-		const auto matches =[&](const Token& token)
+		const auto matches = [&](const Token& token)
 		{
 			return token.kind == TokenKind::Identifier && token.tok == Tok::None;
 		};
@@ -1433,7 +1433,7 @@ namespace heimdall
 			[](std::size_t value, const Token& token)
 			{
 				return value < token.offset;
-		});
+			});
 		if (after != begin)
 		{
 			const auto candidate = std::prev(after);
@@ -1728,7 +1728,7 @@ namespace heimdall
 			return std::unexpected(preview.error());
 		}
 
-		const auto preview_for =[&](DocumentId affected)->const RefactoredSource *
+		const auto preview_for = [&](DocumentId affected)->const RefactoredSource *
 		{
 			for (const auto& refactored : *preview)
 			{

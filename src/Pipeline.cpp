@@ -451,7 +451,7 @@ namespace heimdall::cli
 					[](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
 					{
 						return a.offset < b.offset;
-				});
+					});
 			}
 
 			if (options.fix && !result.diagnostics.empty())
@@ -484,11 +484,11 @@ namespace heimdall::cli
 						if (index >= files.size())
 						{
 							break;
-					}
+						}
 
 						ProcessFile(files[index], options, database, results[index]);
-				}
-			});
+					}
+				});
 		}
 
 		workers.clear();

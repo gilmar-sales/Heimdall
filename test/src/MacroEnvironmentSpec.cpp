@@ -328,9 +328,9 @@ TEST(MacroEnvironmentSpec, StopsEnteringHeadersPastTheMacroLimit)
     project.Write("bulk.h", many);
     project.Write("late.h", "#pragma once\n#define LATE 1\n");
     const std::string text = "#include \"bulk.h\"\n#include \"late.h\"\n";
-    const auto main        = project.Write("main.cpp", text);
-    auto options           = Offline();
-    options.maxMacros      = 8;
+    const auto main = project.Write("main.cpp", text);
+    auto options = Offline();
+    options.maxMacros = 8;
 
     const auto env = MacroEnvironment::Build(main, text, nullptr, options);
 

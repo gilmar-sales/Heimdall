@@ -50,7 +50,7 @@ namespace heimdall
 					[](const Diagnostic& a, const Diagnostic& b)
 					{
 						return a.offset < b.offset;
-				});
+					});
 				return std::move(mOut);
 			}
 
@@ -1095,7 +1095,7 @@ namespace heimdall
 					[&](std::uint32_t a, std::uint32_t b)
 					{
 						return view.Range(a).first < view.Range(b).first;
-				});
+					});
 				std::string spelling;
 				for (const auto clause : ordered)
 				{
@@ -1141,7 +1141,7 @@ namespace heimdall
 					{
 						return view.Offset(view.PositionOf(symbols.decl_token[a])) <
 						view.Offset(view.PositionOf(symbols.decl_token[b]));
-				});
+					});
 				const auto& reference = spellingBySymbol[ordered.front()];
 				for (std::size_t i = 1; i < ordered.size(); ++i)
 				{

@@ -210,7 +210,7 @@ namespace heimdall
 					[](std::size_t value, const Token& token)
 					{
 						return value < token.offset;
-				});
+					});
 				if (it == tokens.begin())
 				{
 					return kNone;
@@ -817,7 +817,7 @@ namespace heimdall
 								return (character >= 'a' && character <= 'z') ||
 								(character >= 'A' && character <= 'Z') ||
 								(character >= '0' && character <= '9') || character == '_';
-						});
+							});
 						out.written.emplace_back(identifierReplacement ? replacement : word);
 						out.name_token        = cursor;
 						const std::size_t sep = NextSig(cursor);
@@ -1299,7 +1299,7 @@ namespace heimdall
 				const std::size_t active_end =
 					parent < nodes.size() ? NodeEnd(parent) : m_tree.Source().size();
 
-				auto read_path =[&](std::size_t at)->std::pair<Path, std::size_t> {
+				auto read_path = [&](std::size_t at)->std::pair<Path, std::size_t> {
 					Path path;
 					std::size_t last = at;
 					while (at != kNone && at < end)
@@ -1449,7 +1449,7 @@ namespace heimdall
 					std::erase_if(m_aliases,[&](const NamespaceAlias& existing)
 						{
 							return existing.name == alias.name;
-					});
+						});
 					m_aliases.push_back(std::move(alias));
 					t = end;
 				}
@@ -1862,7 +1862,7 @@ namespace heimdall
 						{
 							return candidate.kind != CompletionKind::Namespace &&
 							candidate.kind != CompletionKind::Type;
-					});
+						});
 				}
 
 				return out;
@@ -1900,7 +1900,7 @@ namespace heimdall
 		{
 			(void) model;
 			std::unordered_map<std::string, bool> has_definition;
-			auto key_of =[](const Candidate& candidate)
+			auto key_of = [](const Candidate& candidate)
 			{
 				return Joined(candidate.scope, candidate.name) + '#' +
 					(IsFunctionKind(candidate.kind) ? std::to_string(candidate.param_count)
@@ -2168,7 +2168,7 @@ namespace heimdall
 					[](const std::string& kind)
 					{
 						return !kind.empty();
-				});
+					});
 			}
 
 			if (!informative)
@@ -2445,7 +2445,7 @@ namespace heimdall
 			const auto selected = std::find_if(references.begin(), references.end(),[offset](const auto& ref)
 				{
 					return offset >= ref.offset && offset < ref.offset + ref.length;
-			});
+				});
 			if (selected == references.end())
 			{
 				return {};
@@ -2537,7 +2537,7 @@ namespace heimdall
 					{
 						return candidate.decl == kNone ||
 						ParameterSignature(tree, model.Decls()[candidate.decl].offset) != expected;
-				});
+					});
 			}
 
 			return ToTargets(model, PreferDefinitions(model, std::move(candidates)));
@@ -2554,7 +2554,7 @@ namespace heimdall
 			[](std::size_t position, const Token& token)
 			{
 				return position < token.offset;
-		});
+			});
 		if (comment != tokens.begin())
 		{
 			const auto& token = *(comment - 1);
@@ -2658,7 +2658,7 @@ namespace heimdall
 			MacroTable local;
 			checkpoints.emplace_back(0, local.Freeze());
 			MacroScanCallbacks callbacks;
-			callbacks.checkpoint =[&](std::size_t position)
+			callbacks.checkpoint = [&](std::size_t position)
 			{
 				checkpoints.emplace_back(position, local.Freeze());
 			};
@@ -2686,12 +2686,12 @@ namespace heimdall
 				[&](const auto& range)
 				{
 					return position >= range.offset && position < range.offset + range.length;
-			});
+				});
 			const bool directive = std::any_of(tree.Directives().begin(), tree.Directives().end(),
 				[&](const auto& range)
 				{
 					return position >= range.offset && position < range.offset + range.length;
-			});
+				});
 			if (!active || directive)
 			{
 				continue;
@@ -2716,7 +2716,7 @@ namespace heimdall
 					[](std::size_t position, const auto& checkpoint)
 					{
 						return position < checkpoint.first;
-				});
+					});
 				table = std::prev(found) -> second;
 			}
 
@@ -2784,7 +2784,7 @@ namespace heimdall
 			first = end;
 		}
 
-		const auto resolve =[&](std::size_t position)
+		const auto resolve = [&](std::size_t position)
 		{
 			bool ambiguous   = false;
 			auto found       = ResolveAt(model, position, ambiguous);
@@ -2801,7 +2801,7 @@ namespace heimdall
 					{
 						const auto target = model.ToTarget(candidate);
 						return target.file != member->file || target.offset != member->offset;
-				});
+					});
 			}
 
 			found = PreferDefinitions(model, std::move(found));
@@ -2838,7 +2838,7 @@ namespace heimdall
 				[&](const auto& range)
 				{
 					return identifier.offset >= range.offset && identifier.offset < range.offset + range.length;
-			});
+				});
 			if (!active)
 			{
 				continue;
@@ -2848,7 +2848,7 @@ namespace heimdall
 				[&](const auto& range)
 				{
 					return identifier.offset >= range.offset && identifier.offset < range.offset + range.length;
-			});
+				});
 			if (directive)
 			{
 				continue;
@@ -2858,7 +2858,7 @@ namespace heimdall
 				[&](const auto& declaration)
 				{
 					return declaration.offset == identifier.offset;
-			});
+				});
 			if (declaring && !includeDeclaration)
 			{
 				continue;

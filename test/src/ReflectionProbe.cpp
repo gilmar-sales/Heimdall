@@ -49,7 +49,7 @@ TEST(Cpp26ReflectionSpec, ReportsCompilerReflectionAndReflectsMembers)
 
 TEST(Cpp26ReflectionSpec, ReflectsFunctionParametersAndEnumerators)
 {
-    constexpr bool matches =[]() consteval
+    constexpr bool matches = []() consteval
     {
         const auto parameters = std::meta::parameters_of(^^Function);
         const auto enumerators = std::meta::enumerators_of(^^Color);

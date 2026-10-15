@@ -15,11 +15,11 @@ namespace
 
     struct CorpusFile
     {
-        std::string             source;
-        heimdall::ParseTree     tree;
+        std::string source;
+        heimdall::ParseTree tree;
         heimdall::ParserOptions options;
-        std::size_t             complete_offset = 0;
-        std::size_t             hover_offset    = 0;
+        std::size_t complete_offset = 0;
+        std::size_t hover_offset = 0;
     };
 
     std::vector<CorpusFile> LoadCorpus(benchmark::State& state)
@@ -41,7 +41,7 @@ namespace
 
             CorpusFile file;
             file.source = std::string(buffer->view());
-            file.tree   = heimdall::ParseTree::Parse(file.source, file.options);
+            file.tree = heimdall::ParseTree::Parse(file.source, file.options);
             file.tree.HoldSource(std::make_shared<const std::string>(file.source));
             // Complete at EOF (expression context in these samples); hover on the
             // first identifier of length >= 3 so the lookup does real work instead

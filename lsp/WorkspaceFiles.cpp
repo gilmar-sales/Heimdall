@@ -206,7 +206,7 @@ namespace heimdall::lsp
 		std::ranges::transform(key, key.begin(),[](char c)
 			{
 				return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		});
+			});
 #endif
 		return key;
 	}

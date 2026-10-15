@@ -12,17 +12,15 @@ namespace
     {
         explicit Bound(std::string source) :
             text(std::make_shared<const std::string>(std::move(source))),
-            tree(heimdall::ParseTree::Parse(*text)), model(heimdall::Binder::Bind(tree))
-        {
-        }
+            tree(heimdall::ParseTree::Parse(*text)), model(heimdall::Binder::Bind(tree)) {}
 
         Bound(const Bound&) = delete;
 
-        Bound& operator=(const Bound&) = delete;
+        Bound& operator= (const Bound&) = delete;
 
         std::shared_ptr<const std::string> text;
-        heimdall::ParseTree                tree;
-        heimdall::SemanticModel            model;
+        heimdall::ParseTree tree;
+        heimdall::SemanticModel model;
 
         heimdall::SymbolId Find(std::string_view name) const
         {
@@ -101,13 +99,14 @@ TEST(BinderPointers, TypedefAndAutoPointersAreNotKnown)
 
 TEST(BinderPointers, FunctionsRememberTheirPointerReturnType)
 {
-    Bound bound("int* a() { return 0; }\n"
-                "const char* b();\n"
-                "auto c() -> char* { return 0; }\n"
-                "int d() { return 0; }\n"
-                "int& e();\n"
-                "auto f() -> int& { return g; }\n"
-                "std::vector<int*> h();\n");
+    Bound bound(
+        "int* a() { return 0; }\n"
+        "const char* b();\n"
+        "auto c() -> char* { return 0; }\n"
+        "int d() { return 0; }\n"
+        "int& e();\n"
+        "auto f() -> int& { return g; }\n"
+        "std::vector<int*> h();\n");
     EXPECT_TRUE(bound.Has("a", heimdall::SymbolFlag::ReturnsPointer));
     EXPECT_TRUE(bound.Has("b", heimdall::SymbolFlag::ReturnsPointer));
     EXPECT_TRUE(bound.Has("c", heimdall::SymbolFlag::ReturnsPointer));
@@ -120,10 +119,10 @@ TEST(BinderPointers, FunctionsRememberTheirPointerReturnType)
 TEST(BinderCode, InactiveBranchesAndDirectivesAreNotCode)
 {
     Bound bound("#define M 1\n"
-                "int live;\n"
-                "#if 0\n"
-                "int dead;\n"
-                "#endif\n");
+        "int live;\n"
+        "#if 0\n"
+        "int dead;\n"
+        "#endif\n");
     EXPECT_TRUE(bound.model.IsCode(bound.Token("live")));
     EXPECT_FALSE(bound.model.IsCode(bound.Token("dead")));
     EXPECT_FALSE(bound.model.IsCode(bound.Token("M")));
@@ -133,11 +132,11 @@ TEST(BinderCode, InactiveBranchesAndDirectivesAreNotCode)
 
 TEST(BinderCode, SignificantTokensAreCodeOnlyAndAscending)
 {
-    Bound       bound("// comment\n"
-                      "int a; /* block */ int b;\n"
-                      "#if 0\n"
-                      "int c;\n"
-                      "#endif\n");
+    Bound bound("// comment\n"
+        "int a; /* block */ int b;\n"
+        "#if 0\n"
+        "int c;\n"
+        "#endif\n");
     const auto& significant = bound.model.Significant();
     ASSERT_FALSE(significant.empty());
     for (std::size_t i = 0; i < significant.size(); ++i)
@@ -161,7 +160,7 @@ TEST(BinderCode, SignificantTokensAreCodeOnlyAndAscending)
 
 TEST(BinderNodes, ChildrenOfListsEveryNodeUnderItsParent)
 {
-    Bound       bound("namespace n { int a; int b; }\nint c;\n");
+    Bound bound("namespace n { int a; int b; }\nint c;\n");
     const auto& nodes = bound.tree.Nodes();
     std::size_t total = 0;
     for (std::uint32_t node = 0; node < nodes.size(); ++node)
@@ -180,11 +179,11 @@ TEST(BinderNodes, ChildrenOfListsEveryNodeUnderItsParent)
 
 TEST(BinderNodes, ScopeOfNodeFollowsTheEnclosingDefinition)
 {
-    Bound       bound("namespace n { struct S { int m; }; }\nint g;\n");
-    const auto& nodes  = bound.tree.Nodes();
+    Bound bound("namespace n { struct S { int m; }; }\nint g;\n");
+    const auto& nodes = bound.tree.Nodes();
     const auto& scopes = bound.model.Scopes();
-    const auto  m      = bound.Find("m");
-    const auto  g      = bound.Find("g");
+    const auto m = bound.Find("m");
+    const auto g = bound.Find("g");
     ASSERT_NE(m, heimdall::kNone);
     ASSERT_NE(g, heimdall::kNone);
     const auto m_scope = bound.model.ScopeOfNode(bound.model.Symbols().decl_node[m]);

@@ -1,4 +1,3 @@
-#include <Heimdall/IncludeIndex.hpp>
 #include <Heimdall/MacroEnvironment.hpp>
 
 #include <algorithm>
@@ -8,6 +7,8 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <Heimdall/IncludeIndex.hpp>
 
 namespace heimdall
 {
@@ -87,7 +88,7 @@ namespace heimdall
 		MacroTable FallbackBuiltins(const CompileCommand* command, bool msvc)
 		{
 			MacroTable table;
-			const auto define =[&table](std::string_view text)
+			const auto define = [&table](std::string_view text)
 			{
 				if (auto parsed = MacroTable::ParseDefinition(text))
 				{
@@ -387,7 +388,10 @@ namespace heimdall
 		void Run(const std::filesystem::path& file, std::string_view text)
 		{
 			mTable = Builtins(mCommand, mOptions.probeCompiler);
-			mTable.ForEach([this](const MacroDef& macro) { mTracer.everDefined.insert(macro.name); });
+			mTable.ForEach([this](const MacroDef& macro)
+				{
+					mTracer.everDefined.insert(macro.name);
+				});
 			mTable.SetObserver(&mTracer);
 			ApplyCommandLine();
 			const std::filesystem::path main = Normalized(file);
@@ -401,15 +405,15 @@ namespace heimdall
 
 			mEnv.mInitial                = mTable.Freeze();
 			MacroScanCallbacks callbacks = CallbacksFor(main.parent_path());
-			callbacks.recordDirectives = true;
-			callbacks.checkpoint =[this](std::size_t offset)
+			callbacks.recordDirectives   = true;
+			callbacks.checkpoint = [this](std::size_t offset)
 			{
 				mEnv.mCheckpoints.push_back({offset, mTable.Freeze()});
 			};
-			mEnv.mMain     = MacroScanner::Scan(text, main.generic_string(), mTable, callbacks, mStop);
-			mEnv.mFinal    = mTable.Freeze();
+			mEnv.mMain        = MacroScanner::Scan(text, main.generic_string(), mTable, callbacks, mStop);
+			mEnv.mFinal       = mTable.Freeze();
 			mEnv.mEverDefined = std::move(mTracer.everDefined);
-			mEnv.mComplete = mComplete && !mEnv.mMain.cancelled;
+			mEnv.mComplete    = mComplete && !mEnv.mMain.cancelled;
 		}
 
 		std::vector<std::filesystem::path> TakeFiles()
@@ -476,11 +480,12 @@ namespace heimdall
 				mSystem,[&](const std::filesystem::path& dir)
 				{
 					return IsUnder(file, dir);
-			});
+				});
 		}
 
 		// Directories searched for a header, in compiler order.
-		std::vector<std::filesystem::path> SearchPath(const IncludeRequest& request,
+		std::vector<std::filesystem::path> SearchPath(
+			const IncludeRequest& request,
 			const std::filesystem::path& includerDir) const
 		{
 			std::vector<std::filesystem::path> dirs;
@@ -517,7 +522,8 @@ namespace heimdall
 			return std::filesystem::is_regular_file(path, ec);
 		}
 
-		std::optional<std::filesystem::path> Resolve(const IncludeRequest& request,
+		std::optional<std::filesystem::path> Resolve(
+			const IncludeRequest& request,
 			const std::filesystem::path& includerDir) const
 		{
 			const std::filesystem::path name(request.header);
@@ -533,7 +539,7 @@ namespace heimdall
 				const auto at = std::ranges::find_if(dirs,[&](const std::filesystem::path& dir)
 					{
 						return Normalized(dir) == Normalized(includerDir);
-				});
+					});
 				first = at == dirs.end() ? 0 : static_cast<std::size_t>(at - dirs.begin()) + 1;
 			}
 
@@ -583,11 +589,11 @@ namespace heimdall
 		MacroScanCallbacks CallbacksFor(const std::filesystem::path& includerDir)
 		{
 			MacroScanCallbacks callbacks;
-			callbacks.include =[this, includerDir](const IncludeRequest& request)
+			callbacks.include = [this, includerDir](const IncludeRequest& request)
 			{
 				return Enter(request, includerDir, false);
 			};
-			callbacks.hasInclude =[this, includerDir](const IncludeRequest& request)
+			callbacks.hasInclude = [this, includerDir](const IncludeRequest& request)
 			{
 				return Resolve(request, includerDir).has_value();
 			};
@@ -595,7 +601,9 @@ namespace heimdall
 		}
 
 		// Scans a header into the live table; false when it cannot be found.
-		bool Enter(const IncludeRequest& request, const std::filesystem::path& includerDir,
+		bool Enter(
+			const IncludeRequest& request,
+			const std::filesystem::path& includerDir,
 			bool forced)
 		{
 			const auto path = Resolve(request, includerDir);
@@ -849,11 +857,7 @@ namespace heimdall
 		std::stop_token stop)
 	{
 		MacroEnvironment env;
-		Builder builder(
-			env,
-			command,
-			options,
-			std::move(stop));
+		Builder builder(env, command, options, std::move(stop));
 		builder.Run(file, text);
 		env.mFiles             = builder.TakeFiles();
 		env.mSystemDirectories = builder.TakeSystem();
@@ -866,7 +870,7 @@ namespace heimdall
 		return std::ranges::any_of(mSystemDirectories,[&](const std::filesystem::path& dir)
 			{
 				return IsUnder(normalized, dir);
-		});
+			});
 	}
 
 	const MacroDef* MacroEnvironment::Find(std::string_view name, std::size_t offset) const
@@ -880,7 +884,7 @@ namespace heimdall
 			mCheckpoints, offset, {},[](const Checkpoint& checkpoint)
 			{
 				return checkpoint.offset;
-		});
+			});
 		if (after == mCheckpoints.begin())
 		{
 			return mInitial;
@@ -904,10 +908,10 @@ namespace heimdall
 		mEnvironment(std::move(environment))
 	{
 		// Order-independent: the sum of each definition's hash mixed with its name.
-		const MacroScanResult& main = mEnvironment->Main();
-		mPreprocessing.directives   = main.directives;
+		const MacroScanResult& main  = mEnvironment->Main();
+		mPreprocessing.directives    = main.directives;
 		mPreprocessing.active_ranges = main.activeRanges;
-		mPreprocessing.macro_events = main.events;
+		mPreprocessing.macro_events  = main.events;
 		for (const auto& diagnostic : main.diagnostics)
 		{
 			// A header that cannot be found is the include analysis' business, not a syntax error.
@@ -924,13 +928,14 @@ namespace heimdall
 				for (const char c : macro.name)
 				{
 					mixed = (mixed ^ static_cast<unsigned char>(c)) * kFnvPrime;
-			}
+				}
 
 				mFingerprint +=(mixed ^ macro.hash) * kFnvPrime;
-		});
+			});
 	}
 
-	const MacroDef* MacroEnvironmentResolver::Find(std::string_view name,
+	const MacroDef* MacroEnvironmentResolver::Find(
+		std::string_view name,
 		std::size_t offset) const noexcept
 	{
 		if (!mEnvironment->MayDefine(name))

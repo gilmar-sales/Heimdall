@@ -33,7 +33,7 @@ namespace heimdall
 		{
 			std::vector<IncludeRef> refs;
 			const std::vector<Token> tokens = Lexer(text).Lex();
-			auto significant =[&](std::size_t i)->std::size_t
+			auto significant = [&](std::size_t i)->std::size_t
 			{
 				while (i < tokens.size() && (tokens[i].kind == TokenKind::Whitespace ||
 					tokens[i].kind == TokenKind::LineComment ||
@@ -44,7 +44,7 @@ namespace heimdall
 
 				return i;
 			};
-			auto text_of =[&](std::size_t i)->std::string_view
+			auto text_of = [&](std::size_t i)->std::string_view
 			{
 				return text.substr(tokens[i].offset, tokens[i].length);
 			};
@@ -549,7 +549,7 @@ namespace heimdall
 		const std::filesystem::path target = header.lexically_normal();
 		std::string best;
 		bool best_angled = false;
-		const auto consider =[&](const std::filesystem::path& directory, bool angled)
+		const auto consider = [&](const std::filesystem::path& directory, bool angled)
 		{
 			if (directory.empty())
 			{
@@ -700,16 +700,16 @@ namespace heimdall
 			normalized_system.push_back(NormalizedAbsolute(dir));
 		}
 
-		auto in_system =[&](const std::filesystem::path& file)
+		auto in_system = [&](const std::filesystem::path& file)
 		{
 			return std::any_of(
 				normalized_system.begin(), normalized_system.end(),
 				[&](const std::filesystem::path& dir)
 				{
 					return IsUnder(file, dir);
-			});
+				});
 		};
-		auto incomplete =[&]
+		auto incomplete = [&]
 		{
 			if (report != nullptr)
 			{
@@ -733,7 +733,7 @@ namespace heimdall
 		// with the header cap a depth-first walk spent the whole budget inside
 		// the last <standard header> and never reached the project's own headers.
 		std::deque<Work> stack;
-		auto enqueue =[&](const std::filesystem::path& dir, int depth, std::string_view source,
+		auto enqueue = [&](const std::filesystem::path& dir, int depth, std::string_view source,
 			const std::filesystem::path& from)
 		{
 			const std::vector<IncludeRef> refs = ScanIncludes(source);
@@ -840,7 +840,7 @@ namespace heimdall
 				[](unsigned char c)
 				{
 					return static_cast<char>(std::tolower(c));
-			});
+				});
 			return accepted.contains(extension);
 		}
 
@@ -980,10 +980,10 @@ namespace heimdall
 				if (a.origin != b.origin)
 				{
 					return a.origin < b.origin;
-			}
+				}
 
 				return a.directory != b.directory ? a.directory : a.label < b.label;
-		});
+			});
 		if (result.size() > max_results)
 		{
 			result.resize(max_results);
@@ -1000,7 +1000,7 @@ namespace heimdall
 		const std::size_t line_begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
 		const std::string_view line  = text.substr(line_begin, offset - line_begin);
 		std::size_t i                = 0;
-		auto skip_blanks =[&]
+		auto skip_blanks = [&]
 		{
 			while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
 			{
@@ -1313,7 +1313,7 @@ namespace heimdall
 								if (h >= headers.size())
 								{
 									return;
-							}
+								}
 
 								const auto content = std::make_shared<const std::string>(
 								ReadFile(headers[h], limits.max_file_bytes, overlay));
@@ -1321,19 +1321,19 @@ namespace heimdall
 								if (content->empty())
 								{
 									continue;
-							}
+								}
 
 							// An exception escaping a worker thread is std::terminate.
 								try
 								{
 									per_header[h] = CompletionEngine::IndexScopes(*content, options);
-							}
+								}
 								catch (...)
 								{
 									per_header[h] = {};
+								}
 							}
-						}
-					});
+						});
 				}
 			}
 		}
@@ -1384,7 +1384,7 @@ namespace heimdall
 				std::erase_if(filtered.members,[](const CompletionItem& member)
 					{
 						return IsReservedName(member.label);
-				});
+					});
 				if (!filtered.members.empty() ||!filtered.bases.empty() ||
 					!filtered.template_params.empty() || filtered.hasReferenceConversion)
 				{

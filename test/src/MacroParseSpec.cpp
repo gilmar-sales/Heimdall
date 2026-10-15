@@ -52,8 +52,9 @@ namespace
         heimdall::MacroTable mTable;
     };
 
-    heimdall::ParseTree Parse(std::string_view source,
-                              std::initializer_list<std::string_view> macros)
+    heimdall::ParseTree Parse(
+        std::string_view source,
+        std::initializer_list<std::string_view> macros)
     {
         heimdall::ParserOptions options;
         options.macro_resolver = std::make_shared<TableResolver>(macros);

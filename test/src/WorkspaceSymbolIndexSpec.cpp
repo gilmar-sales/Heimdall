@@ -71,9 +71,9 @@ TEST(WorkspaceSymbolIndexSpec, RanksExactThenPrefixThenSubstringThenSubsequence)
     WorkspaceSymbolIndex index;
     index.SetDisk("a", Indexed("file:///a.cpp",
                                "int p_a_r_s_e;\n"
-                               "int Reparse;\n"
-                               "int ParseTree;\n"
-                               "int Parse;\n"));
+        "int Reparse;\n"
+        "int ParseTree;\n"
+        "int Parse;\n"));
 
     const auto hits = index.Query("parse");
 
@@ -96,7 +96,7 @@ TEST(WorkspaceSymbolIndexSpec, MatchesQualifiedNames)
     WorkspaceSymbolIndex index;
     index.SetDisk("a", Indexed("file:///a.cpp",
                                "namespace app { struct Widget { void Run(); void Stop(); }; }\n"
-                               "namespace other { struct Widget { void Run(); }; }\n"));
+        "namespace other { struct Widget { void Run(); }; }\n"));
 
     EXPECT_EQ(index.Query("app::Widget::Run").size(), 1u);
     const auto other = index.Query("other::Widget");
@@ -131,12 +131,12 @@ TEST(WorkspaceSymbolIndexSpec, OrdersEqualMatchesDeterministically)
     index.SetDisk("a", Indexed("file:///a.cpp", "void Log(char);\n"));
     index.SetDisk("c", Indexed("file:///c.cpp", "void Log();\n"));
 
-    const auto first  = Where(index.Query("log"));
+    const auto first = Where(index.Query("log"));
     const auto second = Where(index.Query("log"));
 
     EXPECT_EQ(first, second);
     EXPECT_EQ(first, (std::vector<std::string> {"file:///a.cpp:0", "file:///b.cpp:0",
-                                                "file:///b.cpp:1", "file:///c.cpp:0"}));
+                      "file:///b.cpp:1", "file:///c.cpp:0"}));
 }
 
 TEST(WorkspaceSymbolIndexSpec, LimitKeepsTheBestMatches)
@@ -218,8 +218,8 @@ TEST(WorkspaceSymbolIndexSpec, AnonymousScopesAreTransparent)
     WorkspaceSymbolIndex index;
     index.SetDisk("a", Indexed("file:///a.cpp",
                                "namespace { int hidden; }\n"
-                               "namespace app { namespace { struct Impl { int field; }; } }\n"
-                               "struct { int bare; } instance;\n"));
+        "namespace app { namespace { struct Impl { int field; }; } }\n"
+        "struct { int bare; } instance;\n"));
 
     EXPECT_TRUE(index.Query("anonymous").empty());
     const auto hidden = index.Query("hidden");
@@ -267,7 +267,7 @@ TEST(WorkspaceSymbolIndexSpec, ResultsStayValidWhileTheIndexKeepsChanging)
     WorkspaceSymbolIndex index;
     index.SetDisk("a", Indexed("file:///a.cpp", "int Alpha1;\nint Alpha2;\n"));
     const IndexedFilePtr alpha = Indexed("file:///a.cpp", "int Alpha1;\nint Alpha2;\n");
-    const IndexedFilePtr beta  = Indexed("file:///a.cpp", "int Beta1;\nint Beta2;\nint Beta3;\n");
+    const IndexedFilePtr beta = Indexed("file:///a.cpp", "int Beta1;\nint Beta2;\nint Beta3;\n");
     std::atomic<bool> running {true};
     std::thread writer(
         [&]

@@ -875,7 +875,7 @@ namespace heimdall
 		const auto it = std::find_if(catalog.begin(), catalog.end(),[code](const RuleInfo& info)
 			{
 				return info.code == code;
-		});
+			});
 		return it == catalog.end() ? nullptr : & *it;
 	}
 
@@ -885,7 +885,7 @@ namespace heimdall
 		const auto it = std::find_if(catalog.begin(), catalog.end(),[id](const RuleInfo& info)
 			{
 				return info.id == id;
-		});
+			});
 		return it == catalog.end() ? nullptr : & *it;
 	}
 
@@ -1050,7 +1050,7 @@ namespace heimdall
 		// files pin a header; headers and unknown files keep plain order.
 		const auto main_parts     = SplitFileName(main_file_name);
 		const bool source_is_impl = !main_parts.stem.empty() && IsImplExtension(main_parts.ext);
-		auto is_main_header =[&](const IncludeTarget& target)
+		auto is_main_header = [&](const IncludeTarget& target)
 		{
 			if (!source_is_impl)
 			{
@@ -1092,10 +1092,10 @@ namespace heimdall
 				{
 					return std::tolower(static_cast<unsigned char>(left)) ==
 					static_cast<unsigned char>(right);
-			});
+				});
 		};
 
-		auto group_index =[&](const IncludeTarget& target)
+		auto group_index = [&](const IncludeTarget& target)
 		{
 			const auto wanted = target.angle ? IncludeGroup::Angle : IncludeGroup::Quote;
 			const auto it     = std::find(group_order.begin(), group_order.end(), wanted);
@@ -1105,20 +1105,20 @@ namespace heimdall
 
 		// A qualified `<...>` path (`<Heimdall/RuleConfig.hpp>`) as opposed
 		// to a top-level header (`<vector>`).
-		auto is_qualified_path =[](const IncludeTarget& target)
+		auto is_qualified_path = [](const IncludeTarget& target)
 		{
 			return target.angle &&
 				target.text.substr(1, target.text.size() - kIncludeDelimCount).find('/') !=
 				std::string_view::npos;
 		};
 
-		auto section_band =[&](const IncludeTarget& target)
+		auto section_band = [&](const IncludeTarget& target)
 		{
 			return std::pair(is_main_header(target),
 				std::pair(group_index(target), is_qualified_path(target)));
 		};
 
-		auto sorts_before =[&](const IncludeTarget& left, const IncludeTarget& right)
+		auto sorts_before = [&](const IncludeTarget& left, const IncludeTarget& right)
 		{
 			const bool left_main  = is_main_header(left);
 			const bool right_main = is_main_header(right);
@@ -1162,7 +1162,7 @@ namespace heimdall
 		// (group, name) key and regroups it with one blank line
 		// between bands, so the group order holds across the
 		// whole section.
-		auto is_blank_gap =[&](std::size_t begin, std::size_t end)
+		auto is_blank_gap = [&](std::size_t begin, std::size_t end)
 		{
 			for (auto i = begin; i < end; ++i)
 			{
@@ -1206,7 +1206,7 @@ namespace heimdall
 					{
 						return sorts_before(includes[section_begin + left].target,
 						includes[section_begin + right].target);
-				});
+					});
 
 				const auto& first = directives[includes[section_begin].directive];
 				const auto& last  = directives[includes[section_end - 1].directive];
@@ -1476,7 +1476,7 @@ namespace heimdall
 					[](const Token& t)
 					{
 						return t.kind != TokenKind::Whitespace;
-				}))
+					}))
 				{
 					edit = {interior_end, 0, "throw; "};
 				}
@@ -2837,7 +2837,7 @@ namespace heimdall
 			[](const Diagnostic& a, const Diagnostic& b)
 			{
 				return a.offset < b.offset;
-		});
+			});
 
 		for (auto& diagnostic : diagnostics)
 		{
@@ -2860,11 +2860,11 @@ namespace heimdall
 					if (override->code == diagnostic.code)
 					{
 						return !override -> enabled;
+					}
 				}
-			}
 
 				return false;
-		});
+			});
 		if (m_options.honor_suppressions && !diagnostics.empty())
 		{
 			const auto suppressions = FindSuppressions(source, tokens, lines);
@@ -2875,8 +2875,8 @@ namespace heimdall
 					{
 						return s.line == diagnostic.line &&
 						(s.codes.empty() || Suppresses(s.codes, diagnostic.code));
+					});
 				});
-			});
 		}
 
 		return diagnostics;
@@ -2901,7 +2901,7 @@ namespace heimdall
 			[](const TextEdit* a, const TextEdit* b)
 			{
 				return a->offset > b->offset;
-		});
+			});
 
 		std::string result(source);
 		std::size_t previous_start = source.size();
@@ -2912,7 +2912,7 @@ namespace heimdall
 				[edit](const Diagnostic& d)
 				{
 					return d.has_fix && &d.fix == edit;
-			});
+				});
 			// Safe fixes must stay within their diagnostic. Unsafe ones, applied
 			// only on request, may edit elsewhere (a specifier before the type, a
 			// keyword after the parameters) but are still bounds-checked.

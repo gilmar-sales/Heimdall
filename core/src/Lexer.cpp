@@ -172,7 +172,7 @@ namespace heimdall
 		std::size_t PunctuatorLength(std::string_view source, std::size_t offset)
 		{
 			const std::string_view tail = source.substr(offset);
-			auto is =[tail](std::string_view punctuator)
+			auto is = [tail](std::string_view punctuator)
 			{
 				return tail.starts_with(punctuator);
 			};

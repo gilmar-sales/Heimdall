@@ -1514,7 +1514,7 @@ namespace heimdall
 		SubstitutionContext context,
 		std::uint32_t remainingDepth)
 	{
-		const auto invalid =[&](SubstitutionReason reason)
+		const auto invalid = [&](SubstitutionReason reason)
 		{
 			return SubstitutionResult {TypeTable::Unknown, context == SubstitutionContext::Immediate
 				? SubstitutionState::SubstitutionFailure : SubstitutionState::HardError, reason};
@@ -3004,6 +3004,83 @@ namespace heimdall
 
 			if (unresolved)
 			{
+				if (const auto header = m_model.Tree().TypeNames())
+				{
+					const auto alias = header->AliasTarget(text);
+					if (!alias.empty())
+					{
+						if (const auto fixed = FixedWidthInteger(alias))
+						{
+							return m_types.Builtin(*fixed);
+						}
+
+						if (alias == "bool")
+						{
+							return m_types.Builtin(BuiltinType::Bool);
+						}
+
+						if (alias == "char")
+						{
+							return m_types.Builtin(BuiltinType::Char);
+						}
+
+						if (alias == "signed char")
+						{
+							return m_types.Builtin(BuiltinType::SChar);
+						}
+
+						if (alias == "unsigned char")
+						{
+							return m_types.Builtin(BuiltinType::UChar);
+						}
+
+						if (alias == "short" || alias == "short int" || alias == "signed short")
+						{
+							return m_types.Builtin(BuiltinType::Short);
+						}
+
+						if (alias == "unsigned short" || alias == "unsigned short int")
+						{
+							return m_types.Builtin(BuiltinType::UShort);
+						}
+
+						if (alias == "int" || alias == "signed" || alias == "signed int")
+						{
+							return m_types.Builtin(BuiltinType::Int);
+						}
+
+						if (alias == "unsigned" || alias == "unsigned int")
+						{
+							return m_types.Builtin(BuiltinType::UInt);
+						}
+
+						if (alias == "long" || alias == "long int" || alias == "signed long")
+						{
+							return m_types.Builtin(BuiltinType::Long);
+						}
+
+						if (alias == "unsigned long" || alias == "unsigned long int")
+						{
+							return m_types.Builtin(BuiltinType::ULong);
+						}
+
+						if (alias == "float")
+						{
+							return m_types.Builtin(BuiltinType::Float);
+						}
+
+						if (alias == "double")
+						{
+							return m_types.Builtin(BuiltinType::Double);
+						}
+
+						if (alias == "long double")
+						{
+							return m_types.Builtin(BuiltinType::LongDouble);
+						}
+					}
+				}
+
 				if (const auto fixed = FixedWidthInteger(text))
 				{
 					return m_types.Builtin(*fixed);
@@ -3059,7 +3136,7 @@ namespace heimdall
 		Base result;
 		result.next     = begin;
 		std::size_t pos = begin;
-		const auto skip_qualifiers =[&]()
+		const auto skip_qualifiers = [&]()
 		{
 			while (pos < end)
 			{
@@ -4782,7 +4859,7 @@ namespace heimdall
 		SubstitutionContext context,
 		std::uint32_t remainingDepth)
 	{
-		const auto invalid =[&]()
+		const auto invalid = [&]()
 		{
 			return SubstitutedExpression {
 				{
@@ -4952,7 +5029,7 @@ namespace heimdall
 			const auto op        = At(NodeSig(children[0]).second);
 			const auto leftType  = m_types.Strip(left.result.type);
 			const auto rightType = m_types.Strip(right.result.type);
-			const auto unmodeled =[&](TypeId type)
+			const auto unmodeled = [&](TypeId type)
 			{
 				const auto typeKind = m_types.Kind(type);
 				return typeKind == TypeKind::Class || typeKind == TypeKind::TemplateId ||
@@ -5140,7 +5217,7 @@ namespace heimdall
 		};
 
 		const auto children = m_model.ChildrenOf(node);
-		const auto publish =[&](TemplateCallResult result, TypeId type)
+		const auto publish = [&](TemplateCallResult result, TypeId type)
 		{
 			result.returnType = type;
 			m_out.mTemplateCalls.push_back({node, result});
@@ -5403,7 +5480,7 @@ namespace heimdall
 			}
 
 			std::ranges::sort(slots, {}, &Slot::token);
-			const auto checkSignature =[&](std::span<const TypeId> values, bool partial)
+			const auto checkSignature = [&](std::span<const TypeId> values, bool partial)
 			{
 				SubstitutionResult result {returnType, SubstitutionState::Success, SubstitutionReason::None};
 				for (const auto& slot : slots)
@@ -5656,7 +5733,7 @@ namespace heimdall
 		}
 
 		bool orderingIncomplete = false;
-		const auto better =[&](const Candidate& left, const Candidate& right)
+		const auto better = [&](const Candidate& left, const Candidate& right)
 		{
 			bool strict = false;
 			for (std::size_t i = 0; i < left.conversions.size(); ++i)
@@ -5934,7 +6011,7 @@ namespace heimdall
 			references.firstBinding.push_back(static_cast<std::uint32_t>(references.bindingInstance.size()));
 			references.bindingCount.push_back(0);
 			references.coverage.push_back(TemplateCoverage::None);
-			const auto append =[&](std::uint32_t instance, TemplateMemberBinding binding)
+			const auto append = [&](std::uint32_t instance, TemplateMemberBinding binding)
 			{
 				references.bindingInstance.push_back(instance);
 				references.bindingTarget.push_back(binding.symbol);

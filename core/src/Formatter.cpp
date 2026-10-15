@@ -152,6 +152,21 @@ namespace heimdall
 				IsSpliceOpen(sigs, sigs[index + 1].match);
 		}
 
+		bool IsLambdaCaptureOpen(const std::vector<Sig>& sigs, std::size_t index)
+		{
+			if (index >= sigs.size() || sigs[index].text != "[" ||
+				sigs[index].match == kNoSig || sigs[index].match + 1 >= sigs.size())
+			{
+				return false;
+			}
+
+			const std::size_t after_capture = sigs[index].match + 1;
+			return sigs[after_capture].text == "(" || sigs[after_capture].text == "{" ||
+				sigs[after_capture].text == "mutable" || sigs[after_capture].text == "constexpr" ||
+				sigs[after_capture].text == "consteval" || sigs[after_capture].text == "noexcept" ||
+				sigs[after_capture].text == "->";
+		}
+
 		// File-local named constants for the `cpp/no-magic-numbers` rule
 		// (single-literal initializers, which the rule exempts).
 		constexpr std::size_t kTwoTokenOffset   = 2; // neighbor-token lookbehind/lookahead
@@ -841,6 +856,11 @@ namespace heimdall
 
 			if (right == "[")
 			{
+				if (left == "=" && IsLambdaCaptureOpen(sigs, cur))
+				{
+					return 1;
+				}
+
 				if ((left == "&" || left == "&&") && IsDeclaratorStar(sigs, prev))
 				{
 					return DeclaratorGap(left, true, pointer_alignment, reference_alignment);
@@ -1710,7 +1730,7 @@ namespace heimdall
 				[](const Span& left, const Span& right)
 				{
 					return left.start > right.start;
-			});
+				});
 			for (const auto& span : spans)
 			{
 				work.replace(span.start, span.end - span.start, span.replacement);
@@ -1807,7 +1827,7 @@ namespace heimdall
 				[](const auto& left, const auto& right)
 				{
 					return left.pos > right.pos;
-			});
+				});
 			for (const auto& ins : insertions)
 			{
 				work.erase(ins.pos, ins.erase);
@@ -1888,7 +1908,7 @@ namespace heimdall
 				[](const std::size_t left, const std::size_t right)
 				{
 					return left > right;
-			});
+				});
 			for (const auto pos : breaks)
 			{
 				work.insert(pos, "\n");
@@ -1967,7 +1987,7 @@ namespace heimdall
 				[](const Join& left, const Join& right)
 				{
 					return left.start > right.start;
-			});
+				});
 			for (const auto& join : joins)
 			{
 				work.replace(join.start, join.end - join.start, " ");
@@ -2442,6 +2462,36 @@ namespace heimdall
 			return false;
 		}
 
+		bool IsLambdaBodyBrace(const std::vector<Sig>& sigs, std::size_t brace)
+		{
+			if (brace == 0 || sigs[brace].text != "{")
+			{
+				return false;
+			}
+
+			std::size_t end = brace - 1;
+			while (end > 0 && (sigs[end].text == "mutable" || sigs[end].text == "constexpr" ||
+				sigs[end].text == "consteval" || sigs[end].text == "noexcept" ||
+				sigs[end].text == "&" || sigs[end].text == "&&"))
+			{
+				--end;
+			}
+
+			if (end > 1 && sigs[end].kind == TokenKind::Identifier &&
+				sigs[end - 1].text == "->")
+			{
+				end -= 2;
+			}
+
+			if (sigs[end].text == "]")
+			{
+				return true;
+			}
+
+			return sigs[end].text == ")" && sigs[end].match != kNoPos &&
+				sigs[end].match > 0 && sigs[sigs[end].match - 1].text == "]";
+		}
+
 		// An empty `{}` never breaks: pull `{` and `}` together (`{\n}` -> `{}`) and
 		// the pair up onto the header line (`) : x(1)` + newline + `{}` joins).
 		// Comments in either gap and directive lines keep the text as typed.
@@ -2455,7 +2505,7 @@ namespace heimdall
 			};
 
 			std::vector<Edit> edits;
-			const auto blank_gap =[&](std::size_t from, std::size_t to)
+			const auto blank_gap = [&](std::size_t from, std::size_t to)
 			{
 				const std::string_view gap = std::string_view(pass.work).substr(from, to - from);
 				return gap.find_first_not_of(" \t\r\n") == std::string_view::npos;
@@ -2499,7 +2549,7 @@ namespace heimdall
 				[](const Edit& left, const Edit& right)
 				{
 					return left.start > right.start;
-			});
+				});
 			for (const auto& edit : edits)
 			{
 				work.replace(edit.start, edit.end - edit.start, edit.text);
@@ -2713,7 +2763,7 @@ namespace heimdall
 		}
 
 		const std::size_t line_count = line_starts.size();
-		auto line_range =[&](std::size_t line)->std::pair<std::size_t, std::size_t> {
+		auto line_range = [&](std::size_t line)->std::pair<std::size_t, std::size_t> {
 			// [content_start, content_end): content_end excludes a trailing '\r'.
 			const std::size_t start = line_starts[line];
 			const std::size_t stop =
@@ -2726,7 +2776,7 @@ namespace heimdall
 
 			return {start, end};
 		};
-		auto line_ending =[&](std::size_t line)->std::string_view
+		auto line_ending = [&](std::size_t line)->std::string_view
 		{
 			const std::size_t stop =
 				line + 1 < line_starts.size() ? line_starts[line + 1] - 1 : source.size();
@@ -2976,7 +3026,7 @@ namespace heimdall
 				}
 			}
 		}
-		auto original_gap_had_space =[&](std::size_t prev, std::size_t cur) -> bool
+		auto original_gap_had_space = [&](std::size_t prev, std::size_t cur) -> bool
 		{
 			const std::size_t gap_start =
 				tokens[sigs[prev].token].offset + tokens[sigs[prev].token].length;
@@ -3066,7 +3116,7 @@ namespace heimdall
 
 				// Split points inside [begin, end).
 				std::size_t piece = begin;
-				auto emit =[&](std::size_t piece_end)
+				auto emit = [&](std::size_t piece_end)
 				{
 					if (piece_end > piece)
 					{
@@ -3434,7 +3484,7 @@ namespace heimdall
 			int trailing_comment_col = -1; // byte offset of `//` in text, or -1
 		};
 
-		auto normalize_comment =[](std::string piece, bool is_line_comment)->std::string
+		auto normalize_comment = [](std::string piece, bool is_line_comment)->std::string
 		{
 			if (is_line_comment && piece.size() > kCommentMarkerLength &&
 				piece[kCommentMarkerLength] != ' ' && piece[kCommentMarkerLength] != '\t' &&
@@ -3446,7 +3496,7 @@ namespace heimdall
 
 			return piece;
 		};
-		auto render_chunk =[&](const Chunk& chunk, std::size_t chunk_pos) -> Rendered
+		auto render_chunk = [&](const Chunk& chunk, std::size_t chunk_pos) -> Rendered
 		{
 			Rendered out;
 			if (chunk.directive || chunk.verbatim)
@@ -3527,7 +3577,7 @@ namespace heimdall
 			}
 
 			std::string text;
-			auto emit_comment =[&](std::size_t t, bool first_piece)
+			auto emit_comment = [&](std::size_t t, bool first_piece)
 			{
 				const bool is_line = tokens[t].kind == TokenKind::LineComment;
 				std::string piece =
@@ -3943,6 +3993,18 @@ namespace heimdall
 				const std::size_t dedent =
 					leading_closers +((is_scope_label || chunk.label_brace) ? 1 : 0);
 				const std::size_t indent_depth = brace_depth > dedent ? brace_depth - dedent : 0;
+				bool lambda_body_continuation  = false;
+				for (std::size_t candidate = chunk.begin; leading_closers > 0 && candidate > 0;)
+				{
+					--candidate;
+					if (sigs[candidate].text == "{" && sigs[candidate].match >= chunk.begin &&
+						IsLambdaBodyBrace(sigs, candidate) && sigs[candidate].paren_depth > 0)
+					{
+						lambda_body_continuation = true;
+						break;
+					}
+				}
+
 				// A dangling control header (`if (x)` / `else` / `do` with the
 				// body on a later chunk) indents following chunks by the
 				// cumulative dangle_bonus, unless the chunk opens with `{`
@@ -3962,6 +4024,7 @@ namespace heimdall
 					(chunk.starts_inside || chunk.prev_continues || chunk.force_continue);
 				const std::size_t total_indent =
 					indent_depth +(continuation ? 1 : 0) +
+					(lambda_body_continuation ? 1 : 0) +
 					(opens_with_brace ? 0 : static_cast<std::size_t>(dangle_bonus));
 				std::size_t indent_spaces = total_indent * m_options.indent_width;
 				if (!m_options.use_tabs && continuation && r > 0 && !out_lines.empty() &&
@@ -4068,7 +4131,7 @@ namespace heimdall
 
 		if (m_options.align_consecutive_macros || m_options.align_consecutive_assignments)
 		{
-			auto alignment_column =[](std::string_view text,
+			auto alignment_column = [](std::string_view text,
 				bool macro, bool designated = false)->std::optional<std::size_t>
 			{
 				if (text.empty() || text.back() == '\\')
@@ -4174,7 +4237,7 @@ namespace heimdall
 				return column;
 			};
 
-			auto align_runs =[&](bool macro, bool designated = false)
+			auto align_runs = [&](bool macro, bool designated = false)
 			{
 				std::size_t runStart = 0;
 				while (runStart < out_lines.size())
@@ -4250,7 +4313,7 @@ namespace heimdall
 		{
 			std::size_t run_start = 0;
 			bool in_run           = false;
-			auto flush_run =[&](std::size_t start, std::size_t end)
+			auto flush_run = [&](std::size_t start, std::size_t end)
 			{
 				if (end - start < kMinCommentRunLength)
 				{
@@ -4444,7 +4507,7 @@ namespace heimdall
 
 		std::vector<Hunk> hunks;
 		std::size_t i = 0, j = 0;
-		auto values_equal =[&](std::size_t a, std::size_t b)
+		auto values_equal = [&](std::size_t a, std::size_t b)
 		{
 			return src_hash[a] == dst_hash[b] && src[a].text == dst[b].text;
 		};

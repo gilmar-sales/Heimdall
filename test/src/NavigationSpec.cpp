@@ -24,15 +24,19 @@ namespace
         }
     }
 
-    std::vector<heimdall::NavTarget> DefinitionOf(std::string_view source, std::string_view needle,
-                                                  std::size_t nth = 0)
+    std::vector<heimdall::NavTarget> DefinitionOf(
+        std::string_view source,
+        std::string_view needle,
+        std::size_t nth = 0)
     {
         const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
         return heimdall::Navigation::Definition(tree, Find(source, needle, nth));
     }
 
-    std::vector<heimdall::NavTarget> ImplementationOf(std::string_view source,
-                                                      std::string_view needle, std::size_t nth = 0)
+    std::vector<heimdall::NavTarget> ImplementationOf(
+        std::string_view source,
+        std::string_view needle,
+        std::size_t nth = 0)
     {
         const heimdall::ParseTree tree = heimdall::ParseTree::Parse(source);
         return heimdall::Navigation::Implementation(tree, Find(source, needle, nth));

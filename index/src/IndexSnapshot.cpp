@@ -31,7 +31,7 @@ namespace heimdall::index
 		// 0 = no match; higher is better.
 		int Score(std::string_view name, std::string_view query)
 		{
-			const auto lower =[](char c)
+			const auto lower = [](char c)
 			{
 				return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 			};
@@ -55,7 +55,7 @@ namespace heimdall::index
 				return 0;
 			}
 
-			const auto equal =[&](std::size_t from)
+			const auto equal = [&](std::size_t from)
 			{
 				for (std::size_t i = 0; i < query.size(); ++i)
 				{
@@ -117,8 +117,8 @@ namespace heimdall::index
 			[&](std::uint32_t a, std::uint32_t b)
 			{
 				return self.mDirHash[a] < self.mDirHash[b];
-		});
-		const auto permute =[&](auto& column)
+			});
+		const auto permute = [&](auto& column)
 		{
 			auto copy = column;
 			for (std::size_t i = 0; i < order.size(); ++i)
@@ -153,7 +153,7 @@ namespace heimdall::index
 			[&](std::uint32_t a, std::uint32_t b)
 			{
 				return self.mUnresolvedName[a] < self.mUnresolvedName[b];
-		});
+			});
 		order = std::move(unresolvedOrder);
 		permute(self.mUnresolvedName);
 		permute(self.mUnresolvedShard);
@@ -166,7 +166,7 @@ namespace heimdall::index
 			[&](std::uint32_t a, std::uint32_t b)
 			{
 				return self.mShards[a]->Path() < self.mShards[b]->Path();
-		});
+			});
 
 		std::unordered_map<std::string_view, std::vector<std::uint32_t>> byFileName;
 		for (std::uint32_t shard = 0; shard < self.mShards.size(); ++shard)
@@ -252,7 +252,7 @@ namespace heimdall::index
 			}
 		}
 
-		const auto store =[](auto& rows, auto& hash, auto& shard, auto& symbol)
+		const auto store = [](auto& rows, auto& hash, auto& shard, auto& symbol)
 		{
 			std::ranges::sort(rows);
 			for (const auto& [key, s, y] : rows)
@@ -341,7 +341,7 @@ namespace heimdall::index
 			[&](SymbolRef ref)
 			{
 				return mShards[ref.shard]->Symbols().role[ref.symbol] != Role::Definition;
-		});
+			});
 		return result;
 	}
 
@@ -488,7 +488,7 @@ namespace heimdall::index
 				[&](const SymbolRef& target)
 				{
 					return HashOf(target) == hash;
-			}))
+				}))
 			{
 				result.push_back({shard, occ.offset[index], occ.length[index], occ.role[index],
 						resolved.state[index]});
@@ -511,7 +511,7 @@ namespace heimdall::index
 		{
 			const auto& file = *mShards[shard];
 			const auto& rel  = file.Relations();
-			const auto collect =[&](SymbolHash subject, RelationKind kind, bool exact)
+			const auto collect = [&](SymbolHash subject, RelationKind kind, bool exact)
 			{
 				const auto[begin, end] = file.RelationsFrom(subject);
 				for (auto i = begin; i < end; ++i)
@@ -534,7 +534,7 @@ namespace heimdall::index
 								[&](const SymbolRef& target)
 								{
 									return HashOf(target) == hash;
-							}))
+								}))
 							{
 								continue;
 							}
@@ -667,7 +667,7 @@ namespace heimdall::index
 			[](const Hit& a, const Hit& b)
 			{
 				return a.score > b.score;
-		});
+			});
 		std::vector<SymbolRef> result;
 		for (const auto& hit : hits | std::views::take(limit))
 		{

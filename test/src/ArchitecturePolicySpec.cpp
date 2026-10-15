@@ -11,7 +11,7 @@ namespace
     namespace fs = std::filesystem;
     std::string Read(const fs::path& path)
     {
-        std::ifstream      input(path);
+        std::ifstream input(path);
         std::ostringstream output;
         output << input.rdbuf();
         return output.str();
@@ -41,7 +41,7 @@ namespace
             }
 
             std::istringstream code(Read(entry.path()));
-            std::string        line;
+            std::string line;
             while (std::getline(code, line))
             {
                 const auto first = line.find_first_not_of(" \t");
@@ -53,7 +53,7 @@ namespace
                 for (const auto& header : forbidden)
                 {
                     EXPECT_EQ(line.find("Heimdall/" + header), std::string::npos)
-                        << entry.path() << ": " << line;
+                    << entry.path() << ": " << line;
                 }
             }
         }
@@ -62,7 +62,7 @@ namespace
     TEST(ArchitecturePolicy, CoreAndSemanticDoNotDependOnAnalysis)
     {
         const fs::path root(HEIMDALL_SOURCE_DIR);
-        const auto     analysis = Headers(root / "analysis/include/Heimdall");
+        const auto analysis = Headers(root / "analysis/include/Heimdall");
         NoIncludes(root / "core", analysis);
         NoIncludes(root / "semantic", analysis);
         NoIncludes(root / "core", Headers(root / "semantic/include/Heimdall"));
@@ -75,7 +75,7 @@ namespace
     TEST(ArchitecturePolicy, CoreAndSemanticDoNotDependOnTheCrossFileIndex)
     {
         const fs::path root(HEIMDALL_SOURCE_DIR);
-        const auto     index = Headers(root / "index/include/Heimdall");
+        const auto index = Headers(root / "index/include/Heimdall");
         NoIncludes(root / "core", index);
         NoIncludes(root / "semantic", index);
     }

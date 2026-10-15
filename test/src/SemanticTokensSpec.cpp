@@ -16,8 +16,10 @@ namespace
     using heimdall::HighlightKind;
     using heimdall::HighlightSpan;
 
-    std::string Encode(std::string_view text, const std::vector<HighlightSpan>& spans,
-                       std::optional<heimdall::lsp::ByteRange> range = std::nullopt)
+    std::string Encode(
+        std::string_view text,
+        const std::vector<HighlightSpan>& spans,
+        std::optional<heimdall::lsp::ByteRange> range = std::nullopt)
     {
         heimdall::lsp::LineIndex lines;
         lines.Build(text);

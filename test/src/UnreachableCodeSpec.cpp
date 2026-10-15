@@ -18,7 +18,7 @@ namespace
         std::erase_if(diagnostics,[](const auto& diagnostic)
             {
                 return diagnostic.code != "cpp/unreachable-code";
-        });
+            });
         return diagnostics;
     }
 

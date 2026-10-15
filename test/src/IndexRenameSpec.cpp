@@ -73,7 +73,7 @@ namespace
 
             snapshot = idx::IndexSnapshot::Build(std::move(shards));
             context.complete = true;
-            context.document =[this](const std::string& path)->std::optional<heimdall::IndexedDocument>
+            context.document = [this](const std::string& path)->std::optional<heimdall::IndexedDocument>
             {
                 const auto found = files.find(path);
                 if (found == files.end())
@@ -85,13 +85,16 @@ namespace
                 document.text = std::make_shared<const std::string>(found->second);
                 return document;
             };
-            context.editable =[](const std::string&)
+            context.editable = [](const std::string&)
             {
                 return true;
             };
         }
 
-        std::size_t At(const std::string& path, std::string_view needle, std::size_t nth = 0) const
+        std::size_t At(
+            const std::string& path,
+            std::string_view needle,
+            std::size_t nth = 0) const
         {
             std::size_t at = 0;
             for (std::size_t i = 0; i <= nth; ++i)
@@ -146,7 +149,8 @@ TEST(IndexRename, AppliesFilesystemPathEditsToStringKeyedFiles)
 
 TEST(IndexRename, ClassIsRenamedEverywhereIncludingConstructorsAndQualifiers)
 {
-    Project project({
+    Project project(
+        {
             {
                 "widget.hpp",
                 "#pragma once\nstruct Widget;\nstruct Widget\n{\n    Widget();\n    ~Widget();\n    int Size() const;\n};\n"
@@ -170,7 +174,8 @@ TEST(IndexRename, ClassIsRenamedEverywhereIncludingConstructorsAndQualifiers)
 
 TEST(IndexRename, MethodIsRenamedAtEveryCallAndDefinition)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A { int Size() const; };\n"
         },
@@ -188,7 +193,8 @@ TEST(IndexRename, MethodIsRenamedAtEveryCallAndDefinition)
 
 TEST(IndexRename, OnlyTheSelectedOverloadIsRenamed)
 {
-    Project project({
+    Project project(
+        {
             {
                 "h.hpp", "int Add(int);\nint Add(int, int);\n"
         },
@@ -205,7 +211,8 @@ TEST(IndexRename, OnlyTheSelectedOverloadIsRenamed)
 
 TEST(IndexRename, SameNameInAnotherNamespaceIsLeftAlone)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "namespace a { struct Item {}; }\n"
         },
@@ -224,7 +231,8 @@ TEST(IndexRename, SameNameInAnotherNamespaceIsLeftAlone)
 
 TEST(IndexRename, UsingDeclarationsAndFriendNamesAreRenamed)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "namespace a { struct B {}; }\n"
         },
@@ -255,7 +263,8 @@ TEST(IndexRename, RefusesWhileTheIndexIsIncomplete)
 
 TEST(IndexRename, RefusesWhenAnotherFileUsesTheSpellingWithoutAResolvableDeclaration)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -272,7 +281,8 @@ TEST(IndexRename, RefusesWhenAnotherFileUsesTheSpellingWithoutAResolvableDeclara
 
 TEST(IndexRename, RefusesWhenAMemberCallCouldBelongToAnotherClass)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A { int Size(); };\nstruct B { int Size(); };\n"
         },
@@ -288,7 +298,8 @@ TEST(IndexRename, RefusesWhenAMemberCallCouldBelongToAnotherClass)
 
 TEST(IndexRename, RefusesWhenTheNameAppearsInAMacro)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -303,7 +314,8 @@ TEST(IndexRename, RefusesWhenTheNameAppearsInAMacro)
 
 TEST(IndexRename, RenamesVirtualFunctionsAsACompleteFamily)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A { virtual int Run(); };\nstruct B : A { int Run() override; };\n"
         },
@@ -313,12 +325,13 @@ TEST(IndexRename, RenamesVirtualFunctionsAsACompleteFamily)
 
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     EXPECT_EQ(project.Apply(*plan).at("a.hpp"),
-        "struct A { virtual int Execute(); };\nstruct B : A { int Execute() override; };\n");
+              "struct A { virtual int Execute(); };\nstruct B : A { int Execute() override; };\n");
 }
 
 TEST(IndexRename, RefusesToMergeWithAnExistingDeclaration)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int First(int);\nint Second(int);\n"
         },
@@ -333,7 +346,8 @@ TEST(IndexRename, RefusesToMergeWithAnExistingDeclaration)
 
 TEST(IndexRename, RefusesWhenTheNewNameCapturesAnInnerUse)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Outer(int);\nnamespace n { int Inner(int); }\n"
         },
@@ -381,7 +395,7 @@ TEST(IndexRename, RefusesFilesOutsideTheWorkspace)
             {
                 "a.hpp", "struct A {};\n"
             }, {"use.cpp", "#include \"a.hpp\"\nA a;\n"}});
-    project.context.editable =[](const std::string& path)
+    project.context.editable = [](const std::string& path)
     {
         return path != "a.hpp";
     };
@@ -395,7 +409,8 @@ TEST(IndexRename, RefusesFilesOutsideTheWorkspace)
 
 TEST(IndexRename, SpansFilesIsTrueOnlyForEntitiesUsedElsewhere)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A {};\nstruct Alone {};\n"
         },
@@ -410,7 +425,8 @@ TEST(IndexRename, SpansFilesIsTrueOnlyForEntitiesUsedElsewhere)
 
 TEST(IndexRename, RefusesAnUnknownReceiverEvenWithOneVisibleMember)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A { int Size(); };\n"
         },
@@ -425,7 +441,8 @@ TEST(IndexRename, RefusesAnUnknownReceiverEvenWithOneVisibleMember)
 
 TEST(IndexRename, PreservesIndependentLocalHomonyms)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -460,7 +477,8 @@ TEST(IndexRename, RefusesReservedAndAlternativeOperatorNames)
 
 TEST(IndexRename, RefusesWhenTheNewNameIsAMacro)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -492,7 +510,8 @@ TEST(IndexRename, CancellationTakesPrecedenceOverIncompleteCoverage)
 
 TEST(IndexRename, RefusesExistingParseErrorsInAnEditedFile)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -512,7 +531,7 @@ TEST(IndexRename, RefusesPredefinedMacroAsNewName)
                 "a.hpp", "int Compute();\n"
     }});
     const auto load = project.context.document;
-    project.context.document =[load](const std::string& path)
+    project.context.document = [load](const std::string& path)
     {
         auto document = load(path);
         document->options.emplace();
@@ -528,7 +547,8 @@ TEST(IndexRename, RefusesPredefinedMacroAsNewName)
 
 TEST(IndexRename, PreviewSupportsClosedFilesWithoutWorkspaceDocumentIds)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -577,7 +597,7 @@ TEST(IndexRename, PreviewRejectsChangedDocumentVersions)
     const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     const auto load = project.context.document;
-    project.context.document =[load](const std::string& path)
+    project.context.document = [load](const std::string& path)
     {
         auto document = load(path);
         document->version = 2;
@@ -597,7 +617,7 @@ TEST(IndexRename, PreviewRejectsChangedParserOptions)
                 "a.hpp", "int Compute();\n"
     }});
     const auto load = project.context.document;
-    project.context.document =[load](const std::string& path)
+    project.context.document = [load](const std::string& path)
     {
         auto document = load(path);
         document->options.emplace();
@@ -605,7 +625,7 @@ TEST(IndexRename, PreviewRejectsChangedParserOptions)
     };
     const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
-    project.context.document =[load](const std::string& path)
+    project.context.document = [load](const std::string& path)
     {
         auto document = load(path);
         document->options.emplace();
@@ -659,7 +679,7 @@ TEST(IndexRename, RefusesAnOutdatedConfigurationFingerprint)
                 "a.hpp", "int Compute();\n"
     }});
     const auto load = project.context.document;
-    project.context.document =[load](const std::string& path)
+    project.context.document = [load](const std::string& path)
     {
         auto document = load(path);
         document->configHash = 1;
@@ -731,7 +751,8 @@ TEST(IndexRename, PreviewHonorsPreRequestedCancellation)
 
 TEST(IndexRename, PrepareAndRenameShareTheConstructorClassTarget)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A { A(); ~A(); };\n"
         },
@@ -752,7 +773,8 @@ TEST(IndexRename, PrepareAndRenameShareTheConstructorClassTarget)
 
 TEST(IndexRename, RenamesNamespaceReopeningsAndContainedQualifiers)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "namespace original { struct A {}; int Run(); }\n"
         },
@@ -765,14 +787,15 @@ TEST(IndexRename, RenamesNamespaceReopeningsAndContainedQualifiers)
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     const auto result = project.Apply(*plan);
     EXPECT_EQ(result.at("a.cpp"),
-        "#include \"a.hpp\"\nnamespace renamed { int Run() { return 0; } }\n");
+              "#include \"a.hpp\"\nnamespace renamed { int Run() { return 0; } }\n");
     EXPECT_EQ(result.at("use.cpp"),
-        "#include \"a.hpp\"\nrenamed::A object;\nint f() { return renamed::Run(); }\n");
+              "#include \"a.hpp\"\nrenamed::A object;\nint f() { return renamed::Run(); }\n");
 }
 
 TEST(IndexRename, ExactIncludeVisibilityIsPreservedDuringSpeculativeReindexing)
 {
-    Project project({
+    Project project(
+        {
             {
                 "first/widget.hpp", "namespace first { struct Widget {}; }\n"
         },
@@ -805,7 +828,8 @@ TEST(IndexRename, ExactIncludeVisibilityIsPreservedDuringSpeculativeReindexing)
 
 TEST(IndexRename, ExactModeIgnoresUnresolvedIncludesInInactiveBranches)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -834,7 +858,8 @@ TEST(IndexRename, ExactModeIgnoresUnresolvedIncludesInInactiveBranches)
 
 TEST(IndexRename, ExactModeIgnoresIncludeTargetsOutsideTheEditableWorkspace)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -854,7 +879,7 @@ TEST(IndexRename, ExactModeIgnoresIncludeTargetsOutsideTheEditableWorkspace)
 
     project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
     project.context.requireExactIncludes = true;
-    project.context.editable =[](const std::string& path)
+    project.context.editable = [](const std::string& path)
     {
         return !path.starts_with("/usr/");
     };
@@ -866,7 +891,8 @@ TEST(IndexRename, ExactModeIgnoresIncludeTargetsOutsideTheEditableWorkspace)
 
 TEST(IndexRename, ExactModeRefusesHeuristicIncludeVisibility)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Compute();\n"
         },
@@ -882,7 +908,8 @@ TEST(IndexRename, ExactModeRefusesHeuristicIncludeVisibility)
 
 TEST(IndexRename, RenamesImplicitVirtualOverridesAcrossFilesFromTheDerivedDeclaration)
 {
-    Project project({
+    Project project(
+        {
             {
                 "base.hpp", "struct A { virtual int Run(); };\n"
         },
@@ -901,14 +928,15 @@ TEST(IndexRename, RenamesImplicitVirtualOverridesAcrossFilesFromTheDerivedDeclar
     EXPECT_EQ(result.at("base.hpp"), "struct A { virtual int Execute(); };\n");
     EXPECT_EQ(result.at("derived.hpp"), "#include \"base.hpp\"\nstruct B : A { int Execute(); };\n");
     EXPECT_EQ(result.at("use.cpp"),
-        "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Execute() + b.Execute() + c.Execute(); }\n");
+              "#include \"most.hpp\"\nint f(A& a, B& b, C& c) { return a.Execute() + b.Execute() + c.Execute(); }\n");
     EXPECT_EQ(result.at("impl.cpp"),
-        "#include \"most.hpp\"\nint A::Execute() { return 1; }\nint B::Execute() { return 2; }\nint C::Execute() { return 3; }\n");
+              "#include \"most.hpp\"\nint A::Execute() { return 1; }\nint B::Execute() { return 2; }\nint C::Execute() { return 3; }\n");
 }
 
 TEST(IndexRename, VirtualFamilyLeavesUnrelatedVirtualMethodsUntouched)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp",
                 "struct A { virtual int Run(); };\nstruct B : A { int Run(); };\nstruct Unrelated { virtual int Run(); };\n"
@@ -921,18 +949,19 @@ TEST(IndexRename, VirtualFamilyLeavesUnrelatedVirtualMethodsUntouched)
 
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
-        "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Execute() + other.Run(); }\n");
+              "#include \"a.hpp\"\nint f(A& a, Unrelated& other) { return a.Execute() + other.Run(); }\n");
 }
 
 TEST(IndexRename, VirtualFamilyRefusesNonEditableOverrides)
 {
-    Project project({
+    Project project(
+        {
             {
                 "base.hpp", "struct A { virtual int Run(); };\n"
         },
             {"derived.hpp", "#include \"base.hpp\"\nstruct B : A { int Run(); };\n"},
     });
-    project.context.editable =[](const std::string& path)
+    project.context.editable = [](const std::string& path)
     {
         return path != "derived.hpp";
     };
@@ -945,7 +974,8 @@ TEST(IndexRename, VirtualFamilyRefusesNonEditableOverrides)
 
 TEST(IndexRename, PreservesDoxygenReferencesAndDeclarationBriefsAcrossFiles)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "/** @brief Widget represents a widget. */\nstruct Widget {};\n"
         },
@@ -962,7 +992,8 @@ TEST(IndexRename, PreservesDoxygenReferencesAndDeclarationBriefsAcrossFiles)
 
 TEST(IndexRename, RenamesInheritedVirtualCallsAndBareUsesAcrossFiles)
 {
-    Project project({
+    Project project(
+        {
             {
                 "base.hpp", "struct Base { virtual int Run(); };\n"
         },
@@ -975,12 +1006,13 @@ TEST(IndexRename, RenamesInheritedVirtualCallsAndBareUsesAcrossFiles)
 
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
-        "#include \"derived.hpp\"\nint Derived::Call() { return Execute(); }\nint f(Derived& value) { return value.Execute(); }\n");
+              "#include \"derived.hpp\"\nint Derived::Call() { return Execute(); }\nint f(Derived& value) { return value.Execute(); }\n");
 }
 
 TEST(IndexRename, RefusesInheritedNewNameCaptureEvenWhenTheLocalBinderBoundAGlobal)
 {
-    Project project({
+    Project project(
+        {
             {
                 "base.hpp", "struct Base { virtual int Run(); };\nstruct Derived : Base { int Call(); };\n"
         },
@@ -996,7 +1028,8 @@ TEST(IndexRename, RefusesInheritedNewNameCaptureEvenWhenTheLocalBinderBoundAGlob
 
 TEST(IndexRename, UnrelatedSyntaxErrorFixtureDoesNotBlockProjectRename)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct Widget {};\n"
         },
@@ -1014,7 +1047,8 @@ TEST(IndexRename, UnrelatedSyntaxErrorFixtureDoesNotBlockProjectRename)
 
 TEST(IndexRename, SyntaxErrorFixtureMentioningTheNewNameBlocksTheProof)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct Widget {};\n"
         },
@@ -1029,7 +1063,8 @@ TEST(IndexRename, SyntaxErrorFixtureMentioningTheNewNameBlocksTheProof)
 
 TEST(IndexRename, BuiltinArgumentTypesChooseAnExactSameArityOverload)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "int Add(long);\nint Add(int);\n"
         },
@@ -1041,7 +1076,7 @@ TEST(IndexRename, BuiltinArgumentTypesChooseAnExactSameArityOverload)
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     EXPECT_EQ(project.Apply(*plan).at("a.hpp"), "int Add(long);\nint Sum(int);\n");
     EXPECT_EQ(project.Apply(*plan).at("use.cpp"),
-        "#include \"a.hpp\"\nint f() { return Sum(1) + Add(1L); }\n");
+              "#include \"a.hpp\"\nint f() { return Sum(1) + Add(1L); }\n");
 }
 
 TEST(IndexRename, RenamesFunctionCalledInNamespaceScopeVariableInitializer)
@@ -1056,12 +1091,13 @@ TEST(IndexRename, RenamesFunctionCalledInNamespaceScopeVariableInitializer)
 
     ASSERT_TRUE(plan.has_value()) << plan.error().message;
     EXPECT_EQ(project.Apply(*plan).at("a.cpp"),
-        "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
+              "int MakeList() { return 1; }\n\nauto list = MakeList();\n");
 }
 
 TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThis)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.cpp",
                 "struct A\n{\n\tint m_x;\n\tvoid F();\n};\n\nstruct B\n{\n\tint m_x;\n};\n\nvoid A::F()\n{\n\tauto& self = *this;\n\tself.m_x = 1;\n}\n"
@@ -1079,7 +1115,8 @@ TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThis)
 
 TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThisInOutOfLineDefinition)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.hpp", "struct A\n{\n\tint m_x;\n\tvoid F();\n\tvoid G();\n};\n"
         },
@@ -1098,7 +1135,8 @@ TEST(IndexRename, RenamesMemberAccessedThroughAutoReferenceToThisInOutOfLineDefi
 
 TEST(IndexRename, MacroIsRenamedAtItsDefinitionsUsesAndConditions)
 {
-    Project project({
+    Project project(
+        {
             {
                 "config.h", "#pragma once\n#define LIMIT 8\n#define DOUBLE_LIMIT (LIMIT * 2)\n"
         },
@@ -1119,7 +1157,8 @@ TEST(IndexRename, MacroIsRenamedAtItsDefinitionsUsesAndConditions)
 
 TEST(IndexRename, RenamingAMacroFromAUseWorksToo)
 {
-    Project project({
+    Project project(
+        {
             {
                 "config.h", "#define SQUARE(x) ((x) * (x))\n"
         },
@@ -1149,7 +1188,8 @@ TEST(IndexRename, IncludeGuardMacrosAreRenamedAtIfndefDefineAndEndifComments)
 
 TEST(IndexRename, MacroRenameRefusesANewNameAlreadyInUse)
 {
-    Project project({
+    Project project(
+        {
             {
                 "config.h", "#define LIMIT 8\n"
         },
@@ -1164,13 +1204,15 @@ TEST(IndexRename, MacroRenameRefusesANewNameAlreadyInUse)
 
 TEST(IndexRename, MacroRenameRefusesWhenTheNameIsStringifiedOrPasted)
 {
-    Project stringified({
+    Project stringified(
+        {
             {
                 "a.h", "#define LIMIT 8\n#define STR(x) #x\n"
         },
             {"use.cpp", "#include \"a.h\"\nconst char* s = STR(LIMIT);\n"},
     });
-    Project pasted({
+    Project pasted(
+        {
             {
                 "a.h", "#define LIMIT 8\n#define CAT(a, b) a##b\n"
         },
@@ -1196,7 +1238,8 @@ TEST(IndexRename, MacroRenameRefusesWhenTheNameIsStringifiedOrPasted)
 
 TEST(IndexRename, MacroRenameRefusesWhenTheNameAlsoAppearsInInactiveCode)
 {
-    Project project({
+    Project project(
+        {
             {
                 "a.h", "#define LIMIT 8\n"
         },

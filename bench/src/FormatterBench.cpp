@@ -13,7 +13,7 @@ namespace
     void BM_Format(benchmark::State& state)
     {
         std::vector<std::string> sources;
-        std::size_t              source_bytes = 0;
+        std::size_t source_bytes = 0;
         for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
         {
             if (!entry.is_regular_file())
@@ -39,7 +39,7 @@ namespace
         }
 
         const heimdall::Formatter formatter;
-        std::size_t               output_bytes = 0;
+        std::size_t output_bytes = 0;
         for (auto _ : state)
         {
             output_bytes = 0;
@@ -67,6 +67,7 @@ namespace
             before += "void Empty" + std::to_string(index) + "()\n{\n}\n\n";
             after += "void Empty" + std::to_string(index) + "()\n{\n    \n}\n\n";
         }
+
         const auto initialTree = heimdall::ParseTree::Parse(before);
         const auto changedTree = heimdall::ParseTree::Parse(after);
         const heimdall::Formatter formatter;
@@ -77,10 +78,12 @@ namespace
                 changedTree, reuse ? &checkpoint : nullptr);
             benchmark::DoNotOptimize(result.Formatted().data());
         }
+
         state.counters["reused_output"] = reuse ? 1 : 0;
     }
 
     BENCHMARK_TEMPLATE(ShapingCheckpoint, false)->Arg(100)->Arg(1000);
+
     BENCHMARK_TEMPLATE(ShapingCheckpoint, true)->Arg(100)->Arg(1000);
 
 } // namespace

@@ -12,38 +12,50 @@ using heimdall::lsp::ThreadPool;
 
 TEST(ThreadPoolSpec, SerialLanePreservesOrderWithoutBlockingAnotherDocument)
 {
-    ThreadPool         pool(2);
+    ThreadPool pool(2);
     std::promise<void> release;
-    auto               gate = release.get_future().share();
+    auto gate = release.get_future().share();
     std::promise<void> entered;
     std::promise<void> independent;
-    std::vector<int>   order;
+    std::vector<int> order;
 
     pool.SubmitSerial("a.cpp",
                       [&]
-                      {
-                          entered.set_value();
-                          gate.wait();
-                          order.push_back(1);
-                      });
+        {
+            entered.set_value();
+            gate.wait();
+            order.push_back(1);
+        });
     entered.get_future().wait();
-    pool.SubmitSerial("a.cpp", [&] { order.push_back(2); });
-    pool.SubmitSerial("b.cpp", [&] { independent.set_value(); });
+    pool.SubmitSerial("a.cpp",[&]
+        {
+            order.push_back(2);
+        });
+    pool.SubmitSerial("b.cpp",[&]
+        {
+            independent.set_value();
+        });
     const auto status = independent.get_future().wait_for(std::chrono::seconds(2));
     release.set_value();
     pool.WaitIdle();
 
     EXPECT_EQ(status, std::future_status::ready);
-    EXPECT_EQ(order, (std::vector<int> { 1, 2 }));
+    EXPECT_EQ(order, (std::vector<int> {1, 2}));
 }
 
 TEST(ThreadPoolSpec, ThrowingSerialTaskDoesNotStrandLaterTasks)
 {
-    ThreadPool       pool(2);
+    ThreadPool pool(2);
     std::atomic<int> done = 0;
 
-    pool.SubmitSerial("a.cpp", [] { throw std::runtime_error("boom"); });
-    pool.SubmitSerial("a.cpp", [&] { ++done; });
+    pool.SubmitSerial("a.cpp",[]
+        {
+            throw std::runtime_error("boom");
+        });
+    pool.SubmitSerial("a.cpp",[&]
+        {
+            ++done;
+        });
     pool.WaitIdle();
 
     EXPECT_EQ(done.load(), 1);
@@ -51,9 +63,9 @@ TEST(ThreadPoolSpec, ThrowingSerialTaskDoesNotStrandLaterTasks)
 
 TEST(ThreadPoolSpec, CancelledQueuedTaskReleasesItsSnapshotBeforeWorkersAreAvailable)
 {
-    ThreadPool         pool(1);
+    ThreadPool pool(1);
     std::promise<void> release;
-    auto               gate = release.get_future().share();
+    auto gate = release.get_future().share();
     std::promise<void> entered;
     pool.Submit(
         [&]
@@ -62,13 +74,19 @@ TEST(ThreadPoolSpec, CancelledQueuedTaskReleasesItsSnapshotBeforeWorkersAreAvail
             gate.wait();
         });
     entered.get_future().wait();
-    auto               snapshot = std::make_shared<int>(42);
-    std::weak_ptr<int> weak     = snapshot;
-    std::stop_source   stop;
-    std::atomic<int>   ran       = 0;
-    std::atomic<int>   cancelled = 0;
+    auto snapshot = std::make_shared<int>(42);
+    std::weak_ptr<int> weak = snapshot;
+    std::stop_source stop;
+    std::atomic<int> ran = 0;
+    std::atomic<int> cancelled = 0;
 
-    pool.SubmitCancellable([snapshot, &ran] { ++ran; }, stop.get_token(), [&] { ++cancelled; });
+    pool.SubmitCancellable([snapshot, &ran]
+        {
+            ++ran;
+            }, stop.get_token(),[&]
+        {
+            ++cancelled;
+        });
     snapshot.reset();
     stop.request_stop();
     const bool released = weak.expired();
@@ -82,18 +100,24 @@ TEST(ThreadPoolSpec, CancelledQueuedTaskReleasesItsSnapshotBeforeWorkersAreAvail
 
 TEST(ThreadPoolSpec, SurvivesThrowingTasksAndKeepsRunningLaterOnes)
 {
-    ThreadPool       pool(2);
+    ThreadPool pool(2);
     std::atomic<int> done = 0;
     // More throwing tasks than workers: if an exception killed a worker, the
     // pool would run out of threads and the later tasks would never run.
     for (int i = 0; i < 20; ++i)
     {
-        pool.Submit([] { throw std::runtime_error("boom"); });
+        pool.Submit([]
+            {
+                throw std::runtime_error("boom");
+            });
     }
 
     for (int i = 0; i < 20; ++i)
     {
-        pool.Submit([&] { ++done; });
+        pool.Submit([&]
+            {
+                ++done;
+            });
     }
 
     pool.WaitIdle();
@@ -102,13 +126,16 @@ TEST(ThreadPoolSpec, SurvivesThrowingTasksAndKeepsRunningLaterOnes)
 
 TEST(ThreadPoolSpec, WaitIdleReturnsAfterManyRounds)
 {
-    ThreadPool       pool(3);
+    ThreadPool pool(3);
     std::atomic<int> done = 0;
     for (int round = 0; round < 200; ++round)
     {
         for (int i = 0; i < 8; ++i)
         {
-            pool.Submit([&] { ++done; });
+            pool.Submit([&]
+                {
+                    ++done;
+                });
         }
 
         pool.WaitIdle();
@@ -119,21 +146,26 @@ TEST(ThreadPoolSpec, WaitIdleReturnsAfterManyRounds)
 
 TEST(ThreadPoolSpec, InteractiveRunsBeforeQueuedBackground)
 {
-    ThreadPool         pool(1);
+    ThreadPool pool(1);
     std::promise<void> release;
-    auto               gate = release.get_future().share();
-    pool.Submit([gate] { gate.wait(); });
+    auto gate = release.get_future().share();
+    pool.Submit([gate]
+        {
+            gate.wait();
+        });
 
-    std::mutex       mu;
+    std::mutex mu;
     std::vector<int> order;
     pool.Submit(
-        [&] {
+        [&]
+        {
             const std::lock_guard<std::mutex> lock(mu);
             order.push_back(1);
         },
         ThreadPool::Priority::Background);
     pool.Submit(
-        [&] {
+        [&]
+        {
             const std::lock_guard<std::mutex> lock(mu);
             order.push_back(2);
         },
@@ -151,15 +183,21 @@ TEST(ThreadPoolSpec, ShutdownIsIdempotentAndIgnoresLaterSubmits)
     pool.Shutdown();
     pool.Shutdown();
     std::atomic<int> done = 0;
-    pool.Submit([&] { ++done; });
+    pool.Submit([&]
+        {
+            ++done;
+        });
     EXPECT_EQ(done.load(), 0);
 }
 
 TEST(ThreadPoolSpec, RecordsLaneQueueTimeAndFailuresSeparatelyFromExecution)
 {
     ThreadPool pool(1);
-    pool.SubmitSerial("file", [] {});
-    pool.SubmitSerial("file", [] { throw std::runtime_error("failure"); });
+    pool.SubmitSerial("file",[] {});
+    pool.SubmitSerial("file",[]
+        {
+            throw std::runtime_error("failure");
+        });
     pool.Submit([] {});
 
     pool.WaitIdle();
@@ -177,26 +215,32 @@ TEST(ThreadPoolSpec, RecordsLaneQueueTimeAndFailuresSeparatelyFromExecution)
 
 TEST(ThreadPoolSpec, WorkspaceBarrierPinsAllEarlierDocumentsBeforeLaterChanges)
 {
-    ThreadPool         pool(3);
+    ThreadPool pool(3);
     std::promise<void> release;
-    const auto         gate             = release.get_future().share();
-    std::atomic<int>   completed        = 0;
-    std::atomic<bool>  pinned           = false;
-    std::atomic<bool>  laterObservedPin = false;
+    const auto gate = release.get_future().share();
+    std::atomic<int> completed = 0;
+    std::atomic<bool> pinned = false;
+    std::atomic<bool> laterObservedPin = false;
     pool.SubmitSerial("first",
                       [&, gate]
-                      {
-                          gate.wait();
-                          ++completed;
-                      });
-    pool.SubmitSerial("second", [&] { ++completed; });
+        {
+            gate.wait();
+            ++completed;
+        });
+    pool.SubmitSerial("second",[&]
+        {
+            ++completed;
+        });
     pool.SubmitBarrier(
         [&]
         {
             EXPECT_EQ(completed.load(), 2);
             pinned = true;
         });
-    pool.SubmitSerial("third", [&] { laterObservedPin = pinned.load(); });
+    pool.SubmitSerial("third",[&]
+        {
+            laterObservedPin = pinned.load();
+        });
 
     release.set_value();
     pool.WaitIdle();
@@ -207,12 +251,24 @@ TEST(ThreadPoolSpec, WorkspaceBarrierPinsAllEarlierDocumentsBeforeLaterChanges)
 
 TEST(ThreadPoolSpec, ThrowingWorkspaceBarrierReleasesLaterLanes)
 {
-    ThreadPool       pool(2);
+    ThreadPool pool(2);
     std::atomic<int> completed = 0;
-    pool.SubmitBarrier([] { throw std::runtime_error("failed pin"); });
-    pool.SubmitSerial("first", [&] { ++completed; });
-    pool.SubmitBarrier([&] { ++completed; });
-    pool.SubmitSerial("second", [&] { ++completed; });
+    pool.SubmitBarrier([]
+        {
+            throw std::runtime_error("failed pin");
+        });
+    pool.SubmitSerial("first",[&]
+        {
+            ++completed;
+        });
+    pool.SubmitBarrier([&]
+        {
+            ++completed;
+        });
+    pool.SubmitSerial("second",[&]
+        {
+            ++completed;
+        });
 
     pool.WaitIdle();
 

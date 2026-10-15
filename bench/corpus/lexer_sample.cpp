@@ -55,14 +55,14 @@ namespace heimdall::samples
                 continue;
             }
 
-            out.push_back(Token{.kind = 1,.offset = i,.length = 1});
+            out.push_back(Token {.kind = 1,.offset = i,.length = 1});
             ++i;
         }
 
         std::sort(out.begin(), out.end(),[](const Token& a, const Token& b)
             {
                 return a.offset < b.offset;
-        });
+            });
         return out;
     }
 

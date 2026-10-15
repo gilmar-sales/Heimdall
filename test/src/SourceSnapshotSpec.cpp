@@ -11,7 +11,7 @@ namespace
     TEST(SourceSnapshotSpec, EditingOneByteSharesTheOtherPiecesAndKeepsOldViewsAlive)
     {
         const std::string source(20000, 'a');
-        auto              before = heimdall::SourceSnapshot::Create(source);
+        auto before = heimdall::SourceSnapshot::Create(source);
         ASSERT_TRUE(before);
         const auto first = before->Chunk(0).data();
 
@@ -23,7 +23,7 @@ namespace
         EXPECT_EQ(before->Read(9999, 3), "aaa");
         EXPECT_EQ(after->Read(9999, 3), "aba");
         EXPECT_EQ(*before->Materialize(), source);
-        auto expected   = source;
+        auto expected = source;
         expected[10000] = 'b';
         EXPECT_EQ(*after->Materialize(), expected);
     }
@@ -54,8 +54,12 @@ namespace
         for (int i = 0; i < 12; ++i)
         {
             readers.emplace_back(
-                std::async(std::launch::async, [&] { return source->Materialize(); }));
+                std::async(std::launch::async,[&]
+                {
+                    return source->Materialize();
+                }));
         }
+
         auto expected = readers.front().get();
 
         for (std::size_t i = 1; i < readers.size(); ++i)
@@ -67,10 +71,10 @@ namespace
 
 TEST(SourceSnapshotSpec, LongTypingSessionsBoundPieceMetadataWithoutChangingOldSnapshots)
 {
-    auto        source    = *heimdall::SourceSnapshot::Create("int value = 1;");
-    const auto  before    = source;
-    bool        compacted = false;
-    std::string expected  = "int value = 1;";
+    auto source = *heimdall::SourceSnapshot::Create("int value = 1;");
+    const auto before = source;
+    bool compacted = false;
+    std::string expected = "int value = 1;";
     for (std::size_t i = 0; i < 1000; ++i)
     {
         source = *source.Edit(4, 0, "a");

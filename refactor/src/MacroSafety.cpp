@@ -484,7 +484,7 @@ namespace heimdall::refactor_detail
 				{
 					return token.offset >= range.offset &&
 					token.offset - range.offset < range.length;
-			});
+				});
 			if (!directive)
 			{
 				original.push_back(source.substr(token.offset, token.length));

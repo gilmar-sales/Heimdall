@@ -123,7 +123,7 @@ TEST(IncludeInsertionSpec, HeaderIsSpelledFromTheShortestSearchDirectory)
     command.include_directories = {root / "include", "src"};
     command.arguments = {"heimdall-no-such-compiler"};
 
-    const auto spell =[&](const std::filesystem::path& header, const std::filesystem::path& file)
+    const auto spell = [&](const std::filesystem::path& header, const std::filesystem::path& file)
     {
         return heimdall::IncludeIndex::SpellHeader(header, file, &command);
     };

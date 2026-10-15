@@ -238,7 +238,7 @@ namespace heimdall::lsp
 		// preserving every other spelling (notably `::` qualification).
 		std::string StripConstRef(std::string_view raw)
 		{
-			const auto isWord =[](char c)
+			const auto isWord = [](char c)
 			{
 				return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') ||
 					(c >= '0' && c <= '9') || c == '_';
@@ -252,7 +252,7 @@ namespace heimdall::lsp
 			std::vector<Piece> pieces;
 			std::string current;
 			bool currentWord = false;
-			const auto push =[&]
+			const auto push = [&]
 			{
 				if (!current.empty())
 				{
@@ -323,7 +323,7 @@ namespace heimdall::lsp
 		{
 			std::string out;
 			std::string word;
-			const auto flush =[&]
+			const auto flush = [&]
 			{
 				if (!word.empty() && word != "const" && word != "volatile")
 				{
@@ -444,7 +444,7 @@ namespace heimdall::lsp
 				}
 			}
 
-			const auto isPlainIdent =[&](std::uint32_t i)
+			const auto isPlainIdent = [&](std::uint32_t i)
 			{
 				return tokens[i].kind == heimdall::TokenKind::Identifier &&
 					tokens[i].tok == heimdall::Tok::None;
@@ -770,19 +770,19 @@ namespace heimdall::lsp
 		mIndexWorker = std::jthread([this](std::stop_token stop)
 			{
 				IndexWorkerMain(stop);
-		});
+			});
 		mDiagWorker = std::jthread([this](std::stop_token stop)
 			{
 				DiagWorkerMain(stop);
-		});
+			});
 
 		mPool.Submit([]
 			{
 				heimdall::IncludeIndex::SystemIncludes("c++");
-		},
+			},
 			ThreadPool::Priority::Background);
 
-		auto stop_workers =[&]
+		auto stop_workers = [&]
 		{
 			std::vector<std::stop_source> sources;
 			{
@@ -906,14 +906,14 @@ namespace heimdall::lsp
 							std::jthread([this](std::stop_token stop)
 							{
 								WorkspaceScanMain(stop);
-						});
+							});
 					}
 
 					mSymbolWorker =
 						std::jthread([this](std::stop_token stop)
 						{
 							SymbolIndexMain(stop);
-					});
+						});
 				}
 				else if (method == "shutdown")
 				{
@@ -946,7 +946,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							FormatDocument(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/rangeFormatting")
 				{
@@ -954,7 +954,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							RangeFormatDocument(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/codeAction")
 				{
@@ -962,7 +962,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							CodeActions(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/completion")
 				{
@@ -970,7 +970,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							CompleteDocument(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/references" ||
 					method == "textDocument/prepareRename" || method == "textDocument/rename")
@@ -982,7 +982,7 @@ namespace heimdall::lsp
 						[this, mode](simdjson::dom::element request, std::string_view id)
 						{
 							RenameDocument(request, id, mode);
-					});
+						});
 				}
 				else if (method == "textDocument/documentLink")
 				{
@@ -990,7 +990,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							DocumentLinks(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/definition")
 				{
@@ -998,7 +998,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							GotoDocument(request, id, false);
-					});
+						});
 				}
 				else if (method == "textDocument/implementation")
 				{
@@ -1006,7 +1006,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							GotoDocument(request, id, true);
-					});
+						});
 				}
 				else if (method == "textDocument/signatureHelp")
 				{
@@ -1014,7 +1014,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							SignatureHelpDocument(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/hover")
 				{
@@ -1022,7 +1022,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							HoverDocument(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/inlayHint")
 				{
@@ -1030,7 +1030,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							InlayHints(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/semanticTokens/full" ||
 					method == "textDocument/semanticTokens/range")
@@ -1040,7 +1040,7 @@ namespace heimdall::lsp
 						[this, ranged](simdjson::dom::element request, std::string_view id)
 						{
 							SemanticTokensRequest(request, id, ranged);
-					});
+						});
 				}
 				else if (method == "textDocument/documentSymbol")
 				{
@@ -1048,7 +1048,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							DocumentSymbols(request, id);
-					});
+						});
 				}
 				else if (method == "textDocument/prepareTypeHierarchy")
 				{
@@ -1056,7 +1056,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							TypeHierarchyRequest(request, id, TypeHierarchyMode::Prepare);
-					});
+						});
 				}
 				else if (method == "typeHierarchy/supertypes")
 				{
@@ -1064,7 +1064,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							TypeHierarchyRequest(request, id, TypeHierarchyMode::Supertypes);
-					});
+						});
 				}
 				else if (method == "typeHierarchy/subtypes")
 				{
@@ -1072,7 +1072,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							TypeHierarchyRequest(request, id, TypeHierarchyMode::Subtypes);
-					});
+						});
 				}
 				else if (method == "workspace/symbol")
 				{
@@ -1080,7 +1080,7 @@ namespace heimdall::lsp
 						[this](simdjson::dom::element request, std::string_view id)
 						{
 							WorkspaceSymbols(request, id);
-					});
+						});
 				}
 				else if (method == "workspace/didChangeWatchedFiles")
 				{
@@ -1166,27 +1166,27 @@ namespace heimdall::lsp
 				if (parser.parse(body).get(request))
 				{
 					return;
-			}
+				}
 
 				std::string_view method;
 				if (request["method"].get_string().get(method))
 				{
 					return;
-			}
+				}
 
 				if (method == "textDocument/didOpen")
 				{
 					OpenDocument(request);
-			}
+				}
 				else if (method == "textDocument/didChange")
 				{
 					ChangeDocument(request);
-			}
+				}
 				else if (method == "textDocument/didClose")
 				{
 					CloseDocument(request);
-			}
-		});
+				}
+			});
 	}
 
 	void LanguageServer::Dispatch(
@@ -1234,14 +1234,14 @@ namespace heimdall::lsp
 
 		// Pin after prior notifications, before later ones. Cancellation was
 		// registered above, so transport can cancel even while this pin is queued.
-		auto pin =[this, job]
+		auto pin = [this, job]
 		{
 			if (job->context.stop.stop_requested())
 			{
 				mPool.SubmitCancellable([this, job]
 					{
 						ExecuteRequest(job);
-					}, job->context.stop,
+						}, job->context.stop,
 					[this, job]
 					{
 						job->context.pinned.reset();
@@ -1251,7 +1251,7 @@ namespace heimdall::lsp
 						RespondCancelled(job->id);
 						const std::lock_guard lock(m_inflight_mu);
 						m_inflight.erase(job->id);
-				});
+					});
 				return;
 			}
 
@@ -1265,7 +1265,7 @@ namespace heimdall::lsp
 						[lifetime = snapshot->lifetime](DocumentVersion*)
 						{
 							lifetime->Release();
-					});
+						});
 					job->context.pinned =
 						PinnedDocument {job->context.document_uri, std::move(*snapshot)};
 				}
@@ -1275,7 +1275,7 @@ namespace heimdall::lsp
 			mPool.SubmitCancellable([this, job]
 				{
 					ExecuteRequest(job);
-				}, job->context.stop,
+					}, job->context.stop,
 				[this, job]
 				{
 					job->context.pinned.reset();
@@ -1285,7 +1285,7 @@ namespace heimdall::lsp
 					RespondCancelled(job->id);
 					const std::lock_guard lock(m_inflight_mu);
 					m_inflight.erase(job->id);
-			});
+				});
 		};
 		std::string_view method;
 		if (request["method"].get_string().get(method))
@@ -1343,7 +1343,7 @@ namespace heimdall::lsp
 		catch (const ParsePending& pending)
 		{
 			auto waiter = std::make_shared<ParseSlot::Waiter>();
-			waiter->resume =[this, job, slot = pending.slot]
+			waiter->resume = [this, job, slot = pending.slot]
 			{
 				// Keep the finished result with this request even if didChange
 				// or another version has meanwhile evicted the document cache.
@@ -1353,9 +1353,9 @@ namespace heimdall::lsp
 							const std::lock_guard<std::mutex> lock(slot->mu);
 							job->context.parsed        = slot->tree;
 							job->context.parse_failure = slot->failure;
-					}
+						}
 						ExecuteRequest(job);
-				});
+					});
 			};
 			std::weak_ptr<ParseSlot::Waiter> weak = waiter;
 			waiter->cancellation.emplace(job->context.stop, std::function<void() >([weak]
@@ -1363,8 +1363,8 @@ namespace heimdall::lsp
 					if (auto waiting = weak.lock())
 					{
 						waiting->Wake();
-				}
-			}));
+					}
+				}));
 			bool completed;
 			{
 				const std::lock_guard<std::mutex> lock(pending.slot->mu);
@@ -1651,8 +1651,8 @@ namespace heimdall::lsp
 				for (const auto& driver : drivers)
 				{
 					heimdall::IncludeIndex::SystemIncludes(driver);
-			}
-		}),
+				}
+			}),
 			ThreadPool::Priority::Background);
 	}
 
@@ -1857,8 +1857,8 @@ namespace heimdall::lsp
 					kind == heimdall::DirectiveKind::Ifdef || kind == heimdall::DirectiveKind::Ifndef ||
 					kind == heimdall::DirectiveKind::Elif || kind == heimdall::DirectiveKind::Else ||
 					kind == heimdall::DirectiveKind::Endif;
-			});
-			const auto emit =[&](std::size_t begin, std::size_t end)
+				});
+			const auto emit = [&](std::size_t begin, std::size_t end)
 			{
 				if (end <= begin || begin >= text.size())
 				{
@@ -1886,7 +1886,7 @@ namespace heimdall::lsp
 			// A gap between active ranges covers directive lines too (the
 			// standalone preprocessor keeps them out of the ranges). Cut the
 			// conditional directives back out: they are always compiled text.
-			const auto append =[&](std::size_t begin, std::size_t end)
+			const auto append = [&](std::size_t begin, std::size_t end)
 			{
 				if (end <= begin || begin >= text.size())
 				{
@@ -2080,7 +2080,7 @@ namespace heimdall::lsp
 			return false;
 		}
 
-		auto number =[](simdjson::dom::object object, const char* key)->std::size_t
+		auto number = [](simdjson::dom::object object, const char* key)->std::size_t
 		{
 			std::uint64_t unsigned_value = 0;
 			if (!object[key].get_uint64().get(unsigned_value))
@@ -2371,7 +2371,7 @@ namespace heimdall::lsp
 				mPool.Submit(ThreadPool::Task([this, closed_path]()
 					{
 						IndexDiskSymbols(closed_path, std::stop_token {});
-				}),
+					}),
 					ThreadPool::Priority::Background);
 			}
 		}
@@ -2384,7 +2384,7 @@ namespace heimdall::lsp
 			mPool.Submit(ThreadPool::Task([this, closed_path]()
 				{
 					PublishWorkspaceFile(closed_path, std::stop_token {});
-			}),
+				}),
 				ThreadPool::Priority::Background);
 			return;
 		}
@@ -2413,7 +2413,7 @@ namespace heimdall::lsp
 
 		auto text             = std::make_shared<std::string>(std::move(*contents));
 		const std::string uri = UriFromPath(file);
-		const auto is_open =[&]
+		const auto is_open = [&]
 		{
 			const std::shared_lock<std::shared_mutex> lock(m_docs_mu);
 			return m_documents.contains(uri);
@@ -2453,7 +2453,7 @@ namespace heimdall::lsp
 		QuoteJson(uri, message);
 		message += ",\"diagnostics\":[";
 		int count = 0;
-		const auto append =[&](std::size_t offset, std::size_t length, int severity,
+		const auto append = [&](std::size_t offset, std::size_t length, int severity,
 			std::string_view code, std::string_view text_message)
 		{
 			if (count++ > 0)
@@ -2838,7 +2838,7 @@ namespace heimdall::lsp
 				[](const heimdall::Diagnostic& a, const heimdall::Diagnostic& b)
 				{
 					return a.offset < b.offset;
-			});
+				});
 		}
 
 		return diagnostics;
@@ -2859,7 +2859,7 @@ namespace heimdall::lsp
 			result.coverageIssue = mIndexIssue;
 		}
 		result.requireExactIncludes = true;
-		result.editable =[root](const std::string& path)
+		result.editable = [root](const std::string& path)
 		{
 			if (root.empty() ||!IsUnderRoot(std::filesystem::path(path), root))
 			{
@@ -2870,9 +2870,9 @@ namespace heimdall::lsp
 			return std::ranges::none_of(relative.parent_path(),[](const std::filesystem::path& part)
 				{
 					return IsSkippedDirectory(part.string());
-			});
+				});
 		};
-		result.document =[this](const std::string& path)->std::optional<heimdall::IndexedDocument>
+		result.document = [this](const std::string& path)->std::optional<heimdall::IndexedDocument>
 		{
 			const auto uri = UriFromPath(path);
 			heimdall::IndexedDocument indexed;
@@ -2939,7 +2939,7 @@ namespace heimdall::lsp
 		const auto offset = document->lines->OffsetFromPosition(
 			{static_cast<std::size_t>(PositionNumber(position, "line")),
 				static_cast<std::size_t>(PositionNumber(position, "character"))});
-		const auto fail =[&](const heimdall::RefactoringError& error)
+		const auto fail = [&](const heimdall::RefactoringError& error)
 		{
 			if (error.code == heimdall::RefactoringErrorCode::Cancelled)
 			{
@@ -2991,7 +2991,7 @@ namespace heimdall::lsp
 			return;
 		}
 
-		const auto range =[&](const std::shared_ptr<const LineIndex>& lines, std::size_t start,
+		const auto range = [&](const std::shared_ptr<const LineIndex>& lines, std::size_t start,
 			std::size_t length, std::string& output)
 		{
 			output += "{\"start\":";
@@ -3031,7 +3031,7 @@ namespace heimdall::lsp
 		}
 
 		std::set<std::pair<std::string, std::size_t>> emitted;
-		const auto appendWritten =[&](std::string& response)
+		const auto appendWritten = [&](std::string& response)
 		{
 			const HeaderView headers = AwaitHeaderScopes(uri_string, document->text, command);
 			const auto* scopes       = headers.index ? &headers.index->Scopes() : nullptr;
@@ -3077,7 +3077,7 @@ namespace heimdall::lsp
 				response += '}';
 			}
 		};
-		const auto appendIndexed =[&](std::string& response)
+		const auto appendIndexed = [&](std::string& response)
 		{
 			const auto snapshot  = mIndexStore.Snapshot();
 			const auto selfPath  = PathFromUri(uri_string).generic_string();
@@ -3430,7 +3430,7 @@ namespace heimdall::lsp
 		std::string response   = "[";
 		bool first             = true;
 
-		const auto accepts =[&](std::string_view kind)
+		const auto accepts = [&](std::string_view kind)
 		{
 			simdjson::dom::object action_context;
 			simdjson::dom::array only;
@@ -3470,7 +3470,7 @@ namespace heimdall::lsp
 			std::shared_ptr<const LineIndex> lines;
 		};
 
-		const auto sibling_param_edits =[&](const heimdall::Diagnostic& diagnostic)
+		const auto sibling_param_edits = [&](const heimdall::Diagnostic& diagnostic)
 		{
 			std::vector<ParamEdit> extras;
 			if (diagnostic.code != "api/pass-by-const-reference" &&
@@ -3626,7 +3626,7 @@ namespace heimdall::lsp
 		const auto selection_end = lines->OffsetFromPosition(
 			{static_cast<std::size_t>(PositionNumber(end_object, "line")),
 				static_cast<std::size_t>(PositionNumber(end_object, "character"))});
-		const auto append_refactor =[&](const auto& plan, std::string_view kind)
+		const auto append_refactor = [&](const auto& plan, std::string_view kind)
 		{
 			if (!plan || RequestCancelled() ||!IsCurrentVersion(uri_string, version) ||
 				!heimdall::PreviewRefactoring(m_workspace.Snapshot(), *plan, CurrentStop()))
@@ -3677,7 +3677,7 @@ namespace heimdall::lsp
 					{
 						return token.kind == heimdall::TokenKind::Identifier &&
 						tree->Text(token) == name;
-				});
+					});
 				if (!used)
 				{
 					break;
@@ -3701,7 +3701,7 @@ namespace heimdall::lsp
 					{
 						return token.kind == heimdall::TokenKind::Identifier &&
 						tree->Text(token) == function_name;
-				});
+					});
 				if (!used)
 				{
 					break;
@@ -3781,7 +3781,7 @@ namespace heimdall::lsp
 					{
 						return token.kind == heimdall::TokenKind::Identifier &&
 						tree->Text(token) == name;
-				});
+					});
 				if (!used)
 				{
 					break;
@@ -3806,7 +3806,7 @@ namespace heimdall::lsp
 					{
 						return token.kind == heimdall::TokenKind::Identifier &&
 						tree->Text(token) == name;
-				});
+					});
 				if (!used)
 				{
 					break;
@@ -3840,7 +3840,7 @@ namespace heimdall::lsp
 				[](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
 				{
 					return a->fix.offset > b->fix.offset;
-			});
+				});
 
 			std::vector<const heimdall::Diagnostic*> selected;
 			selected.reserve(safe.size());
@@ -3871,7 +3871,7 @@ namespace heimdall::lsp
 					[](const heimdall::Diagnostic* a, const heimdall::Diagnostic* b)
 					{
 						return a->fix.offset < b->fix.offset;
-				});
+					});
 
 				if (!first)
 				{
@@ -4293,7 +4293,7 @@ namespace heimdall::lsp
 			return;
 		}
 
-		const auto lower =[](std::string_view word)
+		const auto lower = [](std::string_view word)
 		{
 			std::string folded(word);
 			for (char& c : folded)
@@ -4318,12 +4318,12 @@ namespace heimdall::lsp
 				!offered.contains(macro.name))
 				{
 					matches.push_back(std::make_shared<const heimdall::MacroDef>(macro));
-			}
-		});
+				}
+			});
 		std::ranges::sort(matches,[](const heimdall::MacroPtr& a, const heimdall::MacroPtr& b)
 			{
 				return a->name.size() != b->name.size() ? a->name.size() < b->name.size() : a->name < b->name;
-		});
+			});
 		if (matches.size() > kMaxMacroItems)
 		{
 			matches.resize(kMaxMacroItems);
@@ -4395,21 +4395,21 @@ namespace heimdall::lsp
 			}
 		}
 
-		const auto is_header =[](const std::filesystem::path& path)
+		const auto is_header = [](const std::filesystem::path& path)
 		{
 			const std::string extension = path.extension().string();
 			return extension == ".h" || extension == ".hh" || extension == ".hpp" ||
 				extension == ".hxx" || extension == ".h++" || extension == ".inl" ||
 				extension == ".ipp" || extension == ".tpp";
 		};
-		const auto starts_folded =[](std::string_view name, std::string_view prefix)
+		const auto starts_folded = [](std::string_view name, std::string_view prefix)
 		{
 			return name.size() >= prefix.size() &&
 				std::equal(prefix.begin(), prefix.end(), name.begin(),[](char a, char b)
 				{
 					return std::tolower(static_cast<unsigned char>(a)) ==
 					std::tolower(static_cast<unsigned char>(b));
-			});
+				});
 		};
 
 		const std::size_t replace_start = offset - context.prefix.size();
@@ -4468,7 +4468,7 @@ namespace heimdall::lsp
 			const bool known = std::any_of(items.begin(), items.end(),[&](const auto& item)
 				{
 					return item.label == symbol.name && symbol.container.empty();
-			});
+				});
 			if (known || std::find(offered.begin(), offered.end(), qualified_name) != offered.end())
 			{
 				continue;
@@ -4890,17 +4890,17 @@ namespace heimdall::lsp
 							base_edit.old_length,
 							base_edit.new_length,
 							baseDirectivesUnchanged
-					};
+						};
 						tree = std::make_shared<heimdall::ParseTree>(
 						heimdall::ParseTree::ParseSnapshot(text, options,
 						lifetime ? lifetime->stop.get_token()
 						: std::stop_token {},
 						lexed, base ? &reuse : nullptr));
-				}
+					}
 					catch (...)
 					{
 						failure = std::current_exception();
-				}
+					}
 
 					std::vector<std::shared_ptr<ParseSlot::Waiter>> waiters;
 					{
@@ -4909,20 +4909,20 @@ namespace heimdall::lsp
 						slot->failure = failure;
 						slot->ready.store(slot->tree != nullptr, std::memory_order_release);
 						waiters.swap(slot->waiters);
-				}
+					}
 					slot->cv.notify_all();
 					for (auto& waiter : waiters)
 					{
 						waiter->Wake();
-				}
+					}
 
 					const std::lock_guard<std::mutex> lock(mParseMutex);
 					if (const auto found = mParseCache.find(uri);
 					found != mParseCache.end() && found->second.slot == slot)
 					{
 						found->second.base.reset();
-				}
-			},
+					}
+				},
 				lifetime ? lifetime->stop.get_token() : std::stop_token {},
 				[slot]
 				{
@@ -4931,13 +4931,13 @@ namespace heimdall::lsp
 						const std::lock_guard lock(slot->mu);
 						slot->cancelled = true;
 						waiters.swap(slot->waiters);
-				}
+					}
 					slot->cv.notify_all();
 					for (auto& waiter : waiters)
 					{
 						waiter->Wake();
-				}
-			});
+					}
+				});
 		}
 
 		std::unique_lock<std::mutex> lock(slot->mu);
@@ -4951,7 +4951,7 @@ namespace heimdall::lsp
 				{
 					return slot->ready.load(std::memory_order_acquire) ||
 					slot->failure || slot->cancelled;
-			}))
+				}))
 			{
 				return nullptr;
 			}
@@ -5022,7 +5022,7 @@ namespace heimdall::lsp
 		}
 
 		// Parameter ranges are byte offsets into the label; LSP counts UTF-16 units.
-		const auto utf16 =[](std::string_view label, std::uint32_t byte)
+		const auto utf16 = [](std::string_view label, std::uint32_t byte)
 		{
 			return std::to_string(ToPosition(label, byte).character);
 		};
@@ -5221,7 +5221,7 @@ namespace heimdall::lsp
 		const auto& semantic_symbols   = context.Symbols();
 		const HeaderView typeHeaders   = AwaitHeaderScopes(uri_string, text, command);
 		const auto* typeIndex          = typeHeaders.index ? &typeHeaders.index->Scopes() : nullptr;
-		const auto next_significant =[&](std::size_t token, std::size_t limit)
+		const auto next_significant = [&](std::size_t token, std::size_t limit)
 		{
 			while (token < limit && (tokens[token].kind == heimdall::TokenKind::Whitespace ||
 				tokens[token].kind == heimdall::TokenKind::LineComment ||
@@ -5232,7 +5232,7 @@ namespace heimdall::lsp
 
 			return token;
 		};
-		const auto spell_type =[&](std::uint32_t type_begin, std::size_t limit)
+		const auto spell_type = [&](std::uint32_t type_begin, std::size_t limit)
 		{
 			if (type_begin >= tokens.size())
 			{
@@ -5272,7 +5272,7 @@ namespace heimdall::lsp
 			return std::string(tree->Source().substr(
 				begin_offset, last_token.offset + last_token.length - begin_offset));
 		};
-		const auto inferred_spelling =[&](heimdall::SymbolId symbol)
+		const auto inferred_spelling = [&](heimdall::SymbolId symbol)
 		{
 			const auto declaration = semantic_symbols.decl_node[symbol];
 			if (declaration >= nodes.size())
@@ -5559,7 +5559,7 @@ namespace heimdall::lsp
 
 			return std::string(return_type);
 		};
-		const auto is_auto_declaration =[&](heimdall::SymbolId symbol)
+		const auto is_auto_declaration = [&](heimdall::SymbolId symbol)
 		{
 			const auto declaration = semantic_symbols.decl_node[symbol];
 			if (declaration >= nodes.size())
@@ -5581,7 +5581,7 @@ namespace heimdall::lsp
 
 			return false;
 		};
-		const auto structured_binding_type =[&](heimdall::SymbolId symbol, heimdall::TypeId type)
+		const auto structured_binding_type = [&](heimdall::SymbolId symbol, heimdall::TypeId type)
 		{
 			const auto declaration = semantic_symbols.decl_node[symbol];
 			const auto name_token  = semantic_symbols.decl_token[symbol];
@@ -5685,7 +5685,7 @@ namespace heimdall::lsp
 
 			return heimdall::TypeTable::Unknown;
 		};
-		const auto is_structured_binding =[&](heimdall::SymbolId symbol)
+		const auto is_structured_binding = [&](heimdall::SymbolId symbol)
 		{
 			const auto declaration = semantic_symbols.decl_node[symbol];
 			const auto name_token  = semantic_symbols.decl_token[symbol];
@@ -5792,8 +5792,92 @@ namespace heimdall::lsp
 				{token_offset + token.length, ": " + type_spelling, 1});
 		}
 
+		for (std::size_t node = 0; node < nodes.size(); ++node)
 		{
-			const auto IsBareName =[&](std::size_t argumentNode, std::string_view name)
+			if (nodes.Kind(node) != heimdall::GrammarKind::LambdaExpression)
+			{
+				continue;
+			}
+
+			const auto first_token = nodes.FirstToken(node);
+			const auto token_end = std::min<std::size_t>(
+				first_token + nodes.TokenCount(node), tokens.size());
+			if (first_token >= token_end)
+			{
+				continue;
+			}
+
+			std::size_t paren_depth     = 0;
+			std::size_t bracket_depth   = 0;
+			std::size_t body_open       = token_end;
+			std::size_t parameter_close = token_end;
+			std::size_t capture_close   = token_end;
+			bool has_trailing_return    = false;
+			for (auto token = first_token; token < token_end; ++token)
+			{
+				const auto kind = tokens[token].tok;
+				if (kind == heimdall::Tok::LBrace && paren_depth == 0 && bracket_depth == 0)
+				{
+					body_open = token;
+					break;
+				}
+
+				has_trailing_return |= kind == heimdall::Tok::Arrow;
+				if (kind == heimdall::Tok::LParen)
+				{
+					++paren_depth;
+				}
+				else if (kind == heimdall::Tok::RParen && paren_depth > 0)
+				{
+					--paren_depth;
+					if (paren_depth == 0 && bracket_depth == 0)
+					{
+						parameter_close = token;
+					}
+				}
+				else if (kind == heimdall::Tok::LBracket)
+				{
+					++bracket_depth;
+				}
+				else if (kind == heimdall::Tok::RBracket && bracket_depth > 0)
+				{
+					--bracket_depth;
+					if (bracket_depth == 0)
+					{
+						capture_close = token;
+					}
+				}
+			}
+
+			if (body_open == token_end || has_trailing_return ||
+				tokens[body_open].offset < first_offset || tokens[body_open].offset >= last_offset)
+			{
+				continue;
+			}
+
+			const auto return_type = context.Types().LambdaReturnType(
+				static_cast<std::uint32_t>(node));
+			if (!context.Types().Types().IsKnown(return_type))
+			{
+				continue;
+			}
+
+			const auto spelling = context.Types().Spell(return_type);
+			if (spelling.empty() || spelling == "auto" ||
+				spelling.find("<unknown>") != std::string::npos)
+			{
+				continue;
+			}
+
+			const auto signature_end = parameter_close < body_open ? parameter_close : capture_close;
+			const auto hint_offset = signature_end < body_open
+			? tokens[signature_end].offset + tokens[signature_end].length
+			: tokens[body_open].offset;
+			orderedHints.push_back({hint_offset, " -> " + spelling, 1});
+		}
+
+		{
+			const auto IsBareName = [&](std::size_t argumentNode, std::string_view name)
 			{
 				if (name.empty() ||
 					nodes.Kind(argumentNode) != heimdall::GrammarKind::IdentifierExpression)
@@ -5905,7 +5989,7 @@ namespace heimdall::lsp
 						{
 							return i < signature.parameterNames.size() &&
 							signature.parameterNames[i] == names[i];
-					}))
+						}))
 					{
 						continue;
 					}
@@ -5923,7 +6007,7 @@ namespace heimdall::lsp
 				[](const OrderedHint& left, const OrderedHint& right)
 				{
 					return left.offset < right.offset;
-			});
+				});
 			for (const auto& hint : orderedHints)
 			{
 				if (!first)
@@ -6078,7 +6162,7 @@ namespace heimdall::lsp
 				mIndexCv.wait(lock, stop,[&]
 					{
 						return !m_index_queue.empty();
-				});
+					});
 				if (stop.stop_requested())
 				{
 					return;
@@ -6150,7 +6234,7 @@ namespace heimdall::lsp
 		mDiagCv.wait(lock,[&]
 			{
 				return mDiaQueue.empty() && !mDiagBusy;
-		});
+			});
 	}
 
 	void LanguageServer::DiagWorkerMain(std::stop_token stop)
@@ -6165,7 +6249,7 @@ namespace heimdall::lsp
 				mDiagCv.wait(lock, stop,[&]
 					{
 						return !mDiaQueue.empty();
-				});
+					});
 				if (stop.stop_requested())
 				{
 					return;
@@ -6208,18 +6292,18 @@ namespace heimdall::lsp
 						if (stop.stop_requested())
 						{
 							return true;
-					}
+						}
 
 						for (const auto& queued : mDiaQueue)
 						{
 							if (queued.uri == job.uri)
 							{
 								return true;
+							}
 						}
-					}
 
 						return false;
-				});
+					});
 				if (stop.stop_requested())
 				{
 					mDiagBusy = false;
@@ -6580,7 +6664,7 @@ namespace heimdall::lsp
 		};
 
 		std::vector<Resolved> resolved;
-		auto add_resolved =[&](LoadedFile* file, std::size_t at, std::size_t length)
+		auto add_resolved = [&](LoadedFile* file, std::size_t at, std::size_t length)
 		{
 			// The same header can be loaded twice (indexed bytes vs. bytes read
 			// from disk), so deduplicate by URI, not by loader pointer.
@@ -6600,11 +6684,11 @@ namespace heimdall::lsp
 		// Bounded for <50ms: at most kMaxGotoCandidates files per target
 		// (siblings first, then compile-DB stems, then open docs). Each
 		// candidate parse below is cancellable via CurrentStop().
-		auto source_candidates =[&](const std::filesystem::path& owner)
+		auto source_candidates = [&](const std::filesystem::path& owner)
 		{
 			constexpr std::size_t kMaxGotoCandidates = 4;
 			std::vector<std::filesystem::path> candidates;
-			auto push =[&](const std::filesystem::path& path)
+			auto push = [&](const std::filesystem::path& path)
 			{
 				if (candidates.size() >= kMaxGotoCandidates)
 				{
@@ -7120,7 +7204,7 @@ namespace heimdall::lsp
 		heimdall::HighlightContext context;
 		if (environment)
 		{
-			context.findMacro =[&environment](std::string_view name, std::size_t offset)
+			context.findMacro = [&environment](std::string_view name, std::size_t offset)
 			{
 				return environment->Find(name, offset);
 			};
@@ -7236,7 +7320,7 @@ namespace heimdall::lsp
 		const auto& symbols  = model.Symbols();
 		const auto& tokens   = model.Tree().Tokens();
 		std::string response = "[";
-		const auto append =[&](std::string_view name, const std::string& itemUri,
+		const auto append = [&](std::string_view name, const std::string& itemUri,
 			const LineIndex& lines, std::size_t rangeBegin, std::size_t rangeEnd,
 			std::size_t nameBegin, std::size_t nameEnd)
 		{
@@ -7371,7 +7455,7 @@ namespace heimdall::lsp
 			return;
 		}
 
-		const auto lower =[](std::string text)
+		const auto lower = [](std::string text)
 		{
 			for (char& c : text)
 			{
@@ -7401,14 +7485,14 @@ namespace heimdall::lsp
 						lower(macro.name).find(needle) == std::string::npos)
 						{
 							return;
-					}
+						}
 
 						if (seen.insert(macro.file + "#" + macro.name).second)
 						{
 							candidates.push_back({macro.name, macro.file, macro.offset,
 								entry.environment->IsSystemFile(macro.file)});
-					}
-				});
+						}
+					});
 			}
 		}
 
@@ -7422,7 +7506,7 @@ namespace heimdall::lsp
 					{
 						return candidate.name == symbol.name &&
 						std::filesystem::path(candidate.file).generic_string() == path;
-				});
+					});
 			}
 		}
 
@@ -7431,10 +7515,10 @@ namespace heimdall::lsp
 				if (a.system != b.system)
 				{
 					return !a.system;
-			}
+				}
 
 				return a.name.size() != b.name.size() ? a.name.size() < b.name.size() : a.name < b.name;
-		});
+			});
 		if (candidates.size() > kMaxHeaderMacros)
 		{
 			candidates.resize(kMaxHeaderMacros);
@@ -7629,7 +7713,7 @@ namespace heimdall::lsp
 		}
 
 		const auto started = std::chrono::steady_clock::now();
-		const auto elapsed_ms =[&started]
+		const auto elapsed_ms = [&started]
 		{
 			return static_cast<std::uint64_t>(
 				std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -7665,7 +7749,7 @@ namespace heimdall::lsp
 		// One report per percent at most: a 20 000-file scan sends about a hundred messages.
 		constexpr std::size_t kPercent = 100;
 		const std::size_t report_every = std::max<std::size_t>(1, files.size() / kPercent);
-		const auto drain =[&]
+		const auto drain = [&]
 		{
 			// Relaxed is enough: the counter only hands out distinct file indexes, and each
 			// file's result is published through WorkspaceSymbolIndex's own lock.
@@ -7835,7 +7919,7 @@ namespace heimdall::lsp
 						IndexDiskSymbols(path, std::stop_token {});
 						mIndexPendingJobs.fetch_sub(1, std::memory_order_acq_rel);
 						RefreshIndexCompleteness(std::stop_token {});
-				}),
+					}),
 					ThreadPool::Priority::Background);
 			}
 		}

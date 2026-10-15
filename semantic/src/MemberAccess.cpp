@@ -1,10 +1,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <Heimdall/LineTable.hpp>
-#include <Heimdall/SemanticRules.hpp>
 #include <string>
 #include <vector>
+
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/SemanticRules.hpp>
 
 #include "detail/TokenView.hpp"
 
@@ -20,7 +21,7 @@ namespace heimdall
 		std::vector<Diagnostic> diagnostics;
 		std::vector<TypeId> resolved(nodes.size(), TypeTable::Unknown);
 		std::vector<std::uint8_t> state(nodes.size(), 0);
-		std::function<TypeId(std::uint32_t) > resolve =[&](std::uint32_t node) -> TypeId
+		std::function<TypeId(std::uint32_t) > resolve = [&](std::uint32_t node) -> TypeId
 		{
 			if (node >= nodes.size())
 			{

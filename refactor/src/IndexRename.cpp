@@ -64,7 +64,7 @@ namespace heimdall
 			std::string_view name)
 		{
 			auto at = end;
-			const auto skip =[&]
+			const auto skip = [&]
 			{
 				while (at < text.size() && std::isspace(static_cast<unsigned char>(text[at])) != 0)
 				{
@@ -263,12 +263,12 @@ namespace heimdall
 				}
 
 				const auto includeLines = IncludeLines(text);
-				const auto inInclude =[&](std::size_t offset)
+				const auto inInclude = [&](std::size_t offset)
 				{
 					return std::ranges::any_of(includeLines,[&](const auto& line)
 						{
 							return offset >= line.first && offset < line.second;
-					});
+						});
 				};
 				const auto tokens = Lexer(text).Lex();
 				std::vector<std::size_t> significant;
@@ -280,7 +280,7 @@ namespace heimdall
 					}
 				}
 
-				const auto spelling =[&](std::size_t sig)
+				const auto spelling = [&](std::size_t sig)
 				{
 					return text.substr(tokens[significant[sig]].offset, tokens[significant[sig]].length);
 				};
@@ -835,7 +835,7 @@ namespace heimdall
 				if (std::ranges::any_of(owners,[&](const idx::SymbolRef candidate)
 					{
 						return snapshot.HashOf(candidate) != snapshot.HashOf(anchor);
-				}))
+					}))
 				{
 					return Fail(RefactoringErrorCode::IncompleteAnalysis, "The constructor's class is ambiguous");
 				}
@@ -889,7 +889,7 @@ namespace heimdall
 
 		const auto& occurrences = snapshot.Shards()[origin]->Occurrences();
 		return PreparedIndexRename {anchor, occurrences.offset[occurrence], occurrences.length[occurrence],
-				oldName, *family};
+			oldName, *family};
 	}
 
 	std::expected<RefactoringPlan, RefactoringError> IndexRename::Rename(
@@ -1325,7 +1325,7 @@ namespace heimdall
 			}
 		}
 
-		const auto hashOf =[&](idx::SymbolHash old)
+		const auto hashOf = [&](idx::SymbolHash old)
 		{
 			const auto found = renamed.find(old);
 			return found == renamed.end() ? old : found->second;
@@ -1501,7 +1501,7 @@ namespace heimdall
 			std::ranges::sort(edits, {},[](const SourceEdit* edit)
 				{
 					return edit->offset;
-			});
+				});
 			std::string source;
 			std::size_t cursor = 0;
 			for (std::size_t i = 0; i < edits.size(); ++i)

@@ -394,7 +394,7 @@ namespace heimdall
 			}
 		}
 
-		const auto addSection =[&](std::string_view title, const std::string& body)
+		const auto addSection = [&](std::string_view title, const std::string& body)
 		{
 			if (!body.empty())
 			{

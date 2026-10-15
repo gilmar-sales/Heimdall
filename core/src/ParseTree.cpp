@@ -425,7 +425,7 @@ namespace heimdall
 				[](const Token& token, std::size_t offset)
 				{
 					return token.offset < offset;
-			});
+				});
 			for (auto it = first; it != m_tokens.end(); ++it)
 			{
 				const std::size_t tok_end = static_cast<std::size_t>(it->offset) + it->length;

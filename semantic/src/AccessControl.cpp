@@ -4,8 +4,8 @@
 #include <string_view>
 #include <vector>
 
-#include <Heimdall/LineTable.hpp>
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/LineTable.hpp>
 #include <Heimdall/SemanticRules.hpp>
 
 namespace heimdall
@@ -29,7 +29,9 @@ namespace heimdall
 			return text;
 		}
 
-		SymbolId ClassOfExpression(const TypeModel& types, std::uint32_t node,
+		SymbolId ClassOfExpression(
+			const TypeModel& types,
+			std::uint32_t node,
 			std::string_view& instanceType)
 		{
 			const auto& model = types.Model();
@@ -637,7 +639,7 @@ namespace heimdall
 		const auto& nodes   = tree.NodesSoA();
 		const auto& symbols = model.Symbols();
 		const auto& tokens  = tree.Tokens();
-		const auto isAuto =[&](SymbolId symbol)
+		const auto isAuto = [&](SymbolId symbol)
 		{
 			const auto declaration = symbols.decl_node[symbol];
 			if (declaration >= nodes.size())
@@ -657,7 +659,7 @@ namespace heimdall
 
 			return false;
 		};
-		const auto spelledAutoType =[&](SymbolId symbol)
+		const auto spelledAutoType = [&](SymbolId symbol)
 		{
 			const auto declaration = symbols.decl_node[symbol];
 			if (declaration >= nodes.size())

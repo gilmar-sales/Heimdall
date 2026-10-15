@@ -46,7 +46,7 @@ namespace
     void BM_Parse(benchmark::State& state)
     {
         std::size_t corpus_bytes = 0;
-        const auto  sources      = LoadCorpus(state, corpus_bytes);
+        const auto sources = LoadCorpus(state, corpus_bytes);
         if (sources.empty())
         {
             return;

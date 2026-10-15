@@ -14,7 +14,7 @@ namespace
         for (int i = 0; i < functions; ++i)
         {
             source += "int function" + std::to_string(i) + "() { return " +
-                      std::to_string(i ? i : value) + "; }\n";
+                std::to_string(i ? i : value) + "; }\n";
         }
 
         return std::make_shared<const std::string>(std::move(source));
@@ -38,8 +38,8 @@ namespace
 
     void PagedWorkspaceUpdate(benchmark::State& state)
     {
-        Workspace  workspace;
-        const auto first  = Source(1, 1);
+        Workspace workspace;
+        const auto first = Source(1, 1);
         const auto second = Source(1, 2);
         const auto firstBuffer =
             std::make_shared<const SourceSnapshot>(*SourceSnapshot::Create(*first));
@@ -52,10 +52,14 @@ namespace
         const auto id = workspace.OpenBuffer("edit.cpp", firstBuffer, firstTokens, 1);
         for (std::int64_t i = 1; i < state.range(0); ++i)
         {
-            (void)workspace.Open("other" + std::to_string(i) + ".cpp", first);
+            (void) workspace.Open("other" + std::to_string(i) + ".cpp", first);
         }
-        const Lexer::TextEdit edit { first->find("return 1") + 7, 1, 1 };
-        std::int64_t          version = 1;
+
+        const Lexer::TextEdit edit
+        {
+            first->find("return 1") + 7, 1, 1
+        };
+        std::int64_t version = 1;
         for (auto _ : state)
         {
             ++version;
@@ -72,22 +76,22 @@ namespace
     void WarmSemanticCache(benchmark::State& state)
     {
         Workspace workspace;
-        auto      id       = workspace.Open("cache.cpp", Source(static_cast<int>(state.range(0))));
-        auto      snapshot = workspace.Snapshot();
+        auto id = workspace.Open("cache.cpp", Source(static_cast<int>(state.range(0))));
+        auto snapshot = workspace.Snapshot();
         benchmark::DoNotOptimize(snapshot.Types(*id));
         for (auto _ : state)
         {
             benchmark::DoNotOptimize(snapshot.Types(*id));
         }
 
-        const auto metrics                     = snapshot.Metrics();
-        state.counters["parses"]               = static_cast<double>(metrics.parse_count);
-        state.counters["binds"]                = static_cast<double>(metrics.bind_count);
-        state.counters["types"]                = static_cast<double>(metrics.type_count);
-        state.counters["cache_hits"]           = static_cast<double>(metrics.cache_hits);
+        const auto metrics = snapshot.Metrics();
+        state.counters["parses"] = static_cast<double>(metrics.parse_count);
+        state.counters["binds"] = static_cast<double>(metrics.bind_count);
+        state.counters["types"] = static_cast<double>(metrics.type_count);
+        state.counters["cache_hits"] = static_cast<double>(metrics.cache_hits);
         state.counters["semantic_allocations"] = static_cast<double>(metrics.semantic_allocations);
-        state.counters["type_allocations"]     = static_cast<double>(metrics.type_allocations);
-        state.counters["estimated_bytes"]      = static_cast<double>(snapshot.Memory().Total());
+        state.counters["type_allocations"] = static_cast<double>(metrics.type_allocations);
+        state.counters["estimated_bytes"] = static_cast<double>(snapshot.Memory().Total());
     }
 
     BENCHMARK(WarmSemanticCache)->Arg(10)->Arg(1000);
@@ -106,18 +110,18 @@ namespace
     void IncrementalUpdate(benchmark::State& state)
     {
         Workspace workspace;
-        auto      first  = Source(static_cast<int>(state.range(0)), 1);
-        auto      second = Source(static_cast<int>(state.range(0)), 2);
-        auto      id     = workspace.Open("edit.cpp", first);
+        auto first = Source(static_cast<int>(state.range(0)), 1);
+        auto second = Source(static_cast<int>(state.range(0)), 2);
+        auto id = workspace.Open("edit.cpp", first);
         benchmark::DoNotOptimize(workspace.Snapshot().Syntax(*id));
         std::int64_t version = 0;
-        std::size_t  reused  = 0;
+        std::size_t reused = 0;
         for (auto _ : state)
         {
             ++version;
             (void) workspace.Update(*id, version % 2 ? second : first, version);
             auto tree = workspace.Snapshot().Syntax(*id);
-            reused    = tree->ReusedItems();
+            reused = tree->ReusedItems();
             benchmark::DoNotOptimize(tree);
         }
 
@@ -128,16 +132,17 @@ namespace
 
     void ScheduledNativeRules(benchmark::State& state)
     {
-        Workspace       workspace;
-        auto            id = workspace.Open("rules.cpp", Source(100));
+        Workspace workspace;
+        auto id = workspace.Open("rules.cpp", Source(100));
         AnalysisContext context(workspace.Snapshot(), *id);
-        RuleScheduler   scheduler;
+        RuleScheduler scheduler;
         for (int i = 0; i < state.range(0); ++i)
         {
             ScheduledRule rule;
             rule.metadata.code = "bench/" + std::to_string(i);
-            rule.interests     = { GrammarKind::ReturnStatement };
-            rule.on_node       = [](const AnalysisContext& ctx, NodeId node, DiagnosticSink&) {
+            rule.interests = {GrammarKind::ReturnStatement};
+            rule.on_node = [](const AnalysisContext& ctx, NodeId node, DiagnosticSink&)
+            {
                 benchmark::DoNotOptimize(ctx.Syntax().NodesSoA().FirstToken(node));
             };
             (void) scheduler.Register(std::move(rule));
@@ -157,37 +162,38 @@ namespace
     template <bool legacy, bool warm>
     void SemanticDispatch(benchmark::State& state)
     {
-        auto        source = Source(1000);
-        auto        tree = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(source, {}));
+        auto source = Source(1000);
+        auto tree = std::make_shared<const ParseTree>(ParseTree::ParseSnapshot(source, {}));
         RuleOptions options;
         if (state.range(0) != 4)
         {
             for (const auto& rule : RuleCatalog())
             {
                 options.overrides.push_back(
-                    { std::string(rule.code), false, rule.default_severity });
+                    {std::string(rule.code), false, rule.default_severity});
             }
 
-            const std::string_view codes[] = { "", "cpp/modernize-override",
-                                               "cpp/no-implicit-bool-conversion",
-                                               "cpp/modernize-constexpr" };
+            const std::string_view codes[] = {"", "cpp/modernize-override",
+                "cpp/no-implicit-bool-conversion",
+                "cpp/modernize-constexpr"};
             if (state.range(0))
             {
                 options.overrides.push_back(
-                    { std::string(codes[state.range(0)]), true, Severity::Warning });
+                    {std::string(codes[state.range(0)]), true, Severity::Warning});
             }
         }
 
         RuleEngine engine(options);
-        auto       snapshot = AnalysisSnapshot::FromSyntax(tree, {});
-        const auto run      = [&](const AnalysisContext& context) {
+        auto snapshot = AnalysisSnapshot::FromSyntax(tree, {});
+        const auto run = [&](const AnalysisContext& context)
+        {
             if constexpr (!legacy)
-                return AnalysisFeatures::Diagnostics(context, engine, true);
+            return AnalysisFeatures::Diagnostics(context, engine, true);
             else
             {
-                auto all      = engine.Analyze(context.Syntax());
+                auto all = engine.Analyze(context.Syntax());
                 auto semantic = SemanticRules::Analyze(context.Semantic(), context.Types(), {});
-                auto doc      = SemanticRules::AnalyzeDocumentation(context.Semantic(), engine);
+                auto doc = SemanticRules::AnalyzeDocumentation(context.Semantic(), engine);
                 semantic.insert(semantic.end(), std::make_move_iterator(doc.begin()),
                                 std::make_move_iterator(doc.end()));
                 semantic = engine.ApplyPolicy(std::move(semantic), context.Syntax());
@@ -195,16 +201,19 @@ namespace
                            std::make_move_iterator(semantic.end()));
                 std::stable_sort(
                     all.begin(), all.end(),
-                    [](const Diagnostic& a, const Diagnostic& b) { return a.offset < b.offset; });
+                    [](const Diagnostic& a, const Diagnostic& b)
+                    {
+                        return a.offset < b.offset;
+                    });
                 return all;
             }
         };
         if constexpr (warm)
-            benchmark::DoNotOptimize(run(AnalysisContext(snapshot, snapshot.Documents()[0])));
+        benchmark::DoNotOptimize(run(AnalysisContext(snapshot, snapshot.Documents()[0])));
         for (auto _ : state)
         {
             if constexpr (!warm)
-                snapshot = AnalysisSnapshot::FromSyntax(tree, {});
+            snapshot = AnalysisSnapshot::FromSyntax(tree, {});
             benchmark::DoNotOptimize(run(AnalysisContext(snapshot, snapshot.Documents()[0])));
         }
 

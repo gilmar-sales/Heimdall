@@ -81,7 +81,8 @@ TEST(InternPool, EqualTextsShareAnIdAndUnknownTextsAreNotFound)
 
 TEST(Binder, RecordsTemplateParameterCategoriesDefaultsAndPacks)
 {
-    const Bound bound("template<class T = int, int N = 3, template<class> class C, class... Ts> struct Box {};");
+    const Bound bound(
+        "template<class T = int, int N = 3, template<class> class C, class... Ts> struct Box {};");
     const auto& declarations = bound.model.Templates();
     const auto& parameters = bound.model.TemplateParameters();
 
@@ -101,7 +102,8 @@ TEST(Binder, RecordsTemplateParameterCategoriesDefaultsAndPacks)
 
 TEST(Binder, NestedTemplateParametersUseLexicalScopesWithoutLeaking)
 {
-    const Bound bound("template<class T> struct Outer { template<class U> U f(U value) { return value; } T field; }; int f(int value) { return value; }");
+    const Bound bound(
+        "template<class T> struct Outer { template<class U> U f(U value) { return value; } T field; }; int f(int value) { return value; }");
     const auto& declarations = bound.model.Templates();
     const auto& parameters = bound.model.TemplateParameters();
 
@@ -116,7 +118,8 @@ TEST(Binder, NestedTemplateParametersUseLexicalScopesWithoutLeaking)
 
 TEST(Binder, TemplateParameterShadowsOuterNamesAndQualifiedUsesStayDependent)
 {
-    const Bound bound("struct T {}; template<class T> int f() { return T::value; } int g() { T value; return 0; }");
+    const Bound bound(
+        "struct T {}; template<class T> int f() { return T::value; } int g() { T value; return 0; }");
     const auto parameter = bound.Find("T", heimdall::SymbolKind::TemplateParameter);
 
     EXPECT_EQ(bound.model.ResolveToken(bound.Token("T", 2)), parameter);
@@ -145,7 +148,8 @@ TEST(Binder, LaterTemplateParametersAreNotVisibleInEarlierDefaults)
 
 TEST(Binder, UnnamedQualifiedValueTypesDoNotDeclareTheirTypeNamesAsParameters)
 {
-    const Bound bound("template<std::size_t, const Type, template<class...> class C> struct Box {};");
+    const Bound bound(
+        "template<std::size_t, const Type, template<class...> class C> struct Box {};");
     const auto& parameters = bound.model.TemplateParameters();
 
     ASSERT_EQ(parameters.symbol.size(), 3u);
@@ -210,7 +214,8 @@ TEST(Binder, BuildsNamespaceAndClassScopes)
 
 TEST(Binder, ModelsTemplateParameterScopeAndDependentReferenceState)
 {
-    Bound bound("template<class T, int N> int f(int value, T object) "
+    Bound bound(
+        "template<class T, int N> int f(int value, T object) "
         "{ return object.member + value + N; }");
     const auto typeParameter = bound.Find("T", heimdall::SymbolKind::TemplateParameter);
     const auto valueParameter = bound.Find("N", heimdall::SymbolKind::TemplateParameter);
@@ -305,11 +310,12 @@ TEST(Binder, ConstructorsAndDestructorsAreFlagged)
 
 TEST(Binder, SignatureIgnoresParameterNamesAndDefaults)
 {
-    Bound bound("struct B { virtual void f(int a, const char* s); virtual void g(int a = 1); };\n"
+    Bound bound(
+        "struct B { virtual void f(int a, const char* s); virtual void g(int a = 1); };\n"
         "struct D : B { void f(int renamed, const char* text); void g(int); };\n");
     const auto& symbols = bound.model.Symbols();
     const auto& names = bound.model.Names();
-    const auto signature =[&](std::string_view name, std::size_t occurrence)
+    const auto signature = [&](std::string_view name, std::size_t occurrence)
     {
         for (heimdall::SymbolId i = 0; i < symbols.Size(); ++i)
         {
@@ -331,7 +337,8 @@ TEST(Binder, SignatureIgnoresParameterNamesAndDefaults)
 
 TEST(Binder, SignatureSeparatesTypesAndQualifiers)
 {
-    Bound bound("struct S { void f(int); void f(long); void f(int) const; void f(int&); void "
+    Bound bound(
+        "struct S { void f(int); void f(long); void f(int) const; void f(int&); void "
         "h(void); void h(); };\n");
     const auto& symbols = bound.model.Symbols();
     std::vector<std::uint64_t> f;
@@ -471,7 +478,8 @@ TEST(Binder, RequiresLocalsResolveInsideTheirRequirements)
 
 TEST(Binder, InnerBlockShadowsOuterDeclaration)
 {
-    Bound bound("void f() {\n"
+    Bound bound(
+        "void f() {\n"
         "    int x = 1;\n"
         "    {\n"
         "        int x = 2;\n"
@@ -520,7 +528,8 @@ TEST(Binder, LocalIsNotVisibleBeforeItsDeclaration)
 
 TEST(Binder, OutOfClassDefinitionSeesClassMembers)
 {
-    Bound bound("struct S { int m; void h(int p); };\n"
+    Bound bound(
+        "struct S { int m; void h(int p); };\n"
         "void S::h(int p) {\n"
         "    int a = p + m;\n"
         "}\n");
@@ -555,7 +564,8 @@ TEST(Binder, QualifiedDefinitionIsNotFoundByUnqualifiedLookup)
 
 TEST(Binder, QualifiedNamesResolveThroughNamespaces)
 {
-    Bound bound("namespace n { int v; namespace deep { int w; } }\n"
+    Bound bound(
+        "namespace n { int v; namespace deep { int w; } }\n"
         "void f() {\n"
         "    n::v = 1;\n"
         "    n::deep::w = 2;\n"
@@ -589,7 +599,8 @@ TEST(Binder, UnknownNamesStayUnresolved)
 
 TEST(Binder, EnumeratorsLiveInTheEnclosingScopeUnlessScoped)
 {
-    Bound bound("enum Plain { A, B };\n"
+    Bound bound(
+        "enum Plain { A, B };\n"
         "enum class Strong { C, D };\n"
         "int f() { return A + C; }\n");
     const auto& names = bound.model.Names();

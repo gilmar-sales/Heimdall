@@ -19,8 +19,9 @@ namespace
 
     void WriteConfig(const std::filesystem::path& directory, std::string_view contents)
     {
-        std::ofstream out(directory / heimdall::RuleConfigFileName,
-                          std::ios::binary | std::ios::trunc);
+        std::ofstream out(
+            directory / heimdall::RuleConfigFileName,
+            std::ios::binary | std::ios::trunc);
         out << contents;
     }
 

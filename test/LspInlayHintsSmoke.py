@@ -138,6 +138,27 @@ assert actual == [
 assert all(hint["kind"] == 1 and hint["paddingLeft"] for hint in hints), hints
 assert run(disabled=True) == []
 
+lambda_source = (
+    "void f() {\n"
+    "    auto is_digit = [](char c)\n"
+    "    { return c >= '0' && c <= '9'; };\n"
+    "    auto typed_digit = [](char c) -> bool\n"
+    "    { return c >= '0' && c <= '9'; };\n"
+    "    auto constant = []\n"
+    "    { return 42; };\n"
+    "}\n"
+)
+lambda_hints = run(text=lambda_source, hint_range={
+    "start": {"line": 0, "character": 0},
+    "end": {"line": 7, "character": 0},
+})
+assert [(hint["position"]["line"], hint["label"]) for hint in lambda_hints] == [
+    (1, " -> bool"),
+    (5, " -> int"),
+], lambda_hints
+assert lambda_hints[0]["position"]["character"] == lambda_source.splitlines()[1].index(")") + 1
+assert lambda_hints[1]["position"]["character"] == lambda_source.splitlines()[5].index("]") + 1
+
 parameter_source = (
     "int MetodoTeste(unsigned int first, int second, const char* desc);\n"
     "template<class T> struct List { void Push(const T& value); };\n"

@@ -22,6 +22,12 @@ namespace heimdall
 
 		virtual bool IsType(std::string_view name) const noexcept = 0;
 
+		// Underlying spelling for a header-declared alias, or empty when unknown.
+		virtual std::string_view AliasTarget(std::string_view) const noexcept
+		{
+			return {};
+		}
+
 		// Changes whenever the answers may change: incremental reuse of a previous
 		// parse is only valid under the same fingerprint.
 		virtual std::uint64_t Fingerprint() const noexcept = 0;

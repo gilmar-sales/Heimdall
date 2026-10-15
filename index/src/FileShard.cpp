@@ -117,7 +117,7 @@ namespace heimdall::index
 			[&](std::uint32_t index)
 			{
 				return mRelations.object[index];
-		});
+			});
 		return {range.begin(), range.end()};
 	}
 
@@ -151,7 +151,7 @@ namespace heimdall::index
 			[&](std::uint32_t a, std::uint32_t b)
 			{
 				return mRelations.subject[a] < mRelations.subject[b];
-		});
+			});
 
 		RelationColumns sorted;
 		sorted.subject.reserve(order.size());
@@ -174,7 +174,7 @@ namespace heimdall::index
 			[&](std::uint32_t a, std::uint32_t b)
 			{
 				return mRelations.object[a] < mRelations.object[b];
-		});
+			});
 
 		mSymbolOccurrenceBegin.assign(mSymbols.Size() + 1, 0);
 		for (const auto symbol : mOccurrences.symbol)

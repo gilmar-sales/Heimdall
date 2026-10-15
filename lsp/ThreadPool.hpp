@@ -73,7 +73,7 @@ namespace heimdall::lsp
 				m_threads.emplace_back([this]
 					{
 						WorkerMain();
-				});
+					});
 			}
 		}
 
@@ -160,14 +160,14 @@ namespace heimdall::lsp
 							{
 								pending->task = {};
 								cancelled     = std::move(pending->cancelled);
+							}
 						}
-					}
 						if (cancelled)
 						{
 							cancelled();
+						}
 					}
-				}
-			});
+				});
 			Submit(
 				[this, pending]
 				{
@@ -176,17 +176,17 @@ namespace heimdall::lsp
 						const std::lock_guard lock(pending->mutex);
 						task               = std::move(pending->task);
 						pending->cancelled = {};
-				}
+					}
 					if (task)
 					{
 						task();
-				}
+					}
 					else
 					{
 						const std::lock_guard lock(m_mu);
 						++mMetrics.cancelled;
-				}
-			});
+					}
+				});
 		}
 
 		// Blocks until every submitted task has finished.
@@ -198,7 +198,7 @@ namespace heimdall::lsp
 				{
 					return m_interactive.empty() && m_background.empty() &&
 					m_active == 0 && m_lanes.empty() && mBarriers.empty();
-			});
+				});
 		}
 
 		// Drops queued tasks, lets running ones finish, joins the workers.
@@ -297,7 +297,7 @@ namespace heimdall::lsp
 			m_interactive.push_back([this, key]
 				{
 					RunLane(key);
-			});
+				});
 		}
 
 		void ScheduleBarrier()
@@ -315,7 +315,7 @@ namespace heimdall::lsp
 					try
 					{
 						task();
-				}
+					}
 					catch (...) {}
 
 					{
@@ -324,16 +324,16 @@ namespace heimdall::lsp
 						if (!mBarriers.empty())
 						{
 							mBarriers.pop_front();
-					}
+						}
 
 						ScheduleBarrier();
 						for (auto& [key, lane] : m_lanes)
 						{
 							ScheduleLane(key, lane);
+						}
 					}
-				}
 					m_cv.notify_all();
-			});
+				});
 		}
 
 		void RunLane(const std::string& key)
@@ -395,7 +395,7 @@ namespace heimdall::lsp
 						lock,[&]
 						{
 							return m_stopping ||!m_interactive.empty() ||!m_background.empty();
-					});
+						});
 					if (m_stopping)
 					{
 						return;

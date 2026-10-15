@@ -20,7 +20,7 @@ namespace heimdall
 	bool DiagnosticSink::Emit(Diagnostic diagnostic)
 	{
 		const auto size = m_context.Syntax().Source().size();
-		const auto valid =[size](std::size_t offset, std::size_t length)
+		const auto valid = [size](std::size_t offset, std::size_t length)
 		{
 			return offset <= size && length <= size - offset;
 		};
@@ -109,7 +109,7 @@ namespace heimdall
 			}
 		}
 
-		auto invoke =[&](std::size_t i, NodeId node, bool document)
+		auto invoke = [&](std::size_t i, NodeId node, bool document)
 		{
 			auto& metrics = result.metrics[i];
 			if (metrics.failed)
@@ -123,7 +123,7 @@ namespace heimdall
 			const auto start = profiling ? std::chrono::steady_clock::now()
 			: std::chrono::steady_clock::time_point {};
 			++metrics.execution_count;
-			auto callback =[&]
+			auto callback = [&]
 			{
 				if (document)
 				{
@@ -194,7 +194,7 @@ namespace heimdall
 			std::erase_if(result.diagnostics,[&](const Diagnostic& diagnostic)
 				{
 					return diagnostic.code == metrics.code;
-			});
+				});
 			metrics.diagnostics_emitted = 0;
 		}
 

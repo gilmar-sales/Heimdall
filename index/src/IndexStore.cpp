@@ -49,7 +49,7 @@ namespace heimdall::index
 				const auto& key = entry.first;
 				return key == path ||
 				(key.size() > path.size() && key.starts_with(path) && key[path.size()] == '/');
-		});
+			});
 		if (removed != 0)
 		{
 			++mRevision;
@@ -82,7 +82,7 @@ namespace heimdall::index
 				[](const auto& a, const auto& b)
 				{
 					return a->Path() < b->Path();
-			});
+				});
 			mSnapshot = IndexSnapshot::Build(std::move(shards), mRevision);
 		}
 

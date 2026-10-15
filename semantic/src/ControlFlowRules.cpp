@@ -1,11 +1,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <Heimdall/LineTable.hpp>
-#include <Heimdall/SemanticRules.hpp>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/SemanticRules.hpp>
 
 #include "detail/ImplicitConversion.hpp"
 #include "detail/TokenView.hpp"

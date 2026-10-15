@@ -7,7 +7,8 @@ namespace heimdall
 
 	InstantiationTable::InstantiationTable(std::pmr::memory_resource* resource) :
 		primary(resource), selected(resource), firstArgument(resource), argumentCount(resource),
-		firstSubstitution(resource), substitutionCount(resource), state(resource), checkState(resource), reason(resource),
+		firstSubstitution(resource), substitutionCount(resource), state(resource), checkState(resource),
+		reason(resource),
 		firstBase(resource), baseCount(resource), baseType(resource) {}
 
 	DependentReferenceTable::DependentReferenceTable(std::pmr::memory_resource* resource) :
@@ -102,7 +103,9 @@ namespace heimdall
 		}
 	}
 
-	TemplateMemberBinding TypeModel::LookupInstantiatedMember(std::uint32_t instance, NameId name) const
+	TemplateMemberBinding TypeModel::LookupInstantiatedMember(
+		std::uint32_t instance,
+		NameId name) const
 	{
 		if (instance >= mInstantiations.primary.size())
 		{
@@ -166,7 +169,9 @@ namespace heimdall
 		? TemplateMemberBinding {symbol, TemplateResolution::Resolved}: TemplateMemberBinding {};
 	}
 
-	TemplateMemberBinding TypeModel::LookupTypeMember(TypeId type, NameId name,
+	TemplateMemberBinding TypeModel::LookupTypeMember(
+		TypeId type,
+		NameId name,
 		std::uint32_t depth) const
 	{
 		constexpr std::uint32_t kMaxLookupDepth = 64;

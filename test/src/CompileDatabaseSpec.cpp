@@ -13,19 +13,19 @@ TEST(CompileDatabaseSpec, ReadsArgumentsAndExtractsDefinesUndefinesAndIncludes)
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << "[{\"directory\":\"" << root.generic_string()
-            << "\",\"file\":\"src/main.cpp\",\"arguments\":[\"g++\",\"-std=c++26\","
-               "\"-DDEBUG=1\",\"-DVALUE\",\"-UOLD\",\"-I\",\"include\"]}]";
+        << "\",\"file\":\"src/main.cpp\",\"arguments\":[\"g++\",\"-std=c++26\","
+            "\"-DDEBUG=1\",\"-DVALUE\",\"-UOLD\",\"-I\",\"include\"]}]";
     }
 
     auto database = heimdall::CompileDatabase::Load(path);
-    ASSERT_TRUE(database) << (database ? "" : database.error());
+    ASSERT_TRUE(database) <<(database ? "" : database.error());
     ASSERT_EQ(database->Commands().size(), 1);
     const auto* command = database->Find(root / "src" / "main.cpp");
     ASSERT_NE(command, nullptr);
     EXPECT_EQ(command->standard, heimdall::CppStandard::Cpp26);
     EXPECT_EQ(command->defines.at("DEBUG"), "1");
     EXPECT_EQ(command->defines.at("VALUE"), "1");
-    EXPECT_EQ(command->undefines, (std::vector<std::string> { "OLD" }));
+    EXPECT_EQ(command->undefines, (std::vector<std::string> {"OLD"}));
     ASSERT_EQ(command->include_directories.size(), 1);
     EXPECT_EQ(command->include_directories[0], (root / "include").lexically_normal());
     std::filesystem::remove(path);
@@ -39,8 +39,8 @@ TEST(CompileDatabaseSpec, ParsesCommandStringFallback)
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << "[{\"directory\":\"" << root.generic_string()
-            << "\",\"file\":\"src/main.cpp\",\"command\":\"g++ -DVALUE=42 -I include "
-               "src/main.cpp\"}]";
+        << "\",\"file\":\"src/main.cpp\",\"command\":\"g++ -DVALUE=42 -I include "
+            "src/main.cpp\"}]";
     }
     auto database = heimdall::CompileDatabase::Load(path);
     ASSERT_TRUE(database);
@@ -60,8 +60,8 @@ TEST(CompileDatabaseSpec, SelectsLatestRecognizedLanguageStandardOption)
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << "[{\"directory\":\"" << root.generic_string()
-            << "\",\"file\":\"src/main.cpp\",\"arguments\":[\"cl\",\"/std:c++20\",\"/"
-               "std:c++23\"]}]";
+        << "\",\"file\":\"src/main.cpp\",\"arguments\":[\"cl\",\"/std:c++20\",\"/"
+            "std:c++23\"]}]";
     }
     auto database = heimdall::CompileDatabase::Load(path);
     ASSERT_TRUE(database);
@@ -75,7 +75,7 @@ namespace
 
     std::filesystem::path WriteDatabase(const char* name, std::string_view entries)
     {
-        const auto    path = std::filesystem::temp_directory_path() / name;
+        const auto path = std::filesystem::temp_directory_path() / name;
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out << '[' << entries << ']';
         return path;
@@ -100,14 +100,14 @@ TEST(CompileDatabaseSpec, FindIgnoresPathCaseOnWindows)
 
 TEST(CompileDatabaseSpec, FindOrNearestFallsBackToClosestDirectoryForHeaders)
 {
-    const auto        root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
-    const std::string dir  = root.generic_string();
-    const auto        path = WriteDatabase(
+    const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
+    const std::string dir = root.generic_string();
+    const auto path = WriteDatabase(
         "heimdall_compile_commands_nearest_test.json",
         "{\"directory\":\"" + dir +
-            "\",\"file\":\"other/a.cpp\",\"arguments\":[\"g++\",\"-Iother_inc\"]},"
-            "{\"directory\":\"" +
-            dir + "\",\"file\":\"core/src/b.cpp\",\"arguments\":[\"g++\",\"-Icore_inc\"]}");
+        "\",\"file\":\"other/a.cpp\",\"arguments\":[\"g++\",\"-Iother_inc\"]},"
+        "{\"directory\":\"" +
+        dir + "\",\"file\":\"core/src/b.cpp\",\"arguments\":[\"g++\",\"-Icore_inc\"]}");
     auto database = heimdall::CompileDatabase::Load(path);
     ASSERT_TRUE(database);
 

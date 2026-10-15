@@ -250,7 +250,7 @@ TEST(IncludeIndexSpec, MetaHeaderOffersReflectionFunctionsByQualifiedName)
     const auto identifier = std::ranges::find_if(all,[](const auto& item)
         {
             return item.label == "identifier_of";
-    });
+        });
     ASSERT_NE(identifier, all.end());
     EXPECT_EQ(identifier->kind, heimdall::CompletionKind::Function);
 
@@ -707,7 +707,7 @@ TEST(IncludeCompletionSpec, WorksWithoutACompileCommand)
         [](const heimdall::IncludeCandidate& candidate)
         {
             return candidate.label == "local.hpp";
-    });
+        });
     ASSERT_NE(local, candidates.end());
     EXPECT_EQ(local->origin, heimdall::IncludeOrigin::Local);
 }
@@ -776,7 +776,7 @@ TEST(IncludeIndexSpec, TypeNamesFeedTheParserOfTheIncludingFile)
     EXPECT_FALSE(index.TypeNames()->IsType("area")); // a member function
     EXPECT_FALSE(index.TypeNames()->IsType("base_value"));
 
-    const auto count =[](const heimdall::ParseTree& tree, heimdall::GrammarKind kind)
+    const auto count = [](const heimdall::ParseTree& tree, heimdall::GrammarKind kind)
     {
         std::size_t n = 0;
         for (const auto& node : tree.Nodes())

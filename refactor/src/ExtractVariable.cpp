@@ -430,7 +430,7 @@ namespace heimdall
 			const auto& model   = context.Semantic();
 			const auto& symbols = model.Symbols();
 			const auto& types   = context.Types().Types();
-			const auto gated =[&](NodeId gated_node)
+			const auto gated = [&](NodeId gated_node)
 			{
 				const auto type = context.Types().NodeType(gated_node);
 				return types.IsInteger(type) || types.IsBool(type);
@@ -917,7 +917,7 @@ namespace heimdall
 							"Transformation loses a document"});
 				}
 
-				const auto mapped =[&](std::size_t offset)->std::optional<std::size_t>
+				const auto mapped = [&](std::size_t offset)->std::optional<std::size_t>
 				{
 					std::size_t result = offset;
 					for (const auto& edit : *changes)
@@ -939,7 +939,7 @@ namespace heimdall
 				std::vector<SymbolId> identities(before->Symbols().Size(), kNone);
 				const auto& before_tokens = before->Tree().Tokens();
 				const auto& after_tokens  = tree.Tokens();
-				const auto is_moved =[&](SymbolId symbol)
+				const auto is_moved = [&](SymbolId symbol)
 				{
 					for (const auto& [moved_document, moved_symbol] : moved)
 					{
@@ -2341,7 +2341,7 @@ namespace heimdall
 		std::ranges::sort(params,[&](const Param& a, const Param& b)
 			{
 				return symbols.decl_token[a.symbol] < symbols.decl_token[b.symbol];
-		});
+			});
 		for (std::size_t i = 0; i < params.size(); ++i)
 		{
 			for (std::size_t j = i + 1; j < params.size(); ++j)
@@ -3625,7 +3625,7 @@ namespace heimdall
 			return false;
 		}
 
-		const auto alpha =[](char c)
+		const auto alpha = [](char c)
 		{
 			return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_';
 		};
@@ -3954,7 +3954,7 @@ namespace heimdall
 
 		// Outermost-first `::`-joined chain of enclosing namespaces; empty at
 		// translation-unit scope or past anonymous ones.
-		const auto namespace_chain =[&](ScopeId scope)
+		const auto namespace_chain = [&](ScopeId scope)
 		{
 			const auto& scopes = model->Scopes();
 			std::string chain;
