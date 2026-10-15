@@ -7,22 +7,46 @@
 namespace heimdall
 {
 
-	constexpr std::size_t kDefaultInitialCapacity = 65536; // 64 KiB
+	/** Default initial capacity of an arena, in bytes. (64 KiB)*/
+	constexpr std::size_t DEFAULT_INITIAL_CAPACITY = 65536;
 
-	// Monotonic bump arena for SyntaxTree nodes, tokens and scratch data.
-	// Allocations are never freed individually; Reset() releases everything
-	// at once. Not thread-safe by design (one arena per worker thread).
+	/**
+	 * @brief Monotonic allocator for objects and temporary data.
+	 *
+	 * Allocations are not freed individually; Reset() releases all allocated
+	 * memory at once. This type is not thread-safe and is intended for one
+	 * worker thread at a time.
+	 */
 	class Arena
 	{
 	public:
-		explicit Arena(std::size_t initial_capacity = kDefaultInitialCapacity);
+		/**
+		 * @brief Creates an arena with the requested initial capacity.
+		 * @param initial_capacity Initial capacity in bytes.
+		 */
+		explicit Arena(std::size_t initial_capacity = DEFAULT_INITIAL_CAPACITY);
 
+		/** @brief Copy construction is disabled. */
 		Arena(const Arena&) = delete;
 
+		/** @brief Copy assignment is disabled. */
 		Arena& operator= (const Arena&) = delete;
 
+		/**
+		 * @brief Allocates a block of memory from the arena.
+		 * @param size Number of bytes to allocate.
+		 * @param alignment Required alignment, defaulting to max_align_t.
+		 * @return Pointer to the allocated memory.
+		 */
 		void* Allocate(std::size_t size, std::size_t alignment = alignof(std::max_align_t));
 
+		/**
+		 * @brief Constructs an object in arena-allocated memory.
+		 * @tparam T Type of object to construct.
+		 * @tparam Args Types of the constructor arguments.
+		 * @param args Arguments forwarded to T's constructor.
+		 * @return Pointer to the newly constructed object.
+		 */
 		template <typename T, typename... Args>
 		T* New(Args &&... args)
 		{
@@ -30,35 +54,41 @@ namespace heimdall
 			return new (mem) T(std::forward<Args>(args)...);
 		}
 
-		// Adapter for std::pmr containers: allocations are forwarded to the
-		// arena (and counted in Used()), deallocation is a no-op. Valid for as
-		// long as the arena lives and is not moved (arenas are not movable).
+		/**
+		 * @brief Returns a memory-resource adapter for PMR containers.
+		 *
+		 * Allocations are forwarded to this arena and counted by Used();
+		 * deallocation is a no-op. The resource is valid only while this arena
+		 * is alive.
+		 * @return Pointer to this arena's memory resource.
+		 */
 		std::pmr::memory_resource* Resource() noexcept
 		{
 			return &m_adapter;
 		}
 
-		// Releases all memory back to the upstream resource.
+		/** @brief Releases all arena memory back to the upstream resource. */
 		void Reset();
 
-		// Approximate bytes handed out since construction or last Reset().
+		/** @returns Approximate bytes allocated since construction or the last Reset(). */
 		std::size_t Used() const noexcept
 		{
 			return m_used;
 		}
 
+		/** @returns Number of allocations since construction or the last Reset(). */
 		std::size_t AllocationCount() const noexcept
 		{
 			return m_allocations;
 		}
 
-		/** Bytes currently reserved from the upstream allocator, including arena slack. */
+		/** @returns Bytes currently reserved from the upstream allocator, including arena slack. */
 		[[nodiscard]] std::size_t ReservedBytes() const noexcept
 		{
 			return mUpstream.bytes;
 		}
 
-		/** Largest upstream reservation since construction or the last reset. */
+		/** @returns Largest upstream reservation since construction or the last reset. */
 		[[nodiscard]] std::size_t PeakReservedBytes() const noexcept
 		{
 			return mUpstream.peak;

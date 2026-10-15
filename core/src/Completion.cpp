@@ -4948,6 +4948,8 @@ namespace heimdall
 
 	} // namespace
 
+	constexpr std::size_t MAX_ALIAS_DEPTH = 8;
+
 	static ScopeIndex BuildScopeIndex(const ParseTree& tree, bool for_header);
 
 	ScopeIndex CompletionEngine::IndexScopes(
@@ -7052,9 +7054,8 @@ namespace heimdall
 					}
 				}
 
-				auto hint                            = value.hint.empty() ? m_hint : value.hint;
-				constexpr std::size_t kMaxAliasDepth = 8;
-				for (std::size_t depth = 0; depth < kMaxAliasDepth; ++depth)
+				auto hint = value.hint.empty() ? m_hint : value.hint;
+				for (std::size_t depth = 0; depth < MAX_ALIAS_DEPTH; ++depth)
 				{
 					const auto type = ParseTypeName(written);
 					if (!type.ok)
@@ -7129,7 +7130,7 @@ namespace heimdall
 
 			[[nodiscard]] bool HasImplicitReflectionConversion(const Resolved& value) const
 			{
-				constexpr std::string_view kConversionPrefix = "operator ";
+				constexpr std::string_view CONVERSION_PREFIX = "operator ";
 				if (!value.ok || HasReflectionIndirection(value))
 				{
 					return false;
@@ -7139,13 +7140,13 @@ namespace heimdall
 				{
 					for (const auto& member : scope->members)
 					{
-						if (!member.label.starts_with(kConversionPrefix) || member.deleted ||
+						if (!member.label.starts_with(CONVERSION_PREFIX) || member.deleted ||
 							member.access != MemberAccess::Public || member.detail.find("explicit") != std::string::npos)
 						{
 							continue;
 						}
 
-						const auto target = FromText(std::string_view(member.label).substr(kConversionPrefix.size()),
+						const auto target = FromText(std::string_view(member.label).substr(CONVERSION_PREFIX.size()),
 							scope->path, 0);
 						if (target.path == std::vector<std::string> {"std", "meta", "info"} &&
 							!HasReflectionIndirection(target))
@@ -7160,10 +7161,9 @@ namespace heimdall
 
 			[[nodiscard]] bool HasReflectionIndirection(const Resolved& value) const
 			{
-				auto text                            = value.text;
-				auto hint                            = value.hint.empty() ? m_hint : value.hint;
-				constexpr std::size_t kMaxAliasDepth = 8;
-				for (std::size_t depth = 0; depth < kMaxAliasDepth; ++depth)
+				auto text = value.text;
+				auto hint = value.hint.empty() ? m_hint : value.hint;
+				for (std::size_t depth = 0; depth < MAX_ALIAS_DEPTH; ++depth)
 				{
 					if (text.find('*') != std::string::npos || text.find('[') != std::string::npos)
 					{

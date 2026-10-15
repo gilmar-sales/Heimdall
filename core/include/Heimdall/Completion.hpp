@@ -16,6 +16,7 @@
 namespace heimdall
 {
 
+	/** @brief Kind of symbol offered as a completion candidate. */
 	enum class CompletionKind : std::uint8_t
 	{
 		Keyword,
@@ -27,7 +28,7 @@ namespace heimdall
 		Directive
 	};
 
-	// Access level of a class member; namespace-scope names are Public.
+	/** @brief Access level of a class member; namespace-scope names are Public. */
 	enum class MemberAccess : std::uint8_t
 	{
 		Public,
@@ -35,6 +36,7 @@ namespace heimdall
 		Private
 	};
 
+	/** @brief Completion candidate and associated display, navigation, and type metadata. */
 	struct CompletionItem
 	{
 		std::string label;
@@ -92,11 +94,18 @@ namespace heimdall
 		std::shared_ptr<const FunctionDeduction> deduction;
 	};
 
+	/**
+	 * @brief One named scope and its direct members.
+	 *
+	 * The path is qualified from the translation unit; an empty path denotes
+	 * global scope. Header scopes are merged by path during indexing.
+	 */
 	// One named scope and its direct members. `path` is the qualified path from
 	// the translation unit (`{"std", "chrono"}`); an empty path denotes the
 	// global scope. `kind` describes the scope itself when listed as a member
 	// (Namespace for namespaces, Type for records). Backbone for header indexing:
 	// headers are parsed exactly like sources and their scopes merged by path.
+	/** @brief A named scope and the declarations indexed directly within it. */
 	struct IndexedScope
 	{
 		std::vector<std::string> path;
@@ -114,11 +123,13 @@ namespace heimdall
 		bool hasReferenceConversion = false;
 	};
 
+	/** Collection of indexed scopes available to completion queries. */
 	using ScopeIndex = std::vector<IndexedScope>;
 
 	// One callable offered by signature help. `label` reads like
 	// `add(int left, int right = 0) -> int`; each parameter is a [begin, end) byte
 	// range of the label.
+	/** @brief Callable signature and byte ranges of its displayed parameters. */
 	struct SignatureInfo
 	{
 		std::string label;
@@ -130,6 +141,7 @@ namespace heimdall
 
 	// What the word at the cursor completes, for frontends that add candidates of
 	// their own (workspace symbols with include insertion).
+	/** Category of syntactic context at a completion position. */
 	enum class CompletionContextKind : std::uint8_t
 	{
 		Unqualified, // `na|`
@@ -137,6 +149,7 @@ namespace heimdall
 		Other        // member access, preprocessor, comments, new names
 	};
 
+	/** @brief Completion prefix and optional qualified-name path at the cursor. */
 	struct CompletionContext
 	{
 		CompletionContextKind kind = CompletionContextKind::Other;
@@ -146,6 +159,7 @@ namespace heimdall
 	};
 
 	// Overloads of the call around the cursor and the argument being typed.
+	/** @brief Callable overloads and the active signature and parameter. */
 	struct SignatureHelp
 	{
 		std::vector<SignatureInfo> signatures;
@@ -155,10 +169,17 @@ namespace heimdall
 		std::size_t call_open = std::string_view::npos;
 	};
 
-	// Lexical + local ParseTree completion engine (core, STL only).
-	// Works on incomplete code: ParseTree diagnostics are ignored, candidates
-	// are collected from lexer identifiers, DeclaredName nodes and macros,
-	// then filtered by the identifier prefix immediately before `offset`.
+	/**
+	 * @brief Computes completion, signature-help, and hover information.
+	 *
+	 * Supports incomplete source and can incorporate declarations from an
+	 * optional external scope index.
+	 *
+	 * Lexical + local ParseTree completion engine (core, STL only).
+	 * Works on incomplete code: ParseTree diagnostics are ignored, candidates
+	 * are collected from lexer identifiers, DeclaredName nodes and macros,
+	 * then filtered by the identifier prefix immediately before `offset`.
+	 */
 	class CompletionEngine
 	{
 	public:
@@ -174,12 +195,16 @@ namespace heimdall
 			std::size_t nameToken,
 			const ScopeIndex* external = nullptr);
 
+		/** @brief Returns the identifier prefix immediately before offset. */
 		static std::string PrefixAt(std::string_view source, std::size_t offset);
 
+		/** @brief Classifies the completion context and prefix at offset. */
 		static CompletionContext ContextAt(std::string_view source, std::size_t offset);
 
+		/** @brief Computes completion candidates using default parser options. */
 		static std::vector<CompletionItem> Complete(std::string_view source, std::size_t offset);
 
+		/** @brief Computes completion candidates with the supplied parser options. */
 		static std::vector<CompletionItem> Complete(
 			std::string_view source,
 			const ParserOptions& options,
@@ -202,12 +227,16 @@ namespace heimdall
 		// and casts from groups. Last component only, so `std::string` yields `string`.
 		static std::shared_ptr<const TypeNameOracle> TypeNamesOf(const ScopeIndex& index);
 
+		/** @brief Parses source and indexes its named scopes and declarations. */
 		static ScopeIndex IndexScopes(std::string_view source, const ParserOptions& options);
 
+		/** @brief Indexes named scopes and declarations from an existing parse tree. */
 		static ScopeIndex IndexScopes(const ParseTree& tree);
 
-		// Signatures of the function, constructor or aggregate whose argument list
-		// contains `offset` (`f(1, |`, `obj.m(|`, `S s{|`, `new S(|`).
+		/**
+		 * @brief Signatures of the function, constructor or aggregate whose argument list
+		 * contains `offset` (`f(1, |`, `obj.m(|`, `S s{|`, `new S(|`).
+		 */
 		static SignatureHelp Signatures(
 			std::string_view source,
 			const ParserOptions& options,
@@ -220,6 +249,7 @@ namespace heimdall
 			std::size_t offset,
 			const ScopeIndex* external = nullptr);
 
+		/** @brief Returns the symbol information under offset, if available. */
 		static std::optional<CompletionItem> Hover(
 			std::string_view source,
 			const ParserOptions& options,

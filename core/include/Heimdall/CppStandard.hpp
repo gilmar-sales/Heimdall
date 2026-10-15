@@ -5,8 +5,13 @@
 namespace heimdall
 {
 
-	// Supported source-language dialects. Separate from the compiler standard
-	// required to build Heimdall itself.
+	/**
+	 *
+	 * @brief Supported source-language dialects.
+	 *
+	 * Separate from the compiler standard
+	 *
+	 */
 	enum class CppStandard : std::uint8_t
 	{
 		Cpp20,

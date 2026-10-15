@@ -19,7 +19,9 @@
 namespace heimdall
 {
 
-	/** Feature-test macro value observed in the compiler or standard library. */
+	/**
+	 * @breaf Feature-test macro value observed in the compiler or standard library.
+	 */
 	struct Cpp26Feature
 	{
 		std::string_view name;

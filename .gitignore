@@ -24,3 +24,5 @@ site/
 
 *.pftrace
 *.vsix
+
+perf.data

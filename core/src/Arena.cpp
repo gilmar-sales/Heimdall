@@ -8,7 +8,9 @@ namespace heimdall
 	void* Arena::Allocate(std::size_t size, std::size_t alignment)
 	{
 		void* mem = m_resource.allocate(size, alignment);
+
 		m_used +=(size + alignment - 1) & ~(alignment - 1);
+
 		++m_allocations;
 
 		return mem;
