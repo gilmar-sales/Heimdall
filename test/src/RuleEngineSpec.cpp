@@ -90,7 +90,8 @@ TEST(RuleEngineSpec, DoesNotTreatConstReferencesOrConstMethodsAsConstants)
 {
     constexpr std::string_view source =
         "void f(const Token& token) { return token.kind == TokenKind::BlockComment; }\n"
-        "class Sample { const ParseTree& m_tree; void Run() const; };\n"
+        "class Sample { const ParseTree& m_tree; void Run() const; "
+        "virtual std::uint64_t Fingerprint() const noexcept = 0; };\n"
         "void g() { const auto position = Lookup(offset); }\n"
         "void h() { const auto name_pos = loop.semi1 - 3; }\n"
         "constexpr int BadName = 1;\n";

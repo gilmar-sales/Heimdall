@@ -231,7 +231,9 @@ namespace
             const HeaderTree tree;
             state.ResumeTiming();
             auto environment = tree.Build();
-            benchmark::DoNotOptimize(environment.Final());
+            auto finalEnv = environment.Final();
+
+            benchmark::DoNotOptimize(finalEnv);
         }
     }
 
@@ -243,7 +245,8 @@ namespace
         for (auto _ : state)
         {
             auto environment = tree.Build();
-            benchmark::DoNotOptimize(environment.Final());
+            auto finalEnv = environment.Final();
+            benchmark::DoNotOptimize(finalEnv);
         }
     }
 
@@ -333,7 +336,10 @@ namespace
         {
             auto environment = heimdall::MacroEnvironment::Build("/nonexistent/large.cpp", source,
                 nullptr, options);
-            benchmark::DoNotOptimize(environment.Final());
+
+            auto finalEnv = environment.Final();
+
+            benchmark::DoNotOptimize(finalEnv);
         }
     }
 

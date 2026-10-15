@@ -22,6 +22,8 @@ namespace heimdall
 	namespace
 	{
 
+		constexpr std::size_t MAX_SPECIFIER_TOKENS = 4;
+
 		// ---- Flat hash map with interned string IDs (u32) for Completion ----
 		// Replaces unordered_map<string, CompletionItem> to avoid string hashing/allocation
 		// on hot paths. Uses open addressing with linear probing, power-of-two table.
@@ -156,9 +158,7 @@ namespace heimdall
 			{
 				std::uint32_t key = 0;
 				Value value;
-			}
-
-			;
+			};
 
 			FlatHashMap() = default;
 
@@ -313,19 +313,21 @@ namespace heimdall
 		std::vector<CompletionItem> CollectAndSort(const Map& map, const StringInterner& interner)
 		{
 			(void) interner;
-			// Labels are the map keys, so they are unique: sort pointers by label and
-			// copy each item once instead of swapping whole items.
+
 			std::vector<const CompletionItem*> sorted;
 			sorted.reserve(map.Size());
+
 			map.ForEach([&](std::uint32_t, const CompletionItem& value)
 				{
 					sorted.push_back(&value);
 				});
+
 			std::sort(sorted.begin(), sorted.end(),
 				[](const CompletionItem* left, const CompletionItem* right)
 				{
 					return left->label < right->label;
 				});
+
 			std::vector<CompletionItem> items;
 			items.reserve(sorted.size());
 			for (const CompletionItem* item : sorted)
@@ -342,10 +344,12 @@ namespace heimdall
 		{
 			std::vector<CompletionItem> items;
 			items.reserve(map.Size());
+
 			map.ForEach([&](std::uint32_t key, const CompletionItem& value)
 				{
 					items.push_back(value);
 				});
+
 			std::sort(items.begin(), items.end(),
 				[&](const CompletionItem& left, const CompletionItem& right)
 				{
@@ -354,8 +358,9 @@ namespace heimdall
 						return left.label < right.label;
 					}
 
-					return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+					return left.kind < right.kind;
 				});
+
 			return items;
 		}
 
@@ -1172,10 +1177,9 @@ namespace heimdall
 					const std::size_t last = std::min<std::size_t>(
 						declaration.GetFirstToken() + declaration.GetTokenCount(),
 						tree.Tokens().size());
-					std::size_t seen                          = 0;
-					constexpr std::size_t kMaxSpecifierTokens = 4;
+					std::size_t seen = 0;
 					for (std::size_t t = declaration.GetFirstToken();
-						t < last && seen < kMaxSpecifierTokens; ++t)
+						t < last && seen < MAX_SPECIFIER_TOKENS; ++t)
 					{
 						const TokenKind token_kind = tree.Tokens()[t].kind;
 						if (token_kind == TokenKind::Whitespace ||
@@ -10071,15 +10075,15 @@ namespace heimdall
 				return result;
 			}
 
-			constexpr std::size_t kOpenerLen = 2;
-			const Token& token               = tokens[comment];
-			if (offset < token.offset + kOpenerLen)
+			constexpr std::size_t OPENER_LENGTH = 2;
+			const Token& token                  = tokens[comment];
+			if (offset < token.offset + OPENER_LENGTH)
 			{
 				return result;
 			}
 
 			std::string_view inside =
-				source.substr(token.offset + kOpenerLen, offset - token.offset - kOpenerLen);
+				source.substr(token.offset + OPENER_LENGTH, offset - token.offset - OPENER_LENGTH);
 			while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t'))
 			{
 				inside.remove_prefix(1);

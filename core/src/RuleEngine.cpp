@@ -1497,6 +1497,39 @@ namespace heimdall
 					continue;
 				}
 
+				if (word == "const" && i > 0 && tokens[i - 1].kind == TokenKind::Punctuation)
+				{
+					const auto previous = PunctuationText(source, tokens[i - 1]);
+					if (previous == ")" || previous == "&" || previous == "&&")
+					{
+						continue;
+					}
+				}
+
+				bool is_noexcept_qualifier = false;
+				for (std::size_t j = i + 1; word == "const" && j < tokens.size(); ++j)
+				{
+					if (tokens[j].kind == TokenKind::Punctuation)
+					{
+						const auto punctuation = PunctuationText(source, tokens[j]);
+						if (punctuation == ";" || punctuation == "{" || punctuation == "=")
+						{
+							break;
+						}
+					}
+
+					if (source.substr(tokens[j].offset, tokens[j].length) == "noexcept")
+					{
+						is_noexcept_qualifier = true;
+						break;
+					}
+				}
+
+				if (is_noexcept_qualifier)
+				{
+					continue;
+				}
+
 				std::size_t name             = tokens.size();
 				std::size_t initializer      = tokens.size();
 				bool has_initializer         = false;
