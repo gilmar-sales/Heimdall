@@ -23,7 +23,7 @@ namespace heimdall
 
 		// Deepest base chain followed; deeper is Unknown, not a stack overflow.
 		constexpr std::size_t kMaxDepth = 256;
-		constexpr std::uint32_t kVirtualish =
+		constexpr std::uint32_t VIRTUALISH_FLAGS =
 			SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final | SymbolFlag::Pure;
 		constexpr std::uint32_t kNotMember =
 			SymbolFlag::Friend | SymbolFlag::Static | SymbolFlag::Qualified;
@@ -248,7 +248,7 @@ namespace heimdall
 
 		bool IsVirtualish(const SymbolTable& symbols, SymbolId function)
 		{
-			return (symbols.flags[function] & kVirtualish) != 0;
+			return (symbols.flags[function] & VIRTUALISH_FLAGS) != 0;
 		}
 
 		// ---------------------------------------------------------------------
@@ -281,7 +281,7 @@ namespace heimdall
 					{
 						m_destructor[klass] = symbol;
 					}
-					else if ((flags& kVirtualish) != 0 && (flags& SymbolFlag::Constructor) == 0)
+					else if ((flags& VIRTUALISH_FLAGS) != 0 && (flags& SymbolFlag::Constructor) == 0)
 					{
 						m_introduces_virtual[klass] = 1;
 						if ((flags & (SymbolFlag::Virtual | SymbolFlag::Pure)) != 0)

@@ -8010,6 +8010,15 @@ namespace heimdall::lsp
 		std::string issue    = discovery.complete ? std::string {}: "Workspace discovery was cancelled, truncated or failed";
 		for (const auto& path : discovery.files)
 		{
+			const auto relative = path.lexically_relative(root);
+			if (std::ranges::any_of(relative.parent_path(),[](const std::filesystem::path& part)
+				{
+					return IsSkippedDirectory(part.string());
+				}))
+			{
+				continue;
+			}
+
 			const auto shard    = snapshot->ShardFor(path.generic_string());
 			const auto contents = ReadWorkspaceFile(path);
 			if (stop.stop_requested() || shard == heimdall::index::kInvalid ||!contents ||

@@ -11,6 +11,8 @@ root = pathlib.Path(tempfile.mkdtemp(prefix="heimdall-index-rename-"))
 files = {
     "test/fixtures/parse_syntax_error.cpp": "int broken(\n",
     "Alone.hpp": "struct Alone {};\n",
+    "Rules.cpp": "constexpr unsigned kVirtualish = 1u | 2u;\n"
+                "bool IsVirtual(unsigned flags) { return (flags & kVirtualish) != 0; }\n",
     "Widget.hpp": "struct Widget\n{\n    Widget();\n    int Size() const;\n};\n",
     "Widget.cpp": '#include "Widget.hpp"\nWidget::Widget() {}\nint Widget::Size() const { return 1; }\n',
     "User.cpp": '#include "Widget.hpp"\nint Use(const Widget& widget) { return widget.Size(); }\n',
@@ -105,6 +107,23 @@ try:
                                           "position": {"line": 0, "character": 8}, "newName": "Independent"}, True)
     assert "error" not in alone, alone
     assert len(alone["result"]["documentChanges"]) == 1, alone
+
+    rules_uri = (root / "Rules.cpp").as_uri()
+    send("textDocument/didOpen", {"textDocument": {"uri": rules_uri, "languageId": "cpp", "version": 1,
+                                                    "text": files["Rules.cpp"]}})
+    wait_for(lambda m: m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == rules_uri,
+             "constexpr diagnostics")
+    prepared_constant = send("textDocument/prepareRename", {"textDocument": {"uri": rules_uri},
+                                                             "position": {"line": 0, "character": 25}}, True)
+    assert "error" not in prepared_constant, prepared_constant
+    assert prepared_constant["result"]["placeholder"] == "kVirtualish", prepared_constant
+    constant = send("textDocument/rename", {"textDocument": {"uri": rules_uri},
+                                            "position": {"line": 0, "character": 25},
+                                            "newName": "VIRTUALISH"}, True)
+    assert "error" not in constant, constant
+    assert len(constant["result"]["documentChanges"]) == 1, constant
+    assert all(edit["newText"] == "VIRTUALISH"
+               for edit in constant["result"]["documentChanges"][0]["edits"]), constant
 
     refused = send("textDocument/rename", {"textDocument": {"uri": uri},
                                            "position": {"line": 0, "character": 8},

@@ -172,6 +172,27 @@ TEST(IndexRename, ClassIsRenamedEverywhereIncludingConstructorsAndQualifiers)
               "#include \"widget.hpp\"\nint f(const Gadget& w) { Gadget local; return w.Size(); }\n");
 }
 
+TEST(IndexRename, RenamesConstexprConstantWithBitwiseInitializer)
+{
+    Project project(
+        {
+            {
+                "rules.cpp",
+                "namespace {\n"
+                "constexpr std::uint32_t kVirtualish =\n"
+                "    SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final;\n"
+                "bool IsVirtual(unsigned flags) { return (flags & kVirtualish) != 0; }\n"
+                "}\n"
+    }});
+
+    const auto plan = project.Rename(
+        "rules.cpp", project.At("rules.cpp", "kVirtualish"), "VIRTUALISH");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    EXPECT_NE(project.Apply(*plan).at("rules.cpp").find("VIRTUALISH"), std::string::npos);
+    EXPECT_EQ(project.Apply(*plan).at("rules.cpp").find("kVirtualish"), std::string::npos);
+}
+
 TEST(IndexRename, MethodIsRenamedAtEveryCallAndDefinition)
 {
     Project project(
@@ -882,6 +903,39 @@ TEST(IndexRename, ExactModeIgnoresIncludeTargetsOutsideTheEditableWorkspace)
     project.context.editable = [](const std::string& path)
     {
         return !path.starts_with("/usr/");
+    };
+
+    const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");
+
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+}
+
+TEST(IndexRename, ExactModeIgnoresUnresolvedIncludesInNonEditableDependencies)
+{
+    Project project(
+        {
+            {
+                "a.hpp", "int Compute();\n"
+        },
+            {"use.cpp", "#include \"a.hpp\"\nint f() { return Compute(); }\n"},
+            {"build/_deps/google_benchmark/benchmark.cc", "#include <benchmark/benchmark.h>\n"}});
+    std::vector<std::shared_ptr<const idx::FileShard>> shards;
+    for (const auto& [path, text] : project.files)
+    {
+        const auto tree = heimdall::ParseTree::Parse(text);
+        const auto model = heimdall::Binder::Bind(tree);
+        shards.push_back(idx::ShardBuilder::Build(model, path, 0,
+                                                  [](std::string_view spelling, bool, std::uint32_t)->std::optional<std::string>
+            {
+                return spelling == "a.hpp" ? std::optional<std::string>("a.hpp") : std::nullopt;
+        }));
+    }
+
+    project.snapshot = idx::IndexSnapshot::Build(std::move(shards));
+    project.context.requireExactIncludes = true;
+    project.context.editable = [](const std::string& path)
+    {
+        return !path.starts_with("build/");
     };
 
     const auto plan = project.Rename("a.hpp", project.At("a.hpp", "Compute"), "Evaluate");

@@ -16,11 +16,12 @@ namespace heimdall
 	namespace
 	{
 
-		constexpr std::uint32_t kExcluded =
+		constexpr std::uint32_t EXCLUDED_FLAGS =
 			SymbolFlag::Static | SymbolFlag::Constructor | SymbolFlag::Destructor |
 			SymbolFlag::Qualified | SymbolFlag::Friend | SymbolFlag::Override | SymbolFlag::Final |
 			SymbolFlag::Template;
-		constexpr std::uint32_t kVirtualish =
+
+		constexpr std::uint32_t VIRTUALISH_FLAGS =
 			SymbolFlag::Virtual | SymbolFlag::Override | SymbolFlag::Final;
 
 		bool IsTrivia(const Token& token)
@@ -87,7 +88,7 @@ namespace heimdall
 				{
 					if (symbols.kind[member] == SymbolKind::Function &&
 						symbols.signature[member] == signature &&
-						(symbols.flags[member] & kVirtualish) != 0 &&
+						(symbols.flags[member] & VIRTUALISH_FLAGS) != 0 &&
 						(symbols.flags[member] & (SymbolFlag::Static | SymbolFlag::Constructor)) ==
 						0)
 					{
@@ -198,10 +199,11 @@ namespace heimdall
 		LineTable lines;
 		bool lines_built = false;
 		Visited visited(symbols.Size());
+
 		for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
 			if (symbols.kind[symbol] != SymbolKind::Function ||
-				(symbols.flags[symbol] & kExcluded) != 0 || symbols.signature[symbol] == 0 ||
+				(symbols.flags[symbol] & EXCLUDED_FLAGS) != 0 || symbols.signature[symbol] == 0 ||
 				symbols.name[symbol] == kNone)
 			{
 				continue;

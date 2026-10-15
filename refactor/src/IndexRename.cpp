@@ -728,6 +728,11 @@ namespace heimdall
 		{
 			for (const auto& file : snapshot.Shards())
 			{
+				if (context.editable && !context.editable(file->Path()))
+				{
+					continue;
+				}
+
 				if (!file->ExactIncludes())
 				{
 					return Fail(RefactoringErrorCode::IncompleteAnalysis,
