@@ -259,6 +259,37 @@ namespace heimdall
 			}
 		}
 
+		simdjson::dom::element naming_element;
+		if (!root["naming"].get(naming_element))
+		{
+			simdjson::dom::object naming;
+			if (const auto error = naming_element.get_object().get(naming); error)
+			{
+				return std::unexpected("'naming' in Heimdall config must be an object: " + path.string());
+			}
+
+			for (const auto field : naming)
+			{
+				if (field.key != "constants")
+				{
+					return std::unexpected("unknown setting in 'naming': " + std::string(field.key));
+				}
+
+				std::string_view casing;
+				if (field.value.get_string().get(casing) ||
+					(casing != "k-prefix" && casing != "screaming-snake-case"))
+				{
+					return std::unexpected(
+						"'constants' in 'naming' must be 'k-prefix' or 'screaming-snake-case'");
+				}
+
+				configuration.options.constant_name_casing = casing == "k-prefix"
+				? ConstantNameCasing::KPrefix
+				: ConstantNameCasing::ScreamingSnakeCase;
+				configuration.has_constant_name_casing = true;
+			}
+		}
+
 		simdjson::dom::element macros_element;
 		if (!root["macros"].get(macros_element))
 		{
@@ -693,6 +724,11 @@ namespace heimdall
 			if (it->has_macro_max_macros)
 			{
 				merged.macro_max_macros = it->options.macro_max_macros;
+			}
+
+			if (it->has_constant_name_casing)
+			{
+				merged.constant_name_casing = it->options.constant_name_casing;
 			}
 		}
 

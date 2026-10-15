@@ -29,6 +29,9 @@
             "error"
           ]
         },
+        "cpp/constant-naming": {
+          "enum": ["off", "warning", "error"]
+        },
         "format/no-trailing-whitespace": {
           "enum": [
             "off",
@@ -394,6 +397,18 @@
           "maximum": 1000000,
           "default": 65536,
           "description": "Distinct macro names defined across one translation unit before headers stop being entered. The C++ standard asks implementations to support 65536."
+        }
+      },
+      "additionalProperties": false
+    },
+    "naming": {
+      "type": "object",
+      "description": "Naming conventions checked by naming rules.",
+      "properties": {
+        "constants": {
+          "enum": ["k-prefix", "screaming-snake-case"],
+          "default": "k-prefix",
+          "description": "Required casing for const/constexpr variables and #define names. Enable cpp/constant-naming in rules."
         }
       },
       "additionalProperties": false

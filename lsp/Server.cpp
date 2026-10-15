@@ -5714,6 +5714,122 @@ namespace heimdall::lsp
 		};
 
 		std::vector<OrderedHint> orderedHints;
+		const auto genericLambdaElement = [&](std::size_t lambdaFirst, std::size_t lambdaLast)
+		{
+			std::size_t call     = nodes.size();
+			std::size_t smallest = std::numeric_limits<std::size_t>::max();
+			for (std::size_t candidate = 0; candidate < nodes.size(); ++candidate)
+			{
+				if (nodes.Kind(candidate) != heimdall::GrammarKind::CallExpression)
+				{
+					continue;
+				}
+
+				const auto begin = nodes.FirstToken(candidate);
+				const auto end   = std::min<std::size_t>(begin + nodes.TokenCount(candidate), tokens.size());
+				if (begin <= lambdaFirst && end >= lambdaLast && end - begin < smallest)
+				{
+					call     = candidate;
+					smallest = end - begin;
+				}
+			}
+
+			if (call == nodes.size())
+			{
+				return std::string {};
+			}
+
+			const auto callBegin = nodes.FirstToken(call);
+			const auto callEnd   = std::min<std::size_t>(callBegin + nodes.TokenCount(call), tokens.size());
+			std::size_t open     = callEnd;
+			for (auto token = callBegin; token < lambdaFirst; ++token)
+			{
+				if (tokens[token].tok != heimdall::Tok::LParen)
+				{
+					continue;
+				}
+
+				std::size_t depth = 1;
+				for (auto next = token + 1; next < callEnd; ++next)
+				{
+					if (tokens[next].tok == heimdall::Tok::LParen)
+					{
+						++depth;
+					}
+					else if (tokens[next].tok == heimdall::Tok::RParen && --depth == 0)
+					{
+						if (next >= lambdaFirst)
+						{
+							open = token;
+						}
+
+						break;
+					}
+				}
+
+				if (open != callEnd)
+				{
+					break;
+				}
+			}
+
+			if (open == callEnd)
+			{
+				return std::string {};
+			}
+
+			const auto argument = next_significant(open + 1, lambdaFirst);
+			if (argument >= lambdaFirst || tokens[argument].kind != heimdall::TokenKind::Identifier)
+			{
+				return std::string {};
+			}
+
+			auto sourceSymbol = semantic.ResolveToken(static_cast<std::uint32_t>(argument));
+			if (sourceSymbol == heimdall::kNone)
+			{
+				const auto name = semantic.Names().Find(tree->Text(tokens[argument]));
+				if (name != heimdall::kNone)
+				{
+					sourceSymbol = semantic.Lookup(semantic.ScopeOfNode(call), name,
+						static_cast<std::uint32_t>(argument));
+				}
+			}
+
+			if (sourceSymbol == heimdall::kNone ||
+				(semantic_symbols.kind[sourceSymbol] != heimdall::SymbolKind::Variable &&
+				semantic_symbols.kind[sourceSymbol] != heimdall::SymbolKind::Parameter))
+			{
+				return std::string {};
+			}
+
+			const auto containerType = context.Types().Types().Strip(
+				context.Types().SymbolType(sourceSymbol));
+			std::string spelling    = context.Types().Spell(containerType);
+			const auto templateOpen = spelling.find('<');
+			if (templateOpen != std::string::npos)
+			{
+				std::size_t depth = 0;
+				for (std::size_t index = templateOpen; index < spelling.size(); ++index)
+				{
+					if (spelling[index] == '<')
+					{
+						++depth;
+					}
+					else if (spelling[index] == '>' && --depth == 0)
+					{
+						spelling = spelling.substr(templateOpen + 1, index - templateOpen - 1);
+						break;
+					}
+					else if (spelling[index] == ',' && depth == 1)
+					{
+						spelling = spelling.substr(templateOpen + 1, index - templateOpen - 1);
+						break;
+					}
+				}
+			}
+
+			return spelling;
+		};
 		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
 			if (symbols.kind[symbol] != heimdall::SymbolKind::Variable)
@@ -5849,8 +5965,63 @@ namespace heimdall::lsp
 				}
 			}
 
-			if (body_open == token_end || has_trailing_return ||
-				tokens[body_open].offset < first_offset || tokens[body_open].offset >= last_offset)
+			if (body_open == token_end || tokens[body_open].offset < first_offset ||
+				tokens[body_open].offset >= last_offset)
+			{
+				continue;
+			}
+
+			const std::string elementType = genericLambdaElement(first_token, token_end);
+			if (!elementType.empty())
+			{
+				for (heimdall::SymbolId parameter = 0; parameter < semantic_symbols.Size(); ++parameter)
+				{
+					if (semantic_symbols.kind[parameter] != heimdall::SymbolKind::Parameter)
+					{
+						continue;
+					}
+
+					const auto nameToken = semantic_symbols.decl_token[parameter];
+					if (nameToken <= first_token || nameToken >= body_open || nameToken >= tokens.size())
+					{
+						continue;
+					}
+
+					const auto declaration = semantic_symbols.decl_node[parameter];
+					if (declaration >= nodes.size())
+					{
+						continue;
+					}
+
+					const auto declarationBegin = nodes.FirstToken(declaration);
+					if (declarationBegin < first_token || declarationBegin >= nameToken)
+					{
+						continue;
+					}
+
+					std::string_view declaredType = tree->Source().substr(
+						tokens[declarationBegin].offset,
+						tokens[nameToken].offset - tokens[declarationBegin].offset);
+					const auto autoPosition = declaredType.find("auto");
+					if (autoPosition == std::string_view::npos)
+					{
+						continue;
+					}
+
+					while (!declaredType.empty() &&
+						(declaredType.back() == ' ' || declaredType.back() == '\t'))
+					{
+						declaredType.remove_suffix(1);
+					}
+
+					std::string inferredType(declaredType);
+					inferredType.replace(autoPosition, 4, elementType);
+					orderedHints.push_back({tokens[nameToken].offset + tokens[nameToken].length,
+							": " + inferredType, 1});
+				}
+			}
+
+			if (has_trailing_return)
 			{
 				continue;
 			}

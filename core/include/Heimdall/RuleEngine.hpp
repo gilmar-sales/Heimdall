@@ -32,6 +32,7 @@ namespace heimdall
 		CircularInclude,
 		TodoComment,
 		MagicNumber,
+		ConstantNaming,
 		ModernizeOverride,
 		ModernizeNullptr,
 		NoZeroAsNull,
@@ -93,6 +94,12 @@ namespace heimdall
 		TemplateSubstitution
 	};
 
+	enum class ConstantNameCasing : std::uint8_t
+	{
+		KPrefix,
+		ScreamingSnakeCase
+	};
+
 	// Which declarations the doc/* rules look at. Public: what other code can
 	// use (public and protected members, namespace-scope entities with external
 	// linkage). Private: private members and internal-linkage entities
@@ -148,21 +155,22 @@ namespace heimdall
 
 	struct RuleOptions
 	{
-		bool null_macro                    = true;
-		bool trailing_whitespace           = true;
-		bool final_newline                 = true;
-		bool empty_catch                   = true;
-		bool duplicate_include             = true;
-		bool legacy_typedef                = true;
-		bool todo_comment                  = true;
-		bool magic_numbers                 = true;
-		bool modernize_emplace             = true;
-		bool modernize_make_unique         = true;
-		bool modernize_make_shared         = true;
-		bool modernize_smart_ptr           = true;
-		bool no_new_delete                 = true;
-		bool modernize_structured_bindings = true;
-		bool modernize_algorithms          = true;
+		bool null_macro                         = true;
+		bool trailing_whitespace                = true;
+		bool final_newline                      = true;
+		bool empty_catch                        = true;
+		bool duplicate_include                  = true;
+		bool legacy_typedef                     = true;
+		bool todo_comment                       = true;
+		bool magic_numbers                      = true;
+		ConstantNameCasing constant_name_casing = ConstantNameCasing::KPrefix;
+		bool modernize_emplace                  = true;
+		bool modernize_make_unique              = true;
+		bool modernize_make_shared              = true;
+		bool modernize_smart_ptr                = true;
+		bool no_new_delete                      = true;
+		bool modernize_structured_bindings      = true;
+		bool modernize_algorithms               = true;
 		// Opt-in: the order is a project convention, so the rule only
 		// runs when enabled together with a configured order.
 		bool sort_includes      = false;

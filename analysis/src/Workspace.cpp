@@ -265,7 +265,7 @@ namespace heimdall
 			}
 		}
 
-		std::uint64_t Elapsed(Clock::time_point start)
+		std::uint64_t Elapsed(const Clock::time_point& start)
 		{
 			return static_cast<std::uint64_t>(
 				std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());

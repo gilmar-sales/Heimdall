@@ -4035,6 +4035,22 @@ namespace heimdall
 					if (NodeSig(child).first == begin + 1)
 					{
 						type = m_types.Decay(m_types.Strip(NodeType(child)));
+						if (type == TypeTable::Unknown &&
+							m_nodes.Kind(child) == GrammarKind::BinaryExpression)
+						{
+							const auto operands = m_model.ChildrenOf(child);
+							if (operands.size() == 2)
+							{
+								const Tok op = At(NodeSig(operands[0]).second);
+								if (op == Tok::EqEq || op == Tok::BangEq || op == Tok::Lt ||
+									op == Tok::Gt || op == Tok::Le || op == Tok::Ge ||
+									op == Tok::AmpAmp || op == Tok::PipePipe)
+								{
+									type = m_types.Builtin(BuiltinType::Bool);
+								}
+							}
+						}
+
 						break;
 					}
 				}
@@ -4495,6 +4511,11 @@ namespace heimdall
 		}
 
 		const auto kind = m_symbols.kind[symbol];
+		if (kind == SymbolKind::Enum)
+		{
+			return m_types.Enum(symbol);
+		}
+
 		if (kind == SymbolKind::TemplateParameter)
 		{
 			const auto parameter = m_model.ParameterOf(symbol);
@@ -4815,6 +4836,12 @@ namespace heimdall
 		}
 
 		const auto kind = m_symbols.kind[member];
+		if (kind == SymbolKind::Enumerator && op == Tok::ColonColon)
+		{
+			const auto qualifier = m_types.Strip(NodeType(kids[0]));
+			return m_types.Kind(qualifier) == TypeKind::Enum ? qualifier : TypeTable::Unknown;
+		}
+
 		if (kind == SymbolKind::Variable || kind == SymbolKind::Parameter)
 		{
 			m_out.m_member_symbol[node] = member;

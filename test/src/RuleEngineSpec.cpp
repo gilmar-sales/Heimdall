@@ -21,6 +21,54 @@ TEST(RuleEngineSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
         "#define TEXT NULL\nvoid f() { auto p = nullptr; } // NULL\nconst char* s = \"NULL\";\n");
 }
 
+TEST(RuleEngineSpec, ChecksConfiguredNamingForConstantsAndMacros)
+{
+    constexpr std::string_view source =
+        "constexpr int BadName = 1;\n"
+        "const int kGood = 2;\n"
+        "#define BAD_MACRO 3\n"
+        "#define kBadMacro 4\n";
+    auto options = heimdall::RuleOptions {};
+    options.constant_name_casing = heimdall::ConstantNameCasing::ScreamingSnakeCase;
+    options.overrides.push_back({"cpp/constant-naming", true, heimdall::Severity::Warning});
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(diagnostics.size(), 3);
+    EXPECT_EQ(diagnostics[0].code, "cpp/constant-naming");
+    EXPECT_EQ(source.substr(diagnostics[0].offset, diagnostics[0].length), "BadName");
+    EXPECT_EQ(source.substr(diagnostics[1].offset, diagnostics[1].length), "kGood");
+
+    options.constant_name_casing = heimdall::ConstantNameCasing::KPrefix;
+    const auto prefixed = heimdall::RuleEngine(options).Analyze(source);
+    ASSERT_EQ(std::count_if(prefixed.begin(), prefixed.end(),[](const auto& diagnostic)
+        {
+            return diagnostic.code == "cpp/constant-naming";
+            }), 2);
+}
+
+TEST(RuleEngineSpec, DoesNotTreatConstReferencesOrConstMethodsAsConstants)
+{
+    constexpr std::string_view source =
+        "void f(const Token& token) { return token.kind == TokenKind::BlockComment; }\n"
+        "class Sample { const ParseTree& m_tree; void Run() const; };\n"
+        "void g() { const auto position = Lookup(offset); }\n"
+        "void h() { const auto name_pos = loop.semi1 - 3; }\n"
+        "constexpr int BadName = 1;\n";
+    auto options = heimdall::RuleOptions {};
+    options.constant_name_casing = heimdall::ConstantNameCasing::ScreamingSnakeCase;
+    options.overrides.push_back({"cpp/constant-naming", true, heimdall::Severity::Warning});
+    const auto diagnostics = heimdall::RuleEngine(options).Analyze(source);
+    const auto naming = std::find_if(diagnostics.begin(), diagnostics.end(),[](const auto& diagnostic)
+        {
+            return diagnostic.code == "cpp/constant-naming";
+        });
+    ASSERT_NE(naming, diagnostics.end());
+    EXPECT_EQ(std::count_if(diagnostics.begin(), diagnostics.end(),[](const auto& diagnostic)
+        {
+            return diagnostic.code == "cpp/constant-naming";
+            }), 1);
+    EXPECT_EQ(source.substr(naming->offset, naming->length), "BadName");
+}
+
 TEST(RuleEngineSpec, IgnoresIncludesInsideSeparateRawStringsButReportsRealDuplicates)
 {
     constexpr std::string_view source =
@@ -471,7 +519,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto& catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 68);
+    ASSERT_EQ(catalog.size(), 69);
     for (const auto& info : catalog)
     {
         EXPECT_FALSE(info.code.empty());

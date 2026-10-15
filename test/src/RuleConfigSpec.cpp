@@ -45,6 +45,21 @@ TEST(RuleConfigSpec, LoadsRuleSeveritiesDisabledRulesAndSuppressionsSetting)
     std::filesystem::remove_all(directory);
 }
 
+TEST(RuleConfigSpec, LoadsConstantNamingConvention)
+{
+    const auto directory = MakeConfigDir("constant-naming");
+    WriteConfig(directory,
+                R"({"rules":{"cpp/constant-naming":"warning"},"naming":{"constants":"screaming-snake-case"}})");
+    const auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
+    ASSERT_TRUE(loaded) <<(loaded ? "" : loaded.error());
+    EXPECT_TRUE(loaded->has_constant_name_casing);
+    EXPECT_EQ(loaded->options.constant_name_casing,
+              heimdall::ConstantNameCasing::ScreamingSnakeCase);
+    WriteConfig(directory, R"({"naming":{"constants":"camelCase"}})");
+    EXPECT_FALSE(heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName));
+    std::filesystem::remove_all(directory);
+}
+
 TEST(RuleConfigSpec, FindsNearestConfigAndMergesParentSettings)
 {
     const auto directory = MakeConfigDir("merge");

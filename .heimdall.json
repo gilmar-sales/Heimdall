@@ -14,7 +14,8 @@
     "cpp/sort-includes": "warning",
     "cpp/modernize-using": "warning",
     "doc/require-comment": "warning",
-    "doc/doxygen-style": "warning"
+    "doc/doxygen-style": "warning",
+    "cpp/constant-naming": "warning"
   },
   "format": {
     "sort-includes": true,
@@ -24,6 +25,9 @@
     "reference-alignment": "left",
     "align-consecutive-assignments": true,
     "align-consecutive-macros": true
+  },
+  "naming": {
+    "constants": "screaming-snake-case"
   },
   "include-order": {
     "groups": [

@@ -1656,7 +1656,7 @@ namespace heimdall
 						break;
 					}
 
-					edits.push_back({p, p + 3, std::string()});
+					edits.emplace_back(p, p + 3, std::string());
 					p += 3;
 				}
 				else if (view.Text(p) == variable_name)

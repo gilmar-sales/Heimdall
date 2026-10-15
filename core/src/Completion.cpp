@@ -922,6 +922,7 @@ namespace heimdall
 				condition                 = condition.substr(0, comment);
 				const std::size_t block   = condition.find("/*");
 				condition                 = condition.substr(0, block);
+
 				while (!condition.empty() &&
 					(condition.back() == ' ' || condition.back() == '\t' || condition.back() == '\r'))
 				{

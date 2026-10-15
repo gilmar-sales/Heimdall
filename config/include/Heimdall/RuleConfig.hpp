@@ -25,6 +25,7 @@ namespace heimdall
 		bool has_doc_scope                  = false;
 		bool has_macro_include_depth        = false;
 		bool has_macro_max_macros           = false;
+		bool has_constant_name_casing       = false;
 		bool has_pointer_alignment          = false;
 		bool has_reference_alignment        = false;
 		bool has_blank_line_between_methods = false;

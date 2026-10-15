@@ -48,6 +48,35 @@ namespace heimdall
 				offset < directives[cursor].offset + directives[cursor].length;
 		}
 
+		bool IsConstantName(std::string_view name, ConstantNameCasing casing)
+		{
+			if (casing == ConstantNameCasing::KPrefix)
+			{
+				return name.size() > 1 && name[0] == 'k' &&
+					(name[1] >= 'A' && name[1] <= 'Z');
+			}
+
+			bool has_letter = false;
+			for (const char ch : name)
+			{
+				if (ch >= 'a' && ch <= 'z')
+				{
+					return false;
+				}
+
+				if ((ch >= 'A' && ch <= 'Z') ||(ch >= '0' && ch <= '9'))
+				{
+					has_letter = has_letter ||(ch >= 'A' && ch <= 'Z');
+				}
+				else if (ch != '_')
+				{
+					return false;
+				}
+			}
+
+			return has_letter;
+		}
+
 		Diagnostic MakeDiagnostic(
 			RuleId rule,
 			std::string code,
@@ -744,6 +773,8 @@ namespace heimdall
 				"unresolved TODO, FIXME or XXX comment"},
 			{RuleId::MagicNumber, "cpp/no-magic-numbers", "cpp", Severity::Warning, "syntactic",
 				false, "numeric literal without a named constant"},
+			{RuleId::ConstantNaming, "cpp/constant-naming", "cpp", Severity::Warning, "syntactic",
+				false, "constant name that does not match the configured casing"},
 			{RuleId::ModernizeOverride, "cpp/modernize-override", "cpp", Severity::Warning,
 				"semantic", true, "overriding virtual function without override"},
 			{RuleId::ModernizeNullptr, "cpp/modernize-nullptr", "cpp", Severity::Warning,
@@ -1397,6 +1428,165 @@ namespace heimdall
 					"magic number '" + std::string(text) + "' should use a named constant",
 					token.offset, token.length, position, {0, 0, ""}, false);
 				diagnostics.push_back(std::move(diagnostic));
+			}
+		}
+
+		if (RuleEnabled("cpp/constant-naming", false))
+		{
+			std::size_t directive_cursor = 0;
+			const auto report = [&](std::size_t offset, std::size_t length, std::string_view name)
+			{
+				if (IsConstantName(name, m_options.constant_name_casing))
+				{
+					return;
+				}
+
+				const std::string expected = m_options.constant_name_casing == ConstantNameCasing::KPrefix
+				? "kUpperCamelCase with a 'k' prefix"
+				: "SCREAMING_SNAKE_CASE";
+				diagnostics.push_back(MakeDiagnostic(RuleId::ConstantNaming, "cpp/constant-naming",
+					"constant '" + std::string(name) + "' should use " + expected,
+					offset, length, lines.Lookup(offset), {0, 0, ""}, false));
+			};
+
+			for (const auto& directive : directives)
+			{
+				if (directive.kind != DirectiveKind::Define ||!directive.active)
+				{
+					continue;
+				}
+
+				const auto text   = source.substr(directive.offset, directive.length);
+				const auto define = text.find("define");
+				if (define == std::string_view::npos)
+				{
+					continue;
+				}
+
+				auto begin = define + 6;
+				while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])))
+				{
+					++begin;
+				}
+
+				auto end = begin;
+				while (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) ||
+					text[end] == '_'))
+				{
+					++end;
+				}
+
+				if (end > begin)
+				{
+					report(directive.offset + begin, end - begin, text.substr(begin, end - begin));
+				}
+			}
+
+			for (std::size_t i = 0; i < tokens.size(); ++i)
+			{
+				if (tokens[i].kind != TokenKind::Identifier ||
+					IsInDirective(tokens[i].offset, directives, directive_cursor))
+				{
+					continue;
+				}
+
+				const auto word = source.substr(tokens[i].offset, tokens[i].length);
+				if (word != "const" && word != "constexpr")
+				{
+					continue;
+				}
+
+				std::size_t name             = tokens.size();
+				std::size_t initializer      = tokens.size();
+				bool has_initializer         = false;
+				bool is_indirect             = false;
+				bool is_auto                 = false;
+				bool initializer_is_constant = true;
+				for (std::size_t j = i + 1; j < tokens.size(); ++j)
+				{
+					if (IsInDirective(tokens[j].offset, directives, directive_cursor))
+					{
+						break;
+					}
+
+					if (tokens[j].kind == TokenKind::Punctuation)
+					{
+						const auto punctuation = PunctuationText(source, tokens[j]);
+						if (punctuation == "=" || punctuation == "{")
+						{
+							has_initializer = true;
+							initializer     = j;
+							break;
+						}
+
+						if (punctuation == "&" || punctuation == "*")
+						{
+							is_indirect = true;
+						}
+						else if (punctuation == ";" || punctuation == "(" || punctuation == ")" ||
+							punctuation == "}")
+						{
+							break;
+						}
+					}
+
+					if (tokens[j].kind == TokenKind::Identifier)
+					{
+						name    = j;
+						is_auto = is_auto || source.substr(tokens[j].offset, tokens[j].length) == "auto";
+					}
+				}
+
+				bool auto_call_initializer = false;
+				if (is_auto && initializer < tokens.size())
+				{
+					for (std::size_t j = initializer + 1; j < tokens.size(); ++j)
+					{
+						if (tokens[j].kind == TokenKind::Punctuation &&
+							(PunctuationText(source, tokens[j]) == ";" ||
+							PunctuationText(source, tokens[j]) == "}"))
+						{
+							break;
+						}
+
+						if (tokens[j].kind == TokenKind::Punctuation &&
+							PunctuationText(source, tokens[j]) == "(" && j > initializer + 1 &&
+							tokens[j - 1].kind == TokenKind::Identifier)
+						{
+							auto_call_initializer = true;
+							break;
+						}
+					}
+				}
+
+				if (word == "const" && initializer < tokens.size())
+				{
+					for (std::size_t j = initializer + 1; j < tokens.size(); ++j)
+					{
+						if (tokens[j].kind == TokenKind::Punctuation &&
+							(PunctuationText(source, tokens[j]) == ";" ||
+							PunctuationText(source, tokens[j]) == "}"))
+						{
+							break;
+						}
+
+						if (tokens[j].kind == TokenKind::Identifier)
+						{
+							const auto value = source.substr(tokens[j].offset, tokens[j].length);
+							if (value != "true" && value != "false" && value != "nullptr")
+							{
+								initializer_is_constant = false;
+							}
+						}
+					}
+				}
+
+				if (has_initializer && !is_indirect && !auto_call_initializer &&
+					initializer_is_constant && name < tokens.size())
+				{
+					report(tokens[name].offset, tokens[name].length,
+						source.substr(tokens[name].offset, tokens[name].length));
+				}
 			}
 		}
 

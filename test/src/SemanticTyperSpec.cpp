@@ -312,6 +312,26 @@ TEST(Typer, LambdaReturnTypeDoesNotBecomeTheClosureExpressionType)
     EXPECT_TRUE(found);
 }
 
+TEST(Typer, DeducesLambdaReturnTypeFromScopedEnumerators)
+{
+    const Typed typed(
+        "enum class Truth { False, True, Unknown };\n"
+        "void f() { auto evaluate = [](int value) {\n"
+        "if (value) return Truth::True; return Truth::False; }; }\n");
+    const auto& nodes = typed.tree.NodesSoA();
+    bool found = false;
+    for (std::uint32_t node = 0; node < nodes.size(); ++node)
+    {
+        if (nodes.Kind(node) == heimdall::GrammarKind::LambdaExpression)
+        {
+            found = true;
+            EXPECT_EQ(typed.types.Spell(typed.types.LambdaReturnType(node)), "Truth");
+        }
+    }
+
+    EXPECT_TRUE(found);
+}
+
 // ---- TypeTable -----------------------------------------------------------------
 
 TEST(TypeTable, HashConsesEqualTypes)

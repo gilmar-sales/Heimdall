@@ -91,7 +91,7 @@ namespace heimdall
 			bool profiling = false,
 			std::stop_token stop = {}) const;
 
-		std::size_t Size() const noexcept
+		[[nodiscard]] std::size_t Size() const noexcept
 		{
 			return m_rules.size();
 		}

@@ -139,6 +139,7 @@ assert all(hint["kind"] == 1 and hint["paddingLeft"] for hint in hints), hints
 assert run(disabled=True) == []
 
 lambda_source = (
+    "enum class Truth { False, True, Unknown };\n"
     "void f() {\n"
     "    auto is_digit = [](char c)\n"
     "    { return c >= '0' && c <= '9'; };\n"
@@ -146,18 +147,82 @@ lambda_source = (
     "    { return c >= '0' && c <= '9'; };\n"
     "    auto constant = []\n"
     "    { return 42; };\n"
+    "    const auto evaluate = [](std::string_view condition)\n"
+    "    {\n"
+    "        if (condition.empty()) { return Truth::Unknown; }\n"
+    "        return condition == \"true\" ? Truth::True : Truth::False;\n"
+    "    };\n"
     "}\n"
 )
 lambda_hints = run(text=lambda_source, hint_range={
     "start": {"line": 0, "character": 0},
-    "end": {"line": 7, "character": 0},
+    "end": {"line": 14, "character": 0},
 })
 assert [(hint["position"]["line"], hint["label"]) for hint in lambda_hints] == [
-    (1, " -> bool"),
-    (5, " -> int"),
+    (2, " -> bool"),
+    (6, " -> int"),
+    (8, " -> Truth"),
 ], lambda_hints
-assert lambda_hints[0]["position"]["character"] == lambda_source.splitlines()[1].index(")") + 1
-assert lambda_hints[1]["position"]["character"] == lambda_source.splitlines()[5].index("]") + 1
+assert lambda_hints[0]["position"]["character"] == lambda_source.splitlines()[2].index(")") + 1
+assert lambda_hints[1]["position"]["character"] == lambda_source.splitlines()[6].index("]") + 1
+assert lambda_hints[2]["position"]["character"] == lambda_source.splitlines()[8].index(")") + 1
+
+generic_lambda_source = (
+    "void f() {\n"
+    "    std::ranges::sort(roots,\n"
+    "        [](const auto& a, const auto& b)\n"
+    "        { return PathKey(a) < PathKey(b); });\n"
+    "    std::sort(candidates.begin(), candidates.end(),[](const auto& left, const auto& right)\n"
+    "        { return left.lastUsed < right.lastUsed; });\n"
+    "}\n"
+)
+generic_hints = run(text=generic_lambda_source, hint_range={
+    "start": {"line": 0, "character": 0},
+    "end": {"line": 7, "character": 0},
+})
+assert [(hint["position"]["line"], hint["label"]) for hint in generic_hints] == [
+    (2, " -> bool"),
+    (4, " -> bool"),
+], generic_hints
+
+sort_lambda_source = (
+    "#include <algorithm>\n"
+    "#include <filesystem>\n"
+    "#include <string>\n"
+    "#include <vector>\n"
+    "std::string PathKey(const std::filesystem::path& path);\n"
+    "struct Candidate { int lastUsed; };\n"
+    "void f(std::vector<std::filesystem::path>& roots, std::vector<Candidate>& candidates) {\n"
+    "    std::ranges::sort(roots,\n"
+    "        [](const auto& a, const auto& b)\n"
+    "        { return PathKey(a) < PathKey(b); });\n"
+    "    std::sort(candidates.begin(), candidates.end(),[](const auto& left, const auto& right)\n"
+    "        { return left.lastUsed < right.lastUsed; });\n"
+    "}\n"
+)
+sort_hints = run(text=sort_lambda_source, hint_range={
+    "start": {"line": 0, "character": 0},
+    "end": {"line": 13, "character": 0},
+})
+assert [(hint["position"]["line"], hint["label"]) for hint in sort_hints] == [
+    (8, ": const std::filesystem::path&"),
+    (8, ": const std::filesystem::path&"),
+    (8, " -> bool"),
+    (9, "path:"),
+    (9, "path:"),
+    (10, ": const Candidate&"),
+    (10, ": const Candidate&"),
+    (10, " -> bool"),
+], sort_hints
+assert [(hint["position"]["line"], hint["label"]) for hint in sort_hints
+        if hint["kind"] == 1] == [
+    (8, ": const std::filesystem::path&"),
+    (8, ": const std::filesystem::path&"),
+    (8, " -> bool"),
+    (10, ": const Candidate&"),
+    (10, ": const Candidate&"),
+    (10, " -> bool"),
+], sort_hints
 
 parameter_source = (
     "int MetodoTeste(unsigned int first, int second, const char* desc);\n"
