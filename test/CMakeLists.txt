@@ -49,6 +49,7 @@ add_executable(Tests_run
   src/UnreachableCodeSpec.cpp
   src/ReturnValidationSpec.cpp
   src/CompletionSpec.cpp
+  src/CompletionRankingSpec.cpp
   src/TemplateDeductionSpec.cpp
   src/CompletionParitySpec.cpp
   src/SignatureHelpSpec.cpp

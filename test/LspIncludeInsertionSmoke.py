@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_insertion_") as te
         "}\n", encoding="utf-8")
     (root / "src" / "util.hpp").write_text("struct UtilThing {};\n", encoding="utf-8")
     main = root / "src" / "main.cpp"
-    main_text = "#include <vector>\n\nint main() {\n    Wid\n    lib::wid\n    UtilTh\n}\n"
+    main_text = "#include <vector>\n\n[[deprecated]] int WidgetOld; int main() {\n    Wid\n    lib::wid\n    UtilTh\n}\n"
     main.write_text(main_text, encoding="utf-8")
     other = root / "src" / "other.cpp"
     other_text = "#include \"util.hpp\"\nint f() {\n    UtilTh\n}\n"
@@ -78,6 +78,11 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_insertion_") as te
     unqualified = complete(10, main.as_uri(), main_text, 3, 7)
     widget = next((i for i in unqualified if i["label"] == "Widget"), None)
     assert widget is not None, [i["label"] for i in unqualified]
+    labels = [item["label"] for item in unqualified]
+    assert "WidgetOld" in labels, labels
+    assert labels.index("Widget") < labels.index("WidgetOld"), labels
+    assert [item["sortText"] for item in unqualified] == sorted(
+        item["sortText"] for item in unqualified), unqualified
     assert widget["textEdit"]["newText"] == "lib::Widget", widget
     assert widget["textEdit"]["range"]["start"] == {"line": 3, "character": 4}, widget
     insertion = widget["additionalTextEdits"]

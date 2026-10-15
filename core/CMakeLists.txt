@@ -23,6 +23,7 @@ add_library(heimdall_core STATIC
   src/Preprocessor.cpp
   src/RuleEngine.cpp
   src/Completion.cpp
+  src/CompletionRanking.cpp
   src/TemplateDeduction.cpp
   src/IncludeInsertion.cpp
   src/TypeLayout.cpp

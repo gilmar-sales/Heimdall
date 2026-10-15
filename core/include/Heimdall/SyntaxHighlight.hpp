@@ -33,6 +33,7 @@ namespace heimdall
 		Method,
 		Property,
 		Variable,
+		Parameter,
 		Count
 	};
 

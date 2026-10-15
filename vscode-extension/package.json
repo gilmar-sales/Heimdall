@@ -130,6 +130,11 @@
           "default": true,
           "description": "Show inferred type hints for auto variables and parameter name hints at call arguments."
         },
+        "heimdall.completion.serverRanking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preserve Heimdall's context-aware completion ranking instead of VS Code's fuzzy reordering. Refreshes symbol suggestions while typing; disable to favor client-side filtering on high-latency connections."
+        },
         "heimdall.dimInactiveCode": {
           "type": "boolean",
           "default": true,

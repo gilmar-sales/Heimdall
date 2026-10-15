@@ -9,8 +9,10 @@
 #include <shared_mutex>
 #include <stop_token>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/CompletionRanking.hpp>
 #include <Heimdall/Doxygen.hpp>
 #include <Heimdall/Formatter.hpp>
 #include <Heimdall/IncludeAnalyzer.hpp>
@@ -4199,26 +4201,15 @@ namespace heimdall::lsp
 		const Position start     = lines->ToPosition(offset - prefix.size());
 		const Position end       = lines->ToPosition(offset);
 
-		std::string response;
-		// Items arrive ranked (exact prefix, case-insensitive prefix, fuzzy);
-		// `sortText` keeps that order instead of the client's alphabetical one.
-		constexpr std::size_t kSortTextWidth = 6;
-		std::size_t rank                     = 0;
+		std::vector<CompletionResponseItem> candidates;
+		candidates.reserve(items.size());
 		for (const auto& item : items)
 		{
-			if (rank != 0)
-			{
-				response += ',';
-			}
-
-			std::string sort_text = std::to_string(rank++);
-			sort_text.insert(0, kSortTextWidth - std::min(kSortTextWidth, sort_text.size()), '0');
+			std::string response;
 			response += "{\"label\":";
 			QuoteJson(item.label, response);
 			response += ",\"kind\":" + std::to_string(ToLspKind(item.kind)) + ",\"detail\":";
 			QuoteJson(item.detail, response);
-			response += ",\"sortText\":";
-			QuoteJson(sort_text, response);
 			if (!item.filter_text.empty())
 			{
 				response += ",\"filterText\":";
@@ -4244,20 +4235,56 @@ namespace heimdall::lsp
 			response += "},\"newText\":";
 			QuoteJson(item.label, response);
 			response += "}}";
+			candidates.push_back({item.label, heimdall::CompletionRanking::Evaluate(item, prefix),
+					std::move(response)});
 		}
 
-		AppendMacroCompletions(uri_string, text, version, command, offset, prefix, start, end,
-			items, rank, response);
+		const bool macrosTruncated = AppendMacroCompletions(uri_string, text, version, command,
+			offset, prefix, start, end, items, candidates);
 		const bool truncated = AppendIncludeInsertionItems(uri_string, *text, offset, command,
-			headers, items, *lines, rank, response);
-		const bool incomplete = !headers.complete || truncated;
+			headers, items, *lines, candidates);
+		if (RequestCancelled())
+		{
+			RespondCancelled(id);
+			return;
+		}
+
+		std::stable_sort(candidates.begin(), candidates.end(),[](const auto& left, const auto& right)
+			{
+				return left.score != right.score ? left.score > right.score : left.label < right.label;
+			});
+		std::string response;
+		constexpr std::size_t kSortTextWidth = 10;
+		std::size_t rank                     = 0;
+		for (auto& candidate : candidates)
+		{
+			if (candidate.score <= 0)
+			{
+				continue;
+			}
+
+			if (rank != 0)
+			{
+				response += ',';
+			}
+
+			std::string sortText = std::to_string(rank++);
+			sortText.insert(0, kSortTextWidth - std::min(kSortTextWidth, sortText.size()), '0');
+			candidate.json.pop_back();
+			response += candidate.json;
+			response += ",\"sortText\":";
+			QuoteJson("heimdall:" + sortText, response);
+			response += '}';
+		}
+
+		const bool incomplete = !headers.complete || truncated || macrosTruncated;
 		Respond(id, (incomplete ? "{\"isIncomplete\":true,\"items\":["
 			: "{\"isIncomplete\":false,\"items\":[") + response + "]}");
 	}
 
 	// Macros live at the cursor, from any header or the compile command. Not offered after
 	// `.`, `->` or `::`, where a macro name cannot appear.
-	void LanguageServer::AppendMacroCompletions(
+	bool LanguageServer::AppendMacroCompletions(
 		const std::string& uri,
 		const std::shared_ptr<const std::string>& text,
 		std::int64_t version,
@@ -4267,16 +4294,14 @@ namespace heimdall::lsp
 		const Position& start,
 		const Position& end,
 		const std::vector<heimdall::CompletionItem>& items,
-		std::size_t& rank,
-		std::string& response)
+		std::vector<CompletionResponseItem>& candidates)
 	{
 		constexpr std::size_t kMaxMacroItems = 100;
 		constexpr int kConstantKind          = 21;
 		constexpr int kFunctionKind          = 3;
-		constexpr std::size_t kSortTextWidth = 6;
 		if (prefix.empty())
 		{
-			return;
+			return false;
 		}
 
 		const std::size_t prefixStart = offset - prefix.size();
@@ -4284,26 +4309,15 @@ namespace heimdall::lsp
 		const char beforeThat         = prefixStart > 1 ? (*text)[prefixStart - 2] : ' ';
 		if (before == '.' || before == ':' ||(before == '>' && beforeThat == '-'))
 		{
-			return;
+			return false;
 		}
 
 		const auto environment = MacroEnvironmentFor(uri, text, version, command);
 		if (!environment)
 		{
-			return;
+			return false;
 		}
 
-		const auto lower = [](std::string_view word)
-		{
-			std::string folded(word);
-			for (char& c : folded)
-			{
-				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			}
-
-			return folded;
-		};
-		const std::string wanted = lower(prefix);
 		std::unordered_set<std::string> offered;
 		for (const auto& item : items)
 		{
@@ -4313,17 +4327,20 @@ namespace heimdall::lsp
 		std::vector<heimdall::MacroPtr> matches;
 		environment->At(offset).ForEach([&](const heimdall::MacroDef& macro)
 			{
-				if (macro.name.size() >= wanted.size() && lower(macro.name).starts_with(wanted) &&
+				if (macro.name.starts_with(prefix) &&
 				(prefix.starts_with('_') ||!macro.name.starts_with("__")) &&
 				!offered.contains(macro.name))
 				{
 					matches.push_back(std::make_shared<const heimdall::MacroDef>(macro));
 				}
 			});
-		std::ranges::sort(matches,[](const heimdall::MacroPtr& a, const heimdall::MacroPtr& b)
+		std::ranges::sort(matches,[&](const heimdall::MacroPtr& a, const heimdall::MacroPtr& b)
 			{
-				return a->name.size() != b->name.size() ? a->name.size() < b->name.size() : a->name < b->name;
+				const float left  = heimdall::CompletionRanking::MatchScore(a->name, prefix, true);
+				const float right = heimdall::CompletionRanking::MatchScore(b->name, prefix, true);
+				return left != right ? left > right : a->name < b->name;
 			});
+		const bool truncated = matches.size() > kMaxMacroItems;
 		if (matches.size() > kMaxMacroItems)
 		{
 			matches.resize(kMaxMacroItems);
@@ -4331,20 +4348,12 @@ namespace heimdall::lsp
 
 		for (const auto& macro : matches)
 		{
-			if (!response.empty())
-			{
-				response += ',';
-			}
-
-			std::string sortText = std::to_string(rank++);
-			sortText.insert(0, kSortTextWidth - std::min(kSortTextWidth, sortText.size()), '0');
+			std::string response;
 			response += "{\"label\":";
 			QuoteJson(macro->name, response);
 			response += ",\"kind\":" +
 				std::to_string(macro->functionLike ? kFunctionKind : kConstantKind) + ",\"detail\":";
 			QuoteJson(heimdall::lsp::MacroSignature(*macro), response);
-			response += ",\"sortText\":";
-			QuoteJson(sortText, response);
 			response += ",\"textEdit\":{\"range\":{\"start\":";
 			AppendPosition(start, response);
 			response += ",\"end\":";
@@ -4352,7 +4361,14 @@ namespace heimdall::lsp
 			response += "},\"newText\":";
 			QuoteJson(macro->name, response);
 			response += "}}";
+			heimdall::CompletionItem item;
+			item.label = macro->name;
+			item.kind  = heimdall::CompletionKind::Macro;
+			candidates.push_back({item.label, heimdall::CompletionRanking::Evaluate(item, prefix),
+					std::move(response)});
 		}
+
+		return truncated;
 	}
 
 	bool LanguageServer::AppendIncludeInsertionItems(
@@ -4363,8 +4379,7 @@ namespace heimdall::lsp
 		const HeaderView& headers,
 		const std::vector<heimdall::CompletionItem>& items,
 		const LineIndex& lines,
-		std::size_t& rank,
-		std::string& response)
+		std::vector<CompletionResponseItem>& candidates)
 	{
 		const heimdall::CompletionContext context =
 			heimdall::CompletionEngine::ContextAt(text, offset);
@@ -4402,15 +4417,6 @@ namespace heimdall::lsp
 				extension == ".hxx" || extension == ".h++" || extension == ".inl" ||
 				extension == ".ipp" || extension == ".tpp";
 		};
-		const auto starts_folded = [](std::string_view name, std::string_view prefix)
-		{
-			return name.size() >= prefix.size() &&
-				std::equal(prefix.begin(), prefix.end(), name.begin(),[](char a, char b)
-				{
-					return std::tolower(static_cast<unsigned char>(a)) ==
-					std::tolower(static_cast<unsigned char>(b));
-				});
-		};
 
 		const std::size_t replace_start = offset - context.prefix.size();
 		std::vector<std::string> offered;
@@ -4445,7 +4451,7 @@ namespace heimdall::lsp
 			}
 
 			if (kind == 0 || symbol.name.find("::") != std::string_view::npos ||
-				!starts_folded(symbol.name, context.prefix) ||
+				heimdall::CompletionRanking::MatchScore(symbol.name, context.prefix) <= 0 ||
 				(qualified && symbol.container != scope))
 			{
 				continue;
@@ -4482,20 +4488,12 @@ namespace heimdall::lsp
 			}
 
 			offered.push_back(qualified_name);
-			std::string sort_text                = std::to_string(rank++);
-			constexpr std::size_t kSortTextWidth = 6;
-			sort_text.insert(0, kSortTextWidth - std::min(kSortTextWidth, sort_text.size()), '0');
-			if (!response.empty())
-			{
-				response += ',';
-			}
+			std::string response;
 
 			response += "{\"label\":";
 			QuoteJson(std::string(symbol.name), response);
 			response += ",\"kind\":" + std::to_string(kind) + ",\"detail\":";
 			QuoteJson(qualified_name + "  (#include " + spelled + ")", response);
-			response += ",\"sortText\":";
-			QuoteJson(sort_text, response);
 			response += ",\"filterText\":";
 			QuoteJson(std::string(symbol.name), response);
 			response += ",\"textEdit\":{\"range\":{\"start\":";
@@ -4511,6 +4509,11 @@ namespace heimdall::lsp
 			response += "},\"newText\":";
 			QuoteJson(edit->text, response);
 			response += "}]}";
+			heimdall::CompletionItem item;
+			item.label = std::string(symbol.name);
+			item.kind  = heimdall::CompletionKind::Variable;
+			candidates.push_back({item.label,
+					heimdall::CompletionRanking::Evaluate(item, context.prefix, true), std::move(response)});
 		}
 
 		return hits.size() >= kIncludeCandidates;
@@ -7388,9 +7391,84 @@ namespace heimdall::lsp
 			context.activeRanges = tree->ActiveRanges();
 		}
 
-		const auto spans = heimdall::SyntaxHighlight::Extract(*tree, context);
+		const auto spans    = heimdall::SyntaxHighlight::Extract(*tree, context);
+		auto parameterSpans = spans;
+		const auto model    = heimdall::Binder::Bind(*tree);
+		const auto& symbols = model.Symbols();
+		const auto& tokens  = tree->Tokens();
+		std::unordered_set<std::uint32_t> parameterDeclarations;
+		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+		{
+			if (symbols.kind[symbol] == heimdall::SymbolKind::Parameter)
+			{
+				parameterDeclarations.insert(symbols.decl_token[symbol]);
+			}
+		}
+
+		std::unordered_map<std::uint32_t, heimdall::HighlightKind> parameterReferences;
+		const auto& references = model.Refs();
+		for (std::size_t reference = 0; reference < references.token.size(); ++reference)
+		{
+			const auto target = references.target[reference];
+			if (target >= symbols.Size())
+			{
+				continue;
+			}
+
+			if (symbols.kind[target] == heimdall::SymbolKind::Parameter)
+			{
+				parameterReferences.emplace(references.token[reference],
+					heimdall::HighlightKind::Parameter);
+			}
+			else if (symbols.kind[target] == heimdall::SymbolKind::TemplateParameter)
+			{
+				parameterReferences.emplace(references.token[reference], heimdall::HighlightKind::Type);
+			}
+		}
+
+		std::unordered_set<std::size_t> parameterOffsets;
+		for (const auto token : parameterDeclarations)
+		{
+			if (token < tokens.size())
+			{
+				parameterOffsets.insert(tokens[token].offset);
+			}
+		}
+
+		for (const auto& [token, kind] : parameterReferences)
+		{
+			static_cast<void>(kind);
+			if (token < tokens.size())
+			{
+				parameterOffsets.insert(tokens[token].offset);
+			}
+		}
+
+		std::erase_if(parameterSpans,[&](const heimdall::HighlightSpan& span)
+			{
+				return parameterOffsets.contains(span.offset);
+			});
+		for (const auto token : parameterDeclarations)
+		{
+			if (token < tokens.size())
+			{
+				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
+						heimdall::HighlightKind::Parameter, 0});
+			}
+		}
+
+		for (const auto& [token, kind] : parameterReferences)
+		{
+			if (token < tokens.size())
+			{
+				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
+						kind, 0});
+			}
+		}
+
+		std::ranges::sort(parameterSpans, {}, &heimdall::HighlightSpan::offset);
 		std::string response;
-		AppendSemanticTokens(spans, tree->Source(), *document->lines, range, response);
+		AppendSemanticTokens(parameterSpans, tree->Source(), *document->lines, range, response);
 		Respond(id, response);
 	}
 

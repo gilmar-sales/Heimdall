@@ -205,6 +205,13 @@ namespace heimdall::lsp
 
 		void CompleteDocument(simdjson::dom::element request, std::string_view id);
 
+		struct CompletionResponseItem
+		{
+			std::string label;
+			float score = 0;
+			std::string json;
+		};
+
 		// Workspace symbols declared in headers `uri` does not include yet, each with
 		// the `#include` that makes it visible. True when the symbol query was cut by
 		// its limit (more candidates may match a longer prefix).
@@ -216,8 +223,7 @@ namespace heimdall::lsp
 			const HeaderView& headers,
 			const std::vector<heimdall::CompletionItem>& items,
 			const LineIndex& lines,
-			std::size_t& rank,
-			std::string& response);
+			std::vector<CompletionResponseItem>& candidates);
 
 		// `#include "` / `#include <` path completion; quoted and angled
 		// includes search different directories.
@@ -273,7 +279,7 @@ namespace heimdall::lsp
 			const heimdall::CompileCommand* command,
 			std::string_view id);
 
-		void AppendMacroCompletions(
+		bool AppendMacroCompletions(
 			const std::string& uri,
 			const std::shared_ptr<const std::string>& text,
 			std::int64_t version,
@@ -283,8 +289,7 @@ namespace heimdall::lsp
 			const Position& start,
 			const Position& end,
 			const std::vector<heimdall::CompletionItem>& items,
-			std::size_t& rank,
-			std::string& response);
+			std::vector<CompletionResponseItem>& candidates);
 
 		void AppendHeaderMacroSymbols(
 			std::string_view query,

@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <Heimdall/CompletionRanking.hpp>
 #include <Heimdall/Doxygen.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/Navigation.hpp>
@@ -170,8 +171,9 @@ namespace heimdall
 			void Reserve(std::size_t n)
 			{
 				const std::size_t cap = NextPowerOfTwo(n * 2);
-				m_entries.assign(cap, Entry {});
-				m_mask = cap - 1;
+				m_entries             = std::vector<Entry>(cap);
+				m_mask                = cap - 1;
+				m_size                = 0;
 			}
 
 			// Insert or update. Returns pair<iterator, bool> like unordered_map.
@@ -258,6 +260,18 @@ namespace heimdall
 
 			// Iterate all entries (for collecting results)
 			template <typename F>
+			void ForEach(F&& f)
+			{
+				for (auto& entry : m_entries)
+				{
+					if (entry.key != 0)
+					{
+						f(entry.key, entry.value);
+					}
+				}
+			}
+
+			template <typename F>
 			void ForEach(F&& f) const
 			{
 				for (const auto& e : m_entries)
@@ -284,9 +298,9 @@ namespace heimdall
 			void Rehash()
 			{
 				std::vector<Entry> old = std::move(m_entries);
-				m_entries.assign(old.size() * 2, Entry {});
-				m_mask = m_entries.size() - 1;
-				m_size = 0;
+				m_entries              = std::vector<Entry>(old.size() * 2);
+				m_mask                 = m_entries.size() - 1;
+				m_size                 = 0;
 				for (auto& e : old)
 				{
 					if (e.key != 0)
@@ -308,57 +322,16 @@ namespace heimdall
 			std::size_t m_size = 0;
 		};
 
-		// Helper to collect CompletionItems from FlatHashMap into a sorted vector
+		// Collect before the shared ranking pass to avoid sorting the candidates twice.
 		template <typename Map>
-		std::vector<CompletionItem> CollectAndSort(const Map& map, const StringInterner& interner)
-		{
-			(void) interner;
-
-			std::vector<const CompletionItem*> sorted;
-			sorted.reserve(map.Size());
-
-			map.ForEach([&](std::uint32_t, const CompletionItem& value)
-				{
-					sorted.push_back(&value);
-				});
-
-			std::sort(sorted.begin(), sorted.end(),
-				[](const CompletionItem* left, const CompletionItem* right)
-				{
-					return left->label < right->label;
-				});
-
-			std::vector<CompletionItem> items;
-			items.reserve(sorted.size());
-			for (const CompletionItem* item : sorted)
-			{
-				items.push_back(*item);
-			}
-
-			return items;
-		}
-
-		// Overload for string-based labels (when we don't have interner IDs in CompletionItem)
-		template <typename Map>
-		std::vector<CompletionItem> CollectAndSort(const Map& map)
+		std::vector<CompletionItem> CollectItems(Map& map)
 		{
 			std::vector<CompletionItem> items;
 			items.reserve(map.Size());
 
-			map.ForEach([&](std::uint32_t key, const CompletionItem& value)
+			map.ForEach([&](std::uint32_t, CompletionItem& value)
 				{
-					items.push_back(value);
-				});
-
-			std::sort(items.begin(), items.end(),
-				[&](const CompletionItem& left, const CompletionItem& right)
-				{
-					if (left.label != right.label)
-					{
-						return left.label < right.label;
-					}
-
-					return left.kind < right.kind;
+					items.push_back(std::move(value));
 				});
 
 			return items;
@@ -580,119 +553,13 @@ namespace heimdall
 			return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 		}
 
-		constexpr char FoldCase(char c)
-		{
-			return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-		}
-
-		// How well a candidate matches the typed word, best first in the ranking.
-		enum class MatchQuality : std::uint8_t
-		{
-			None,
-			Fuzzy,
-			FoldedPrefix,
-			Prefix,
-		};
-
-		// Start of a word segment: `Bar` and `bar` in `FooBar`, `foo_bar`, `x2bar`.
-		bool IsSegmentStart(std::string_view name, std::size_t at)
-		{
-			if (at == 0)
-			{
-				return true;
-			}
-
-			const char previous = name[at - 1];
-			const char current  = name[at];
-			const auto is_lower = [](char c)
-			{
-				return c >= 'a' && c <= 'z';
-			};
-			const auto is_upper = [](char c)
-			{
-				return c >= 'A' && c <= 'Z';
-			};
-			const auto is_digit = [](char c)
-			{
-				return c >= '0' && c <= '9';
-			};
-			return (previous == '_' && current != '_') ||(is_upper(current) && is_lower(previous)) ||
-				(!is_digit(current) && is_digit(previous));
-		}
-
 		// Exact prefix, then case-insensitive prefix, then a case-insensitive fuzzy
 		// match in clangd's style: the first character matches a segment start and
 		// each following one either continues the previous match or starts a new
 		// segment (`Foba` finds `FooBar`, `ba` finds `BigBang`, `ec` misses `explicit`).
-		MatchQuality MatchName(std::string_view name, std::string_view query)
-		{
-			if (query.empty() || StartsWith(name, query))
-			{
-				return MatchQuality::Prefix;
-			}
-
-			if (name.size() < query.size())
-			{
-				return MatchQuality::None;
-			}
-
-			bool folded = true;
-			for (std::size_t i = 0; i < query.size(); ++i)
-			{
-				if (FoldCase(name[i]) != FoldCase(query[i]))
-				{
-					folded = false;
-					break;
-				}
-			}
-
-			if (folded)
-			{
-				return MatchQuality::FoldedPrefix;
-			}
-
-			constexpr std::size_t kMaxFuzzyName = 256;
-			if (name.size() > kMaxFuzzyName)
-			{
-				return MatchQuality::None;
-			}
-
-			// matched[j]: query[0..i] matches with query[i] at name[j].
-			std::array<bool, kMaxFuzzyName> matched {};
-			std::array<bool, kMaxFuzzyName> next {};
-			for (std::size_t j = 0; j < name.size(); ++j)
-			{
-				matched[j] = FoldCase(name[j]) == FoldCase(query[0]) && IsSegmentStart(name, j);
-			}
-
-			for (std::size_t i = 1; i < query.size(); ++i)
-			{
-				bool any_before = false;
-				for (std::size_t j = 0; j < name.size(); ++j)
-				{
-					const bool same = FoldCase(name[j]) == FoldCase(query[i]);
-					next[j] = same && j > 0 &&
-						(matched[j - 1] ||(any_before && IsSegmentStart(name, j)));
-					any_before = any_before || matched[j];
-				}
-
-				matched = next;
-			}
-
-			for (std::size_t j = 0; j < name.size(); ++j)
-			{
-				if (matched[j])
-				{
-					return MatchQuality::Fuzzy;
-				}
-			}
-
-			return MatchQuality::None;
-		}
-
 		bool MatchesPrefix(std::string_view name, std::string_view prefix)
 		{
-			return !name.empty() && MatchName(name, prefix) != MatchQuality::None;
+			return CompletionRanking::MatchScore(name, prefix) > 0;
 		}
 
 		// Macros only complete from an exact prefix: fuzzy matches on them are noise.
@@ -722,59 +589,11 @@ namespace heimdall
 			return !rest.empty() && IsIdentChar(rest.front());
 		}
 
-		// Candidate label for filtering: override suggestions are labeled with the
-		// whole signature but filtered by the function name.
-		std::string_view FilterTextOf(const CompletionItem& item)
-		{
-			return item.filter_text.empty() ? std::string_view(item.label)
-			: std::string_view(item.filter_text);
-		}
-
-		// Records and enums are listed by their owner with the scope item shape
-		// (detail `struct ns::Name`); completion reports them as types.
-		CompletionItem NormalizeForCompletion(CompletionItem item)
-		{
-			if (item.kind == CompletionKind::Namespace && !item.detail.starts_with("namespace"))
-			{
-				item.kind = CompletionKind::Type;
-			}
-
-			return item;
-		}
-
 		std::vector<CompletionItem> RankItems(
 			std::vector<CompletionItem> items,
 			std::string_view prefix)
 		{
-			if (prefix.empty())
-			{
-				for (auto& item : items)
-				{
-					item = NormalizeForCompletion(std::move(item));
-				}
-
-				return items;
-			}
-
-			std::vector<std::pair<MatchQuality, CompletionItem>> ranked;
-			ranked.reserve(items.size());
-			for (auto& item : items)
-			{
-				const MatchQuality quality = MatchName(FilterTextOf(item), prefix);
-				ranked.emplace_back(quality, NormalizeForCompletion(std::move(item)));
-			}
-
-			std::stable_sort(ranked.begin(), ranked.end(),
-				[](const auto& left, const auto& right)
-				{
-					return left.first > right.first;
-				});
-			items.clear();
-			for (auto& [quality, item] : ranked)
-			{
-				items.push_back(std::move(item));
-			}
-
+			CompletionRanking::Rank(items, prefix);
 			return items;
 		}
 
@@ -1376,9 +1195,12 @@ namespace heimdall
 				return;
 			}
 
-			CompletionItem& old = entry->value;
-			item.deprecated     = item.deprecated || old.deprecated;
-			old.deprecated      = item.deprecated;
+			CompletionItem& old  = entry->value;
+			const auto scope     = std::max(old.completionScope, item.completionScope);
+			old.completionScope  = scope;
+			item.completionScope = scope;
+			item.deprecated      = item.deprecated || old.deprecated;
+			old.deprecated       = item.deprecated;
 			if (KindPriority(item.kind) > KindPriority(old.kind) ||
 				(KindPriority(item.kind) == KindPriority(old.kind) && item.is_definition &&
 				!old.is_definition &&
@@ -5737,9 +5559,9 @@ namespace heimdall
 							continue;
 						}
 
-						InsertItem(
-							interner, best,
-							DescribeDeclared(tree, source, tokens, n, name, CompletionKind::Variable));
+						auto item            = DescribeDeclared(tree, source, tokens, n, name, CompletionKind::Variable);
+						item.completionScope = CompletionScope::Function;
+						InsertItem(interner, best, std::move(item));
 						continue;
 					}
 
@@ -5754,7 +5576,9 @@ namespace heimdall
 						continue;
 					}
 
-					InsertItem(interner, best, DescribeDeclared(tree, source, tokens, n, name, kind));
+					auto item            = DescribeDeclared(tree, source, tokens, n, name, kind);
+					item.completionScope = CompletionScope::File;
+					InsertItem(interner, best, std::move(item));
 				}
 			}
 
@@ -8091,7 +7915,9 @@ namespace heimdall
 							continue;
 						}
 
-						CompletionItem item = member;
+						CompletionItem item      = member;
+						item.completionScope     = CompletionScope::Class;
+						item.inheritedCompletion = depth > 0;
 						InsertItem(interner, best, WithFieldDetail(std::move(item)));
 					}
 				}
@@ -10311,7 +10137,7 @@ namespace heimdall
 			return Complete(tree, options, offset, external);
 		}
 
-		return RankItems(CollectAndSort(best), prefix);
+		return RankItems(CollectItems(best), prefix);
 	}
 
 	static std::vector<CompletionItem> CompleteTree(
@@ -10553,7 +10379,7 @@ namespace heimdall
 			}
 		}
 
-		auto items = CollectAndSort(best, interner);
+		auto items = CollectItems(best);
 		if (!for_hover && RequiresReflectionValue(source, tokens, offset))
 		{
 			RestrictReflectionItems(tree, external, offset, items);

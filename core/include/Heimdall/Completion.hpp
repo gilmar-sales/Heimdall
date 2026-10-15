@@ -36,6 +36,15 @@ namespace heimdall
 		Private
 	};
 
+	/** @brief Visibility domain used to rank symbols independently of their display kind. */
+	enum class CompletionScope : std::uint8_t
+	{
+		Unknown,
+		File,
+		Class,
+		Function
+	};
+
 	/** @brief Completion candidate and associated display, navigation, and type metadata. */
 	struct CompletionItem
 	{
@@ -92,6 +101,10 @@ namespace heimdall
 		std::vector<std::string> templateParams;
 		/// Shared return metadata, populated only for functions with deduced return types.
 		std::shared_ptr<const FunctionDeduction> deduction;
+		/// Visibility domain, left neutral when the collector cannot establish it.
+		CompletionScope completionScope = CompletionScope::Unknown;
+		/// Whether this completion was collected through a base-class traversal.
+		bool inheritedCompletion = false;
 	};
 
 	/**

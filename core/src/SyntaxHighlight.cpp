@@ -17,7 +17,7 @@ namespace heimdall
 		constexpr std::array<std::string_view, static_cast<std::size_t>(HighlightKind::Count) >
 		kKindNames = {"keyword", "number", "string", "comment", "operator", "macro",
 			"namespace", "type", "class", "struct", "enum", "enumMember",
-			"function", "method", "property", "variable"};
+			"function", "method", "property", "variable", "parameter"};
 
 		constexpr std::size_t kTypeKeywordCount = 15;
 		constexpr std::size_t kTokensPerSpan    = 2;

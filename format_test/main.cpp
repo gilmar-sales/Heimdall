@@ -2,6 +2,7 @@
 #include <meta>
 #include <string>
 #include <string_view>
+
 /**
  * @brief Calculates the sum of a and b, returning 100 if the sum exceeds 10, and 1 otherwise.
  *

@@ -1,6 +1,7 @@
 #include <benchmark/benchmark.h>
 
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/CompletionRanking.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/ParseTree.hpp>
@@ -118,6 +119,35 @@ namespace
     }
 
     BENCHMARK(BM_Complete);
+
+    void BM_CompletionRank(benchmark::State& state)
+    {
+        std::vector<heimdall::CompletionItem> corpus;
+        const auto count = static_cast<std::size_t>(state.range(0));
+        corpus.reserve(count);
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            heimdall::CompletionItem item;
+            item.label = "FetchBuffer" + std::to_string(count - index);
+            item.kind = heimdall::CompletionKind::Function;
+            item.deprecated = index % 7 == 0;
+            corpus.push_back(std::move(item));
+        }
+
+        for (auto _ : state)
+        {
+            state.PauseTiming();
+            auto items = corpus;
+            state.ResumeTiming();
+
+            heimdall::CompletionRanking::Rank(items, "FB");
+            benchmark::DoNotOptimize(items.data());
+        }
+
+        state.SetItemsProcessed(state.iterations() * state.range(0));
+    }
+
+    BENCHMARK(BM_CompletionRank)->Arg(100)->Arg(1000)->Arg(10000);
 
     BENCHMARK(BM_Hover);
 

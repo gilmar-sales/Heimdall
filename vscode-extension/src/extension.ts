@@ -10,6 +10,7 @@ import {
     Trace,
 } from 'vscode-languageclient/node';
 import { stageServerBinary } from './serverStaging';
+import { preserveCompletionRanking } from './completionRanking';
 import { CPP_LANGUAGES, FORMATTER_DEFAULT_COLUMN_LIMIT, equalArrays, findHeimdallConfig, resolveColumnLimit, rulersForColumnLimit } from './columnRulers';
 import {
     findInstalledServer,
@@ -471,6 +472,19 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
             workspaceRoot,
         },
         outputChannel: output,
+        middleware: {
+            provideCompletionItem: async (document, position, completionContext, token, next) => {
+                const result = await next(document, position, completionContext, token);
+                if (!result || token.isCancellationRequested ||
+                    !vscode.workspace.getConfiguration('heimdall', document.uri).get<boolean>('completion.serverRanking', true)) {
+                    return result;
+                }
+                const range = document.getWordRangeAtPosition(position);
+                const prefix = range ? document.getText(new vscode.Range(range.start, position)) : '';
+                const items = preserveCompletionRanking(Array.isArray(result) ? result : result.items, prefix);
+                return items ? new vscode.CompletionList(items, true) : result;
+            },
+        },
     };
 
     client = new LanguageClient('heimdall', 'Heimdall', serverOptions, clientOptions);
