@@ -19,7 +19,7 @@ namespace heimdall
 		std::string code;
 		std::string summary;
 		Severity severity = Severity::Warning;
-		bool enabled      = true;
+		bool enabled      = false;
 	};
 
 	struct RuleMetrics

@@ -15,6 +15,7 @@ namespace
         plugin.name = std::move(name);
         PluginRule rule;
         rule.code = std::move(code);
+        rule.enabled = true;
         rule.interests = {PluginNodeKind::Return};
         rule.on_node = [](const PluginContext& context, NodeId node,
                           std::vector<PluginDiagnostic>& out)
@@ -57,6 +58,7 @@ namespace
         plugin.name = "query-test";
         PluginRule rule;
         rule.code = "test/queries";
+        rule.enabled = true;
         rule.interests = {PluginNodeKind::Return};
         rule.on_node = [](const PluginContext& context, NodeId node,
                           std::vector<PluginDiagnostic>& out)
@@ -114,6 +116,7 @@ namespace
         AnalysisEngine engine;
         ScheduledRule native;
         native.metadata.code = "test/native";
+        native.metadata.enabled = true;
         native.interests = {GrammarKind::ReturnStatement};
         native.on_node = [](const AnalysisContext& context, NodeId node, DiagnosticSink& sink)
         {

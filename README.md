@@ -586,7 +586,9 @@ outside the extension) still needs to be closed before relinking.
   lexer tokens. Green nodes are flat immutable-style spans linked by parent index;
   unmatched/mismatched delimiters produce diagnostics and recovery continues. This
   is structural scaffolding, not yet a C++ declaration/expression grammar.
-- **Rule engine**: `cpp/no-null` replaces `NULL` with `nullptr` outside comments,
+- **Rule engine**: Every rule is opt-in and disabled unless its code is set under
+  `rules` in `.heimdall.json` (or enabled with `--rule`). Use `warning` or `error`
+  to enable a rule, and `off` to disable it. `cpp/no-null` replaces `NULL` with `nullptr` outside comments,
   literals and directives; `format/no-trailing-whitespace` removes trailing
   spaces/tabs; `format/require-final-newline` ensures a final newline and makes
   CLI/LSP formatting insert it when configured as `warning` or `error`, preserving LF/CRLF;
@@ -596,7 +598,7 @@ outside the extension) still needs to be closed before relinking.
   aliases; `cpp/no-todo` flags uppercase `TODO`/`FIXME`/`XXX` markers in
   comments (no autofix); `cpp/no-magic-numbers` flags numeric literals other
   than `0`/`1` (any base or suffix spelling) outside comments, literals and
-  directives (no autofix); `cpp/sort-includes` (opt-in) flags include blocks out of the
+  directives (no autofix); `cpp/sort-includes` flags include blocks out of the
   configured order (`include-order` in `.heimdall.json`) and safely
   reorders each block in batch; `cpp/modernize-emplace` rewrites
   `push_back(T(...))`/`push_back({...})` as `emplace_back(...)` (quick fix);

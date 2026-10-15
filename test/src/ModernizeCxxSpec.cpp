@@ -11,7 +11,15 @@ namespace
 
     std::vector<heimdall::Diagnostic> Lint(const std::string& source)
     {
-        return heimdall::RuleEngine().Analyze(source);
+        auto options = heimdall::RuleOptions {};
+        options.modernize_emplace = true;
+        options.modernize_make_unique = true;
+        options.modernize_make_shared = true;
+        options.modernize_smart_ptr = true;
+        options.no_new_delete = true;
+        options.modernize_structured_bindings = true;
+        options.modernize_algorithms = true;
+        return heimdall::RuleEngine(std::move(options)).Analyze(source);
     }
 
     std::vector<heimdall::Diagnostic> ByCode(

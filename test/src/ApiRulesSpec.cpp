@@ -575,6 +575,36 @@ TEST(ApiConstCorrectness, ReportsAMemberFunctionThatReadsOnly)
               "struct A { int x; int get() const { return x; } };\n");
 }
 
+TEST(ApiConstCorrectness, DoesNotSuggestConstWhenSubscriptedMemberIsAssigned)
+{
+    const Typed typed(
+        "struct Visited { int stamp[4] {}; int epoch = 0;\n"
+        "bool Mark(int symbol) {\n"
+        "return stamp[symbol] != epoch && (stamp[symbol] = epoch, true);\n"
+        "}\n"
+        "};\n");
+
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
+
+    EXPECT_TRUE(diagnostics.empty());
+}
+
+TEST(ApiConstCorrectness, ReportsErrorForSubscriptedMemberWriteInConstMethod)
+{
+    const Typed typed(
+        "struct Visited { int stamp[4] {}; int epoch = 0;\n"
+        "bool Mark(int symbol) const {\n"
+        "return stamp[symbol] != epoch && (stamp[symbol] = epoch, true);\n"
+        "}\n"
+        "};\n");
+
+    const auto diagnostics = heimdall::SemanticRules::AnalyzeConstCorrectness(typed.flow);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics[0].code, "cpp/const-member-modification");
+    EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
+}
+
 TEST(ApiConstCorrectness, SilentForWritersStaticAndUnknownCalls)
 {
     EXPECT_TRUE(heimdall::SemanticRules::AnalyzeConstCorrectness(

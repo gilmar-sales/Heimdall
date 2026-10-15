@@ -17,6 +17,7 @@ namespace
     {
         ScheduledRule rule;
         rule.metadata.code = std::move(code);
+        rule.metadata.enabled = true;
         rule.interests = {GrammarKind::ReturnStatement, GrammarKind::ReturnStatement};
         rule.on_node = [](const AnalysisContext& context, NodeId node, DiagnosticSink& sink)
         {
@@ -72,6 +73,7 @@ namespace
         auto context = Context("int x;");
         ScheduledRule rule;
         rule.metadata.code = "test/bounds";
+        rule.metadata.enabled = true;
         rule.on_document = [](const AnalysisContext&, DiagnosticSink& sink)
         {
             sink.Emit({999, 1}, "out of bounds");

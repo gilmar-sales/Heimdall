@@ -84,7 +84,7 @@ namespace heimdall
 		std::string code;
 		std::string summary;
 		PluginSeverity severity = PluginSeverity::Warning;
-		bool enabled            = true;
+		bool enabled            = false;
 		std::vector<PluginNodeKind> interests;
 		std::function<void(const PluginContext&, NodeId, std::vector<PluginDiagnostic>&) > on_node;
 	};

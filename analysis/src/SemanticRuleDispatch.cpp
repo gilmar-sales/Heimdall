@@ -111,7 +111,7 @@ namespace heimdall::detail
 			const auto& entry        = entries[i];
 			const auto* info         = FindRule(entry.id);
 			const bool documentation = std::holds_alternative<DocumentationRule>(entry.callback);
-			selected[i]              = info && engine.Enabled(info->code, !documentation);
+			selected[i]              = info && engine.Enabled(info->code, false);
 			if (!selected[i])
 			{
 				continue;

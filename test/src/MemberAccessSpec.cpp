@@ -12,8 +12,10 @@ namespace
         heimdall::Workspace workspace;
         const auto file = workspace.Open("members.cpp", std::make_shared<const std::string>(source));
         heimdall::AnalysisContext context(workspace.Snapshot(), *file);
+        heimdall::RuleOptions options;
+        options.overrides.push_back({"cpp/dot-on-pointer", true, heimdall::Severity::Error});
         auto diagnostics = heimdall::AnalysisFeatures::Diagnostics(
-            context, heimdall::RuleEngine {}, true);
+            context, heimdall::RuleEngine(std::move(options)), true);
         std::erase_if(diagnostics,[](const auto& diagnostic)
             {
                 return diagnostic.code != "cpp/dot-on-pointer";

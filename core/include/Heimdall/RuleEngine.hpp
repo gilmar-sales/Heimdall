@@ -162,30 +162,22 @@ namespace heimdall
 		bool duplicate_include                  = true;
 		bool legacy_typedef                     = true;
 		bool todo_comment                       = true;
-		bool magic_numbers                      = true;
+		bool magic_numbers                      = false;
 		ConstantNameCasing constant_name_casing = ConstantNameCasing::KPrefix;
-		bool modernize_emplace                  = true;
-		bool modernize_make_unique              = true;
-		bool modernize_make_shared              = true;
-		bool modernize_smart_ptr                = true;
-		bool no_new_delete                      = true;
-		bool modernize_structured_bindings      = true;
-		bool modernize_algorithms               = true;
-		// Opt-in: the order is a project convention, so the rule only
-		// runs when enabled together with a configured order.
-		bool sort_includes      = false;
-		bool honor_suppressions = true;
+		bool modernize_emplace                  = false;
+		bool modernize_make_unique              = false;
+		bool modernize_make_shared              = false;
+		bool modernize_smart_ptr                = false;
+		bool no_new_delete                      = false;
+		bool modernize_structured_bindings      = false;
+		bool modernize_algorithms               = false;
+		bool sort_includes                      = false;
+		bool honor_suppressions                 = true;
 		std::vector<RuleOverride> overrides;
 		std::vector<IncludeGroup> include_order = {IncludeGroup::Angle, IncludeGroup::Quote};
 		bool include_case_insensitive           = true;
-		// File name of the translation unit being analyzed ("Reporting.cpp").
-		// The homonymous header ("Reporting.hpp") sorts before every group.
-		// Empty disables the pinning; set per file by the caller.
 		std::string main_file_name;
-		DocScope doc_scope = DocScope::Public;
-		// Bounds of the macro environment of a translation unit (`macros` in .heimdall.json).
-		// The defaults are what GCC and Clang accept (include depth) and what the C++ standard
-		// asks implementations to support (macros defined at once).
+		DocScope doc_scope                  = DocScope::Public;
 		std::size_t macro_max_include_depth = 200;
 		std::size_t macro_max_macros        = 65536;
 	};

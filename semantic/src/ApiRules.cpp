@@ -1754,6 +1754,20 @@ namespace heimdall
 						return false;
 					}
 
+					// A subscripted member can be modified through the returned
+					// element even though the assignment is not adjacent to its name.
+					if (after == Tok::LBracket)
+					{
+						const auto close = view.Match(i + 1, body.second);
+						if (close < body.second &&
+							(IsAssignToken(view.At(close + 1)) ||
+							view.At(close + 1) == Tok::PlusPlus ||
+							view.At(close + 1) == Tok::MinusMinus))
+						{
+							return false;
+						}
+					}
+
 					// `m_.push_back(...)`: a call through the member. Only
 					// calls the engine knows to be const are safe.
 					if ((after == Tok::Dot || after == Tok::Arrow) && i + 2 < body.second &&
@@ -1815,6 +1829,43 @@ namespace heimdall
 
 			(void) function;
 			return true;
+		}
+
+		std::size_t ConstMemberSubscriptWrite(
+			const SemanticModel& model,
+			const detail::TokenView& view,
+			SymbolId klass,
+			const std::pair<std::size_t, std::size_t>& body)
+		{
+			const auto& symbols = model.Symbols();
+			for (auto i = body.first + 1; i < body.second; ++i)
+			{
+				if (!view.IsWord(i) || view.At(i + 1) != Tok::LBracket)
+				{
+					continue;
+				}
+
+				const SymbolId target = model.ResolveToken(view.TokenAt(i));
+				if (target == kNone || symbols.kind[target] != SymbolKind::Variable ||
+					symbols.scope[target] != symbols.member_scope[klass])
+				{
+					continue;
+				}
+
+				const auto close = view.Match(i + 1, body.second);
+				if (close >= body.second)
+				{
+					continue;
+				}
+
+				const Tok after = view.At(close + 1);
+				if (IsAssignToken(after) || after == Tok::PlusPlus || after == Tok::MinusMinus)
+				{
+					return close + 1;
+				}
+			}
+
+			return body.second;
 		}
 
 		// ---------------------------------------------------------------------
@@ -1906,6 +1957,32 @@ namespace heimdall
 			// Member functions that could be `const`.
 			for (SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 			{
+				if (symbols.kind[symbol] == SymbolKind::Function &&
+					(symbols.flags[symbol] & (SymbolFlag::Const | SymbolFlag::Definition)) ==
+					(SymbolFlag::Const | SymbolFlag::Definition))
+				{
+					const ScopeId scope = symbols.scope[symbol];
+					if (scopes.kind[scope] == ScopeKind::Class && scopes.owner[scope] != kNone)
+					{
+						const auto body = FunctionBodyOf(model, view, symbols.decl_node[symbol]);
+						if (body)
+						{
+							const auto write = ConstMemberSubscriptWrite(
+								model, view, scopes.owner[scope], *body);
+							if (write < body->second)
+							{
+								const auto name = view.PositionOf(symbols.decl_token[symbol]);
+								auto diagnostic = analysis.Make(
+									RuleId::ApiConstCorrectness, "cpp/const-member-modification",
+									"assignment modifies a member through a const member function",
+									write);
+								diagnostic.severity = Severity::Error;
+								diagnostics.push_back(std::move(diagnostic));
+							}
+						}
+					}
+				}
+
 				constexpr std::uint32_t kSkipped =
 					SymbolFlag::Static | SymbolFlag::Constructor | SymbolFlag::Destructor |
 					SymbolFlag::Operator | SymbolFlag::Template | SymbolFlag::Friend |

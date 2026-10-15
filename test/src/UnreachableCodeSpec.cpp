@@ -13,8 +13,12 @@ namespace
         const auto file = workspace.Open("unreachable.cpp",
             std::make_shared<const std::string>(source));
         heimdall::AnalysisContext context(workspace.Snapshot(), *file);
+        heimdall::RuleOptions options;
+        options.overrides.push_back({"cpp/unreachable-code", true, heimdall::Severity::Warning});
+        options.overrides.push_back({"cpp/missing-return", true, heimdall::Severity::Error});
+        options.overrides.push_back({"cpp/return-type", true, heimdall::Severity::Error});
         auto diagnostics = heimdall::AnalysisFeatures::Diagnostics(
-            context, heimdall::RuleEngine {}, true);
+            context, heimdall::RuleEngine(std::move(options)), true);
         std::erase_if(diagnostics,[](const auto& diagnostic)
             {
                 return diagnostic.code != "cpp/unreachable-code";

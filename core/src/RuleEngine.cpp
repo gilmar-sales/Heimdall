@@ -1311,7 +1311,7 @@ namespace heimdall
 		LineTable lines;
 		lines.Build(source);
 
-		if (m_options.null_macro)
+		if (RuleEnabled("cpp/no-null", m_options.null_macro))
 		{
 			std::size_t directive_cursor = 0;
 			for (const auto& token : tokens)
@@ -1333,7 +1333,7 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.trailing_whitespace)
+		if (RuleEnabled("format/no-trailing-whitespace", m_options.trailing_whitespace))
 		{
 			std::size_t line_start = 0;
 			while (line_start < source.size())
@@ -1370,7 +1370,8 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.final_newline && !source.empty() && source.back() != '\n')
+		if (RuleEnabled("format/require-final-newline", m_options.final_newline) &&
+			!source.empty() && source.back() != '\n')
 		{
 			const auto position = lines.Lookup(source.size());
 			const bool crlf     = source.find("\r\n") != std::string_view::npos;
@@ -1380,7 +1381,7 @@ namespace heimdall
 				{source.size(), 0, crlf ? "\r\n" : "\n"}));
 		}
 
-		if (m_options.todo_comment)
+		if (RuleEnabled("cpp/no-todo", m_options.todo_comment))
 		{
 			for (const auto& token : tokens)
 			{
@@ -1404,7 +1405,7 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.magic_numbers)
+		if (RuleEnabled("cpp/no-magic-numbers", m_options.magic_numbers))
 		{
 			std::size_t directive_cursor = 0;
 			for (std::size_t i = 0; i < tokens.size(); ++i)
@@ -1590,7 +1591,7 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.empty_catch)
+		if (RuleEnabled("cpp/no-empty-catch", m_options.empty_catch))
 		{
 			std::size_t directive_cursor = 0;
 			for (std::size_t i = 0; i < tokens.size(); ++i)
@@ -1680,7 +1681,7 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.duplicate_include)
+		if (RuleEnabled("cpp/no-duplicate-include", m_options.duplicate_include))
 		{
 			// Only includes outside any conditional block are compared: the
 			// same header in different #ifdef branches is usually intentional.
@@ -1734,7 +1735,7 @@ namespace heimdall
 			}
 		}
 
-		if (m_options.legacy_typedef)
+		if (RuleEnabled("cpp/modernize-using", m_options.legacy_typedef))
 		{
 			std::size_t directive_cursor = 0;
 			for (std::size_t i = 0; i < tokens.size(); ++i)

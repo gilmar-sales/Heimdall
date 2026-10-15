@@ -30,6 +30,10 @@ namespace
         auto doc = SemanticRules::AnalyzeDocumentation(context.Semantic(), engine);
         semantic.insert(semantic.end(), std::make_move_iterator(doc.begin()),
                         std::make_move_iterator(doc.end()));
+        std::erase_if(semantic,[&](const Diagnostic& diagnostic)
+            {
+                return !engine.Enabled(diagnostic.code, false);
+            });
         semantic = engine.ApplyPolicy(std::move(semantic), context.Syntax());
         all.insert(all.end(), std::make_move_iterator(semantic.begin()),
                    std::make_move_iterator(semantic.end()));
@@ -198,7 +202,17 @@ int undocumented(int argument) { return argument; }
             AnalysisContext context(workspace.Snapshot(), *id);
             ProjectContext project;
             project.file = "equivalence.cpp";
-            RuleEngine defaults;
+            auto defaults_options = DisabledRules();
+            for (const auto& rule : RuleCatalog())
+            {
+                if (rule.layer == "semantic" || rule.layer == "api")
+                {
+                    defaults_options.overrides.push_back(
+                        {std::string(rule.code), true, rule.default_severity});
+                }
+            }
+
+            RuleEngine defaults(std::move(defaults_options));
             ExpectEquivalent(AnalysisFeatures::Diagnostics(context, defaults, true, project),
                              Legacy(context, defaults, project));
             for (const auto& rule : RuleCatalog())
@@ -259,6 +273,15 @@ int undocumented(int argument) { return argument; }
         AnalysisContext context(workspace.Snapshot(), *id);
         RuleOptions options;
         options.doc_scope = DocScope::All;
+        for (const auto& rule : RuleCatalog())
+        {
+            if (rule.layer == "semantic" || rule.layer == "api")
+            {
+                options.overrides.push_back(
+                    {std::string(rule.code), true, rule.default_severity});
+            }
+        }
+
         options.overrides.push_back({"doc/require-comment", true, Severity::Warning});
         options.overrides.push_back({"doc/doxygen-style", true, Severity::Warning});
         RuleEngine engine(options);

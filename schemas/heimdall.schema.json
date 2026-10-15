@@ -20,7 +20,7 @@
     },
     "rules": {
       "type": "object",
-      "description": "Per-rule severity. Valid values are 'off', 'warning' and 'error'.",
+      "description": "Rules are disabled unless listed here. Valid values are 'off', 'warning' and 'error'.",
       "properties": {
         "cpp/no-null": {
           "enum": [
