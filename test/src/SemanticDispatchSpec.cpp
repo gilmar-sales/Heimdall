@@ -85,6 +85,34 @@ namespace
         EXPECT_EQ(context.Snapshot().Metrics().type_count, 0);
     }
 
+    TEST(SemanticDispatchSpec, UnconfiguredSemanticRulesStayOffUntilExplicitlyEnabled)
+    {
+        Workspace workspace;
+        const auto document = workspace.Open("opt-in.cpp",
+            std::make_shared<const std::string>("void f(int); void g() { f(); }\n"));
+        ASSERT_TRUE(document);
+        const AnalysisContext context(workspace.Snapshot(), *document);
+
+        const auto defaults = AnalysisFeatures::Diagnostics(context, RuleEngine {}, true);
+
+        EXPECT_TRUE(defaults.empty());
+        EXPECT_EQ(context.Snapshot().Metrics().bind_count, 0);
+        EXPECT_EQ(context.Snapshot().Metrics().type_count, 0);
+
+        RuleOptions options;
+        options.overrides.push_back({"cpp/call-argument-count", true, Severity::Error});
+
+        const auto enabled = AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+
+        ASSERT_EQ(enabled.size(), 1);
+        EXPECT_EQ(enabled.front().code, "cpp/call-argument-count");
+        EXPECT_EQ(enabled.front().severity, Severity::Error);
+
+        options.overrides.push_back({"cpp/call-argument-count", false, Severity::Error});
+
+        EXPECT_TRUE(AnalysisFeatures::Diagnostics(context, RuleEngine(options), true).empty());
+    }
+
     TEST(SemanticDispatchSpec, EachNativeRuleRequestsOnlyItsModelDomain)
     {
         for (const auto& rule : RuleCatalog())
@@ -138,7 +166,7 @@ namespace
                 rule.id == RuleId::ModernizeSpan || rule.id == RuleId::ModernizeAttributes ||
                 rule.id == RuleId::ApiMissingNodiscard || rule.id == RuleId::ApiPassByValue ||
                 rule.id == RuleId::ApiPassByConstReference ||
-                rule.id == RuleId::ApiConstCorrectness || rule.id == RuleId::ApiUnsafeDowncast ||
+                rule.id == RuleId::ApiConstCorrectness || rule.id == RuleId::ConstMemberModification || rule.id == RuleId::ApiUnsafeDowncast ||
                 rule.id == RuleId::ApiSlicing || rule.id == RuleId::CallArgumentType ||
                 rule.id == RuleId::DotOnPointer || rule.id == RuleId::InaccessibleMember ||
                 rule.id == RuleId::ConflictingDeclaration ||
@@ -253,6 +281,43 @@ int undocumented(int argument) { return argument; }
         EXPECT_EQ(context.Snapshot().Metrics().type_count, 0);
         options.overrides.push_back({"cpp/no-zero-as-null", false, Severity::Warning});
         EXPECT_TRUE(AnalysisFeatures::Diagnostics(context, RuleEngine(options), true).empty());
+    }
+
+    TEST(SemanticDispatchSpec, ConstMemberModificationIsConfiguredIndependentlyOfConstSuggestions)
+    {
+        Workspace workspace;
+        const auto document = workspace.Open("const-member.cpp", std::make_shared<const std::string>(
+            "struct Values { int slots[4]; int value; "
+            "void Write(int index) const { slots[index] = 1; } "
+            "int Read() { return value; } };\n"));
+        ASSERT_TRUE(document);
+        const AnalysisContext context(workspace.Snapshot(), *document);
+        auto options = DisabledRules();
+        options.overrides.push_back({"cpp/const-member-modification", true, Severity::Error});
+
+        const auto errors = AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+
+        ASSERT_EQ(errors.size(), 1);
+        EXPECT_EQ(errors.front().code, "cpp/const-member-modification");
+        EXPECT_EQ(errors.front().rule, RuleId::ConstMemberModification);
+        EXPECT_EQ(errors.front().severity, Severity::Error);
+
+        options.overrides.push_back({"api/const-correctness", true, Severity::Warning});
+
+        const auto both = AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+
+        ASSERT_EQ(both.size(), 2);
+        EXPECT_EQ(std::count_if(both.begin(), both.end(),[](const Diagnostic& diagnostic)
+            {
+                return diagnostic.code == "cpp/const-member-modification";
+                }), 1);
+
+        options.overrides.push_back({"cpp/const-member-modification", false, Severity::Error});
+
+        const auto suggestions = AnalysisFeatures::Diagnostics(context, RuleEngine(options), true);
+
+        ASSERT_EQ(suggestions.size(), 1);
+        EXPECT_EQ(suggestions.front().code, "api/const-correctness");
     }
 
     TEST(SemanticDispatchSpec, PreservesDiagnosticOrderWhenManyRulesShareOffsets)

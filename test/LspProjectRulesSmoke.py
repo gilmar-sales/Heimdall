@@ -24,6 +24,10 @@ def parse(stream):
 
 with tempfile.TemporaryDirectory(prefix="heimdall_lsp_project_rules_") as temporary:
     root = Path(temporary)
+    (root / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+        "cpp/include-what-you-use": "warning",
+        "cpp/modernize-final": "warning",
+    }}), encoding="utf-8")
     include = root / "inc"
     include.mkdir()
     (include / "core.hpp").write_text("#pragma once\nstruct Core {};\n", encoding="utf-8")

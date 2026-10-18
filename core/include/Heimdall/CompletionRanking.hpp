@@ -7,6 +7,15 @@
 
 namespace heimdall
 {
+	/** @brief Independent factors for explaining the heuristic score without allocation. */
+	struct CompletionScore
+	{
+		float name      = 0;
+		float quality   = 1;
+		float relevance = 1;
+		float total     = 0;
+	};
+
 	/** @brief Shared, deterministic ranking for local, macro and workspace completions. */
 	class CompletionRanking
 	{
@@ -19,6 +28,12 @@ namespace heimdall
 
 		/// Combines name matching with known symbol quality and visibility signals.
 		[[nodiscard]] static float Evaluate(
+			const CompletionItem& item,
+			std::string_view prefix,
+			bool needsInclude = false) noexcept;
+
+		/// Explains name, category/availability quality and contextual relevance separately.
+		[[nodiscard]] static CompletionScore Explain(
 			const CompletionItem& item,
 			std::string_view prefix,
 			bool needsInclude = false) noexcept;

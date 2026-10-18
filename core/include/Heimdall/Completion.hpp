@@ -45,6 +45,17 @@ namespace heimdall
 		Function
 	};
 
+	/** @brief Syntactic role requested at a completion position; unknown roles remain neutral. */
+	enum class CompletionRole : std::uint8_t
+	{
+		Any,
+		Expression,
+		Type,
+		Namespace,
+		Member,
+		Preprocessor
+	};
+
 	/** @brief Completion candidate and associated display, navigation, and type metadata. */
 	struct CompletionItem
 	{
@@ -69,7 +80,7 @@ namespace heimdall
 		// variable/field, the return type of a function, or the aliased type of
 		// a `using`/`typedef` (`basic_string<char>` for `std::string`).
 		std::string type_text;
-		// Variables: the type with its declarator (`char*`, `int[4]`), prefixed
+		// Variables and function returns: type with its declarator (`char*`, `int[4]`), prefixed
 		// `static ` for non-instance storage and `?` when it cannot be spelled
 		// (bitfields). Enums: the underlying type, empty when implicit.
 		std::string layout_type;
@@ -105,6 +116,28 @@ namespace heimdall
 		CompletionScope completionScope = CompletionScope::Unknown;
 		/// Whether this completion was collected through a base-class traversal.
 		bool inheritedCompletion = false;
+		/// Query-local semantic signals, never persisted back into an indexed declaration.
+		CompletionRole completionRole = CompletionRole::Any;
+		/// An available normalized type spelling matches one expected by the expression.
+		bool preferredTypeMatch = false;
+		/// An object access offers a known static member rather than an instance member.
+		bool nonInstanceCompletion = false;
+		/// A name is explicitly marked as implementation detail by its producer.
+		bool implementationDetail = false;
+		/// Selecting the candidate requires an additional namespace qualification.
+		bool needsQualification = false;
+		/// The name contains an identifier recently used near the cursor.
+		bool contextWordMatch = false;
+		/// Resolved uses in this document, excluding declarations and the completion token.
+		std::uint32_t mainFileReferences = 0;
+		/// Distinct referenced symbols in the declaration's namespace in this document.
+		std::uint32_t scopeReferences = 0;
+		/// Known namespace hops; negative means unavailable and therefore neutral.
+		std::int32_t scopeDistance = -1;
+		/// Known directory hops to the declaration; negative means unavailable.
+		std::int32_t fileDistance = -1;
+		/// Available return spellings across the overload group, allocated only for grouped functions.
+		std::shared_ptr<const std::vector<std::string>> overloadReturnTypes;
 	};
 
 	/**
@@ -169,6 +202,8 @@ namespace heimdall
 		// Qualified: the written scope path (`{"ns"}`); empty for `::na`.
 		std::vector<std::string> qualifier;
 		std::string prefix;
+		/// Syntactic role shared with frontends that add their own candidates.
+		CompletionRole role = CompletionRole::Any;
 	};
 
 	// Overloads of the call around the cursor and the argument being typed.

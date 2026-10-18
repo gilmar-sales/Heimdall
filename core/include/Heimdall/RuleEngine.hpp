@@ -91,7 +91,9 @@ namespace heimdall
 		// Experimental external rules use their string code as identity.
 		External,
 		/// Proven failures of local template substitution, never speculative candidate notes.
-		TemplateSubstitution
+		TemplateSubstitution,
+		/// A const member function provably writes to a non-mutable member.
+		ConstMemberModification
 	};
 
 	enum class ConstantNameCasing : std::uint8_t

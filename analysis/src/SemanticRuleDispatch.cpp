@@ -51,6 +51,7 @@ namespace heimdall::detail
 			Entry {RuleId::ApiPassByValue, &SemanticRules::AnalyzePassByValue},
 			Entry {RuleId::ApiPassByConstReference, &SemanticRules::AnalyzePassByConstReference},
 			Entry {RuleId::ApiConstCorrectness, &SemanticRules::AnalyzeConstCorrectness},
+			Entry {RuleId::ConstMemberModification, &SemanticRules::AnalyzeConstCorrectness},
 			Entry {RuleId::ApiUnsafeDowncast, &SemanticRules::AnalyzeUnsafeDowncast},
 			Entry {RuleId::ApiSlicing, &SemanticRules::AnalyzeSlicing},
 			Entry {RuleId::ApiImplicitConversion, &SemanticRules::AnalyzeImplicitConversion},
@@ -144,6 +145,17 @@ namespace heimdall::detail
 			}
 
 			const auto& callback = entries[i].callback;
+			bool alreadyRun      = false;
+			for (std::size_t previous = 0; previous < i; ++previous)
+			{
+				alreadyRun = alreadyRun ||(selected[previous] && entries[previous].callback == callback);
+			}
+
+			if (alreadyRun)
+			{
+				continue;
+			}
+
 			if (const auto * bound = std::get_if<BoundRule>(&callback))
 			{
 				Append(local, (*bound)(model));
@@ -154,7 +166,12 @@ namespace heimdall::detail
 			}
 			else if (const auto * flow_rule = std::get_if<FlowRule>(&callback))
 			{
-				Append(local, (*flow_rule)(*flow));
+				auto diagnostics = (*flow_rule)(*flow);
+				std::erase_if(diagnostics,[&](const Diagnostic& diagnostic)
+					{
+						return !engine.Enabled(diagnostic.code, false);
+					});
+				Append(local, std::move(diagnostics));
 			}
 			else if (const auto * project_rule = std::get_if<ProjectRule>(&callback))
 			{

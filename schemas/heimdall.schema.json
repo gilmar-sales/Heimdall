@@ -369,16 +369,89 @@
             "warning",
             "error"
           ]
+        },
+        "cpp/call-argument-count": {
+          "enum": ["off", "warning", "error"],
+          "description": "Function call with an incorrect number of arguments."
+        },
+        "cpp/call-argument-type": {
+          "enum": ["off", "warning", "error"],
+          "description": "Function argument without a valid implicit conversion."
+        },
+        "cpp/template-substitution": {
+          "enum": ["off", "warning", "error"],
+          "description": "Proven template instantiation failure or no viable local overload."
+        },
+        "cpp/dot-on-pointer": {
+          "enum": ["off", "warning", "error"],
+          "description": "Member accessed with '.' on a pointer instead of '->'."
+        },
+        "cpp/access-control": {
+          "enum": ["off", "warning", "error"],
+          "description": "Member access that is not permitted by its access level."
+        },
+        "cpp/conflicting-declaration": {
+          "enum": ["off", "warning", "error"],
+          "description": "Variable redeclared with an incompatible declaration."
+        },
+        "cpp/undeclared-type": {
+          "enum": ["off", "warning", "error"],
+          "description": "Unknown type name in a declaration."
+        },
+        "cpp/unreachable-code": {
+          "enum": ["off", "warning", "error"],
+          "description": "Statement that cannot be reached."
+        },
+        "cpp/missing-return": {
+          "enum": ["off", "warning", "error"],
+          "description": "Non-void function that can fall off the end."
+        },
+        "cpp/return-type": {
+          "enum": ["off", "warning", "error"],
+          "description": "Return incompatible with the function return type."
+        },
+        "cpp/concept-recursive": {
+          "enum": ["off", "warning", "error"],
+          "description": "Concept that refers to itself in its own definition."
+        },
+        "cpp/concept-constrained": {
+          "enum": ["off", "warning", "error"],
+          "description": "Concept definition with a requires-clause or constrained parameters."
+        },
+        "cpp/concept-placement": {
+          "enum": ["off", "warning", "error"],
+          "description": "Concept defined outside namespace scope."
+        },
+        "cpp/concept-specialization": {
+          "enum": ["off", "warning", "error"],
+          "description": "Concept that is explicitly specialized or instantiated."
+        },
+        "cpp/requires-form": {
+          "enum": ["off", "warning", "error"],
+          "description": "Call with template arguments in a requires-clause without parentheses."
+        },
+        "cpp/requires-parameter": {
+          "enum": ["off", "warning", "error"],
+          "description": "Requires-expression parameter with a default or trailing ellipsis."
+        },
+        "cpp/concept-arity": {
+          "enum": ["off", "warning", "error"],
+          "description": "Concept-id used with the wrong number of arguments."
+        },
+        "cpp/requires-unknown-type": {
+          "enum": ["off", "warning", "error"],
+          "description": "Type requirement naming an unknown type outside templates."
+        },
+        "cpp/concept-redeclaration": {
+          "enum": ["off", "warning", "error"],
+          "description": "Constrained redeclaration with a different constraint spelling."
+        },
+        "cpp/const-member-modification": {
+          "enum": ["off", "warning", "error"],
+          "description": "Assignment modifying a member through a const member function."
         }
       },
-      "additionalProperties": {
-        "enum": [
-          "off",
-          "warning",
-          "error"
-        ],
-        "description": "Allows future rules while still validating the setting value."
-      }
+      "additionalProperties": false
     },
     "macros": {
       "type": "object",

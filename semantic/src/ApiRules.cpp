@@ -1973,7 +1973,7 @@ namespace heimdall
 							{
 								const auto name = view.PositionOf(symbols.decl_token[symbol]);
 								auto diagnostic = analysis.Make(
-									RuleId::ApiConstCorrectness, "cpp/const-member-modification",
+									RuleId::ConstMemberModification, "cpp/const-member-modification",
 									"assignment modifies a member through a const member function",
 									write);
 								diagnostic.severity = Severity::Error;

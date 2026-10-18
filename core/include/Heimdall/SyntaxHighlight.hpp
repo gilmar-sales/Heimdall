@@ -34,6 +34,7 @@ namespace heimdall
 		Property,
 		Variable,
 		Parameter,
+		Doxygen,
 		Count
 	};
 

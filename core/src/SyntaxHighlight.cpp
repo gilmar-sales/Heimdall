@@ -17,7 +17,7 @@ namespace heimdall
 		constexpr std::array<std::string_view, static_cast<std::size_t>(HighlightKind::Count) >
 		kKindNames = {"keyword", "number", "string", "comment", "operator", "macro",
 			"namespace", "type", "class", "struct", "enum", "enumMember",
-			"function", "method", "property", "variable", "parameter"};
+			"function", "method", "property", "variable", "parameter", "doxygen"};
 
 		constexpr std::size_t kTypeKeywordCount = 15;
 		constexpr std::size_t kTokensPerSpan    = 2;
@@ -42,6 +42,12 @@ namespace heimdall
 		bool IsWordStart(char c) noexcept
 		{
 			return (c >= 'a' && c <= 'z') ||(c >= 'A' && c <= 'Z') || c == '_';
+		}
+
+		bool IsDoxygenComment(std::string_view text) noexcept
+		{
+			return text.starts_with("/**") || text.starts_with("/*!") ||
+				text.starts_with("///") || text.starts_with("//!");
 		}
 
 		bool IsCallable(HighlightKind kind) noexcept
@@ -166,6 +172,53 @@ namespace heimdall
 					}
 
 					mSpans.push_back({offset, length, kind, modifiers});
+				}
+			}
+
+			void Comment(const Token& token, std::string_view text)
+			{
+				if (!IsDoxygenComment(text))
+				{
+					Emit(token.offset, token.length, HighlightKind::Comment);
+					return;
+				}
+
+				std::size_t segment = 0;
+				for (std::size_t i = 3; i < text.size(); ++i)
+				{
+					if ((text[i] != '@' && text[i] != '\\') ||
+						(i > 0 && (text[i - 1] == '@' || text[i - 1] == '\\')))
+					{
+						continue;
+					}
+
+					std::size_t end = i + 1;
+					while (end < text.size() &&
+						((text[end] >= 'a' && text[end] <= 'z') ||
+						(text[end] >= 'A' && text[end] <= 'Z') ||
+						(text[end] >= '0' && text[end] <= '9') || text[end] == '_'))
+					{
+						++end;
+					}
+
+					if (end == i + 1)
+					{
+						continue;
+					}
+
+					if (i > segment)
+					{
+						Emit(token.offset + segment, i - segment, HighlightKind::Comment);
+					}
+
+					Emit(token.offset + i, end - i, HighlightKind::Doxygen);
+					segment = end;
+					i       = end - 1;
+				}
+
+				if (segment < text.size())
+				{
+					Emit(token.offset + segment, text.size() - segment, HighlightKind::Comment);
 				}
 			}
 
@@ -444,7 +497,7 @@ namespace heimdall
 						continue;
 					case TokenKind::LineComment:
 					case TokenKind::BlockComment:
-						Emit(token.offset, token.length, HighlightKind::Comment);
+						Comment(token, Text(i));
 						continue;
 					case TokenKind::Number:
 						Emit(token.offset, token.length, HighlightKind::Number);

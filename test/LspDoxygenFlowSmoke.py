@@ -20,6 +20,11 @@ def position(text, needle, last=False):
 
 with tempfile.TemporaryDirectory(prefix="heimdall-doxygen-flow-") as directory:
     root = Path(directory).resolve()
+    (root / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+        "cpp/missing-return": "error",
+        "cpp/return-type": "error",
+        "cpp/unreachable-code": "warning",
+    }}), encoding="utf-8")
     uri = (root / "docs.cpp").as_uri()
     broken_uri = (root / "broken.cpp").as_uri()
     source = (

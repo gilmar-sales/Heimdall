@@ -20,7 +20,7 @@ namespace heimdall
 		constexpr std::uint64_t kFnvBasis       = 14695981039346656037ull;
 		constexpr std::uint64_t kFnvPrime       = 1099511628211ull;
 
-		std::string DriverOf(const CompileCommand* command)
+		[[nodiscard]] std::string DriverOf(const CompileCommand* command)
 		{
 			if (command != nullptr && !command->arguments.empty() &&
 				!command->arguments.front().empty())
@@ -76,7 +76,7 @@ namespace heimdall
 			return flags;
 		}
 
-		std::string CppVersion(const CompileCommand* command)
+		[[nodiscard]] std::string CppVersion(const CompileCommand* command)
 		{
 			const CppStandard standard = command != nullptr ? command->standard : CppStandard::Cpp20;
 			return standard == CppStandard::Cpp26 ? "202400L"
@@ -85,7 +85,7 @@ namespace heimdall
 		}
 
 		// What a compiler is known to predefine when it cannot be run.
-		MacroTable FallbackBuiltins(const CompileCommand* command, bool msvc)
+		[[nodiscard]] MacroTable FallbackBuiltins(const CompileCommand* command, bool msvc)
 		{
 			MacroTable table;
 			const auto define = [&table](std::string_view text)
@@ -110,7 +110,7 @@ namespace heimdall
 			return table;
 		}
 
-		std::string RunProbe(const std::string& driver, const std::string& flags)
+		[[nodiscard]] std::string RunProbe(const std::string& driver, const std::string& flags)
 		{
 #if defined(_WIN32)
 			const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " NUL 2>nul\"";
@@ -135,7 +135,7 @@ namespace heimdall
 			return text;
 		}
 
-		MacroTable ParseProbe(std::string_view text)
+		[[nodiscard]] MacroTable ParseProbe(std::string_view text)
 		{
 			MacroTable table;
 			std::size_t pos = 0;
@@ -180,7 +180,7 @@ namespace heimdall
 			return true;
 		}
 
-		std::filesystem::path Normalized(const std::filesystem::path& path)
+		[[nodiscard]] std::filesystem::path Normalized(const std::filesystem::path& path)
 		{
 			std::error_code ec;
 			auto absolute = std::filesystem::absolute(path, ec);

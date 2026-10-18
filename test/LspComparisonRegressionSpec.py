@@ -119,7 +119,7 @@ class RegressionCase(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def start(self, annotated, headers=None, reflection=False):
+    def start(self, annotated, headers=None, reflection=False, rules=None):
         text, self.position = marked(annotated)
         source = self.write("Main.cpp", text)
         for name, header in (headers or {}).items():
@@ -131,7 +131,7 @@ class RegressionCase(unittest.TestCase):
         arguments += ["-c", str(source)]
         database = self.write("compile_commands.json", json.dumps([
             {"directory": str(self.root), "file": str(source), "arguments": arguments}]))
-        self.write(".heimdall.json", json.dumps({"root": True}))
+        self.write(".heimdall.json", json.dumps({"root": True, "rules": rules or {}}))
         self.session = Session(self.server, self.root, source, text, database)
         self.addCleanup(self.session.close)
         return text
@@ -386,7 +386,8 @@ class SyntheticRegressions(RegressionCase):
     def test_iwyu_accepts_public_header_exporting_macro_from_detail_header(self):
         self.start('#include <library/define_struct.hpp>\nDEFINE_STRUCT($Person);\n', {
             "library/define_struct.hpp": "#pragma once\n#include <library/detail/struct_macros.hpp>\n",
-            "library/detail/struct_macros.hpp": "#pragma once\n#define DEFINE_STRUCT(Name) struct Name {}\n"})
+            "library/detail/struct_macros.hpp": "#pragma once\n#define DEFINE_STRUCT(Name) struct Name {}\n"},
+            rules={"cpp/include-what-you-use": "warning"})
 
         diagnostics = self.session.diagnostics(1)
 
@@ -397,7 +398,8 @@ class SyntheticRegressions(RegressionCase):
     def test_iwyu_still_reports_genuinely_indirect_header_use(self):
         self.start('#include "Wrapper.hpp"\n$Hidden object;\n', {
             "Wrapper.hpp": '#pragma once\n#include "Hidden.hpp"\nstruct Wrapper {};\n',
-            "Hidden.hpp": "#pragma once\nstruct Hidden {};\n"})
+            "Hidden.hpp": "#pragma once\nstruct Hidden {};\n"},
+            rules={"cpp/include-what-you-use": "warning"})
 
         diagnostics = self.session.diagnostics(1)
 

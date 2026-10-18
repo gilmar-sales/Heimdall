@@ -10,9 +10,8 @@
  * @param second Describe this parameter.
  * @param desc Describe this parameter.
  *
- * @return void
  */
-int MetodoTeste(std::uint32_t first, int second, const std::string& desc);
+void MetodoTeste(std::uint32_t first, int second, const std::string& desc);
 
 /**
  *
@@ -49,6 +48,8 @@ public:
 			.value = value
 		};
 
+		node->value = "2";
+
 		if (mRoot == nullptr)
 		{
 			mRoot = node;
@@ -78,18 +79,20 @@ auto list = CreateList();
 
 int main()
 {
-	auto list = LinkedList<int>();
+	auto list = new LinkedList<int>();
 
-	list.Push(2);
+	list->Push(2);
 
 	auto node  = new Node<float>();
 	auto test  = node;
 	auto test2 = test;
+	auto v     = test2->value;
 
 	test->value       = 2.0f;
 	const auto test2v = test->value;
 
 	MetodoTeste(1, 2, "");
+	MetodoTeste(2, 3, "test");
 
 	return 0;
 }

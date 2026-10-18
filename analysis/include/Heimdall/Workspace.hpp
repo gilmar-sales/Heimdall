@@ -120,6 +120,9 @@ namespace heimdall
 
 		std::shared_ptr<const SemanticModel> Semantic(DocumentId document) const;
 
+		/// Pins an already published model without starting or waiting for semantic analysis.
+		[[nodiscard]] std::shared_ptr<const SemanticModel> TrySemantic(DocumentId document) const;
+
 		std::shared_ptr<const TypeModel> Types(DocumentId document) const;
 
 		std::shared_ptr<const HeaderSummary> Summary(DocumentId document) const;

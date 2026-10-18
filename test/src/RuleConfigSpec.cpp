@@ -1,9 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/RuleEngine.hpp>
 
 #include <filesystem>
+#include <cstddef>
 #include <fstream>
+#include <iterator>
+#include <regex>
+#include <set>
+#include <simdjson.h>
+#include <string>
+#include <string_view>
 
 namespace
 {
@@ -26,6 +34,133 @@ namespace
     }
 
 } // namespace
+
+TEST(RuleConfigSpec, SchemaDefinesExactlyEveryCatalogRuleWithSupportedSeverities)
+{
+    const auto path = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "schemas" / "heimdall.schema.json";
+    simdjson::dom::parser parser;
+    simdjson::dom::element schema;
+    ASSERT_EQ(parser.load(path.string()).get(schema), simdjson::SUCCESS);
+    simdjson::dom::object rules;
+    ASSERT_EQ(schema["properties"]["rules"].get_object().get(rules), simdjson::SUCCESS);
+    simdjson::dom::object definitions;
+    ASSERT_EQ(rules["properties"].get_object().get(definitions), simdjson::SUCCESS);
+    std::set<std::string> actualCodes;
+    const std::set<std::string> expectedSeverities
+    {
+        "off", "warning", "error"
+    };
+
+    for (const auto field : definitions)
+    {
+        SCOPED_TRACE(field.key);
+        EXPECT_TRUE(actualCodes.emplace(field.key).second);
+        simdjson::dom::array levels;
+        ASSERT_EQ(field.value["enum"].get_array().get(levels), simdjson::SUCCESS);
+        std::set<std::string> severities;
+        for (const auto level : levels)
+        {
+            std::string_view value;
+            ASSERT_EQ(level.get_string().get(value), simdjson::SUCCESS);
+            EXPECT_TRUE(severities.emplace(value).second);
+        }
+
+        EXPECT_EQ(severities, expectedSeverities);
+    }
+
+    std::set<std::string> expectedCodes;
+    for (const auto& rule : heimdall::RuleCatalog())
+    {
+        EXPECT_TRUE(expectedCodes.emplace(rule.code).second);
+    }
+
+    EXPECT_EQ(actualCodes, expectedCodes);
+    bool additionalRules = true;
+    ASSERT_EQ(rules["additionalProperties"].get_bool().get(additionalRules), simdjson::SUCCESS);
+    EXPECT_FALSE(additionalRules);
+}
+
+TEST(RuleConfigSpec, EveryCatalogRuleCanBeConfiguredAtEverySchemaSeverity)
+{
+    const auto directory = MakeConfigDir("schema-severities");
+    for (const std::string_view level :
+        {
+            "off", "warning", "error"
+    })
+    {
+        SCOPED_TRACE(level);
+        std::string config = "{\"root\":true,\"rules\":{";
+        for (const auto& rule : heimdall::RuleCatalog())
+        {
+            if (config.back() != '{')
+            {
+                config += ',';
+            }
+
+            config += '"';
+            config += rule.code;
+            config += "\":\"";
+            config += level;
+            config += '"';
+        }
+
+        config += "}}";
+        WriteConfig(directory, config);
+
+        const auto loaded = heimdall::LoadRuleConfiguration(directory / heimdall::RuleConfigFileName);
+
+        ASSERT_TRUE(loaded) << loaded.error();
+        ASSERT_EQ(loaded->options.overrides.size(), heimdall::RuleCatalog().size());
+        for (std::size_t index = 0; index < heimdall::RuleCatalog().size(); ++index)
+        {
+            const auto& setting = loaded->options.overrides[index];
+            EXPECT_EQ(setting.code, heimdall::RuleCatalog()[index].code);
+            EXPECT_EQ(setting.enabled, level != "off");
+            if (setting.enabled)
+            {
+                EXPECT_EQ(setting.severity,
+                          level == "error" ? heimdall::Severity::Error : heimdall::Severity::Warning);
+            }
+        }
+    }
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST(RuleConfigSpec, EveryConfigurableRuleCodeInSourcesIsRegistered)
+{
+    const std::regex pattern(R"rule("((?:cpp|api|doc|format)/[a-z0-9-]+)")rule");
+    const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
+
+    for (const auto directory :
+        {
+            "core/src", "semantic/src"
+    })
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(root / directory))
+        {
+            if (entry.path().extension() != ".cpp")
+            {
+                continue;
+            }
+
+            SCOPED_TRACE(entry.path().string());
+            std::ifstream file(entry.path());
+            ASSERT_TRUE(file);
+            const std::string source
+            {
+                std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()
+            };
+            for (auto match = std::sregex_iterator(source.begin(), source.end(), pattern);
+                match != std::sregex_iterator(); ++match)
+            {
+                const auto code = (*match)[1].str();
+
+                EXPECT_TRUE(heimdall::IsKnownRuleCode(code)) << code;
+            }
+        }
+    }
+}
 
 TEST(RuleConfigSpec, LoadsRuleSeveritiesDisabledRulesAndSuppressionsSetting)
 {

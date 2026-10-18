@@ -4249,9 +4249,14 @@ namespace heimdall::lsp
 			return;
 		}
 
-		std::stable_sort(candidates.begin(), candidates.end(),[](const auto& left, const auto& right)
+		std::sort(candidates.begin(), candidates.end(),[](const auto& left, const auto& right)
 			{
-				return left.score != right.score ? left.score > right.score : left.label < right.label;
+				if (left.score != right.score)
+				{
+					return left.score > right.score;
+				}
+
+				return left.label != right.label ? left.label < right.label : left.json < right.json;
 			});
 		std::string response;
 		constexpr std::size_t kSortTextWidth = 10;
@@ -4362,8 +4367,9 @@ namespace heimdall::lsp
 			QuoteJson(macro->name, response);
 			response += "}}";
 			heimdall::CompletionItem item;
-			item.label = macro->name;
-			item.kind  = heimdall::CompletionKind::Macro;
+			item.label          = macro->name;
+			item.kind           = heimdall::CompletionKind::Macro;
+			item.completionRole = items.empty() ? heimdall::CompletionRole::Any : items.front().completionRole;
 			candidates.push_back({item.label, heimdall::CompletionRanking::Evaluate(item, prefix),
 					std::move(response)});
 		}
@@ -4424,6 +4430,7 @@ namespace heimdall::lsp
 		{
 			const SymbolView symbol = hit.Symbol();
 			int kind                = 0;
+			auto completionKind     = heimdall::CompletionKind::Type;
 			switch (symbol.kind)
 			{
 			case heimdall::OutlineKind::Class:
@@ -4438,10 +4445,12 @@ namespace heimdall::lsp
 				kind = 13; // Enum
 				break;
 			case heimdall::OutlineKind::Function:
-				kind = 3; // Function
+				kind           = 3; // Function
+				completionKind = heimdall::CompletionKind::Function;
 				break;
 			case heimdall::OutlineKind::Variable:
-				kind = 6; // Variable
+				kind           = 6; // Variable
+				completionKind = heimdall::CompletionKind::Variable;
 				break;
 			case heimdall::OutlineKind::Concept:
 				kind = 8; // Interface
@@ -4510,8 +4519,25 @@ namespace heimdall::lsp
 			QuoteJson(edit->text, response);
 			response += "}]}";
 			heimdall::CompletionItem item;
-			item.label = std::string(symbol.name);
-			item.kind  = heimdall::CompletionKind::Variable;
+			item.label              = std::string(symbol.name);
+			item.kind               = completionKind;
+			item.completionRole     = items.empty() ? context.role : items.front().completionRole;
+			item.needsQualification = !qualified && !symbol.container.empty();
+			item.scopeDistance      = qualified ? 0 : -1;
+			const auto relative     = header.parent_path().lexically_relative(file.parent_path());
+			if (!relative.empty())
+			{
+				constexpr std::int32_t kMaxProximityDistance = 32;
+				item.fileDistance                            = 0;
+				for (const auto& component : relative)
+				{
+					if (component != "." && item.fileDistance < kMaxProximityDistance)
+					{
+						++item.fileDistance;
+					}
+				}
+			}
+
 			candidates.push_back({item.label,
 					heimdall::CompletionRanking::Evaluate(item, context.prefix, true), std::move(response)});
 		}
@@ -7396,16 +7422,100 @@ namespace heimdall::lsp
 		const auto model    = heimdall::Binder::Bind(*tree);
 		const auto& symbols = model.Symbols();
 		const auto& tokens  = tree->Tokens();
+		std::unordered_map<std::uint32_t, heimdall::HighlightKind> parameterReferences;
 		std::unordered_set<std::uint32_t> parameterDeclarations;
 		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
 		{
-			if (symbols.kind[symbol] == heimdall::SymbolKind::Parameter)
+			if (symbols.kind[symbol] != heimdall::SymbolKind::Parameter ||
+				symbols.decl_token[symbol] >= tokens.size())
 			{
-				parameterDeclarations.insert(symbols.decl_token[symbol]);
+				continue;
+			}
+
+			const auto declaration = symbols.decl_token[symbol];
+			parameterDeclarations.insert(declaration);
+			const auto name = model.Names().Text(symbols.name[symbol]);
+			const auto tokenText = [&](std::size_t token)
+			{
+				return tree->Source().substr(tokens[token].offset, tokens[token].length);
+			};
+			std::size_t bodyOpen = declaration + 1;
+			while (bodyOpen < tokens.size() && tokenText(bodyOpen) != "{")
+			{
+				if (tokenText(bodyOpen) == ";")
+				{
+					break;
+				}
+
+				++bodyOpen;
+			}
+
+			if (bodyOpen == tokens.size() || tokenText(bodyOpen) != "{")
+			{
+				continue;
+			}
+
+			std::size_t depth = 1;
+			for (std::size_t token = bodyOpen + 1; token < tokens.size() && depth != 0; ++token)
+			{
+				const auto text = tokenText(token);
+				if (text == "{")
+				{
+					++depth;
+				}
+				else if (text == "}")
+				{
+					--depth;
+				}
+				else if (depth != 0 && tokens[token].kind == heimdall::TokenKind::Identifier &&
+					text == name)
+				{
+					std::size_t previous = token;
+					while (previous > bodyOpen + 1 &&
+						tokens[previous - 1].kind == heimdall::TokenKind::Whitespace)
+					{
+						--previous;
+					}
+
+					std::size_t next = token + 1;
+					while (next < tokens.size() && tokens[next].kind == heimdall::TokenKind::Whitespace)
+					{
+						++next;
+					}
+
+					if (previous > bodyOpen + 1 && tokenText(previous - 1) == "." &&
+						next < tokens.size() && tokenText(next) == "=")
+					{
+						continue;
+					}
+
+					parameterReferences.try_emplace(token, heimdall::HighlightKind::Parameter);
+				}
 			}
 		}
 
-		std::unordered_map<std::uint32_t, heimdall::HighlightKind> parameterReferences;
+		std::unordered_set<std::uint32_t> templateParameterTokens;
+		const auto& templateParameters = model.TemplateParameters();
+		for (std::size_t parameter = 0; parameter < templateParameters.symbol.size(); ++parameter)
+		{
+			const auto symbol = templateParameters.symbol[parameter];
+			if (symbol >= symbols.Size())
+			{
+				continue;
+			}
+
+			const auto name = model.Names().Text(symbols.name[symbol]);
+			for (std::uint32_t token = 0; token < tokens.size(); ++token)
+			{
+				const auto& sourceToken = tokens[token];
+				if (sourceToken.kind == heimdall::TokenKind::Identifier &&
+					tree->Source().substr(sourceToken.offset, sourceToken.length) == name)
+				{
+					templateParameterTokens.insert(token);
+				}
+			}
+		}
+
 		const auto& references = model.Refs();
 		for (std::size_t reference = 0; reference < references.token.size(); ++reference)
 		{
@@ -7427,6 +7537,14 @@ namespace heimdall::lsp
 		}
 
 		std::unordered_set<std::size_t> parameterOffsets;
+		for (const auto token : templateParameterTokens)
+		{
+			if (token < tokens.size())
+			{
+				parameterOffsets.insert(tokens[token].offset);
+			}
+		}
+
 		for (const auto token : parameterDeclarations)
 		{
 			if (token < tokens.size())
@@ -7448,6 +7566,15 @@ namespace heimdall::lsp
 			{
 				return parameterOffsets.contains(span.offset);
 			});
+		for (const auto token : templateParameterTokens)
+		{
+			if (token < tokens.size())
+			{
+				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
+						heimdall::HighlightKind::Type, 0});
+			}
+		}
+
 		for (const auto token : parameterDeclarations)
 		{
 			if (token < tokens.size())

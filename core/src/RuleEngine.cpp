@@ -896,6 +896,8 @@ namespace heimdall
 				"semantic", false, "type requirement naming an unknown type outside templates"},
 			{RuleId::ConceptRedeclaration, "cpp/concept-redeclaration", "cpp", Severity::Warning,
 				"semantic", false, "constrained redeclaration with a different constraint spelling"},
+			{RuleId::ConstMemberModification, "cpp/const-member-modification", "cpp", Severity::Error,
+				"semantic", false, "assignment modifies a member through a const member function"},
 		};
 		return catalog;
 	}

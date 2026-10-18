@@ -195,7 +195,7 @@ namespace heimdall
 					long long value;
 				};
 
-				constexpr Known kAttributes[] = {
+				constexpr Known ATTRIBUTES[] = {
 					{
 						"noreturn", kAttributeCpp11
 					}, {"carries_dependency", kAttributeCpp11},
@@ -211,7 +211,7 @@ namespace heimdall
 					name.remove_prefix(kAttributeBracketLength);
 				}
 
-				for (const Known& known : kAttributes)
+				for (const Known& known : ATTRIBUTES)
 				{
 					if (known.name == name)
 					{

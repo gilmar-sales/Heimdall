@@ -659,6 +659,18 @@ namespace heimdall
 			});
 	}
 
+	std::shared_ptr<const SemanticModel> AnalysisSnapshot::TrySemantic(DocumentId document) const
+	{
+		const auto data = Document(document);
+		if (!data)
+		{
+			return {};
+		}
+
+		const std::unique_lock lock(data->mutex, std::try_to_lock);
+		return lock.owns_lock() ? data->semantic : nullptr;
+	}
+
 	std::shared_ptr<const TypeModel> AnalysisSnapshot::Types(DocumentId document) const
 	{
 		auto data = Document(document);

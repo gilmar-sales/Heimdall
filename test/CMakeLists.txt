@@ -179,6 +179,12 @@ if (Python3_Interpreter_FOUND)
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(
+    NAME LspParameterSemanticTokensSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspParameterSemanticTokensSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  set_tests_properties(LspParameterSemanticTokensSmoke PROPERTIES TIMEOUT 60)
+  add_test(
     NAME LspComparisonRegressions
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspComparisonRegressionSpec.py"
             --heimdall "$<TARGET_FILE:heimdall-lsp>" --compiler heimdall-fixture-compiler

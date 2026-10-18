@@ -12,6 +12,9 @@ server = sys.argv[1]
 include_dir = Path(sys.argv[2]).resolve()
 
 workspace = Path(tempfile.mkdtemp(prefix="heimdall-member-"))
+(workspace / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+    "cpp/dot-on-pointer": "error",
+}}), encoding="utf-8")
 main_cpp = workspace / "main.cpp"
 header_user = workspace / "header_user.hpp"
 main_cpp.write_text("")

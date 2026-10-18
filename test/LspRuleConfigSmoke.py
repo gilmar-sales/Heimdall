@@ -54,6 +54,16 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_config_") as temporary:
     assert not any(item["code"] == "cpp/no-null" for item in diagnostics), diagnostics
 
     diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
+                      "void f(int); void g() { f(); }\n")
+    assert not any(item["code"] in {"cpp/call-argument-count", "cpp/call-argument-type"}
+                   for item in diagnostics), diagnostics
+
+    (cwd / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+        "cpp/no-null": "off",
+        "cpp/call-argument-count": "error",
+        "cpp/call-argument-type": "error",
+    }}), encoding="utf-8")
+    diagnostics = run(cwd, {"initializationOptions": {"enableSemantic": True}},
                       "void test_method(int a, int b, std::string desc) {}\n"
                       "void g() { test_method(1, 2); }\n")
     calls = [item for item in diagnostics if item["code"] == "cpp/call-argument-count"]

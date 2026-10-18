@@ -6,17 +6,24 @@
     "scope": "public"
   },
   "rules": {
+    "cpp/missing-return": "error",
+    "cpp/dot-on-pointer": "error",
+    "api/const-correctness": "warning",
+    "api/explicit-constructor": "warning",
+    "api/missing-nodiscard": "warning",
+    "api/virtual-call-in-constructor": "warning",
+    "cpp/no-integer-to-pointer": "warning",
+    "cpp/modernize-auto": "warning",
+    "cpp/modernize-using": "warning",
+    "cpp/no-empty-catch": "warning",
+    "cpp/constant-naming": "warning",
+    "cpp/no-duplicate-include": "warning",
     "cpp/no-null": "warning",
+    "cpp/sort-includes": "warning",
     "format/no-trailing-whitespace": "warning",
     "format/require-final-newline": "warning",
-    "api/const-correctness": "warning",
-    "cpp/no-empty-catch": "warning",
-    "cpp/no-duplicate-include": "warning",
-    "cpp/sort-includes": "warning",
-    "cpp/modernize-using": "warning",
     "doc/require-comment": "warning",
-    "doc/doxygen-style": "warning",
-    "cpp/constant-naming": "warning"
+    "doc/doxygen-style": "warning"
   },
   "format": {
     "sort-includes": true,

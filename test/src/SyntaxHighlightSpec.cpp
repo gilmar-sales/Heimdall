@@ -97,6 +97,22 @@ TEST(SyntaxHighlightSpec, ClassifiesLexicalCategories)
     EXPECT_FALSE(SpanOf(source, spans, ";"));
 }
 
+TEST(SyntaxHighlightSpec, HighlightsDoxygenCommandsWithoutChangingCommentText)
+{
+    constexpr std::string_view source = "/** @brief Summary\n * \\param value details */\n// @brief ordinary\n";
+
+    const auto spans = Highlight(source);
+
+    EXPECT_TRUE(IsKind(source, spans, "@brief", HighlightKind::Doxygen));
+    EXPECT_TRUE(IsKind(source, spans, "\\param", HighlightKind::Doxygen));
+    EXPECT_TRUE(IsKind(source, spans, "// @brief ordinary", HighlightKind::Comment));
+    EXPECT_TRUE(std::ranges::any_of(spans,[&](const HighlightSpan& span)
+        {
+            return span.kind == HighlightKind::Comment &&
+            source.substr(span.offset, span.length).find("Summary") != std::string_view::npos;
+        }));
+}
+
 TEST(SyntaxHighlightSpec, MarksDeclarationsAndTheirUses)
 {
     constexpr std::string_view source = "namespace app\n{\nclass Widget\n{\npublic:\n    int mCount;\n"
@@ -205,6 +221,7 @@ TEST(SyntaxHighlightSpec, KindNamesFollowTheLegendOrder)
     EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::Keyword), "keyword");
     EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::EnumMember), "enumMember");
     EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::Variable), "variable");
+    EXPECT_EQ(heimdall::HighlightKindName(HighlightKind::Doxygen), "doxygen");
 }
 
 TEST(SyntaxHighlightSpec, ResolvesMacrosDefinedOutsideTheFile)

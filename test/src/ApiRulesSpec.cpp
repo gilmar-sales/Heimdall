@@ -602,6 +602,7 @@ TEST(ApiConstCorrectness, ReportsErrorForSubscriptedMemberWriteInConstMethod)
 
     ASSERT_EQ(diagnostics.size(), 1u);
     EXPECT_EQ(diagnostics[0].code, "cpp/const-member-modification");
+    EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::ConstMemberModification);
     EXPECT_EQ(diagnostics[0].severity, heimdall::Severity::Error);
 }
 

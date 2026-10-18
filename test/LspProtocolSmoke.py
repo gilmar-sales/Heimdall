@@ -1,11 +1,41 @@
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-server = sys.argv[1]
-compile_commands = sys.argv[2]
-fixture = Path(sys.argv[3]).resolve()
+server = str(Path(sys.argv[1]).resolve())
+original_fixture = Path(sys.argv[3]).resolve()
+temporary = tempfile.TemporaryDirectory(prefix="heimdall-lsp-protocol-",
+                                       dir="/tmp/opencode" if Path("/tmp/opencode").is_dir() else None)
+root = Path(temporary.name).resolve()
+fixture = root / original_fixture.name
+fixture.write_text(original_fixture.read_text(encoding="utf-8"), encoding="utf-8")
+commands = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+fixture_commands = []
+for command in commands:
+    path = Path(command["file"])
+    if not path.is_absolute():
+        path = Path(command["directory"]) / path
+    if path.resolve() == original_fixture:
+        copied = dict(command, file=str(fixture))
+        if "command" in copied:
+            copied["command"] = copied["command"].replace(str(original_fixture), str(fixture))
+        if "arguments" in copied:
+            copied["arguments"] = [str(fixture) if arg == command["file"] else arg
+                                   for arg in copied["arguments"]]
+        fixture_commands.append(copied)
+assert fixture_commands, f"missing compile command for {original_fixture}"
+compile_commands = str(root / "compile_commands.json")
+Path(compile_commands).write_text(json.dumps(fixture_commands), encoding="utf-8")
+(root / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+    "cpp/no-null": "warning",
+    "cpp/modernize-const": "warning",
+    "cpp/access-control": "error",
+    "cpp/conflicting-declaration": "error",
+    "cpp/call-argument-type": "error",
+    "cpp/undeclared-type": "error",
+}}), encoding="utf-8")
 uri = fixture.as_uri()
 broken_uri = uri + ".broken.cpp"
 access_uri = uri + ".access.cpp"
@@ -107,7 +137,7 @@ for message in messages:
     wire.extend(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
     wire.extend(body)
 
-process = subprocess.run([server], input=wire, capture_output=True, timeout=10, check=False)
+process = subprocess.run([server], input=wire, capture_output=True, cwd=root, timeout=10, check=False)
 if process.returncode != 0:
     raise SystemExit(f"LSP server exited with {process.returncode}: {process.stderr.decode(errors='replace')}")
 

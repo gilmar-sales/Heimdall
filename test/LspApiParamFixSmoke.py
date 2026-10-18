@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 server = sys.argv[1]
@@ -22,7 +23,29 @@ def parse(stream):
     return responses
 
 
+def read_message(stream):
+    length = None
+    while True:
+        line = stream.readline()
+        assert line, "LSP closed stdout before diagnostics became ready"
+        if line == b"\r\n":
+            break
+        if line.lower().startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1])
+    assert length is not None
+    body = bytearray()
+    while len(body) < length:
+        chunk = stream.read(length - len(body))
+        assert chunk, "LSP closed stdout in a message body"
+        body.extend(chunk)
+    return json.loads(body)
+
+
 def code_actions(root, sources, main):
+    (root / ".heimdall.json").write_text(json.dumps({"root": True, "rules": {
+        "api/pass-by-const-reference": "warning",
+        "api/pass-by-value": "warning",
+    }}), encoding="utf-8")
     database = root / "compile_commands.json"
     database.write_text(json.dumps([{
         "directory": str(root),
@@ -52,10 +75,31 @@ def code_actions(root, sources, main):
         {"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": {}},
         {"jsonrpc": "2.0", "method": "exit"},
     ]
-    process = subprocess.run([server], input=b"".join(frame(m) for m in messages),
-                             capture_output=True, cwd=root, timeout=60, check=False)
-    assert process.returncode == 0, process.stderr.decode(errors="replace")
-    responses = parse(process.stdout)
+    open_count = 2 + len(sources)
+    responses = []
+    with subprocess.Popen([server], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, cwd=root, bufsize=0) as process:
+        watchdog = threading.Timer(60, process.kill)
+        watchdog.start()
+        try:
+            process.stdin.write(b"".join(frame(m) for m in messages[:open_count]))
+            pending = {(root / name).as_uri() for name in sources}
+            while pending:
+                message = read_message(process.stdout)
+                responses.append(message)
+                if message.get("method") == "textDocument/publishDiagnostics":
+                    params = message["params"]
+                    if params.get("version") == 1:
+                        pending.discard(params["uri"])
+            stdout, stderr = process.communicate(
+                input=b"".join(frame(m) for m in messages[open_count:]), timeout=60)
+            assert process.returncode == 0, stderr.decode(errors="replace")
+            responses.extend(parse(stdout))
+        finally:
+            watchdog.cancel()
+            if process.poll() is None:
+                process.kill()
+            process.wait()
     publications = [r for r in responses if r.get("method") == "textDocument/publishDiagnostics"]
     diagnostics = [d for p in publications if p["params"]["uri"] == uri for d in p["params"]["diagnostics"]]
     actions = next(r for r in responses if r.get("id") == 2)["result"]

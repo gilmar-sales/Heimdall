@@ -32,10 +32,12 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_insertion_") as te
         "namespace lib {\n"
         "struct Widget { int size; };\n"
         "int widget_count();\n"
+        "struct RankedZType {};\n"
+        "int RankedAFunction();\n"
         "}\n", encoding="utf-8")
     (root / "src" / "util.hpp").write_text("struct UtilThing {};\n", encoding="utf-8")
     main = root / "src" / "main.cpp"
-    main_text = "#include <vector>\n\n[[deprecated]] int WidgetOld; int main() {\n    Wid\n    lib::wid\n    UtilTh\n}\n"
+    main_text = "#include <vector>\n\n[[deprecated]] int WidgetOld; int main() {\n    Wid\n    lib::wid\n    UtilTh\n    new Ranked\n}\n"
     main.write_text(main_text, encoding="utf-8")
     other = root / "src" / "other.cpp"
     other_text = "#include \"util.hpp\"\nint f() {\n    UtilTh\n}\n"
@@ -105,6 +107,11 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_include_insertion_") as te
     included = complete(13, other.as_uri(), other_text, 2, 10)
     assert all("additionalTextEdits" not in i for i in included if i["label"] == "UtilThing"), \
         included
+
+    ranked = complete(14, main.as_uri(), main_text, 6, 14)
+    ranked_labels = [item["label"] for item in ranked]
+    assert "RankedZType" in ranked_labels and "RankedAFunction" in ranked_labels, ranked_labels
+    assert ranked_labels.index("RankedZType") < ranked_labels.index("RankedAFunction"), ranked_labels
 
     send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": {}})
     send({"jsonrpc": "2.0", "method": "exit"})
