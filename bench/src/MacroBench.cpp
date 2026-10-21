@@ -210,10 +210,11 @@ namespace
 
         HeaderTree& operator= (const HeaderTree&) = delete;
 
-        heimdall::MacroEnvironment Build() const
+        heimdall::MacroEnvironment Build(bool reuseEffects = true) const
         {
             heimdall::MacroEnvironmentOptions options;
             options.probeCompiler = false;
+            options.reuseEffects = reuseEffects;
             return heimdall::MacroEnvironment::Build(mRoot / "main.cpp", mMain, nullptr, options);
         }
 
@@ -242,11 +243,28 @@ namespace
     {
         const HeaderTree tree;
         (void) tree.Build();
+        heimdall::MacroEnvironmentMetrics metrics;
         for (auto _ : state)
         {
             auto environment = tree.Build();
             auto finalEnv = environment.Final();
             benchmark::DoNotOptimize(finalEnv);
+            metrics = environment.Metrics();
+        }
+
+        state.counters["metadata_queries"] = static_cast<double>(metrics.metadataQueries);
+        state.counters["files_read"] = static_cast<double>(metrics.filesRead);
+        state.counters["effects_replayed"] = static_cast<double>(metrics.effectsReplayed);
+    }
+
+    void BM_Environment_NoEffectReuse(benchmark::State& state)
+    {
+        const HeaderTree tree;
+        for (auto _ : state)
+        {
+            auto environment = tree.Build(false);
+            auto finalEnvironment = environment.Final();
+            benchmark::DoNotOptimize(finalEnvironment);
         }
     }
 
@@ -392,6 +410,8 @@ namespace
     BENCHMARK(BM_Environment_Cold)->Unit(benchmark::kMillisecond);
 
     BENCHMARK(BM_Environment_Warm)->Unit(benchmark::kMillisecond);
+
+    BENCHMARK(BM_Environment_NoEffectReuse)->Unit(benchmark::kMillisecond);
 
     BENCHMARK(BM_Parse_WithoutResolver);
 

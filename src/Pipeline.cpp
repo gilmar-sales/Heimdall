@@ -14,8 +14,10 @@
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/MacroEnvironment.hpp>
 #include <Heimdall/MappedBuffer.hpp>
+#include <Heimdall/ModuleUnit.hpp>
 #include <Heimdall/RuleConfig.hpp>
 #include <Heimdall/SemanticRules.hpp>
+#include <Heimdall/Trace.hpp>
 
 namespace heimdall::cli
 {
@@ -121,6 +123,8 @@ namespace heimdall::cli
 			return "ModuleDeclaration";
 		case GrammarKind::ImportDeclaration:
 			return "ImportDeclaration";
+		case GrammarKind::ExportDeclaration:
+			return "ExportDeclaration";
 		case GrammarKind::UsingDeclaration:
 			return "UsingDeclaration";
 		case GrammarKind::ConceptDefinition:
@@ -216,6 +220,7 @@ namespace heimdall::cli
 
 				environmentOptions.maxIncludeDepth = limits.macro_max_include_depth;
 				environmentOptions.maxMacros       = limits.macro_max_macros;
+				HEIMDALL_TRACE_SCOPE(Macro, "PrepareMacroEnvironment");
 				parser_options.macro_resolver =
 					std::make_shared<heimdall::MacroEnvironmentResolver>(
 					std::make_shared<const heimdall::MacroEnvironment>(
@@ -251,8 +256,13 @@ namespace heimdall::cli
 		const heimdall::CompileDatabase* database,
 		FileResult& result)
 	{
+		HEIMDALL_TRACE_SCOPE_DETAIL(Cli, "ProcessFile", path.generic_string());
 		result.path = path;
-		auto buffer = heimdall::MappedBuffer::Open(path.string());
+		auto buffer = [&]
+		{
+			HEIMDALL_TRACE_SCOPE(Cli, "MappedBuffer::Open");
+			return heimdall::MappedBuffer::Open(path.string());
+		}();
 		if (!buffer)
 		{
 			result.error = buffer.error();
@@ -268,7 +278,11 @@ namespace heimdall::cli
 			options.command == Command::Check)
 		{
 			parser_options            = ParserOptionsForFile(path, options, database, source);
-			tree                      = heimdall::ParseTree::Parse(source, parser_options);
+			{
+				HEIMDALL_TRACE_SCOPE(Parse, "ParseTree::Parse");
+				tree = heimdall::ParseTree::Parse(source, parser_options);
+			}
+
 			result.standard_name      = std::string(StandardName(tree->Standard()));
 			result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree->Diagnostics());
 			if (options.command == Command::Parse)
@@ -399,10 +413,16 @@ namespace heimdall::cli
 			}
 
 			rule_options.main_file_name = path.filename().string();
+			if (tree)
+			{
+				result.module       = heimdall::ExtractModuleUnit(*tree);
+				result.rule_options = rule_options;
+			}
 
 			const heimdall::RuleEngine rule_engine(rule_options);
 			if (!(tree && options.semantic && database != nullptr))
 			{
+				HEIMDALL_TRACE_SCOPE(Cli, "RuleEngine::Analyze");
 				result.diagnostics =
 					tree ? rule_engine.Analyze(*tree) : rule_engine.Analyze(source);
 			}
@@ -418,6 +438,7 @@ namespace heimdall::cli
 				const auto* command = database->FindOrNearest(path);
 				if (command != nullptr)
 				{
+					HEIMDALL_TRACE_SCOPE(Include, "IncludeAnalyzer");
 					profile  = heimdall::IncludeAnalyzer::BuildProfile(path, *tree, command);
 					semantic = heimdall::IncludeAnalyzer::Analyze(*tree, *profile);
 				}
@@ -441,6 +462,7 @@ namespace heimdall::cli
 					parser_options,
 					path),
 					0);
+				HEIMDALL_TRACE_SCOPE(Semantic, "AnalysisFeatures::Diagnostics");
 				result.diagnostics =
 					heimdall::AnalysisFeatures::Diagnostics(analysis, rule_engine, true, context);
 				semantic = rule_engine.ApplyPolicy(std::move(semantic), *tree);
@@ -478,6 +500,7 @@ namespace heimdall::cli
 		{
 			workers.emplace_back([&]()
 				{
+					HEIMDALL_TRACE_THREAD("cli-worker");
 					while (true)
 					{
 						const std::size_t index = next.fetch_add(1, std::memory_order_relaxed);

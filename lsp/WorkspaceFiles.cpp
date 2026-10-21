@@ -1,5 +1,7 @@
 #include "WorkspaceFiles.hpp"
 
+#include <Heimdall/ModuleUnit.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -19,10 +21,11 @@ namespace heimdall::lsp
 
 		static constexpr std::string_view kExtensions[] = {
 			".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx",
-			".h", ".ipp", ".tpp", ".inl", ".cppm", ".ixx",
+			".h", ".ipp", ".tpp", ".inl",
 		};
 		const std::string extension = file.extension().string();
-		return std::ranges::find(kExtensions, extension) != std::end(kExtensions);
+		return std::ranges::find(kExtensions, extension) != std::end(kExtensions) ||
+			IsModuleUnitExtension(extension);
 	}
 
 	bool IsSkippedDirectory(std::string_view name)

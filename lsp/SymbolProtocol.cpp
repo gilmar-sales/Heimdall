@@ -84,6 +84,7 @@ namespace heimdall::lsp
 
 	int ToLspSymbolKind(heimdall::OutlineKind kind) noexcept
 	{
+		constexpr int kModule      = 2;
 		constexpr int kNamespace   = 3;
 		constexpr int kClass       = 5;
 		constexpr int kMethod      = 6;
@@ -129,6 +130,8 @@ namespace heimdall::lsp
 			return kInterface;
 		case heimdall::OutlineKind::Macro:
 			return kConstant;
+		case heimdall::OutlineKind::Module:
+			return kModule;
 		}
 
 		return kVariable;

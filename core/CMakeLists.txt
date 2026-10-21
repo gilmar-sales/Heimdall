@@ -31,8 +31,10 @@ add_library(heimdall_core STATIC
   src/SymbolOutline.cpp
   src/SyntaxHighlight.cpp
   src/MacroTable.cpp
+  src/ModuleUnit.cpp
   src/MacroExpander.cpp
   src/MacroScanner.cpp
+  src/Trace.cpp
 )
 add_library(heimdall::core ALIAS heimdall_core)
 
@@ -55,3 +57,9 @@ target_compile_options(heimdall_core PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-exceptions;-fno-rtti>
   $<$<CXX_COMPILER_ID:MSVC>:/GR-;/EHs-c->
 )
+
+# Trace macros expand to nothing unless profiling is enabled; the sink that
+# forwards events to Perfetto lives in heimdall_profiling, never in core.
+if (HEIMDALL_PROFILING)
+  target_compile_definitions(heimdall_core PUBLIC HEIMDALL_PROFILING=1)
+endif ()

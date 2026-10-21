@@ -88,6 +88,11 @@ namespace heimdall
 		ConceptArity,
 		RequiresValidity,
 		ConceptRedeclaration,
+		ModuleStructure,
+		ModuleImportCycle,
+		ModuleDuplicateInterface,
+		ModulePartitionExport,
+		ModuleUnresolvedImport,
 		// Experimental external rules use their string code as identity.
 		External,
 		/// Proven failures of local template substitution, never speculative candidate notes.

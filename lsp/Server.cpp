@@ -1,13 +1,16 @@
 #include "Server.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
+#include <syncstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -20,8 +23,10 @@
 #include <Heimdall/IndexRename.hpp>
 #include <Heimdall/IndexStore.hpp>
 #include <Heimdall/Lexer.hpp>
+#include <Heimdall/ModuleUnit.hpp>
 #include <Heimdall/Navigation.hpp>
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Profiling.hpp>
 #include <Heimdall/Refactoring.hpp>
 #include <Heimdall/RuleConfig.hpp>
 #include <Heimdall/RuleEngine.hpp>
@@ -31,6 +36,7 @@
 #include <Heimdall/ShardBuilder.hpp>
 #include <Heimdall/SymbolOutline.hpp>
 #include <Heimdall/SyntaxHighlight.hpp>
+#include <Heimdall/Trace.hpp>
 #include <Heimdall/TypeHierarchy.hpp>
 
 #include "Document.hpp"
@@ -770,6 +776,19 @@ namespace heimdall::lsp
 
 	bool LanguageServer::Run()
 	{
+		const auto tracePath     = heimdall::profiling::OutputPathFromEnvironment();
+		mProfilingSession        = tracePath ? heimdall::profiling::Session::Start(*tracePath) : nullptr;
+		const auto& traceSession = mProfilingSession;
+		if (tracePath)
+		{
+			std::osyncstream(std::cerr)
+			<<(traceSession ? "heimdall: recording Perfetto trace to " + tracePath->string()
+				: std::string("heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON"))
+			<< '\n';
+		}
+
+		HEIMDALL_TRACE_THREAD("lsp-io");
+		HEIMDALL_TRACE_SCOPE(Lsp, "LanguageServer::Run");
 		mIndexWorker = std::jthread([this](std::stop_token stop)
 			{
 				IndexWorkerMain(stop);
@@ -781,6 +800,7 @@ namespace heimdall::lsp
 
 		mPool.Submit([]
 			{
+				HEIMDALL_TRACE_SCOPE_DETAIL(Compiler, "SystemIncludes", "c++");
 				heimdall::IncludeIndex::SystemIncludes("c++");
 			},
 			ThreadPool::Priority::Background);
@@ -836,6 +856,10 @@ namespace heimdall::lsp
 			DrainRequests();
 			mParsePool.Shutdown();
 			mPool.Shutdown();
+			if (traceSession)
+			{
+				traceSession->Stop();
+			}
 		};
 
 		std::string body;
@@ -871,7 +895,18 @@ namespace heimdall::lsp
 			{
 				if (method == "initialize")
 				{
+					HEIMDALL_TRACE_SCOPE(Startup, "initialize");
 					LoadInitializationOptions(request);
+					const std::lock_guard profilingLock(mProfilingMutex);
+					if (traceSession)
+					{
+						const std::lock_guard lock(m_init_mu);
+						traceSession->SetProjectRoot(mWorkspaceRoot);
+						std::osyncstream(std::cerr)
+						<< "heimdall: recording Perfetto trace to "
+						<< traceSession->Output().string() << '\n';
+					}
+
 					const std::string rename_capability =
 						mVersionedEdits ? "{\"prepareProvider\":true}" : "false";
 					const std::string workspace_symbol_capability =
@@ -903,6 +938,7 @@ namespace heimdall::lsp
 				}
 				else if (method == "initialized")
 				{
+					HEIMDALL_TRACE_INSTANT(Startup, "initialized");
 					if (mWorkspaceScan.load(std::memory_order_relaxed))
 					{
 						mScanWorker =
@@ -1459,6 +1495,7 @@ namespace heimdall::lsp
 
 	void LanguageServer::LoadInitializationOptions(simdjson::dom::element request)
 	{
+		HEIMDALL_TRACE_SCOPE(Startup, "LoadInitializationOptions");
 		simdjson::dom::object params;
 		simdjson::dom::object options;
 		const bool has_params = GetObject(request, "params", params);
@@ -1638,7 +1675,12 @@ namespace heimdall::lsp
 			return;
 		}
 
-		auto database = heimdall::CompileDatabase::Load(std::filesystem::path(path));
+		auto database = [&]
+		{
+			HEIMDALL_TRACE_SCOPE_DETAIL(Startup, "CompileDatabase::Load", path);
+			return heimdall::CompileDatabase::Load(std::filesystem::path(path));
+		}
+		();
 		if (!database)
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);
@@ -1665,6 +1707,7 @@ namespace heimdall::lsp
 			{
 				for (const auto& driver : drivers)
 				{
+					HEIMDALL_TRACE_SCOPE_DETAIL(Compiler, "SystemIncludes", driver);
 					heimdall::IncludeIndex::SystemIncludes(driver);
 				}
 			}),
@@ -2527,10 +2570,17 @@ namespace heimdall::lsp
 			return;
 		}
 
+		HEIMDALL_TRACE_THREAD("workspace-scan");
+		HEIMDALL_TRACE_SCOPE(Lsp, "WorkspaceScanMain");
 		// Diagnostics cover the open project only: dependency sources
 		// (`_deps`, `third_party`, `external`, `vendor`) stay indexed for
 		// navigation and completion but are not linted.
-		const std::vector<std::filesystem::path> files = DiscoverProjectSources(root, stop);
+		const std::vector<std::filesystem::path> files = [&]
+		{
+			HEIMDALL_TRACE_SCOPE(Lsp, "DiscoverProjectSources");
+			return DiscoverProjectSources(root, stop);
+		}
+		();
 		if (stop.stop_requested())
 		{
 			return;
@@ -4794,11 +4844,29 @@ namespace heimdall::lsp
 		const std::shared_ptr<const std::string>& text,
 		std::int64_t version,
 		const heimdall::CompileCommand* command,
-		bool remember)
+		bool remember,
+		std::stop_token stop)
 	{
 		heimdall::ParserOptions options = ParserOptionsFor(command);
-		if (auto environment = MacroEnvironmentFor(uri, text, version, command, remember))
+		if (auto environment = MacroEnvironmentFor(uri, text, version, command, remember, stop))
 		{
+			if (!remember && std::getenv("HEIMDALL_INDEX_METRICS") != nullptr)
+			{
+				const auto& metrics = environment->Metrics();
+				std::string record  = "{\"file\":";
+				QuoteJson(PathFromUri(uri).generic_string(), record);
+				record += ",\"totalNs\":" + std::to_string(metrics.totalNs) +
+					",\"setupNs\":" + std::to_string(metrics.setupNs) +
+					",\"metadataQueries\":" + std::to_string(metrics.metadataQueries) +
+					",\"resolutionQueries\":" + std::to_string(metrics.resolutionQueries) +
+					",\"filesRead\":" + std::to_string(metrics.filesRead) +
+					",\"bytesRead\":" + std::to_string(metrics.bytesRead) +
+					",\"effectsReplayed\":" + std::to_string(metrics.effectsReplayed) +
+					",\"effectsScanned\":" + std::to_string(metrics.effectsScanned) +
+					",\"effectsRejected\":" + std::to_string(metrics.effectsRejected) + "}";
+				std::osyncstream(std::cerr) << "heimdall-index-metrics " << record << '\n';
+			}
+
 			options.macro_resolver =
 				std::make_shared<heimdall::MacroEnvironmentResolver>(std::move(environment));
 		}
@@ -4910,7 +4978,8 @@ namespace heimdall::lsp
 		}
 		if (start)
 		{
-			if (auto environment = MacroEnvironmentFor(uri, text, version, command, true))
+			if (auto environment = MacroEnvironmentFor(uri, text, version, command, true,
+				lifetime ? lifetime->stop.get_token() : CurrentStop()))
 			{
 				options.macro_resolver =
 					std::make_shared<heimdall::MacroEnvironmentResolver>(std::move(environment));
@@ -6811,6 +6880,15 @@ namespace heimdall::lsp
 			return;
 		}
 
+		if (!implementation)
+		{
+			if (const auto locations = ModuleImportLocations(*tree, offset); !locations.empty())
+			{
+				Respond(id, locations);
+				return;
+			}
+		}
+
 		const heimdall::ScopeIndex* scopes = headers.index ? &headers.index->Scopes() : nullptr;
 		const auto analysis                = AnalysisFor(uri_string, tree, ParserOptionsFor(command));
 		std::vector<heimdall::NavTarget> targets =
@@ -7203,7 +7281,8 @@ namespace heimdall::lsp
 		const std::shared_ptr<const std::string>& text,
 		std::int64_t version,
 		const heimdall::CompileCommand* command,
-		bool remember)
+		bool remember,
+		std::stop_token stop)
 	{
 		{
 			const std::lock_guard<std::mutex> lock(mMacroMutex);
@@ -7244,7 +7323,11 @@ namespace heimdall::lsp
 			options.maxMacros       = m_rule_options.macro_max_macros;
 		}
 
-		const std::stop_token stop = t_context ? t_context->stop : std::stop_token {};
+		if (t_context && !stop.stop_possible())
+		{
+			stop = t_context->stop;
+		}
+
 		auto environment = std::make_shared<const heimdall::MacroEnvironment>(
 			heimdall::MacroEnvironment::Build(file, *text, command, options, stop));
 		if (environment->Main().cancelled)
@@ -7300,6 +7383,49 @@ namespace heimdall::lsp
 		response += "}}";
 		Respond(id, response);
 		return true;
+	}
+
+	std::string LanguageServer::ModuleImportLocations(
+		const heimdall::ParseTree& tree,
+		std::size_t offset)
+	{
+		const auto module  = heimdall::ExtractModuleUnit(tree);
+		const auto* import = module.ImportAt(offset);
+		if (import == nullptr)
+		{
+			return {};
+		}
+
+		const std::string target = module.ImportTarget(*import);
+		if (target.empty())
+		{
+			return {};
+		}
+
+		std::string response = "[";
+		bool first           = true;
+		for (const auto& hit : mSymbolIndex.Query(target, WorkspaceSymbolIndex::kDefaultLimit,
+			CurrentStop()))
+		{
+			const auto symbol = hit.Symbol();
+			if (symbol.kind != heimdall::OutlineKind::Module ||!symbol.exported ||
+				symbol.name != target)
+			{
+				continue;
+			}
+
+			response += first ? "" : ",";
+			first = false;
+			response += "{\"uri\":";
+			QuoteJson(hit.file->uri, response);
+			response += ",\"range\":{\"start\":";
+			AppendPosition(symbol.start, response);
+			response += ",\"end\":";
+			AppendPosition(symbol.end, response);
+			response += "}}";
+		}
+
+		return first ? std::string() : response + "]";
 	}
 
 	bool LanguageServer::MacroDefinition(
@@ -7828,7 +7954,13 @@ namespace heimdall::lsp
 		const std::filesystem::path& file,
 		const heimdall::CompileCommand* command)
 	{
-		const auto model = heimdall::Binder::Bind(tree);
+		HEIMDALL_TRACE_SCOPE(Index, "LanguageServer::IndexShard");
+		const auto model = [&tree]
+		{
+			HEIMDALL_TRACE_SCOPE(Semantic, "Binder::Bind");
+			return heimdall::Binder::Bind(tree);
+		}
+		();
 		const auto configHash = heimdall::index::ShardBuilder::ConfigurationHash(ParserOptionsFor(command),
 			command);
 		return heimdall::index::ShardBuilder::Build(model, file.generic_string(), configHash,
@@ -7882,8 +8014,12 @@ namespace heimdall::lsp
 		std::stop_token stop,
 		const std::function<void(std::string_view) > & reportStage)
 	{
-		const auto stage = [&](std::string_view name)
+		HEIMDALL_TRACE_SCOPE_DETAIL(Index, "IndexDiskSymbols", file.generic_string());
+		std::optional<trace::Scope> stageTrace;
+		const auto stage = [&](const char* name)
 		{
+			stageTrace.reset();
+			stageTrace.emplace(trace::Category::Index, name);
 			if (reportStage)
 			{
 				reportStage(name);
@@ -7915,9 +8051,11 @@ namespace heimdall::lsp
 
 			auto text             = std::make_shared<const std::string>(std::move(*contents));
 			const std::string uri = UriFromPath(file);
+			stage("Resolving macros and includes");
+			const auto options = ParserOptionsForText(uri, text, 0, CommandFor(uri), false, stop);
 			stage("Parsing");
 			const auto tree = heimdall::ParseTree::ParseSnapshot(
-				text, ParserOptionsForText(uri, text, 0, CommandFor(uri), false), stop);
+				text, options, stop);
 			if (tree.Cancelled())
 			{
 				return;
@@ -7955,6 +8093,13 @@ namespace heimdall::lsp
 			return;
 		}
 
+		HEIMDALL_TRACE_THREAD("index-main");
+		std::optional<heimdall::trace::Scope> indexTrace;
+		if (heimdall::trace::ActiveSink())
+		{
+			indexTrace.emplace(heimdall::trace::Category::Index, "SymbolIndexMain");
+		}
+
 		const auto started = std::chrono::steady_clock::now();
 		const auto elapsed_ms = [&started]
 		{
@@ -7962,15 +8107,38 @@ namespace heimdall::lsp
 				std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now() - started).count());
 		};
-		const std::vector<std::filesystem::path> files = DiscoverWorkspaceSources(root, stop);
+		auto files = [&]
+		{
+			HEIMDALL_TRACE_SCOPE(Index, "DiscoverWorkspaceSources");
+			return DiscoverWorkspaceSources(root, stop);
+		}
+		();
+		HEIMDALL_TRACE_COUNTER(Index, "workspace files", static_cast<std::int64_t>(files.size()));
+		const auto projectEnd = std::stable_partition(files.begin(), files.end(),[&](const auto& file)
+			{
+				return !IsDependencySource(root, file);
+			});
+		const auto projectFiles = static_cast<std::size_t>(projectEnd - files.begin());
 		// Reading files dominates, so a few helpers overlap the I/O; the pool that serves
 		// requests is left alone, and shutdown never waits for this scan.
 		constexpr std::size_t kMaxIndexThreads  = 4;
 		constexpr unsigned kCoresPerIndexThread = 4;
-		const std::size_t threads = std::clamp<std::size_t>(
+		std::size_t threads = std::clamp<std::size_t>(
 			std::thread::hardware_concurrency() / kCoresPerIndexThread, 1, kMaxIndexThreads);
+		if (const auto value = std::getenv("HEIMDALL_INDEX_THREADS"))
+		{
+			std::size_t requested = 0;
+			const std::string_view text(value);
+			const auto parsed = std::from_chars(text.data(), text.data() + text.size(), requested);
+			if (parsed.ec == std::errc {} && parsed.ptr == text.data() + text.size() && requested > 0)
+			{
+				threads = std::min(requested, kMaxIndexThreads);
+			}
+		}
+
 		std::atomic<std::size_t> next {0};
 		std::atomic<std::size_t> done {0};
+		std::atomic<std::size_t> projectDone {0};
 		std::mutex report_mutex;
 		std::vector<std::string> activities(threads);
 		const bool show_progress = mWorkspaceSymbols.load(std::memory_order_relaxed) && mWorkDoneProgress.load(std::memory_order_relaxed) &&
@@ -8048,6 +8216,7 @@ namespace heimdall::lsp
 
 		const auto drain = [&](std::size_t slot)
 		{
+			HEIMDALL_TRACE_THREAD(slot == 0 ? "index-main" : "index-helper");
 			// Relaxed is enough: the counter only hands out distinct file indexes, and each
 			// file's result is published through WorkspaceSymbolIndex's own lock.
 			for (std::size_t i = next.fetch_add(1, std::memory_order_relaxed);
@@ -8065,6 +8234,17 @@ namespace heimdall::lsp
 					activities[slot].clear();
 				}
 				const std::size_t finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
+				HEIMDALL_TRACE_COUNTER(Index, "indexed files", static_cast<std::int64_t>(finished));
+				if (i < projectFiles && projectDone.fetch_add(1, std::memory_order_relaxed) + 1 == projectFiles &&
+					!stop.stop_requested() && mWorkspaceSymbols.load(std::memory_order_relaxed))
+				{
+					HEIMDALL_TRACE_INSTANT(Index, "project files processed");
+					std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":3,\"message\":";
+					QuoteJson("Heimdall: project files processed: " + std::to_string(projectFiles) +
+						" files in " + FormatDuration(elapsed_ms()), message);
+					Send(message + "}}");
+				}
+
 				if ((show_status || show_progress) && finished % report_every == 0 &&
 					finished < files.size())
 				{
@@ -8084,31 +8264,55 @@ namespace heimdall::lsp
 
 			drain(0);
 		}
+		if (!stop.stop_requested())
+		{
+			{
+				const std::lock_guard lock(report_mutex);
+				activities[0] = "Checking index completeness";
+			}
+			report();
+			mIndexScanFinished.store(true, std::memory_order_release);
+			HEIMDALL_TRACE_INSTANT(Index, "index scan finished");
+			RefreshIndexCompleteness(stop);
+		}
+
 		if (reporter.joinable())
 		{
 			reporter.request_stop();
 			reporter.join();
 		}
 
+		if (!stop.stop_requested())
+		{
+			indexTrace.reset();
+			const std::lock_guard profilingLock(mProfilingMutex);
+			if (mProfilingSession)
+			{
+				if (!mProfilingSession->Stop())
+				{
+					std::osyncstream(std::cerr) << "heimdall: failed to write Perfetto trace\n";
+				}
+
+				mProfilingSession.reset();
+			}
+		}
+
 		if (show_status)
 		{
-			Send(IndexStatusNotification("ready", files.size(), files.size(), elapsed_ms()));
+			Send(IndexStatusNotification(stop.stop_requested() ? "cancelled" : "ready",
+				done.load(std::memory_order_relaxed), files.size(), elapsed_ms()));
 		}
 
 		if (show_progress)
 		{
-			Send(WorkDoneProgressEnd(token, std::to_string(files.size()) + " files indexed in " +
+			Send(WorkDoneProgressEnd(token, std::to_string(done.load(std::memory_order_relaxed)) +
+				(stop.stop_requested() ? " files processed before cancellation in " : " files indexed in ") +
 				FormatDuration(elapsed_ms())));
 		}
 
 		if (stop.stop_requested())
 		{
 			return;
-		}
-
-		{
-			mIndexScanFinished.store(true, std::memory_order_release);
-			RefreshIndexCompleteness(stop);
 		}
 
 		std::string notification = "{\"jsonrpc\":\"2.0\",\"method\":\"window/"
@@ -8125,6 +8329,7 @@ namespace heimdall::lsp
 
 	void LanguageServer::RefreshIndexCompleteness(std::stop_token stop)
 	{
+		HEIMDALL_TRACE_SCOPE(Index, "RefreshIndexCompleteness");
 		std::filesystem::path root;
 		{
 			const std::lock_guard<std::mutex> lock(m_init_mu);

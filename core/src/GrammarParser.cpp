@@ -825,6 +825,66 @@ namespace heimdall
 			return Invalid;
 		}
 
+		bool IsSignificantKind(std::size_t i, TokenKind kind) const
+		{
+			return i < m_sig.size() && m_tree.Tokens()[m_sig[i]].kind == kind;
+		}
+
+		// `module` and `import` are contextual keywords: they begin a module-unit
+		// declaration only when followed by what such a declaration continues with
+		// (`module;`, `module a.b;`, `module :private;`, `import <h>;`, `import :p;`).
+		// Anything else (`module = 1;`, `module::Type x;`, `import(...)`) is an ordinary name.
+		bool IsModuleUnitHead(std::size_t head, std::size_t end) const
+		{
+			const auto next = head + 1;
+			if (next >= end)
+			{
+				return false;
+			}
+
+			if (Is(head, "module"))
+			{
+				return Is(next, ";") || Is(next, ":") ||
+					IsSignificantKind(next, TokenKind::Identifier);
+			}
+
+			if (Is(head, "import"))
+			{
+				return Is(next, ":") || Is(next, "<") ||
+					IsSignificantKind(next, TokenKind::Identifier) ||
+					IsSignificantKind(next, TokenKind::StringLiteral);
+			}
+
+			return false;
+		}
+
+		// `export { ... }` groups declarations; a bare `export` marks the declaration
+		// that follows it. Returns the position after what was consumed; `grouped`
+		// tells whether that was a whole `export { ... }` rather than the keyword alone.
+		std::size_t ParseExport(std::size_t pos, std::size_t end, std::size_t parent, bool& grouped)
+		{
+			grouped = Is(pos + 1, "{");
+			if (!grouped)
+			{
+				Add(GrammarKind::ExportDeclaration, pos, pos + 1, parent);
+				return pos + 1;
+			}
+
+			const auto brace  = pos + 1;
+			const bool closed = m_match[brace] != Invalid && m_match[brace] > brace;
+			const auto close  = closed ? m_match[brace] : end;
+			const auto node =
+				Add(GrammarKind::ExportDeclaration, pos, closed ? close + 1 : close, parent);
+			ParseScope(brace + 1, close, node, false);
+			if (!closed)
+			{
+				m_tree.m_diagnostics.push_back({m_tree.Tokens()[m_sig[brace]].offset,
+						"expected '}' to close export declaration"});
+			}
+
+			return closed ? close + 1 : end;
+		}
+
 		std::size_t FindSemicolon(std::size_t begin, std::size_t end) const
 		{
 			for (auto i = begin; i < end;)
@@ -5817,6 +5877,22 @@ namespace heimdall
 					BeginItem(pos);
 				}
 
+				if (!member_scope && Is(pos, "export") && !IsModuleUnitHead(pos + 1, end))
+				{
+					bool grouped   = false;
+					const auto next = ParseExport(pos, end, parent, grouped);
+					pos             = next;
+					if (grouped)
+					{
+						continue;
+					}
+
+					if (pos >= end)
+					{
+						break;
+					}
+				}
+
 				const auto start = pos;
 				if (IsDirective(pos))
 				{
@@ -5851,7 +5927,7 @@ namespace heimdall
 					++exported_head;
 				}
 
-				if (Is(exported_head, "module") || Is(exported_head, "import"))
+				if (IsModuleUnitHead(exported_head, end))
 				{
 					const auto semi = FindSemicolon(pos, end);
 					if (semi < end)

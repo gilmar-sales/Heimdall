@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/ModuleUnit.hpp>
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
@@ -41,6 +42,10 @@ namespace heimdall::cli
 		std::vector<heimdall::SemanticDiagnostic> semantic_diagnostics;
 		std::vector<SyntaxDiagnostic> syntax_diagnostics;
 		std::vector<ParseNodeSummary> nodes;
+		/// Module facts of the file and the rule options it was analyzed with, kept for the
+		/// cross-file module pass.
+		heimdall::ModuleUnitInfo module;
+		heimdall::RuleOptions rule_options;
 		std::string standard_name = "c++20";
 		std::string output;
 		bool changed                  = false;
@@ -69,6 +74,11 @@ namespace heimdall::cli
 		const Options& options,
 		const heimdall::CompileDatabase* database,
 		FileResult& result);
+
+	/// Adds the diagnostics that span files (import cycles, duplicate interfaces, partitions
+	/// the primary interface does not export, and optionally unresolved imports) to the
+	/// results of the files they are reported in, honoring each file's own rule options.
+	void AnalyzeModuleGraph(std::vector<FileResult>& results);
 
 	void RunParallel(
 		const std::vector<std::filesystem::path>& files,

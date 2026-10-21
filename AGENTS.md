@@ -52,7 +52,7 @@ This repository adopts the reusable C++ coding practices from `C:/dev/Freyr`: `A
 - Types, concepts, enum values, and functions/methods: `PascalCase` (`TokenKind`, `ParseTree`, `GetToken`).
 - Private/protected data members: `mCamelCase` (`mSource`, `mRegistry`), not new `m_snake_case` names.
 - Parameters, local variables, and public data-only struct fields: `camelCase` (`sourceText`, `tokenIndex`, `changedTick`).
-- Named constants: `kPascalCase` (`kBindingStackBytes`); macros: `UPPER_SNAKE_CASE`. Replace unexplained magic numbers with named constants.
+- Named constants and macros: `UPPER_SNAKE_CASE`. Replace unexplained magic numbers with named constants.
 - Keep the existing `heimdall` namespace and module layout. New C++ filenames use `PascalCase.hpp` / `PascalCase.cpp`; tests use `<Module>Spec.cpp` in `test/src/`.
 - Headers use `#pragma once`, include what they use, and must not expose private dependencies. Put implementation-only helpers in an unnamed namespace in the `.cpp` file.
 - Keep includes deduplicated and grouped according to Heimdall's `.heimdall.json`: angle includes before quoted includes, sorted case-insensitively within groups. Freyr's source files are not consistent enough to override this configured rule.

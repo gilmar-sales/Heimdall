@@ -2181,3 +2181,46 @@ TEST(FormatterSpec, KeepsSemicolonAttachedToNestedRecordBeforeMethod)
     EXPECT_EQ(formatted, source);
     EXPECT_EQ(formatter.Format(formatted), formatted);
 }
+
+TEST(FormatterSpec, KeepsModulePartitionColonsAttachedToTheName)
+{
+    const std::string source =
+        "export module app.core:part;\n"
+        "import :detail;\n"
+        "export import :other;\n"
+        "module :private;\n";
+    const heimdall::Formatter formatter;
+
+    const auto formatted = formatter.Format(source);
+
+    EXPECT_EQ(formatted, source);
+    EXPECT_EQ(formatter.Format(formatted), formatted);
+}
+
+TEST(FormatterSpec, NormalizesSpacingAroundModulePartitions)
+{
+    const heimdall::Formatter formatter;
+
+    const auto formatted = formatter.Format("export module a : b;\nimport : c;\nmodule : private;\n");
+
+    EXPECT_EQ(formatted, "export module a:b;\nimport :c;\nmodule :private;\n");
+}
+
+TEST(FormatterSpec, SeparatesModuleAttributeFromThePartitionName)
+{
+    const std::string source = "export module app:part [[deprecated]];\n";
+
+    EXPECT_EQ(heimdall::Formatter().Format(source), source);
+}
+
+TEST(FormatterSpec, KeepsConditionalColonsOutsideModuleStatementsSpaced)
+{
+    const std::string source =
+        "export module m;\n"
+        "int Pick(bool a)\n"
+        "{\n"
+        "    return a ? 1 : 2;\n"
+        "}\n";
+
+    EXPECT_EQ(heimdall::Formatter().Format(source), source);
+}

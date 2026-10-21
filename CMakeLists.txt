@@ -44,7 +44,13 @@ FetchContent_MakeAvailable(simdjson)
 # Dependency policy: heimdall_core is standard-library-only (see core/CMakeLists.txt
 # and test/src/CorePolicySpec.cpp). simdjson, gtest and Google Benchmark are used
 # only outside core: semantic module, LSP, tests and benches.
+option(HEIMDALL_PROFILING "Instrument the load pipeline and record Perfetto traces (HEIMDALL_TRACE=<file>)" OFF)
+if (HEIMDALL_PROFILING)
+  add_subdirectory(vendor/perfetto)
+endif ()
+
 add_subdirectory(core)
+add_subdirectory(profiling)
 add_subdirectory(config)
 add_subdirectory(semantic)
 add_subdirectory(index)

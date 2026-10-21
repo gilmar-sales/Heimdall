@@ -6,6 +6,8 @@
 #include <utility>
 
 #include <Heimdall/MacroTable.hpp>
+#include <Heimdall/ModuleUnit.hpp>
+#include <Heimdall/Trace.hpp>
 
 namespace heimdall
 {
@@ -66,6 +68,7 @@ namespace heimdall
 						break;
 					case GrammarKind::TemplateDeclaration:
 					case GrammarKind::LanguageLinkageSpec:
+					case GrammarKind::ExportDeclaration:
 						break;
 					case GrammarKind::Declaration:
 					case GrammarKind::FunctionDeclaration:
@@ -79,6 +82,10 @@ namespace heimdall
 						break;
 					case GrammarKind::ConceptDefinition:
 						EmitConcept(node, parent);
+						next = SubtreeEnd(node);
+						break;
+					case GrammarKind::ModuleDeclaration:
+						EmitModule(node, parent);
 						next = SubtreeEnd(node);
 						break;
 					case GrammarKind::MacroInvocation:
@@ -973,6 +980,33 @@ namespace heimdall
 				Add(std::move(symbol), parent);
 			}
 
+			void EmitModule(std::size_t node, std::uint32_t parent)
+			{
+				if (!mModuleLoaded)
+				{
+					mModule       = ExtractModuleUnit(mTree);
+					mModuleLoaded = true;
+				}
+
+				const std::size_t first = FirstSig(node);
+				const std::size_t last  = LastSig(node);
+				if (!mModule.IsModuleUnit() || first == kNone || last == kNone || last < first ||
+					mModule.nameOffset < mTokens[first].offset ||
+					mModule.nameOffset >= TokenEnd(last))
+				{
+					return;
+				}
+
+				OutlineSymbol symbol;
+				symbol.kind       = OutlineKind::Module;
+				symbol.exported   = mModule.IsInterface();
+				symbol.name       = mModule.QualifiedName();
+				symbol.nameOffset = mModule.nameOffset;
+				symbol.nameLength = mModule.nameLength;
+				SetRange(symbol, node);
+				Add(std::move(symbol), parent);
+			}
+
 			void EmitEnumerator(std::size_t node, std::uint32_t parent)
 			{
 				if (parent == kNoOutlineParent || mSymbols[parent].kind != OutlineKind::Enum)
@@ -1005,6 +1039,8 @@ namespace heimdall
 			const GrammarNodeSoA& mNodes;
 			const std::vector<Token>& mTokens;
 			std::vector<OutlineSymbol> mSymbols;
+			ModuleUnitInfo mModule;
+			bool mModuleLoaded = false;
 		};
 
 	} // namespace
@@ -1080,6 +1116,7 @@ namespace heimdall
 
 	std::vector<OutlineSymbol> SymbolOutline::Extract(const ParseTree& tree)
 	{
+		HEIMDALL_TRACE_SCOPE(Index, "SymbolOutline::Extract");
 		std::vector<OutlineSymbol> symbols = Extractor(tree).Run();
 		std::vector<OutlineSymbol> macros  = MacroSymbols(tree);
 		if (macros.empty())

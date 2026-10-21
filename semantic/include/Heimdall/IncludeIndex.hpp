@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -147,7 +148,9 @@ namespace heimdall
 
 		// Default compiler system include directories, cached per compiler
 		// executable. Empty when undiscoverable (unknown driver, spawn failure).
-		static std::vector<std::filesystem::path> SystemIncludes(std::string_view compiler);
+		static std::vector<std::filesystem::path> SystemIncludes(
+			std::string_view compiler,
+			std::stop_token stop = {});
 
 		const ScopeIndex& Scopes() const noexcept
 		{

@@ -446,6 +446,26 @@
           "enum": ["off", "warning", "error"],
           "description": "Constrained redeclaration with a different constraint spelling."
         },
+        "cpp/module-structure": {
+          "enum": ["off", "warning", "error"],
+          "description": "Module unit that breaks the structural rules of C++20 modules (declaration order, fragments, export placement)."
+        },
+        "cpp/module-import-cycle": {
+          "enum": ["off", "warning", "error"],
+          "description": "Import that leads back to the importing module unit. Needs every module file in the same run."
+        },
+        "cpp/module-duplicate-interface": {
+          "enum": ["off", "warning", "error"],
+          "description": "Module whose primary interface unit is declared in more than one file."
+        },
+        "cpp/module-partition-export": {
+          "enum": ["off", "warning", "error"],
+          "description": "Interface partition that the primary interface does not export."
+        },
+        "cpp/module-unresolved-import": {
+          "enum": ["off", "warning", "error"],
+          "description": "Import of a module that no analyzed file provides (opt-in; pass every module file in the run)."
+        },
         "cpp/const-member-modification": {
           "enum": ["off", "warning", "error"],
           "description": "Assignment modifying a member through a const member function."

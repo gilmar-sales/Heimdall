@@ -296,3 +296,23 @@ TEST(WorkspaceSymbolIndexSpec, ResultsStayValidWhileTheIndexKeepsChanging)
     writer.join();
     EXPECT_GT(checked, 0u);
 }
+
+TEST(WorkspaceSymbolIndexSpec, FindsModuleUnitsByNameAndMarksInterfaces)
+{
+    WorkspaceSymbolIndex index;
+    index.SetDisk("file:///core.cppm", Indexed("file:///core.cppm", "export module app.core;\n"));
+    index.SetDisk("file:///core.cpp", Indexed("file:///core.cpp", "module app.core;\n"));
+
+    const auto hits = index.Query("app.core");
+
+    ASSERT_EQ(hits.size(), 2u);
+    std::size_t interfaces = 0;
+    for (const SymbolHit& hit : hits)
+    {
+        EXPECT_EQ(hit.Symbol().kind, heimdall::OutlineKind::Module);
+        interfaces += hit.Symbol().exported ? 1 : 0;
+        EXPECT_EQ(hit.Symbol().exported, hit.file->uri == "file:///core.cppm");
+    }
+
+    EXPECT_EQ(interfaces, 1u);
+}

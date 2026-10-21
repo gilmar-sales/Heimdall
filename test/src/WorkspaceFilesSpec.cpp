@@ -362,3 +362,11 @@ TEST_F(WorkspaceFilesSpec, UnderRootRequiresAWholePathComponent)
     EXPECT_FALSE(IsUnderRoot(mRoot / "a.cpp", root));
     EXPECT_FALSE(IsUnderRoot(root / "a.cpp", {}));
 }
+
+TEST_F(WorkspaceFilesSpec, IncludesEveryModuleInterfaceExtension)
+{
+    for (const char* name : {"core.cppm", "core.ixx", "core.mpp", "core.ccm", "core.cxxm", "core.c++m"})
+    {
+        EXPECT_TRUE(heimdall::lsp::IsWorkspaceSource(name)) << name;
+    }
+}

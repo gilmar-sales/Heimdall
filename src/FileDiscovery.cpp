@@ -1,5 +1,7 @@
 #include "FileDiscovery.hpp"
 
+#include <Heimdall/ModuleUnit.hpp>
+
 #include <algorithm>
 #include <iostream>
 #include <string>
@@ -347,7 +349,8 @@ namespace heimdall::cli
 		const auto extension = path.extension().string();
 		return extension == ".c" || extension == ".cc" || extension == ".cpp" ||
 			extension == ".cxx" || extension == ".h" || extension == ".hh" ||
-			extension == ".hpp" || extension == ".hxx";
+			extension == ".hpp" || extension == ".hxx" ||
+			heimdall::IsModuleUnitExtension(extension);
 	}
 
 	bool MatchGlobPattern(std::string_view pattern, std::string_view text)

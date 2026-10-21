@@ -272,3 +272,39 @@ TEST(SyntaxHighlightSpec, MarksInactiveGroupsWithFullCoverage)
     EXPECT_EQ(live->modifiers & heimdall::kHighlightInactive, 0);
     EXPECT_EQ(SpanOf(source, spans, "#if")->modifiers & heimdall::kHighlightInactive, 0);
 }
+
+TEST(SyntaxHighlightSpec, HighlightsModuleAndImportOnlyAsContextualKeywords)
+{
+    const std::string source =
+        "export module app.core;\n"
+        "import std;\n"
+        "import :detail;\n"
+        "import <vector>;\n";
+
+    const auto spans = Highlight(source);
+
+    EXPECT_TRUE(IsKind(source, spans, "export", HighlightKind::Keyword));
+    EXPECT_TRUE(IsKind(source, spans, "module", HighlightKind::Keyword));
+    EXPECT_TRUE(IsKind(source, spans, "import", HighlightKind::Keyword, 0));
+    EXPECT_TRUE(IsKind(source, spans, "import", HighlightKind::Keyword, 1));
+    EXPECT_TRUE(IsKind(source, spans, "import", HighlightKind::Keyword, 2));
+}
+
+TEST(SyntaxHighlightSpec, DoesNotHighlightModuleOrImportUsedAsNames)
+{
+    const std::string source =
+        "int module = 1;\n"
+        "int f() { int import = module; return import + module; }\n";
+
+    const auto spans = Highlight(source);
+
+    for (std::size_t nth = 0; nth < 4; ++nth)
+    {
+        EXPECT_FALSE(IsKind(source, spans, "module", HighlightKind::Keyword, nth)) << nth;
+    }
+
+    for (std::size_t nth = 0; nth < 2; ++nth)
+    {
+        EXPECT_FALSE(IsKind(source, spans, "import", HighlightKind::Keyword, nth)) << nth;
+    }
+}

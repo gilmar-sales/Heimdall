@@ -69,6 +69,9 @@ namespace heimdall
 		BitfieldSuffix,
 		ModuleDeclaration,
 		ImportDeclaration,
+		/// `export` keyword alone (the exported declaration is the next sibling) or
+		/// `export { ... }`, whose children are the exported declarations.
+		ExportDeclaration,
 		UsingDeclaration,
 		ConceptDefinition,
 		RequiresClause,

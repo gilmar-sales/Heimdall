@@ -21,6 +21,10 @@ add_executable(Tests_run
   src/CliInitSpec.cpp
   src/Cpp26FeaturesSpec.cpp
   src/CorePolicySpec.cpp
+  src/TraceSpec.cpp
+  src/ModuleUnitSpec.cpp
+  src/ModuleGraphSpec.cpp
+  src/ProfilingSpec.cpp
   src/ArchitecturePolicySpec.cpp
   src/SyntaxTreeSpec.cpp
   src/FormatterSpec.cpp
@@ -60,6 +64,7 @@ add_executable(Tests_run
   src/MacroExpanderSpec.cpp
   src/MacroScannerSpec.cpp
   src/MacroEnvironmentSpec.cpp
+  src/CompilerProbeSpec.cpp
   src/SemanticTokensSpec.cpp
   src/SemanticHighlightSpec.cpp
   src/MacroProtocolSpec.cpp
@@ -94,7 +99,7 @@ add_executable(Tests_run
 
 target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp ${PROJECT_SOURCE_DIR}/bench/src ${PROJECT_SOURCE_DIR}/src)
 
-target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::index heimdall::refactor heimdall::config simdjson::simdjson)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::index heimdall::refactor heimdall::config heimdall::profiling simdjson::simdjson)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_BUILD_DIR="${PROJECT_BINARY_DIR}")
@@ -158,8 +163,24 @@ add_test(
           -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckParseCli.cmake"
 )
 
+add_test(
+  NAME HeimdallCheckModulesCli
+  COMMAND "${CMAKE_COMMAND}"
+          "-DHEIMDALL_EXECUTABLE=$<TARGET_FILE:heimdall>"
+          "-DFIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/modules"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckModulesCli.cmake"
+)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+  if (HEIMDALL_PROFILING)
+    add_test(
+      NAME LspProfilingSmoke
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspProfilingSmoke.py"
+        "$<TARGET_FILE:heimdall-lsp>"
+    )
+    set_tests_properties(LspProfilingSmoke PROPERTIES TIMEOUT 60 LABELS "lsp;profiling")
+  endif ()
   add_test(
     NAME TokenParitySmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TokenParitySmoke.py"
@@ -274,6 +295,11 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspNavigationSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspNavigationSmoke.py"
+            "$<TARGET_FILE:heimdall-lsp>"
+  )
+  add_test(
+    NAME LspModuleSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspModuleSmoke.py"
             "$<TARGET_FILE:heimdall-lsp>"
   )
   add_test(

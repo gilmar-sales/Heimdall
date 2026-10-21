@@ -762,6 +762,57 @@ namespace heimdall
 				(sigs[arrow + 2].text == "<" || sigs[arrow + 2].text == "::");
 		}
 
+		// `module` / `import` begin a module-unit declaration (as opposed to being plain
+		// names) when what follows is `;`, `:`, `<`, a string or a name.
+		bool IsModuleUnitHead(const std::vector<Sig>& sigs, std::size_t index)
+		{
+			if (index + 1 >= sigs.size())
+			{
+				return false;
+			}
+
+			const auto& next = sigs[index + 1];
+			if (sigs[index].text == "module")
+			{
+				return next.text == ";" || next.text == ":" || next.kind == TokenKind::Identifier;
+			}
+
+			return sigs[index].text == "import" &&
+				(next.text == ":" || next.text == "<" || next.kind == TokenKind::Identifier ||
+					next.kind == TokenKind::StringLiteral);
+		}
+
+		// Whether `index` lies inside a `[export] module ...;` or `[export] import ...;`
+		// statement, where `:` introduces a partition rather than a label or a base list.
+		bool IsInModuleUnitStatement(const std::vector<Sig>& sigs, std::size_t index)
+		{
+			constexpr std::size_t kMaxStatementTokens = 32;
+			for (std::size_t steps = 0; steps < kMaxStatementTokens; ++steps)
+			{
+				const auto& text = sigs[index].text;
+				const bool head  = text == "export" ? index + 1 < sigs.size() &&
+					IsModuleUnitHead(sigs, index + 1)
+				: IsModuleUnitHead(sigs, index);
+				const bool boundary = index == 0 || sigs[index - 1].text == ";" ||
+					sigs[index - 1].text == "{" || sigs[index - 1].text == "}" ||
+					sigs[index - 1].line < sigs[index].line;
+				if (head && boundary)
+				{
+					return true;
+				}
+
+				if (index == 0 || sigs[index - 1].text == ";" || sigs[index - 1].text == "{" ||
+					sigs[index - 1].text == "}")
+				{
+					return false;
+				}
+
+				--index;
+			}
+
+			return false;
+		}
+
 		int SpacingGap(
 			const std::vector<Sig>& sigs,
 			std::size_t prev,
@@ -781,6 +832,19 @@ namespace heimdall
 			const TokenKind right_kind   = sigs[cur].kind;
 			const bool left_word         = IsWordish(left_kind) || IsComment(left_kind);
 			const bool right_word        = IsWordish(right_kind) || IsComment(right_kind);
+
+			// `export module a.b:part [[attr]];`, `import :part;`, `module :private;`
+			if ((right == ":" || left == ":") &&
+				IsInModuleUnitStatement(sigs, right == ":" ? cur : prev))
+			{
+				return right == ":" && (left == "module" || left == "import") ? 1 : 0;
+			}
+
+			if (right == "[" && left_word && cur + 1 < sigs.size() && sigs[cur + 1].text == "[" &&
+				IsInModuleUnitStatement(sigs, cur))
+			{
+				return 1;
+			}
 
 			if (right == "[" && IsSpliceOpen(sigs, cur))
 			{

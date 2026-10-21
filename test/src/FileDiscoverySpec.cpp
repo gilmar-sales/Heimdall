@@ -124,3 +124,13 @@ TEST(FileDiscoveryGlob, MixedGlobAndPlainInputs)
 
     std::filesystem::remove_all(root);
 }
+
+TEST(FileDiscoverySpec, TreatsModuleInterfaceExtensionsAsSourceFiles)
+{
+    for (const char* name : {"core.cppm", "core.ixx", "core.mpp", "core.ccm", "core.cxxm", "core.c++m"})
+    {
+        EXPECT_TRUE(heimdall::cli::IsSourceFile(name)) << name;
+    }
+
+    EXPECT_FALSE(heimdall::cli::IsSourceFile("core.cppmx"));
+}

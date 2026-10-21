@@ -4,11 +4,12 @@ add_executable(heimdall
   CliOptions.cpp
   FileDiscovery.cpp
   Init.cpp
+  ModulePass.cpp
   Pipeline.cpp
   Reporting.cpp
 )
 
-target_link_libraries(heimdall PRIVATE heimdall::analysis heimdall::config)
+target_link_libraries(heimdall PRIVATE heimdall::analysis heimdall::config heimdall::profiling)
 target_compile_features(heimdall PRIVATE cxx_std_26)
 
 target_precompile_headers(heimdall PRIVATE

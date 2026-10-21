@@ -129,7 +129,8 @@ namespace
                 rule.id == RuleId::ModernizeEmplace || rule.id == RuleId::ModernizeMakeUnique ||
                 rule.id == RuleId::ModernizeMakeShared || rule.id == RuleId::ModernizeSmartPtr ||
                 rule.id == RuleId::NoNewDelete || rule.id == RuleId::ModernizeAlgorithms ||
-                rule.id == RuleId::ModernizeStructuredBindings;
+                rule.id == RuleId::ModernizeStructuredBindings || rule.id == RuleId::ModuleStructure ||
+                rule.layer == "project";
             if (syntax_only)
             {
                 SCOPED_TRACE(rule.code);

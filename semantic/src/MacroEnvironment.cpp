@@ -1,14 +1,19 @@
 #include <Heimdall/MacroEnvironment.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
 #include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/Trace.hpp>
+
+#include "CompilerProbe.hpp"
 
 namespace heimdall
 {
@@ -110,29 +115,18 @@ namespace heimdall
 			return table;
 		}
 
-		[[nodiscard]] std::string RunProbe(const std::string& driver, const std::string& flags)
+		[[nodiscard]] std::string RunProbe(
+			const std::string& driver,
+			const std::string& flags,
+			std::stop_token stop)
 		{
 #if defined(_WIN32)
 			const std::string line = "\"\"" + driver + "\" -x c++ -dM -E" + flags + " NUL 2>nul\"";
-			std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(line.c_str(), "r"), _pclose);
 #else
 			const std::string line =
 				"\"" + driver + "\" -x c++ -dM -E" + flags + " /dev/null 2>/dev/null";
-			std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(line.c_str(), "r"), pclose);
 #endif
-			std::string text;
-			if (!pipe)
-			{
-				return text;
-			}
-
-			char buffer[kProbeBufferBytes];
-			while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
-			{
-				text += buffer;
-			}
-
-			return text;
+			return detail::QueryCompiler(driver, line, stop).output;
 		}
 
 		[[nodiscard]] MacroTable ParseProbe(std::string_view text)
@@ -194,6 +188,7 @@ namespace heimdall
 			std::string name;
 			/// `Signature` of the definition the header saw, 0 when the name was undefined.
 			std::uint64_t signature = 0;
+			MacroPtr definition;
 		};
 
 		struct EffectFile
@@ -211,7 +206,26 @@ namespace heimdall
 			std::vector<std::pair<std::string, MacroPtr>> net;
 			/// The header first, then every header it entered, in order.
 			std::vector<EffectFile> files;
+			struct Query
+			{
+				IncludeRequest request;
+				std::filesystem::path directory;
+				std::optional<std::filesystem::path> result;
+			};
+
+			std::vector<Query> queries;
+			std::vector<std::string> definedNames;
+			std::size_t depth = 1;
 		};
+
+		std::string QueryKey(
+			const IncludeRequest& request,
+			const std::filesystem::path& directory)
+		{
+			const auto path = directory.generic_string();
+			return std::to_string(path.size()) + ":" + path +(request.angled ? "A" : "Q") +
+				(request.next ? "N" : "F") + request.header;
+		}
 
 		std::uint64_t Signature(const MacroDef* macro) noexcept
 		{
@@ -257,29 +271,210 @@ namespace heimdall
 				return cache;
 			}
 
-			std::shared_ptr<const Effect> Find(const std::string& key)
+			std::vector<std::shared_ptr<const Effect>> Find(const std::string& key)
 			{
 				const std::lock_guard<std::mutex> lock(mMutex);
 				const auto found = mEffects.find(key);
-				return found == mEffects.end() ? nullptr : found->second;
+				if (found == mEffects.end())
+				{
+					return {};
+				}
+
+				mOrder.splice(mOrder.begin(), mOrder, found->second.position);
+				return found->second.variants;
 			}
 
 			void Store(const std::string& key, std::shared_ptr<const Effect> effect)
 			{
 				const std::lock_guard<std::mutex> lock(mMutex);
-				if (mEffects.size() >= kMaxEntries)
+				std::size_t bytes = sizeof(Effect) + key.size();
+				for (const auto& file : effect->files)
 				{
-					mEffects.clear();
+					bytes += sizeof(file) + file.path.size() + file.guard.size();
 				}
 
-				mEffects[key] = std::move(effect);
+				for (const auto& read : effect->reads)
+				{
+					bytes += sizeof(read) + read.name.size();
+					if (read.definition)
+					{
+						bytes += sizeof(MacroDef) + read.definition->body.size() + read.definition->file.size() +
+							read.definition->tokens.capacity() * sizeof(MacroBodyToken);
+						for (const auto& parameter : read.definition->params)
+						{
+							bytes += sizeof(parameter) + parameter.size();
+						}
+					}
+				}
+
+				for (const auto& [name, macro] : effect->net)
+				{
+					bytes += sizeof(MacroDef) + name.size();
+					if (macro)
+					{
+						bytes += macro->body.size() + macro->file.size() +
+							macro->tokens.capacity() * sizeof(MacroBodyToken);
+						for (const auto& param : macro->params)
+						{
+							bytes += sizeof(param) + param.size();
+						}
+					}
+				}
+
+				for (const auto& query : effect->queries)
+				{
+					bytes += sizeof(query) + query.request.header.size() +
+						query.directory.native().size() * sizeof(std::filesystem::path::value_type);
+					if (query.result)
+					{
+						bytes += query.result->native().size() * sizeof(std::filesystem::path::value_type);
+					}
+				}
+
+				for (const auto& name : effect->definedNames)
+				{
+					bytes += sizeof(name) + name.size();
+				}
+
+				if (bytes > kMaxBytes)
+				{
+					return;
+				}
+
+				auto found = mEffects.find(key);
+				if (found != mEffects.end() && found->second.variants.size() == kMaxVariants)
+				{
+					const auto removed = found->second.variantBytes.back();
+					mBytes -= removed;
+					found->second.bytes -= removed;
+					found->second.variantBytes.pop_back();
+					found->second.variants.pop_back();
+				}
+
+				while (!mOrder.empty() && (mBytes + bytes > kMaxBytes || mEffects.size() >= kMaxEntries))
+				{
+					const auto victim = mEffects.find(mOrder.back());
+					mBytes -= victim->second.bytes;
+					mEffects.erase(victim);
+					mOrder.pop_back();
+				}
+
+				auto[entry, inserted] = mEffects.try_emplace(key);
+				if (inserted)
+				{
+					mOrder.push_front(key);
+					entry->second.position = mOrder.begin();
+				}
+
+				entry->second.variants.insert(entry->second.variants.begin(), std::move(effect));
+				entry->second.variantBytes.insert(entry->second.variantBytes.begin(), bytes);
+				entry->second.bytes += bytes;
+				mBytes += bytes;
 			}
 
 		private:
-			static constexpr std::size_t kMaxEntries = 8192;
+			static constexpr std::size_t kMaxEntries  = 8192;
+			static constexpr std::size_t kMaxVariants = 4;
+			static constexpr std::size_t kMaxBytes    = 64 * 1024 * 1024;
+			struct Entry
+			{
+				std::vector<std::shared_ptr<const Effect>> variants;
+				std::vector<std::size_t> variantBytes;
+				std::list<std::string>::iterator position;
+				std::size_t bytes = 0;
+			};
 
 			std::mutex mMutex;
-			std::unordered_map<std::string, std::shared_ptr<const Effect>> mEffects;
+			std::unordered_map<std::string, Entry> mEffects;
+			std::list<std::string> mOrder;
+			std::size_t mBytes = 0;
+		};
+
+		class HeaderContentCache
+		{
+		public:
+			static HeaderContentCache& Instance()
+			{
+				static HeaderContentCache cache;
+				return cache;
+			}
+
+			std::shared_ptr<const std::string> Read(
+				const std::filesystem::path& path,
+				std::uint64_t stamp,
+				std::size_t maxBytes,
+				MacroEnvironmentMetrics& metrics)
+			{
+				const auto key = path.generic_string();
+				{
+					const std::lock_guard lock(mMutex);
+					if (const auto found = mContents.find(key); found != mContents.end() &&
+						found->second.stamp == stamp)
+					{
+						mOrder.splice(mOrder.begin(), mOrder, found->second.position);
+						return found->second.content->size() <= maxBytes ? found->second.content : nullptr;
+					}
+				}
+				std::error_code error;
+				const auto size = std::filesystem::file_size(path, error);
+				if (error || size > maxBytes)
+				{
+					return nullptr;
+				}
+
+				std::ifstream input(path, std::ios::binary);
+				auto content = std::make_shared<std::string>(static_cast<std::size_t>(size), '\0');
+				input.read(content->data(), static_cast<std::streamsize>(size));
+				++metrics.metadataQueries;
+				if (!input || Stamp(path, nullptr) != stamp)
+				{
+					return nullptr;
+				}
+
+				++metrics.filesRead;
+				metrics.bytesRead += content->size();
+				constexpr std::size_t kMaxBytes   = 32 * 1024 * 1024;
+				constexpr std::size_t kMaxEntries = 4096;
+				if (content->size() > kMaxBytes)
+				{
+					return content;
+				}
+
+				const std::lock_guard lock(mMutex);
+				if (const auto old = mContents.find(key); old != mContents.end())
+				{
+					mBytes -= old->second.content->size();
+					mOrder.erase(old->second.position);
+					mContents.erase(old);
+				}
+
+				while (!mOrder.empty() && (mBytes + content->size() > kMaxBytes ||
+					mContents.size() >= kMaxEntries))
+				{
+					const auto victim = mContents.find(mOrder.back());
+					mBytes -= victim->second.content->size();
+					mContents.erase(victim);
+					mOrder.pop_back();
+				}
+
+				mOrder.push_front(key);
+				mContents.emplace(key, Entry {stamp, content, mOrder.begin()});
+				mBytes += content->size();
+				return content;
+			}
+
+		private:
+			struct Entry
+			{
+				std::uint64_t stamp;
+				std::shared_ptr<const std::string> content;
+				std::list<std::string>::iterator position;
+			};
+
+			std::mutex mMutex;
+			std::unordered_map<std::string, Entry> mContents;
+			std::list<std::string> mOrder;
+			std::size_t mBytes = 0;
 		};
 
 	} // namespace
@@ -291,21 +486,42 @@ namespace heimdall
 		struct Trace
 		{
 			std::vector<EffectRead> reads;
-			std::unordered_set<std::string> readNames;
-			std::unordered_set<std::string> touched;
+			Preprocessor::ErasedSet readNames;
+			Preprocessor::ErasedSet touched;
 			std::unordered_map<std::string, MacroPtr> net;
 			std::vector<std::string> netOrder;
 			std::vector<EffectFile> files;
-			bool cacheable = true;
+			std::vector<Effect::Query> queries;
+			std::unordered_set<std::string> fileNames;
+			std::unordered_set<std::string> queryNames;
+			std::unordered_set<std::string> definedNames;
+			std::size_t depth = 1;
+			bool cacheable    = true;
 
-			void AddRead(std::string_view name, std::uint64_t signature)
+			void AddFile(const EffectFile& file)
 			{
-				if (touched.contains(std::string(name)) ||!readNames.emplace(name).second)
+				if (fileNames.insert(file.path).second)
+				{
+					files.push_back(file);
+				}
+			}
+
+			void AddQuery(const Effect::Query& query)
+			{
+				if (queryNames.insert(QueryKey(query.request, query.directory)).second)
+				{
+					queries.push_back(query);
+				}
+			}
+
+			void AddRead(std::string_view name, std::uint64_t signature, MacroPtr definition)
+			{
+				if (touched.contains(name) ||!readNames.emplace(name).second)
 				{
 					return;
 				}
 
-				reads.push_back({std::string(name), signature});
+				reads.push_back({std::string(name), signature, std::move(definition)});
 			}
 
 			void SetNet(const std::string& name, MacroPtr macro)
@@ -322,13 +538,26 @@ namespace heimdall
 		{
 		public:
 			std::vector<Trace*> stack;
+			MacroTable* table = nullptr;
 			Preprocessor::ErasedSet everDefined;
 
 			void Read(std::string_view name, const MacroDef* found) override
 			{
 				if (!stack.empty())
 				{
-					stack.back()->AddRead(name, Signature(found));
+					auto& trace = *stack.back();
+					if (trace.touched.contains(name) || trace.readNames.contains(name))
+					{
+						return;
+					}
+					MacroPtr definition;
+					if (found)
+					{
+						table->SetObserver(nullptr);
+						definition = table->Lookup(name);
+						table->SetObserver(this);
+					}
+					trace.AddRead(name, Signature(found), std::move(definition));
 				}
 			}
 
@@ -337,6 +566,7 @@ namespace heimdall
 				everDefined.insert(macro->name);
 				if (!stack.empty())
 				{
+					stack.back()->definedNames.insert(macro->name);
 					stack.back()->SetNet(macro->name, macro);
 				}
 			}
@@ -357,7 +587,8 @@ namespace heimdall
 			std::stop_token stop) :
 			mEnv(env), mCommand(command), mOptions(options), mStop(std::move(stop))
 		{
-			for (const auto& dir : IncludeIndex::SystemIncludes(DriverOf(command)))
+			mTracer.table = &mTable;
+			for (const auto& dir : IncludeIndex::SystemIncludes(DriverOf(command), mStop))
 			{
 				mSystem.push_back(Normalized(dir));
 			}
@@ -373,21 +604,34 @@ namespace heimdall
 			{
 				for (const auto& dir : command->include_directories)
 				{
-					mConfigKey += "|I" + dir.generic_string();
+					const auto normalized = Normalized(dir.is_relative() ? command->directory / dir : dir);
+					mIncludeDirectories.push_back(normalized);
+					mConfigKey += "|I" + normalized.generic_string();
 				}
 
 				for (const auto& dir : command->quote_directories)
 				{
-					mConfigKey += "|Q" + dir.generic_string();
+					const auto normalized = Normalized(dir.is_relative() ? command->directory / dir : dir);
+					mQuoteDirectories.push_back(normalized);
+					mConfigKey += "|Q" + normalized.generic_string();
 				}
 			}
 
-			mConfigKey += "\n";
+			mIncludeDirectories.insert(mIncludeDirectories.end(), mSystem.begin(), mSystem.end());
+
+			if (command != nullptr)
+			{
+				mConfigKey += "|C" + Normalized(command->directory).generic_string();
+			}
+
+			mConfigKey += "|L" + std::to_string(options.maxFileBytes) + ":" +
+				std::to_string(options.maxMacros) + "\n";
 		}
 
 		void Run(const std::filesystem::path& file, std::string_view text)
 		{
-			mTable = Builtins(mCommand, mOptions.probeCompiler);
+			mTable = Builtins(mCommand, mOptions.probeCompiler, mStop);
+			HEIMDALL_TRACE_SCOPE(Macro, "MacroEnvironment::Run");
 			mTable.ForEach([this](const MacroDef& macro)
 				{
 					mTracer.everDefined.insert(macro.name);
@@ -410,7 +654,11 @@ namespace heimdall
 			{
 				mEnv.mCheckpoints.push_back({offset, mTable.Freeze()});
 			};
-			mEnv.mMain        = MacroScanner::Scan(text, main.generic_string(), mTable, callbacks, mStop);
+			{
+				HEIMDALL_TRACE_SCOPE(Macro, "ScanMainFile");
+				mEnv.mMain = MacroScanner::Scan(text, main.generic_string(), mTable, callbacks, mStop);
+			}
+
 			mEnv.mFinal       = mTable.Freeze();
 			mEnv.mEverDefined = std::move(mTracer.everDefined);
 			mEnv.mComplete    = mComplete && !mEnv.mMain.cancelled;
@@ -492,40 +740,72 @@ namespace heimdall
 			if (!request.angled)
 			{
 				dirs.push_back(includerDir);
-				if (mCommand != nullptr)
-				{
-					dirs.insert(dirs.end(), mCommand->quote_directories.begin(),
-						mCommand->quote_directories.end());
-				}
+				dirs.insert(dirs.end(), mQuoteDirectories.begin(), mQuoteDirectories.end());
 			}
 
-			if (mCommand != nullptr)
-			{
-				for (const auto& dir : mCommand->include_directories)
-				{
-					dirs.push_back(dir.is_relative() ? mCommand->directory / dir : dir);
-				}
-			}
-
-			dirs.insert(dirs.end(), mSystem.begin(), mSystem.end());
+			dirs.insert(dirs.end(), mIncludeDirectories.begin(), mIncludeDirectories.end());
 			return dirs;
 		}
 
 		bool Readable(const std::filesystem::path& path) const
 		{
+			const auto key = path.generic_string();
+			if (const auto found = mReadable.find(key); found != mReadable.end())
+			{
+				return found->second;
+			}
+
 			if (mOptions.overlay != nullptr && mOptions.overlay->Find(path))
 			{
+				mReadable.emplace(key, true);
 				return true;
 			}
 
 			std::error_code ec;
-			return std::filesystem::is_regular_file(path, ec);
+			++mEnv.mMetrics.resolutionQueries;
+			const bool readable = std::filesystem::is_regular_file(path, ec);
+			mReadable.emplace(key, readable);
+			return readable;
 		}
 
 		std::optional<std::filesystem::path> Resolve(
 			const IncludeRequest& request,
+			const std::filesystem::path& includerDir)
+		{
+			HEIMDALL_TRACE_SCOPE(Include, "ResolveInclude");
+			auto result = ResolveUntracked(request, includerDir);
+			if (!mTracer.stack.empty())
+			{
+				mTracer.stack.back()->AddQuery({request, includerDir, result});
+			}
+
+			return result;
+		}
+
+		std::optional<std::filesystem::path> ResolveUntracked(
+			const IncludeRequest& request,
 			const std::filesystem::path& includerDir) const
 		{
+			const auto key = QueryKey(request, includerDir);
+			if (const auto found = mResolutions.find(key); found != mResolutions.end())
+			{
+				return found->second;
+			}
+
+			auto result = ResolvePath(request, includerDir);
+			mResolutions.emplace(key, result);
+			return result;
+		}
+
+		std::optional<std::filesystem::path> ResolvePath(
+			const IncludeRequest& request,
+			const std::filesystem::path& includerDir) const
+		{
+			if (mStop.stop_requested())
+			{
+				return std::nullopt;
+			}
+
 			const std::filesystem::path name(request.header);
 			if (name.is_absolute())
 			{
@@ -545,6 +825,11 @@ namespace heimdall
 
 			for (std::size_t i = first; i < dirs.size(); ++i)
 			{
+				if (mStop.stop_requested())
+				{
+					return std::nullopt;
+				}
+
 				const std::filesystem::path candidate = Normalized(dirs[i] / name);
 				if (Readable(candidate))
 				{
@@ -569,17 +854,10 @@ namespace heimdall
 				content = mOptions.overlay->Find(path);
 			}
 
-			if (!content)
+			if (!content && !mStop.stop_requested())
 			{
-				std::error_code ec;
-				const auto size = std::filesystem::file_size(path, ec);
-				std::ifstream in(path, std::ios::binary);
-				if (!ec && in && size <= mOptions.maxFileBytes)
-				{
-					auto text = std::make_shared<std::string>(static_cast<std::size_t>(size), '\0');
-					in.read(text->data(), static_cast<std::streamsize>(size));
-					content = std::move(text);
-				}
+				content = HeaderContentCache::Instance().Read(path, FileStamp(key),
+					mOptions.maxFileBytes, mEnv.mMetrics);
 			}
 
 			mContents.emplace(key, content);
@@ -606,6 +884,12 @@ namespace heimdall
 			const std::filesystem::path& includerDir,
 			bool forced)
 		{
+			if (mStop.stop_requested())
+			{
+				mComplete = false;
+				return false;
+			}
+
 			const auto path = Resolve(request, includerDir);
 			if (!path)
 			{
@@ -621,6 +905,7 @@ namespace heimdall
 			const std::string key = path->generic_string();
 			if (mOnce.contains(key))
 			{
+				MarkUncacheable();
 				return true;
 			}
 
@@ -646,14 +931,27 @@ namespace heimdall
 			}
 
 			const std::string cacheKey = mConfigKey + key;
-			if (const auto effect = EffectCache::Instance().Find(cacheKey);
-				effect && Valid(*effect))
+			if (mOptions.reuseEffects)
 			{
-				Apply(*effect);
-				return true;
+				HEIMDALL_TRACE_SCOPE(Include, "ReplayEffects");
+				for (const auto& effect : EffectCache::Instance().Find(cacheKey))
+				{
+					if (Valid(*effect))
+					{
+						++mEnv.mMetrics.effectsReplayed;
+						Apply(*effect);
+						return true;
+					}
+
+					++mEnv.mMetrics.effectsRejected;
+				}
 			}
 
-			const auto content = Read(*path);
+			const auto content = [&]
+			{
+				HEIMDALL_TRACE_SCOPE_DETAIL(Include, "ReadHeader", key);
+				return Read(*path);
+			}();
 			if (!content)
 			{
 				mComplete = false;
@@ -671,8 +969,12 @@ namespace heimdall
 			mComplete                 = true;
 			mTracer.stack.push_back(&trace);
 			++mDepth;
-			const MacroScanResult scanned =
-				MacroScanner::Scan(*content, key, mTable, CallbacksFor(path->parent_path()), mStop);
+			++mEnv.mMetrics.effectsScanned;
+			const MacroScanResult scanned = [&]
+			{
+				HEIMDALL_TRACE_SCOPE_DETAIL(Macro, "ScanHeader", key);
+				return MacroScanner::Scan(*content, key, mTable, CallbacksFor(path->parent_path()), mStop);
+			}();
 			--mDepth;
 			mTracer.stack.pop_back();
 			mGuards[key] = scanned.guard;
@@ -684,10 +986,11 @@ namespace heimdall
 			const bool clean = mComplete && !scanned.cancelled;
 			mComplete        = completeBefore && mComplete;
 			trace.cacheable  = trace.cacheable && clean;
-			EffectFile self {key, Stamp(*path, mOptions.overlay), scanned.guard,
+			EffectFile self {key, FileStamp(key), scanned.guard,
 				scanned.pragmaOnce};
 			trace.files.insert(trace.files.begin(), self);
-			if (trace.cacheable)
+			trace.fileNames.insert(key);
+			if (trace.cacheable && mOptions.reuseEffects)
 			{
 				auto effect   = std::make_shared<Effect>();
 				effect->reads = trace.reads;
@@ -696,7 +999,11 @@ namespace heimdall
 					effect->net.emplace_back(name, trace.net[name]);
 				}
 
-				effect->files = trace.files;
+				effect->files   = trace.files;
+				effect->queries = trace.queries;
+				effect->definedNames.assign(trace.definedNames.begin(), trace.definedNames.end());
+				effect->depth = trace.depth;
+				std::ranges::sort(effect->definedNames);
 				EffectCache::Instance().Store(cacheKey, std::move(effect));
 			}
 
@@ -705,11 +1012,40 @@ namespace heimdall
 			return true;
 		}
 
+		std::uint64_t FileStamp(const std::string& path) const
+		{
+			if (const auto found = mStamps.find(path); found != mStamps.end())
+			{
+				return found->second;
+			}
+
+			++mEnv.mMetrics.metadataQueries;
+			const auto stamp = Stamp(path, mOptions.overlay);
+			mStamps.emplace(path, stamp);
+			return stamp;
+		}
+
 		bool Valid(const Effect& effect) const
 		{
+			HEIMDALL_TRACE_SCOPE(Include, "ValidateEffect");
+			if (mStop.stop_requested() || effect.depth > mOptions.maxIncludeDepth - mDepth ||
+				mTracer.everDefined.size() + effect.definedNames.size() > mOptions.maxMacros)
+			{
+				return false;
+			}
+
 			for (const EffectRead& read : effect.reads)
 			{
-				if (Signature(mTable.Peek(read.name)) != read.signature)
+				const auto current = mTable.Peek(read.name);
+				if (Signature(current) != read.signature)
+				{
+					return false;
+				}
+
+				if (current && (!read.definition || current->body != read.definition->body ||
+					current->params != read.definition->params || current->functionLike != read.definition->functionLike ||
+					current->variadic != read.definition->variadic || current->file != read.definition->file ||
+					current->offset != read.definition->offset || current->origin != read.definition->origin))
 				{
 					return false;
 				}
@@ -717,7 +1053,16 @@ namespace heimdall
 
 			for (const EffectFile& file : effect.files)
 			{
-				if (Stamp(file.path, mOptions.overlay) != file.stamp)
+				if (mStop.stop_requested() ||(file.pragmaOnce && mOnce.contains(file.path)) ||
+					FileStamp(file.path) != file.stamp)
+				{
+					return false;
+				}
+			}
+
+			for (const auto& query : effect.queries)
+			{
+				if (ResolveUntracked(query.request, query.directory) != query.result)
 				{
 					return false;
 				}
@@ -730,15 +1075,27 @@ namespace heimdall
 		// records them itself; its reads and files are added here.
 		void Apply(const Effect& effect)
 		{
+			HEIMDALL_TRACE_SCOPE(Include, "ApplyEffect");
+			mTracer.everDefined.insert(effect.definedNames.begin(), effect.definedNames.end());
 			if (!mTracer.stack.empty())
 			{
 				Trace& parent = *mTracer.stack.back();
+				parent.depth  = std::max(parent.depth, effect.depth + 1);
+				parent.definedNames.insert(effect.definedNames.begin(), effect.definedNames.end());
 				for (const EffectRead& read : effect.reads)
 				{
-					parent.AddRead(read.name, read.signature);
+					parent.AddRead(read.name, read.signature, read.definition);
 				}
 
-				parent.files.insert(parent.files.end(), effect.files.begin(), effect.files.end());
+				for (const auto& file : effect.files)
+				{
+					parent.AddFile(file);
+				}
+
+				for (const auto& query : effect.queries)
+				{
+					parent.AddQuery(query);
+				}
 			}
 
 			for (const auto& [name, macro] : effect.net)
@@ -777,9 +1134,11 @@ namespace heimdall
 			}
 
 			Trace& parent = *mTracer.stack.back();
+			parent.depth  = std::max(parent.depth, child.depth + 1);
+			parent.definedNames.insert(child.definedNames.begin(), child.definedNames.end());
 			for (const EffectRead& read : child.reads)
 			{
-				parent.AddRead(read.name, read.signature);
+				parent.AddRead(read.name, read.signature, read.definition);
 			}
 
 			for (const std::string& name : child.netOrder)
@@ -787,7 +1146,16 @@ namespace heimdall
 				parent.SetNet(name, child.net.at(name));
 			}
 
-			parent.files.insert(parent.files.end(), child.files.begin(), child.files.end());
+			for (const auto& file : child.files)
+			{
+				parent.AddFile(file);
+			}
+
+			for (const auto& query : child.queries)
+			{
+				parent.AddQuery(query);
+			}
+
 			parent.cacheable = parent.cacheable && child.cacheable;
 		}
 
@@ -807,9 +1175,14 @@ namespace heimdall
 		std::stop_token mStop;
 		MacroTable mTable;
 		std::vector<std::filesystem::path> mSystem;
+		std::vector<std::filesystem::path> mIncludeDirectories;
+		std::vector<std::filesystem::path> mQuoteDirectories;
 		std::vector<std::filesystem::path> mDirectories;
 		std::vector<std::filesystem::path> mFiles;
 		std::unordered_map<std::string, std::shared_ptr<const std::string>> mContents;
+		mutable std::unordered_map<std::string, std::uint64_t> mStamps;
+		mutable std::unordered_map<std::string, bool> mReadable;
+		mutable std::unordered_map<std::string, std::optional<std::filesystem::path>> mResolutions;
 		std::unordered_map<std::string, std::string> mGuards;
 		std::unordered_set<std::string> mOnce;
 		std::unordered_set<std::string> mSeen;
@@ -817,7 +1190,10 @@ namespace heimdall
 		bool mComplete     = true;
 	};
 
-	MacroTable MacroEnvironment::Builtins(const CompileCommand* command, bool probeCompiler)
+	MacroTable MacroEnvironment::Builtins(
+		const CompileCommand* command,
+		bool probeCompiler,
+		std::stop_token stop)
 	{
 		const std::string driver = DriverOf(command);
 		const bool msvc          = IsMsvcDriver(driver);
@@ -826,27 +1202,29 @@ namespace heimdall
 			return FallbackBuiltins(command, msvc);
 		}
 
-		const std::string flags = ProbeFlags(command);
-		const std::string key   = driver + "\n" + flags;
+		HEIMDALL_TRACE_SCOPE_DETAIL(Compiler, "MacroEnvironment::Builtins", driver);
+		const auto output = RunProbe(driver, ProbeFlags(command), stop);
+		if (output.empty())
+		{
+			return FallbackBuiltins(command, false);
+		}
+
 		static std::mutex mutex;
 		static std::unordered_map<std::string, MacroTable> cache;
+		const std::lock_guard lock(mutex);
+		if (const auto found = cache.find(output); found != cache.end())
 		{
-			const std::lock_guard<std::mutex> lock(mutex);
-			if (const auto found = cache.find(key); found != cache.end())
-			{
-				return found->second;
-			}
+			return found->second;
 		}
 
-		MacroTable table = ParseProbe(RunProbe(driver, flags));
-		if (table.Size() == 0)
+		auto table                              = ParseProbe(output).Freeze();
+		constexpr std::size_t kMaxBuiltinTables = 128;
+		if (cache.size() >= kMaxBuiltinTables)
 		{
-			table = FallbackBuiltins(command, false);
+			cache.erase(cache.begin());
 		}
 
-		MacroTable frozen = table.Freeze();
-		const std::lock_guard<std::mutex> lock(mutex);
-		return cache.emplace(key, std::move(frozen)).first->second;
+		return cache.emplace(output, std::move(table)).first->second;
 	}
 
 	MacroEnvironment MacroEnvironment::Build(
@@ -856,11 +1234,17 @@ namespace heimdall
 		const MacroEnvironmentOptions& options,
 		std::stop_token stop)
 	{
+		HEIMDALL_TRACE_SCOPE_DETAIL(Macro, "MacroEnvironment::Build", file.generic_string());
+		const auto start = std::chrono::steady_clock::now();
 		MacroEnvironment env;
 		Builder builder(env, command, options, std::move(stop));
+		env.mMetrics.setupNs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now() - start).count());
 		builder.Run(file, text);
 		env.mFiles             = builder.TakeFiles();
 		env.mSystemDirectories = builder.TakeSystem();
+		env.mMetrics.totalNs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now() - start).count());
 		return env;
 	}
 

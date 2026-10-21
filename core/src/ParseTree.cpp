@@ -11,6 +11,7 @@
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/MacroTable.hpp>
 #include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/Trace.hpp>
 
 #include "detail/GrammarParser.hpp"
 
@@ -89,7 +90,11 @@ namespace heimdall
 		}
 
 		const auto lexStart = ParseClock::now();
-		tree.m_tokens       = lexed != nullptr ? *lexed : Lexer(source).Lex(stop);
+		{
+			HEIMDALL_TRACE_SCOPE(Parse, "Lex");
+			tree.m_tokens = lexed != nullptr ? *lexed : Lexer(source).Lex(stop);
+		}
+
 		tree.mMetrics.lexNs = static_cast<std::uint64_t>(
 			std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
 			.count());
@@ -120,7 +125,11 @@ namespace heimdall
 		if (!tree.m_shared_tokens)
 		{
 			const auto lexStart = ParseClock::now();
-			tree.m_tokens       = Lexer(tree.m_source).Lex(stop);
+			{
+				HEIMDALL_TRACE_SCOPE(Parse, "Lex");
+				tree.m_tokens = Lexer(tree.m_source).Lex(stop);
+			}
+
 			tree.mMetrics.lexNs = static_cast<std::uint64_t>(
 				std::chrono::duration_cast<std::chrono::nanoseconds>(ParseClock::now() - lexStart)
 				.count());
@@ -135,6 +144,7 @@ namespace heimdall
 		std::stop_token stop,
 		const ParseReuse* reuse)
 	{
+		HEIMDALL_TRACE_SCOPE(Parse, "ParseTree::Build");
 		auto& tree             = *this;
 		tree.m_type_names      = options.type_names;
 		tree.m_macro_resolver  = options.macro_resolver;

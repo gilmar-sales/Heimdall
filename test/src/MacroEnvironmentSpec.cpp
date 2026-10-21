@@ -5,11 +5,15 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <array>
+#include <barrier>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 namespace
 {
@@ -70,6 +74,223 @@ namespace
     }
 
 } // namespace
+
+TEST(MacroEnvironmentSpec, WarmReplayObservesNewHasIncludeTargets)
+{
+    Project project;
+    project.Write("outer.h", "#if __has_include(\"optional.h\")\n#define FOUND 1\n#endif\n");
+    const std::string text = "#include \"outer.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    const auto before = MacroEnvironment::Build(main, text, nullptr, Offline());
+
+    project.Write("optional.h", "");
+    const auto after = MacroEnvironment::Build(main, text, nullptr, Offline());
+
+    EXPECT_FALSE(Defined(before.Final(), "FOUND"));
+    EXPECT_TRUE(Defined(after.Final(), "FOUND"));
+}
+
+TEST(MacroEnvironmentSpec, ReplayRespectsEarlierPragmaOnceIncludes)
+{
+    Project project;
+    project.Write("once.h", "#pragma once\n#define VALUE 1\n");
+    project.Write("outer.h", "#include \"once.h\"\n");
+    const std::string first = "#include \"outer.h\"\n";
+    const auto main = project.Write("main.cpp", first);
+    const auto cold = MacroEnvironment::Build(main, first, nullptr, Offline());
+    const std::string changed = "#include \"once.h\"\n#undef VALUE\n#include \"outer.h\"\n";
+
+    const auto warm = MacroEnvironment::Build(main, changed, nullptr, Offline());
+    auto options = Offline();
+    options.reuseEffects = false;
+    const auto reference = MacroEnvironment::Build(main, changed, nullptr, options);
+
+    EXPECT_TRUE(Defined(cold.Final(), "VALUE"));
+    EXPECT_FALSE(Defined(warm.Final(), "VALUE"));
+    EXPECT_EQ(Defined(warm.Final(), "VALUE"), Defined(reference.Final(), "VALUE"));
+    const auto reordered = MacroEnvironment::Build(main, first, nullptr, Offline());
+    EXPECT_TRUE(Defined(reordered.Final(), "VALUE"));
+}
+
+TEST(MacroEnvironmentSpec, ReplayedUndefinitionsStillCountPreviouslyDefinedNames)
+{
+    Project project;
+    project.Write("first.h", "#define TEMPORARY 1\n#undef TEMPORARY\n");
+    project.Write("second.h", "#define NEXT 1\n");
+    project.Write("third.h", "#define VALUE 1\n");
+    const std::string text = "#include \"first.h\"\n#include \"second.h\"\n#include \"third.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    auto options = Offline();
+    options.maxMacros = 3;
+    const auto cold = MacroEnvironment::Build(main, text, nullptr, options);
+
+    const auto warm = MacroEnvironment::Build(main, text, nullptr, options);
+
+    EXPECT_FALSE(Defined(cold.Final(), "VALUE"));
+    EXPECT_FALSE(Defined(warm.Final(), "VALUE"));
+    EXPECT_EQ(cold.Complete(), warm.Complete());
+}
+
+TEST(MacroEnvironmentSpec, CachedContentDoesNotReplaceEditedOverlayBuffers)
+{
+    Project project;
+    const auto header = project.Write("config.h", "#define VALUE 1\n");
+    const std::string text = "#include \"config.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    const auto cold = MacroEnvironment::Build(main, text, nullptr, Offline());
+    heimdall::SourceOverlay overlay;
+    overlay.Add(header, std::make_shared<const std::string>("#define VALUE 2\n"));
+    auto options = Offline();
+    options.overlay = &overlay;
+
+    const auto edited = MacroEnvironment::Build(main, text, nullptr, options);
+    const auto disk = MacroEnvironment::Build(main, text, nullptr, Offline());
+
+    ASSERT_NE(edited.Final().Find("VALUE"), nullptr);
+    EXPECT_EQ(edited.Final().Find("VALUE") -> body, "2");
+    EXPECT_EQ(disk.Final().Find("VALUE") -> body, "1");
+    EXPECT_EQ(cold.Final().Find("VALUE") -> body, "1");
+}
+
+TEST(MacroEnvironmentSpec, UncachedEffectsReuseOnlyRevalidatedFileContents)
+{
+    Project project;
+    project.Write("config.h", "#define VALUE 1\n");
+    const std::string text = "#include \"config.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    auto options = Offline();
+    options.reuseEffects = false;
+    const auto first = MacroEnvironment::Build(main, text, nullptr, options);
+
+    const auto second = MacroEnvironment::Build(main, text, nullptr, options);
+    project.Write("config.h", "#define VALUE 222\n");
+    const auto edited = MacroEnvironment::Build(main, text, nullptr, options);
+
+    EXPECT_GT(first.Metrics().filesRead, 0u);
+    EXPECT_EQ(second.Metrics().filesRead, 0u);
+    EXPECT_GT(second.Metrics().metadataQueries, 0u);
+    EXPECT_EQ(edited.Final().Find("VALUE") -> body, "222");
+}
+
+TEST(MacroEnvironmentSpec, WarmReplayObservesHigherPriorityHeaders)
+{
+    Project project;
+    project.Write("outer.h", "#include <choice.h>\n");
+    project.Write("low/choice.h", "#define VALUE 1\n");
+    std::filesystem::create_directories(project.Root() / "high");
+    const std::string text = "#include \"outer.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    heimdall::CompileCommand command;
+    command.directory = project.Root();
+    command.include_directories = {project.Root() / "high", project.Root() / "low"};
+    const auto before = MacroEnvironment::Build(main, text, &command, Offline());
+
+    project.Write("high/choice.h", "#define VALUE 2\n");
+    const auto after = MacroEnvironment::Build(main, text, &command, Offline());
+
+    ASSERT_NE(before.Final().Find("VALUE"), nullptr);
+    ASSERT_NE(after.Final().Find("VALUE"), nullptr);
+    EXPECT_EQ(before.Final().Find("VALUE") -> body, "1");
+    EXPECT_EQ(after.Final().Find("VALUE") -> body, "2");
+}
+
+TEST(MacroEnvironmentSpec, ReplayedEffectsRespectFileAndDepthLimits)
+{
+    Project project;
+    project.Write("outer.h", "#include \"inner.h\"\n");
+    project.Write("inner.h", "#define VALUE 1\n");
+    const std::string text = "#include \"outer.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    const auto warm = MacroEnvironment::Build(main, text, nullptr, Offline());
+
+    auto small = Offline();
+    small.maxFileBytes = 1;
+    const auto sizeLimited = MacroEnvironment::Build(main, text, nullptr, small);
+    auto shallow = Offline();
+    shallow.maxIncludeDepth = 1;
+    const auto depthLimited = MacroEnvironment::Build(main, text, nullptr, shallow);
+
+    EXPECT_TRUE(Defined(warm.Final(), "VALUE"));
+    EXPECT_FALSE(Defined(sizeLimited.Final(), "VALUE"));
+    EXPECT_FALSE(Defined(depthLimited.Final(), "VALUE"));
+    EXPECT_FALSE(sizeLimited.Complete());
+    EXPECT_FALSE(depthLimited.Complete());
+}
+
+TEST(MacroEnvironmentSpec, RelativeQuoteDirectoriesUseCompileWorkingDirectory)
+{
+    Project project;
+    project.Write("include/config.h", "#define VALUE 1\n");
+    const std::string text = "#include \"config.h\"\n";
+    const auto main = project.Write("src/main.cpp", text);
+    heimdall::CompileCommand command;
+    command.directory = project.Root();
+    command.quote_directories = {"include"};
+
+    const auto environment = MacroEnvironment::Build(main, text, &command, Offline());
+
+    EXPECT_TRUE(Defined(environment.Final(), "VALUE"));
+    EXPECT_TRUE(environment.Complete());
+}
+
+TEST(MacroEnvironmentSpec, ReplayValidatesEachDependencyOncePerBuild)
+{
+    Project project;
+    project.Write("common.h", "#pragma once\n#define VALUE 1\n");
+    project.Write("left.h", "#include \"common.h\"\n");
+    project.Write("right.h", "#include \"common.h\"\n");
+    const std::string text = "#include \"left.h\"\n#include \"right.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    const auto cold = MacroEnvironment::Build(main, text, nullptr, Offline());
+
+    const auto warm = MacroEnvironment::Build(main, text, nullptr, Offline());
+    auto uncached = Offline();
+    uncached.reuseEffects = false;
+    const auto reference = MacroEnvironment::Build(main, text, nullptr, uncached);
+
+    EXPECT_GT(warm.Metrics().effectsReplayed, 0u);
+    EXPECT_LE(warm.Metrics().metadataQueries, warm.Files().size());
+    EXPECT_EQ(warm.Final().Find("VALUE") -> body, reference.Final().Find("VALUE")->body);
+    EXPECT_EQ(warm.Files(), reference.Files());
+    EXPECT_EQ(cold.Complete(), warm.Complete());
+}
+
+TEST(MacroEnvironmentSpec, ConcurrentContextsKeepIndependentMacroEffects)
+{
+    Project project;
+    project.Write("config.h", "#if MODE == 1\n#define VALUE 10\n#else\n#define VALUE 20\n#endif\n");
+    const std::string text = "#include \"config.h\"\n";
+    const auto main = project.Write("main.cpp", text);
+    constexpr std::size_t kWorkers = 4;
+    std::barrier start(static_cast<std::ptrdiff_t>(kWorkers));
+    std::vector<std::jthread> workers;
+    std::array<std::string, kWorkers> values;
+
+    for (std::size_t i = 0; i < kWorkers; ++i)
+    {
+        workers.emplace_back([&, i]
+            {
+                heimdall::CompileCommand command;
+                command.defines["MODE"] = i % 2 == 0 ? "1" : "2";
+                start.arrive_and_wait();
+                for (int repeat = 0; repeat < 4; ++repeat)
+                {
+                    const auto environment = MacroEnvironment::Build(main, text, &command, Offline());
+                    if (const auto value = environment.Final().Find("VALUE"))
+                    {
+                        values[i] = value->body;
+                    }
+                }
+            });
+    }
+
+    workers.clear();
+
+    for (std::size_t i = 0; i < kWorkers; ++i)
+    {
+        EXPECT_EQ(values[i], i % 2 == 0 ? "10" : "20");
+    }
+}
 
 TEST(MacroEnvironmentSpec, SeesMacrosFromQuotedIncludesAtTheirPosition)
 {

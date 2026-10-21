@@ -31,6 +31,7 @@
 #include <Heimdall/IndexStore.hpp>
 #include <Heimdall/MacroEnvironment.hpp>
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Profiling.hpp>
 #include <Heimdall/RuleEngine.hpp>
 
 #include "Document.hpp"
@@ -50,6 +51,9 @@ namespace heimdall::lsp
 		bool Run();
 
 	private:
+		std::mutex mProfilingMutex;
+		std::unique_ptr<heimdall::profiling::Session> mProfilingSession;
+
 		struct DocumentVersion
 		{
 			std::mutex mutex;
@@ -252,14 +256,16 @@ namespace heimdall::lsp
 			const std::shared_ptr<const std::string>& text,
 			std::int64_t version,
 			const heimdall::CompileCommand* command,
-			bool remember = true);
+			bool remember = true,
+			std::stop_token stop = {});
 
 		heimdall::ParserOptions ParserOptionsForText(
 			const std::string& uri,
 			const std::shared_ptr<const std::string>& text,
 			std::int64_t version,
 			const heimdall::CompileCommand* command,
-			bool remember);
+			bool remember,
+			std::stop_token stop = {});
 
 		// Hover and go-to-definition of a macro name; false when `offset` is not on a macro.
 		bool MacroHover(
@@ -270,6 +276,10 @@ namespace heimdall::lsp
 			std::size_t offset,
 			const heimdall::CompileCommand* command,
 			std::string_view id);
+
+		/// JSON locations of the module interface imported at `offset`; empty when `offset` is
+		/// not on a named import or no workspace file declares that module.
+		std::string ModuleImportLocations(const heimdall::ParseTree& tree, std::size_t offset);
 
 		bool MacroDefinition(
 			const std::string& uri,

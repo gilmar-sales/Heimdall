@@ -482,3 +482,47 @@ TEST(SymbolOutlineSpec, ListsActiveDefinesAsMacroSymbolsInSourceOrder)
     EXPECT_EQ(symbols[2].parent, 1u);
     EXPECT_EQ(Named(symbols, "HIDDEN"), nullptr);
 }
+
+TEST(SymbolOutlineSpec, ListsTheModuleUnitDeclarationAsAModuleSymbol)
+{
+    const std::string source =
+        "export module app.core:detail;\n"
+        "import std;\n"
+        "export namespace app { int f(); }\n";
+
+    const auto symbols = Outline(source);
+
+    const auto* module = Named(symbols, "app.core:detail");
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module->kind, OutlineKind::Module);
+    EXPECT_EQ(NameText(source, *module), "app.core:detail");
+    EXPECT_EQ(module->parent, kNoOutlineParent);
+}
+
+TEST(SymbolOutlineSpec, ListsDeclarationsInsideExportBlocksAndExportedNamespaces)
+{
+    const std::string source =
+        "export module m;\n"
+        "export namespace app { int f(); }\n"
+        "export { int a; struct S {}; }\n"
+        "export int g();\n";
+
+    const auto symbols = Outline(source);
+
+    ASSERT_NE(Named(symbols, "app"), nullptr);
+    ASSERT_NE(Named(symbols, "f"), nullptr);
+    EXPECT_EQ(Named(symbols, "f")->container, "app");
+    EXPECT_NE(Named(symbols, "a"), nullptr);
+    ASSERT_NE(Named(symbols, "S"), nullptr);
+    EXPECT_EQ(Named(symbols, "S")->kind, OutlineKind::Struct);
+    EXPECT_NE(Named(symbols, "g"), nullptr);
+}
+
+TEST(SymbolOutlineSpec, ModuleNamedVariablesAreNotModuleSymbols)
+{
+    const auto symbols = Outline("int module = 1;\nint import = 2;\n");
+
+    ASSERT_NE(Named(symbols, "module"), nullptr);
+    EXPECT_EQ(Named(symbols, "module")->kind, OutlineKind::Variable);
+    EXPECT_NE(Named(symbols, "import"), nullptr);
+}

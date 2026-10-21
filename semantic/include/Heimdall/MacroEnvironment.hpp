@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <stop_token>
@@ -16,6 +17,19 @@
 
 namespace heimdall
 {
+	/// Work performed by one environment build; counters do not include other workers.
+	struct MacroEnvironmentMetrics
+	{
+		std::uint64_t totalNs         = 0;
+		std::uint64_t setupNs         = 0;
+		std::size_t metadataQueries   = 0;
+		std::size_t resolutionQueries = 0;
+		std::size_t filesRead         = 0;
+		std::size_t bytesRead         = 0;
+		std::size_t effectsReplayed   = 0;
+		std::size_t effectsScanned    = 0;
+		std::size_t effectsRejected   = 0;
+	};
 
 	inline constexpr std::size_t kBytesPerMebibyte = std::size_t {1} << 20;
 	/// Include nesting GCC and Clang accept before giving up.
@@ -39,6 +53,8 @@ namespace heimdall
 		bool probeCompiler = true;
 		/// Open buffers that win over disk contents; may be null.
 		const SourceOverlay* overlay = nullptr;
+		/// Disable effect reuse for differential tests and profiling.
+		bool reuseEffects = true;
 	};
 
 	/// The macros of one translation unit, as the compiler's preprocessor would see them:
@@ -57,7 +73,10 @@ namespace heimdall
 
 		/// Predefined macros of the compiler named by `command`. The compiler runs once per
 		/// distinct driver and flag set; the result is cached for the process.
-		[[nodiscard]] static MacroTable Builtins(const CompileCommand* command, bool probeCompiler);
+		[[nodiscard]] static MacroTable Builtins(
+			const CompileCommand* command,
+			bool probeCompiler,
+			std::stop_token stop = {});
 
 		/// Macros live at `offset` of the main file (after the directive that ends before it).
 		[[nodiscard]] MacroTable At(std::size_t offset) const;
@@ -100,6 +119,12 @@ namespace heimdall
 			return mComplete;
 		}
 
+		/// Counters and durations for this build.
+		[[nodiscard]] const MacroEnvironmentMetrics& Metrics() const noexcept
+		{
+			return mMetrics;
+		}
+
 	private:
 		[[nodiscard]] const MacroTable& Snapshot(std::size_t offset) const noexcept;
 
@@ -119,6 +144,7 @@ namespace heimdall
 		std::vector<std::filesystem::path> mSystemDirectories;
 		Preprocessor::ErasedSet mEverDefined;
 		bool mComplete = true;
+		MacroEnvironmentMetrics mMetrics;
 	};
 
 	/// Lets the parser ask a `MacroEnvironment` which macro a name is at a position.

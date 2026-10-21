@@ -273,7 +273,8 @@ namespace heimdall::lsp
 			containers[symbol.container],
 			symbol.kind,
 			{symbol.startLine, symbol.startCharacter},
-			{symbol.endLine, symbol.endCharacter}};
+			{symbol.endLine, symbol.endCharacter},
+			symbol.exported};
 	}
 
 	IndexedFilePtr BuildIndexedFile(
@@ -325,6 +326,7 @@ namespace heimdall::lsp
 			record.endLine        = static_cast<std::uint32_t>(end.line);
 			record.endCharacter   = static_cast<std::uint32_t>(end.character);
 			record.kind           = symbol.kind;
+			record.exported       = symbol.exported;
 			file->names += symbol.name;
 			file->symbols.push_back(record);
 			const std::uint64_t nameMask = CharacterMask(symbol.name);

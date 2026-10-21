@@ -28,7 +28,9 @@ namespace heimdall
 		Variable,
 		TypeAlias,
 		Concept,
-		Macro
+		Macro,
+		/// A module unit's own declaration (`export module app.core:part;`).
+		Module
 	};
 
 	inline constexpr std::uint32_t kNoOutlineParent = std::numeric_limits<std::uint32_t>::max();
@@ -52,6 +54,9 @@ namespace heimdall
 		std::size_t rangeLength = 0;
 		/// Index of the enclosing symbol in the same vector, or `kNoOutlineParent`.
 		std::uint32_t parent = kNoOutlineParent;
+		/// For `Module` symbols: the unit is a module interface (primary or partition), the
+		/// one other units import from.
+		bool exported = false;
 	};
 
 	/// Syntactic declaration inventory of a `ParseTree` (core, STL only). Works on incomplete

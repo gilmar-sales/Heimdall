@@ -97,6 +97,8 @@ namespace heimdall
 			case OutlineKind::Constructor:
 			case OutlineKind::Destructor:
 			case OutlineKind::Operator:
+			case OutlineKind::Macro:
+			case OutlineKind::Module:
 				return std::nullopt;
 			}
 
@@ -539,6 +541,45 @@ namespace heimdall
 				}
 			}
 
+			// `module` and `import` are contextual keywords: highlighted only where a
+			// module declaration or import can start, so a variable named `module` is not.
+			bool IsModuleKeyword(std::size_t index) const
+			{
+				const std::string_view text = Text(index);
+				const bool isModule         = text == "module";
+				if (!isModule && text != "import")
+				{
+					return false;
+				}
+
+				if (mPrevSignificant)
+				{
+					const Token& previous = mTokens[*mPrevSignificant];
+					const std::string_view before = Text(*mPrevSignificant);
+					const bool boundary = before == ";" || before == "{" || before == "}" ||
+						before == "export" ||
+						mSource.substr(previous.offset + previous.length,
+							mTokens[index].offset - previous.offset - previous.length)
+						.contains('\n');
+					if (!boundary)
+					{
+						return false;
+					}
+				}
+
+				const std::size_t next = NextSignificant(index);
+				if (next >= mTokens.size())
+				{
+					return false;
+				}
+
+				const std::string_view after = Text(next);
+				const bool name = mTokens[next].kind == TokenKind::Identifier;
+				return isModule ? after == ";" || after == ":" || name
+				: after == ":" || after == "<" || name ||
+					mTokens[next].kind == TokenKind::StringLiteral;
+			}
+
 			void Identifier(std::size_t index)
 			{
 				const Token& token = mTokens[index];
@@ -549,6 +590,12 @@ namespace heimdall
 						Emit(token.offset, token.length, HighlightKind::Keyword);
 					}
 
+					return;
+				}
+
+				if (IsModuleKeyword(index))
+				{
+					Emit(token.offset, token.length, HighlightKind::Keyword);
 					return;
 				}
 

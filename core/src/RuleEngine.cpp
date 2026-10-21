@@ -13,6 +13,7 @@
 
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/LineTable.hpp>
+#include <Heimdall/ModuleUnit.hpp>
 #include <Heimdall/Preprocessor.hpp>
 
 namespace heimdall
@@ -896,6 +897,19 @@ namespace heimdall
 				"semantic", false, "type requirement naming an unknown type outside templates"},
 			{RuleId::ConceptRedeclaration, "cpp/concept-redeclaration", "cpp", Severity::Warning,
 				"semantic", false, "constrained redeclaration with a different constraint spelling"},
+			{RuleId::ModuleStructure, "cpp/module-structure", "cpp", Severity::Error, "syntactic",
+				false, "module unit that breaks the structural rules of C++20 modules"},
+			{RuleId::ModuleImportCycle, "cpp/module-import-cycle", "cpp", Severity::Error, "project",
+				false, "import that leads back to the importing module unit"},
+			{RuleId::ModuleDuplicateInterface, "cpp/module-duplicate-interface", "cpp",
+				Severity::Error, "project", false,
+				"module whose primary interface unit is declared in more than one file"},
+			{RuleId::ModulePartitionExport, "cpp/module-partition-export", "cpp",
+				Severity::Warning, "project", false,
+				"interface partition that the primary interface does not export"},
+			{RuleId::ModuleUnresolvedImport, "cpp/module-unresolved-import", "cpp",
+				Severity::Error, "project", false,
+				"import of a module that no analyzed file provides"},
 			{RuleId::ConstMemberModification, "cpp/const-member-modification", "cpp", Severity::Error,
 				"semantic", false, "assignment modifies a member through a const member function"},
 		};
@@ -984,7 +998,42 @@ namespace heimdall
 
 	std::vector<Diagnostic> RuleEngine::Analyze(const ParseTree& tree) const
 	{
-		return AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
+		auto diagnostics = AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
+		if (!RuleEnabled("cpp/module-structure", true))
+		{
+			return diagnostics;
+		}
+
+		const auto module = ExtractModuleUnit(tree);
+		if (module.problems.empty())
+		{
+			return diagnostics;
+		}
+
+		LineTable lines;
+		lines.Build(tree.Source());
+		std::vector<Diagnostic> structural;
+		structural.reserve(module.problems.size());
+		for (const auto& problem : module.problems)
+		{
+			auto diagnostic = MakeDiagnostic(RuleId::ModuleStructure, "cpp/module-structure",
+				problem.message, problem.offset, problem.length, lines.Lookup(problem.offset), {},
+				false);
+			diagnostic.severity = Severity::Error;
+			structural.push_back(std::move(diagnostic));
+		}
+
+		for (auto& diagnostic : ApplyPolicy(std::move(structural), tree))
+		{
+			diagnostics.push_back(std::move(diagnostic));
+		}
+
+		std::stable_sort(diagnostics.begin(), diagnostics.end(),
+			[](const Diagnostic& a, const Diagnostic& b)
+			{
+				return a.offset < b.offset;
+			});
+		return diagnostics;
 	}
 
 	// Lower-cased file stem/extension split ("src/Reporting.cpp" -> {"reporting", "cpp"}).

@@ -9,6 +9,7 @@
 
 #include <Heimdall/MacroTable.hpp>
 #include <Heimdall/TypeModel.hpp>
+#include <Heimdall/Trace.hpp>
 
 namespace heimdall::index
 {
@@ -1904,6 +1905,7 @@ namespace heimdall::index
 		std::uint64_t configHash,
 		IncludeResolver resolveInclude)
 	{
+		HEIMDALL_TRACE_SCOPE(Index, "ShardBuilder::Build");
 		return ShardBuilderImpl(model, std::move(path), configHash, std::move(resolveInclude)).Run();
 	}
 

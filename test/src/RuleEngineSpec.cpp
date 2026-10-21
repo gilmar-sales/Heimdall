@@ -561,7 +561,7 @@ TEST(RuleEngineSpec, SafeFixesStayMarkedSafe)
 TEST(RuleEngineSpec, CatalogDescribesEveryRule)
 {
     const auto& catalog = heimdall::RuleCatalog();
-    ASSERT_EQ(catalog.size(), 70);
+    ASSERT_EQ(catalog.size(), 75);
     for (const auto& info : catalog)
     {
         EXPECT_FALSE(info.code.empty());
@@ -1029,4 +1029,41 @@ TEST(RuleEngineSpec, ApplyFixesLetsRequestedUnsafeFixesEditOutsideTheirDiagnosti
 
     diagnostic.fix = {100, 0, "x"};
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes("int n = 3;", {diagnostic}, true), "int n = 3;");
+}
+
+TEST(RuleEngineSpec, ReportsModuleStructureProblemsAsErrors)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "module a;\n"
+        "export int f();\n");
+
+    const auto diagnostics = heimdall::RuleEngine().Analyze(tree);
+
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics.front().code, "cpp/module-structure");
+    EXPECT_EQ(diagnostics.front().severity, heimdall::Severity::Error);
+    EXPECT_EQ(diagnostics.front().line, 2u);
+}
+
+TEST(RuleEngineSpec, WellFormedModuleUnitHasNoStructureDiagnostics)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "module;\n"
+        "#include <cstdio>\n"
+        "export module a;\n"
+        "import b;\n"
+        "export int f();\n"
+        "module :private;\n"
+        "int hidden();\n");
+
+    EXPECT_TRUE(heimdall::RuleEngine().Analyze(tree).empty());
+}
+
+TEST(RuleEngineSpec, ModuleStructureRuleCanBeDisabledAndSuppressed)
+{
+    heimdall::RuleOptions options;
+    options.overrides.push_back({"cpp/module-structure", false, heimdall::Severity::Error});
+    const auto tree = heimdall::ParseTree::Parse("module a;\nexport int f();\n");
+
+    EXPECT_TRUE(heimdall::RuleEngine(options).Analyze(tree).empty());
 }

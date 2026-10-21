@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <Heimdall/Trace.hpp>
+
 namespace heimdall::index
 {
 	void IndexStore::SetOpen(const std::string& path, std::shared_ptr<const FileShard> shard)
@@ -24,6 +26,7 @@ namespace heimdall::index
 
 	void IndexStore::SetDisk(const std::string& path, std::shared_ptr<const FileShard> shard)
 	{
+		HEIMDALL_TRACE_SCOPE(Index, "IndexStore::SetDisk");
 		const std::lock_guard lock(mMutex);
 		mDisk[path] = std::move(shard);
 		++mRevision;

@@ -22,7 +22,7 @@ import {
 
 // Source and header files the server indexes for "Go to Symbol in Workspace"; the watcher
 // tells it when one changes on disk (saved elsewhere, created, deleted, branch switch).
-const SOURCE_FILE_GLOB = '**/*.{c,cc,cpp,cxx,c++,h,hh,hpp,hxx,inl,ipp,tpp,cppm,ixx}';
+const SOURCE_FILE_GLOB = '**/*.{c,cc,cpp,cxx,c++,h,hh,hpp,hxx,inl,ipp,tpp,cppm,ixx,mpp,ccm,cxxm}';
 
 let client: LanguageClient | undefined;
 let output: vscode.LogOutputChannel;
@@ -94,7 +94,7 @@ function handleInactiveRegions(params: InactiveRegionsParams): void {
 const appliedRulers = new Map<string, number[]>();
 
 interface IndexStatus {
-    state: 'indexing' | 'ready';
+    state: 'indexing' | 'ready' | 'cancelled';
     done: number;
     total: number;
     elapsedMs: number;
@@ -114,6 +114,9 @@ function showIndexStatus(status: IndexStatus): void {
         const activity = status.activity ? ` — ${status.activity}` : '';
         indexStatus.text = `$(sync~spin) Heimdall: indexing ${status.done}/${status.total} (${elapsed})${activity}`;
         indexStatus.tooltip = `Heimdall is indexing the workspace for Go to Symbol in Workspace.${activity}`;
+    } else if (status.state === 'cancelled') {
+        indexStatus.text = `$(circle-slash) Heimdall: indexing cancelled (${status.done}/${status.total})`;
+        indexStatus.tooltip = `Indexing stopped after ${elapsed}.`;
     } else {
         indexStatus.text = `$(check) Heimdall: ${status.total} files indexed in ${elapsed}`;
         indexStatus.tooltip = `Go to Symbol in Workspace is ready: ${status.total} files indexed in ${elapsed}.`;

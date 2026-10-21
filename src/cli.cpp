@@ -1,10 +1,13 @@
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/Profiling.hpp>
 #include <Heimdall/RuleConfig.hpp>
+#include <Heimdall/Trace.hpp>
 
 #include "CliOptions.hpp"
 #include "FileDiscovery.hpp"
@@ -15,6 +18,17 @@
 int main(int argc, char**argv)
 {
 	constexpr int kExitUsageError = 2;
+	const auto tracePath          = heimdall::profiling::OutputPathFromEnvironment();
+	const auto traceSession = tracePath
+	? heimdall::profiling::Session::Start(*tracePath)
+	: nullptr;
+	if (tracePath && !traceSession)
+	{
+		std::cerr << "heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON\n";
+	}
+
+	heimdall::trace::NameThread("cli-main");
+	const heimdall::trace::Scope traceheimdall(heimdall::trace::Category::Cli, "heimdall");
 	heimdall::cli::Options options {};
 	if (!heimdall::cli::ParseOptions(argc, argv, options))
 	{
@@ -100,16 +114,34 @@ int main(int argc, char**argv)
 	}
 
 	std::vector<std::filesystem::path> files;
-	if (!heimdall::cli::CollectFiles(options.inputs, files))
+	bool collected = false;
+	{
+		const heimdall::trace::Scope traceCollectFiles(heimdall::trace::Category::Startup, "CollectFiles");
+		collected = heimdall::cli::CollectFiles(options.inputs, files);
+	}
+
+	if (!collected)
 	{
 		return kExitUsageError;
 	}
+
+	heimdall::trace::Counter(heimdall::trace::Category::Startup, "input files",
+		static_cast<std::int64_t>(files.size()));
 
 	heimdall::CompileDatabase database;
 	const heimdall::CompileDatabase* database_ptr = nullptr;
 	if (!options.compile_commands.empty())
 	{
-		auto loaded = heimdall::CompileDatabase::Load(options.compile_commands);
+		auto loaded = [&]
+		{
+			const heimdall::trace::Scope traceLoad(heimdall::trace::Category::Startup, "CompileDatabase::Load",
+				[&]
+				{
+					return options.compile_commands.generic_string();
+				});
+			return heimdall::CompileDatabase::Load(options.compile_commands);
+		}
+		();
 		if (!loaded)
 		{
 			std::cerr << loaded.error() << '\n';
@@ -127,7 +159,17 @@ int main(int argc, char**argv)
 	}
 
 	std::vector<heimdall::cli::FileResult> results;
-	heimdall::cli::RunParallel(files, options, database_ptr, results);
+	{
+		const heimdall::trace::Scope traceRunParallel(heimdall::trace::Category::Cli, "RunParallel");
+		heimdall::cli::RunParallel(files, options, database_ptr, results);
+	}
 
+	if (options.command == heimdall::cli::Command::Lint ||
+		options.command == heimdall::cli::Command::Check)
+	{
+		heimdall::cli::AnalyzeModuleGraph(results);
+	}
+
+	const heimdall::trace::Scope traceReportResults(heimdall::trace::Category::Cli, "ReportResults");
 	return heimdall::cli::ReportResults(results, options);
 }

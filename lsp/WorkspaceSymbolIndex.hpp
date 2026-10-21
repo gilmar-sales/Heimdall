@@ -29,6 +29,8 @@ namespace heimdall::lsp
 		/// cannot shift it.
 		Position start;
 		Position end;
+		/// A `Module` symbol that is a module interface unit.
+		bool exported = false;
 	};
 
 	/// Compact record of one symbol; the strings live in the owning `IndexedFile`.
@@ -42,6 +44,7 @@ namespace heimdall::lsp
 		std::uint32_t endLine        = 0;
 		std::uint32_t endCharacter   = 0;
 		heimdall::OutlineKind kind   = heimdall::OutlineKind::Variable;
+		bool exported                = false;
 	};
 
 	/// Immutable symbols of one file revision, stored as parallel columns so a query scans

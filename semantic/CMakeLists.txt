@@ -10,6 +10,8 @@ add_library(heimdall_semantic STATIC
   src/SemanticAnalyzer.cpp
   src/IncludeIndex.cpp
   src/MacroEnvironment.cpp
+  src/ModuleGraph.cpp
+  src/CompilerProbe.cpp
   src/IncludeAnalyzer.cpp
   src/SemanticModel.cpp
   src/SemanticHighlight.cpp

@@ -15,6 +15,9 @@
 
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/ParseTree.hpp>
+#include <Heimdall/Trace.hpp>
+
+#include "CompilerProbe.hpp"
 
 namespace heimdall
 {
@@ -607,36 +610,28 @@ namespace heimdall
 		return best_angled ? "<" + best + ">" : "\"" + best + "\"";
 	}
 
-	std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view compiler)
+	std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(
+		std::string_view compiler,
+		std::stop_token stop)
 	{
-		// Thread-safe memoization: previously a bare static map (data race as
-		// soon as workers arrive) populated on the I/O thread via popen.
-		static std::mutex mutex;
-		static std::unordered_map<std::string, std::vector<std::filesystem::path>> cache;
 		const std::string key(compiler.empty() ? "c++" : compiler);
-		{
-			const std::lock_guard<std::mutex> lock(mutex);
-			if (const auto found = cache.find(key); found != cache.end())
-			{
-				return found->second;
-			}
-		}
-
 		std::vector<std::filesystem::path> dirs;
 #if defined(_WIN32)
 		const std::string command = "\"" + key + "\" -xc++ -E -v - <nul 2>&1";
-		std::unique_ptr<FILE, decltype(&_pclose) > pipe(_popen(command.c_str(), "r"), _pclose);
 #else
 		const std::string command = "\"" + key + "\" -xc++ -E -v - </dev/null 2>&1";
-		std::unique_ptr<FILE, decltype(&pclose) > pipe(popen(command.c_str(), "r"), pclose);
 #endif
-		if (pipe)
+		const auto result = detail::QueryCompiler(key, command, stop);
+		if (result.completed)
 		{
-			bool listing = false;
-			char buffer[512];
-			while (std::fgets(buffer, sizeof(buffer), pipe.get()) != nullptr)
+			bool listing    = false;
+			std::size_t pos = 0;
+			while (pos < result.output.size())
 			{
-				std::string_view line(buffer);
+				const auto end = result.output.find('\n', pos);
+				std::string_view line = std::string_view(result.output).substr(pos,
+					end == std::string::npos ? std::string::npos : end - pos);
+				pos = end == std::string::npos ? result.output.size() : end + 1;
 				while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
 				{
 					line.remove_suffix(1);
@@ -671,16 +666,6 @@ namespace heimdall
 			}
 		}
 
-		{
-			const std::lock_guard<std::mutex> lock(mutex);
-			// Another thread may have populated while popen ran outside the lock.
-			if (const auto found = cache.find(key); found != cache.end())
-			{
-				return found->second;
-			}
-
-			cache.emplace(key, dirs);
-		}
 		return dirs;
 	}
 
@@ -1052,6 +1037,7 @@ namespace heimdall
 		std::size_t offset,
 		const CompileCommand* command)
 	{
+		HEIMDALL_TRACE_SCOPE(Include, "IncludeIndex::ResolveIncludeAt");
 		offset                  = std::min(offset, text.size());
 		const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
 		std::size_t end         = text.find('\n', offset);
@@ -1209,6 +1195,7 @@ namespace heimdall
 		const Limits& limits,
 		const SourceOverlay* overlay)
 	{
+		HEIMDALL_TRACE_SCOPE(Include, "IncludeIndex::Build");
 		IncludeIndex index;
 		// Path -> position in index.m_scopes: merging is O(1) per scope instead of
 		// the previous linear MergeScope scan (O(S^2) over hundreds of scopes for

@@ -114,11 +114,9 @@ namespace heimdall
     X(KwFriend, "friend") \
     X(KwGoto, "goto") \
     X(KwIf, "if") \
-    X(KwImport, "import") \
     X(KwInline, "inline") \
     X(KwInt, "int") \
     X(KwLong, "long") \
-    X(KwModule, "module") \
     X(KwMutable, "mutable") \
     X(KwNamespace, "namespace") \
     X(KwNew, "new") \
