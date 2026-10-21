@@ -84,5 +84,24 @@ TEST(SemanticTokensSpec, LegendListsEveryKindAndTheDeclarationModifier)
 
     EXPECT_NE(legend.find("\"keyword\""), std::string::npos);
     EXPECT_NE(legend.find("\"variable\""), std::string::npos);
-    EXPECT_NE(legend.find("\"tokenModifiers\":[\"declaration\",\"inactive\"]"), std::string::npos);
+    EXPECT_NE(legend.find("\"tokenModifiers\":[\"declaration\",\"inactive\",\"definition\",\"readonly\",\"static\""),
+              std::string::npos);
+    EXPECT_NE(legend.find("\"functionScope\""), std::string::npos);
+    EXPECT_NE(legend.find("\"typeParameter\""), std::string::npos);
+    EXPECT_NE(legend.find("\"concept\""), std::string::npos);
+}
+
+TEST(SemanticTokensSpec, EncodesEveryAdvertisedModifierBit)
+{
+    constexpr std::string_view text = "value";
+    const std::vector<HighlightSpan> spans = {
+        {
+            0, 5, HighlightKind::Variable,
+                heimdall::kHighlightDeclaration | heimdall::kHighlightInactive |
+                heimdall::HighlightMask(heimdall::HighlightModifier::Definition) | heimdall::HighlightMask(heimdall::HighlightModifier::Readonly) |
+                heimdall::HighlightMask(heimdall::HighlightModifier::Static) | heimdall::HighlightMask(heimdall::HighlightModifier::GlobalScope) |
+                heimdall::HighlightMask(heimdall::HighlightModifier::ClassScope) | heimdall::HighlightMask(heimdall::HighlightModifier::FunctionScope)
+    }};
+
+    EXPECT_EQ(Encode(text, spans), "{\"data\":[0,0,5,15,255]}");
 }

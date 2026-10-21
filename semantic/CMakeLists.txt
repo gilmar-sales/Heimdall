@@ -12,6 +12,7 @@ add_library(heimdall_semantic STATIC
   src/MacroEnvironment.cpp
   src/IncludeAnalyzer.cpp
   src/SemanticModel.cpp
+  src/SemanticHighlight.cpp
   src/Binder.cpp
   src/Typer.cpp
   src/TemplateModel.cpp

@@ -321,3 +321,12 @@ TEST(SymbolProtocolSpec, IndexStatusCarriesStateAndCounts)
     EXPECT_EQ(Number(status.root["params"], "total"), 340u);
     EXPECT_EQ(Number(status.root["params"], "elapsedMs"), 1250u);
 }
+
+TEST(SymbolProtocolSpec, IndexStatusCarriesEscapedActivity)
+{
+    Parsed status;
+    ParseJson(status, heimdall::lsp::IndexStatusNotification(
+        "indexing", 12, 340, 1250, "Parsing: core/\"sample\".cpp"));
+
+    EXPECT_EQ(Text(status.root["params"], "activity"), "Parsing: core/\"sample\".cpp");
+}

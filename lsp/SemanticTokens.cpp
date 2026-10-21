@@ -10,7 +10,7 @@ namespace heimdall::lsp
 	namespace
 	{
 
-		constexpr std::string_view kModifierNames = "\"declaration\",\"inactive\"";
+		constexpr std::string_view kModifierNames = "\"declaration\",\"inactive\",\"definition\",\"readonly\",\"static\",\"globalScope\",\"classScope\",\"functionScope\"";
 
 		constexpr unsigned kContinuationMask = 0xC0;
 		constexpr unsigned kContinuationBits = 0x80;

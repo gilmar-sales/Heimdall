@@ -1267,6 +1267,7 @@ namespace heimdall
 		// merge serially. IndexScopes is a pure function of (content, options),
 		// so concurrent calls only share read-only state.
 		std::vector<ScopeIndex> per_header(headers.size());
+		std::vector<SemanticHighlightIndex> highlights(headers.size());
 		index.m_sources.resize(headers.size());
 		if (!headers.empty())
 		{
@@ -1282,7 +1283,9 @@ namespace heimdall
 						continue;
 					}
 
-					per_header[h] = CompletionEngine::IndexScopes(*content, options);
+					const auto tree = ParseTree::Parse(*content, options);
+					per_header[h]   = CompletionEngine::IndexScopes(tree);
+					highlights[h]   = SemanticHighlightIndex::FromModel(Binder::Bind(tree));
 				}
 			}
 			else
@@ -1326,7 +1329,9 @@ namespace heimdall
 							// An exception escaping a worker thread is std::terminate.
 								try
 								{
-									per_header[h] = CompletionEngine::IndexScopes(*content, options);
+									const auto tree = ParseTree::Parse(*content, options);
+									per_header[h]   = CompletionEngine::IndexScopes(tree);
+									highlights[h]   = SemanticHighlightIndex::FromModel(Binder::Bind(tree));
 								}
 								catch (...)
 								{
@@ -1341,6 +1346,7 @@ namespace heimdall
 		index.m_files = headers;
 		for (std::size_t header = 0; header < per_header.size(); ++header)
 		{
+			index.mHighlights.Merge(highlights[header]);
 			auto& scopes = per_header[header];
 			for (auto& scope : scopes)
 			{

@@ -61,6 +61,7 @@ add_executable(Tests_run
   src/MacroScannerSpec.cpp
   src/MacroEnvironmentSpec.cpp
   src/SemanticTokensSpec.cpp
+  src/SemanticHighlightSpec.cpp
   src/MacroProtocolSpec.cpp
   src/MacroParseSpec.cpp
   src/IndexMacroSpec.cpp
@@ -159,6 +160,26 @@ add_test(
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME TokenParitySmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TokenParitySmoke.py"
+      --heimdall "$<TARGET_FILE:heimdall-lsp>"
+  )
+  set_tests_properties(TokenParitySmoke PROPERTIES TIMEOUT 90 LABELS "lsp;parity")
+  option(HEIMDALL_TEST_CLANGD_TOKENS "Run optional semantic token differential with clangd" OFF)
+  if (HEIMDALL_TEST_CLANGD_TOKENS)
+    find_program(HEIMDALL_CLANGD_EXECUTABLE NAMES clangd REQUIRED)
+    add_test(
+      NAME TokenClangdDifferential
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TokenParitySmoke.py"
+        --heimdall "$<TARGET_FILE:heimdall-lsp>" --clangd "${HEIMDALL_CLANGD_EXECUTABLE}"
+    )
+    set_tests_properties(TokenClangdDifferential PROPERTIES TIMEOUT 120 LABELS "lsp;parity;optional")
+  endif ()
+  add_test(
+    NAME TokenComparisonSpec
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/TokenComparisonSpec.py"
+  )
   add_test(
     NAME LspSfinaeSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspSfinaeSmoke.py"

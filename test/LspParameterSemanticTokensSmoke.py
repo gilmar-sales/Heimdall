@@ -83,7 +83,12 @@ by_offset = {offset: (token_type, modifiers) for offset, token_type, modifiers i
 if by_offset.get(declaration, (None,))[0] != "parameter":
     process.kill()
     raise SystemExit(f"parameter declaration is not parameter-colored: {by_offset.get(declaration)}")
-if by_offset.get(reference) != by_offset.get(declaration):
+declaration_bit = 1 << provider["legend"]["tokenModifiers"].index("declaration")
+declared_kind, declared_modifiers = by_offset[declaration]
+if not declared_modifiers & declaration_bit:
+    process.kill()
+    raise SystemExit("parameter declaration has no declaration modifier")
+if by_offset.get(reference) != (declared_kind, declared_modifiers & ~declaration_bit):
     process.kill()
     raise SystemExit(f"parameter reference differs from declaration: "
                      f"{by_offset.get(reference)} != {by_offset.get(declaration)}")

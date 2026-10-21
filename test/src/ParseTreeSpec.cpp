@@ -28,6 +28,24 @@ namespace
 
 } // namespace
 
+TEST(ParseTreeSpec, DirectInitializationArgumentsAreNotFunctionParameters)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "struct Item { Item(int, void*); }; void F() { Item item(1, nullptr); }");
+
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionSuffix), 2u);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2u);
+}
+
+TEST(ParseTreeSpec, AmbiguousTypeArgumentsRemainFunctionDeclarations)
+{
+    const auto tree = heimdall::ParseTree::Parse(
+        "struct Item {}; struct Other {}; void F() { Item function(Other); }");
+
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionSuffix), 2u);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 1u);
+}
+
 TEST(ParseTreeSpec, ExpansionStatementsPreserveTheirDeclarationAndBody)
 {
     constexpr std::string_view source =

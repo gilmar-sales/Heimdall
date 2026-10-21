@@ -26,6 +26,7 @@
 #include <Heimdall/RuleConfig.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
+#include <Heimdall/SemanticHighlight.hpp>
 #include <Heimdall/SemanticRules.hpp>
 #include <Heimdall/ShardBuilder.hpp>
 #include <Heimdall/SymbolOutline.hpp>
@@ -1588,6 +1589,18 @@ namespace heimdall::lsp
 		}
 
 		bool scan = true;
+		simdjson::dom::object semanticCapabilities;
+		if (has_params && GetObject(params, "capabilities", capabilities) &&
+			GetObject(capabilities, "workspace", workspace_capabilities) &&
+			GetObject(workspace_capabilities, "semanticTokens", semanticCapabilities))
+		{
+			bool refresh = false;
+			if (!semanticCapabilities["refreshSupport"].get_bool().get(refresh))
+			{
+				mSemanticTokensRefresh.store(refresh, std::memory_order_relaxed);
+			}
+		}
+
 		if (has_options && !options["workspaceDiagnostics"].get_bool().get(scan))
 		{
 			mWorkspaceScan.store(scan, std::memory_order_relaxed);
@@ -6354,6 +6367,7 @@ namespace heimdall::lsp
 
 	void LanguageServer::IndexWorkerMain(std::stop_token stop)
 	{
+		std::uint64_t refreshId = 0;
 		while (!stop.stop_requested())
 		{
 			IndexJob job;
@@ -6410,6 +6424,11 @@ namespace heimdall::lsp
 						entry.served_key = job.key;
 					}
 				}
+			}
+			if (mSemanticTokensRefresh.load(std::memory_order_relaxed))
+			{
+				Send("{\"jsonrpc\":\"2.0\",\"id\":\"semantic-refresh-" + std::to_string(++refreshId) +
+					"\",\"method\":\"workspace/semanticTokens/refresh\",\"params\":null}");
 			}
 		}
 	}
@@ -7374,6 +7393,7 @@ namespace heimdall::lsp
 			return;
 		}
 
+		const auto headers = AwaitHeaderScopes(uriString, document->text, CommandFor(uriString));
 		const auto tree =
 			CachedParse(uriString, document->text, document->version, CommandFor(uriString));
 		if (!tree || RequestCancelled())
@@ -7417,185 +7437,18 @@ namespace heimdall::lsp
 			context.activeRanges = tree->ActiveRanges();
 		}
 
-		const auto spans    = heimdall::SyntaxHighlight::Extract(*tree, context);
-		auto parameterSpans = spans;
-		const auto model    = heimdall::Binder::Bind(*tree);
-		const auto& symbols = model.Symbols();
-		const auto& tokens  = tree->Tokens();
-		std::unordered_map<std::uint32_t, heimdall::HighlightKind> parameterReferences;
-		std::unordered_set<std::uint32_t> parameterDeclarations;
-		for (heimdall::SymbolId symbol = 0; symbol < symbols.Size(); ++symbol)
+		const auto lexical = heimdall::SyntaxHighlight::Extract(*tree, context);
+		const auto model   = heimdall::Binder::Bind(*tree);
+		const auto spans = heimdall::SemanticHighlight::Extract(
+			model, lexical, headers.index ? &headers.index->Highlights() : nullptr);
+		if (RequestCancelled())
 		{
-			if (symbols.kind[symbol] != heimdall::SymbolKind::Parameter ||
-				symbols.decl_token[symbol] >= tokens.size())
-			{
-				continue;
-			}
-
-			const auto declaration = symbols.decl_token[symbol];
-			parameterDeclarations.insert(declaration);
-			const auto name = model.Names().Text(symbols.name[symbol]);
-			const auto tokenText = [&](std::size_t token)
-			{
-				return tree->Source().substr(tokens[token].offset, tokens[token].length);
-			};
-			std::size_t bodyOpen = declaration + 1;
-			while (bodyOpen < tokens.size() && tokenText(bodyOpen) != "{")
-			{
-				if (tokenText(bodyOpen) == ";")
-				{
-					break;
-				}
-
-				++bodyOpen;
-			}
-
-			if (bodyOpen == tokens.size() || tokenText(bodyOpen) != "{")
-			{
-				continue;
-			}
-
-			std::size_t depth = 1;
-			for (std::size_t token = bodyOpen + 1; token < tokens.size() && depth != 0; ++token)
-			{
-				const auto text = tokenText(token);
-				if (text == "{")
-				{
-					++depth;
-				}
-				else if (text == "}")
-				{
-					--depth;
-				}
-				else if (depth != 0 && tokens[token].kind == heimdall::TokenKind::Identifier &&
-					text == name)
-				{
-					std::size_t previous = token;
-					while (previous > bodyOpen + 1 &&
-						tokens[previous - 1].kind == heimdall::TokenKind::Whitespace)
-					{
-						--previous;
-					}
-
-					std::size_t next = token + 1;
-					while (next < tokens.size() && tokens[next].kind == heimdall::TokenKind::Whitespace)
-					{
-						++next;
-					}
-
-					if (previous > bodyOpen + 1 && tokenText(previous - 1) == "." &&
-						next < tokens.size() && tokenText(next) == "=")
-					{
-						continue;
-					}
-
-					parameterReferences.try_emplace(token, heimdall::HighlightKind::Parameter);
-				}
-			}
+			RespondCancelled(id);
+			return;
 		}
 
-		std::unordered_set<std::uint32_t> templateParameterTokens;
-		const auto& templateParameters = model.TemplateParameters();
-		for (std::size_t parameter = 0; parameter < templateParameters.symbol.size(); ++parameter)
-		{
-			const auto symbol = templateParameters.symbol[parameter];
-			if (symbol >= symbols.Size())
-			{
-				continue;
-			}
-
-			const auto name = model.Names().Text(symbols.name[symbol]);
-			for (std::uint32_t token = 0; token < tokens.size(); ++token)
-			{
-				const auto& sourceToken = tokens[token];
-				if (sourceToken.kind == heimdall::TokenKind::Identifier &&
-					tree->Source().substr(sourceToken.offset, sourceToken.length) == name)
-				{
-					templateParameterTokens.insert(token);
-				}
-			}
-		}
-
-		const auto& references = model.Refs();
-		for (std::size_t reference = 0; reference < references.token.size(); ++reference)
-		{
-			const auto target = references.target[reference];
-			if (target >= symbols.Size())
-			{
-				continue;
-			}
-
-			if (symbols.kind[target] == heimdall::SymbolKind::Parameter)
-			{
-				parameterReferences.emplace(references.token[reference],
-					heimdall::HighlightKind::Parameter);
-			}
-			else if (symbols.kind[target] == heimdall::SymbolKind::TemplateParameter)
-			{
-				parameterReferences.emplace(references.token[reference], heimdall::HighlightKind::Type);
-			}
-		}
-
-		std::unordered_set<std::size_t> parameterOffsets;
-		for (const auto token : templateParameterTokens)
-		{
-			if (token < tokens.size())
-			{
-				parameterOffsets.insert(tokens[token].offset);
-			}
-		}
-
-		for (const auto token : parameterDeclarations)
-		{
-			if (token < tokens.size())
-			{
-				parameterOffsets.insert(tokens[token].offset);
-			}
-		}
-
-		for (const auto& [token, kind] : parameterReferences)
-		{
-			static_cast<void>(kind);
-			if (token < tokens.size())
-			{
-				parameterOffsets.insert(tokens[token].offset);
-			}
-		}
-
-		std::erase_if(parameterSpans,[&](const heimdall::HighlightSpan& span)
-			{
-				return parameterOffsets.contains(span.offset);
-			});
-		for (const auto token : templateParameterTokens)
-		{
-			if (token < tokens.size())
-			{
-				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
-						heimdall::HighlightKind::Type, 0});
-			}
-		}
-
-		for (const auto token : parameterDeclarations)
-		{
-			if (token < tokens.size())
-			{
-				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
-						heimdall::HighlightKind::Parameter, 0});
-			}
-		}
-
-		for (const auto& [token, kind] : parameterReferences)
-		{
-			if (token < tokens.size())
-			{
-				parameterSpans.push_back({tokens[token].offset, tokens[token].length,
-						kind, 0});
-			}
-		}
-
-		std::ranges::sort(parameterSpans, {}, &heimdall::HighlightSpan::offset);
 		std::string response;
-		AppendSemanticTokens(parameterSpans, tree->Source(), *document->lines, range, response);
+		AppendSemanticTokens(spans, tree->Source(), *document->lines, range, response);
 		Respond(id, response);
 	}
 
@@ -8024,11 +7877,22 @@ namespace heimdall::lsp
 		}
 	}
 
-	void LanguageServer::IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop)
+	void LanguageServer::IndexDiskSymbols(
+		const std::filesystem::path& file,
+		std::stop_token stop,
+		const std::function<void(std::string_view) > & reportStage)
 	{
+		const auto stage = [&](std::string_view name)
+		{
+			if (reportStage)
+			{
+				reportStage(name);
+			}
+		};
 		const std::string key = FileKey(file);
 		try
 		{
+			stage("Reading");
 			// A file that was just written can stay locked for a moment (editor save, virus
 			// scan); give an existing one a few tries before dropping it from the index.
 			constexpr int kReadAttempts = 4;
@@ -8051,6 +7915,7 @@ namespace heimdall::lsp
 
 			auto text             = std::make_shared<const std::string>(std::move(*contents));
 			const std::string uri = UriFromPath(file);
+			stage("Parsing");
 			const auto tree = heimdall::ParseTree::ParseSnapshot(
 				text, ParserOptionsForText(uri, text, 0, CommandFor(uri), false), stop);
 			if (tree.Cancelled())
@@ -8059,6 +7924,7 @@ namespace heimdall::lsp
 			}
 
 			LineIndex lines;
+			stage("Extracting symbols");
 			lines.Build(*text);
 			if (mWorkspaceSymbols.load(std::memory_order_relaxed))
 			{
@@ -8066,6 +7932,7 @@ namespace heimdall::lsp
 					key, BuildIndexedFile(uri, heimdall::SymbolOutline::Extract(tree), lines));
 			}
 
+			stage("Building index shard");
 			mIndexStore.SetDisk(file.generic_string(),
 				IndexShard(tree, file, CommandFor(uri)));
 		}
@@ -8105,7 +7972,7 @@ namespace heimdall::lsp
 		std::atomic<std::size_t> next {0};
 		std::atomic<std::size_t> done {0};
 		std::mutex report_mutex;
-		std::size_t reported = 0;
+		std::vector<std::string> activities(threads);
 		const bool show_progress = mWorkspaceSymbols.load(std::memory_order_relaxed) && mWorkDoneProgress.load(std::memory_order_relaxed) &&
 			!files.empty();
 		const bool show_status = mWorkspaceSymbols.load(std::memory_order_relaxed) && mIndexStatus.load(std::memory_order_relaxed);
@@ -8122,10 +7989,64 @@ namespace heimdall::lsp
 				"0/" + std::to_string(files.size()) + " files"));
 		}
 
-		// One report per percent at most: a 20 000-file scan sends about a hundred messages.
+		// File milestones supplement the periodic reports for long-running files.
 		constexpr std::size_t kPercent = 100;
 		const std::size_t report_every = std::max<std::size_t>(1, files.size() / kPercent);
-		const auto drain = [&]
+		const auto report = [&]
+		{
+			const std::lock_guard<std::mutex> lock(report_mutex);
+			std::string activity;
+			for (const auto& current : activities)
+			{
+				if (!current.empty())
+				{
+					if (!activity.empty())
+					{
+						activity += " | ";
+					}
+
+					activity += current;
+				}
+			}
+
+			const auto finished = done.load(std::memory_order_relaxed);
+			if (show_status)
+			{
+				Send(IndexStatusNotification("indexing", finished, files.size(), elapsed_ms(), activity));
+			}
+
+			if (show_progress)
+			{
+				Send(WorkDoneProgressReport(token,
+					std::to_string(finished) + "/" + std::to_string(files.size()) +
+					" files (" + FormatDuration(elapsed_ms()) + ") — " + activity,
+					static_cast<unsigned>(finished * kPercent / files.size())));
+			}
+		};
+		std::jthread reporter;
+		if (show_status || show_progress)
+		{
+			reporter = std::jthread([&](std::stop_token reportingStop)
+				{
+					constexpr std::chrono::milliseconds kReportInterval {1000};
+					std::mutex timerMutex;
+					std::condition_variable_any timer;
+					std::unique_lock lock(timerMutex);
+					while (!reportingStop.stop_requested() && !stop.stop_requested())
+					{
+						timer.wait_for(lock, reportingStop, kReportInterval,[]
+						{
+							return false;
+						});
+						if (!reportingStop.stop_requested())
+						{
+							report();
+						}
+					}
+				});
+		}
+
+		const auto drain = [&](std::size_t slot)
 		{
 			// Relaxed is enough: the counter only hands out distinct file indexes, and each
 			// file's result is published through WorkspaceSymbolIndex's own lock.
@@ -8133,30 +8054,21 @@ namespace heimdall::lsp
 				i < files.size() && !stop.stop_requested();
 				i = next.fetch_add(1, std::memory_order_relaxed))
 			{
-				IndexDiskSymbols(files[i], stop);
+				const auto relative = files[i].lexically_relative(root).generic_string();
+				IndexDiskSymbols(files[i], stop,[&](std::string_view stage)
+					{
+						const std::lock_guard<std::mutex> lock(report_mutex);
+						activities[slot] = std::string(stage) + ": " + relative;
+					});
+				{
+					const std::lock_guard<std::mutex> lock(report_mutex);
+					activities[slot].clear();
+				}
 				const std::size_t finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
 				if ((show_status || show_progress) && finished % report_every == 0 &&
 					finished < files.size())
 				{
-					// Helpers finish out of order: only ever report a larger count than the last.
-					const std::lock_guard<std::mutex> lock(report_mutex);
-					if (finished > reported)
-					{
-						reported = finished;
-						if (show_status)
-						{
-							Send(IndexStatusNotification("indexing", finished, files.size(),
-								elapsed_ms()));
-						}
-
-						if (show_progress)
-						{
-							Send(WorkDoneProgressReport(token,
-								std::to_string(finished) + "/" + std::to_string(files.size()) +
-								" files (" + FormatDuration(elapsed_ms()) + ")",
-								static_cast<unsigned>(finished * kPercent / files.size())));
-						}
-					}
+					report();
 				}
 			}
 		};
@@ -8164,11 +8076,20 @@ namespace heimdall::lsp
 			std::vector<std::jthread> helpers;
 			for (std::size_t i = 1; i < threads; ++i)
 			{
-				helpers.emplace_back(drain);
+				helpers.emplace_back([&, i]
+					{
+						drain(i);
+					});
 			}
 
-			drain();
+			drain(0);
 		}
+		if (reporter.joinable())
+		{
+			reporter.request_stop();
+			reporter.join();
+		}
+
 		if (show_status)
 		{
 			Send(IndexStatusNotification("ready", files.size(), files.size(), elapsed_ms()));

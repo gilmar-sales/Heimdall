@@ -206,6 +206,7 @@ with tempfile.TemporaryDirectory(prefix="heimdall_lsp_symbols_", ignore_cleanup_
     last = statuses[-1]
     assert (last["state"], last["done"]) == ("ready", last["total"]), statuses
     assert all(isinstance(s["elapsedMs"], int) and s["elapsedMs"] >= 0 for s in statuses), statuses
+    assert all(isinstance(s["activity"], str) for s in statuses), statuses
     assert [s["elapsedMs"] for s in statuses] == sorted(s["elapsedMs"] for s in statuses), statuses
     progress_end = [m["params"]["value"] for m in inbox if m.get("method") == "$/progress"
                     and m["params"]["value"]["kind"] == "end"]

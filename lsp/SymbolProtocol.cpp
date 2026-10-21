@@ -298,12 +298,15 @@ namespace heimdall::lsp
 		std::string_view state,
 		std::size_t done,
 		std::size_t total,
-		std::uint64_t elapsedMs)
+		std::uint64_t elapsedMs,
+		std::string_view activity)
 	{
 		std::string out = "{\"jsonrpc\":\"2.0\",\"method\":\"heimdall/indexStatus\",\"params\":{\"state\":";
 		QuoteJson(state, out);
 		out += ",\"done\":" + std::to_string(done) + ",\"total\":" + std::to_string(total) +
-			",\"elapsedMs\":" + std::to_string(elapsedMs) + "}}";
+			",\"elapsedMs\":" + std::to_string(elapsedMs) + ",\"activity\":";
+		QuoteJson(activity, out);
+		out += "}}";
 		return out;
 	}
 

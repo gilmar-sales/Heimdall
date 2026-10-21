@@ -35,21 +35,41 @@ namespace heimdall
 		Variable,
 		Parameter,
 		Doxygen,
+		TypeParameter,
+		Concept,
 		Count
 	};
 
 	/// Bit flags combined in `HighlightSpan::modifiers`.
-	inline constexpr std::uint8_t kHighlightDeclaration = 1;
+	inline constexpr std::uint32_t kHighlightDeclaration = 1;
 	/// The span lies in a group excluded by conditional compilation.
-	inline constexpr std::uint8_t kHighlightInactive = 2;
+	inline constexpr std::uint32_t kHighlightInactive = 2;
+	/// Semantic modifier bits; declaration and inactive keep their original wire positions.
+	enum class HighlightModifier : std::uint32_t
+	{
+		Declaration = 1,
+		Inactive = 2,
+		Definition = 1u << 2,
+		Readonly = 1u << 3,
+		Static = 1u << 4,
+		GlobalScope = 1u << 5,
+		ClassScope = 1u << 6,
+		FunctionScope = 1u << 7
+	};
+
+	/// Convert a semantic modifier to its LSP bit mask without changing existing span callers.
+	[[nodiscard]] constexpr std::uint32_t HighlightMask(HighlightModifier modifier) noexcept
+	{
+		return static_cast<std::uint32_t>(modifier);
+	}
 
 	/// A classified byte range of the source; ranges never overlap.
 	struct HighlightSpan
 	{
-		std::size_t offset     = 0;
-		std::size_t length     = 0;
-		HighlightKind kind     = HighlightKind::Keyword;
-		std::uint8_t modifiers = 0;
+		std::size_t offset      = 0;
+		std::size_t length      = 0;
+		HighlightKind kind      = HighlightKind::Keyword;
+		std::uint32_t modifiers = 0;
 	};
 
 	/// Name of a kind in the LSP semantic token legend (`keyword`, `enumMember`, ...).

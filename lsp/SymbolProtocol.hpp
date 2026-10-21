@@ -53,11 +53,13 @@ namespace heimdall::lsp
 
 	/// `heimdall/indexStatus` notification for the status-bar item: `state` is "indexing" or
 	/// "ready"; `done` of `total` files are indexed after `elapsedMs` milliseconds.
+	/// `activity` describes the current stages and workspace-relative file paths.
 	[[nodiscard]] std::string IndexStatusNotification(
 		std::string_view state,
 		std::size_t done,
 		std::size_t total,
-		std::uint64_t elapsedMs);
+		std::uint64_t elapsedMs,
+		std::string_view activity = {});
 
 	/// `$/progress` notification that dismisses the progress.
 	[[nodiscard]] std::string WorkDoneProgressEnd(std::string_view token, std::string_view message);

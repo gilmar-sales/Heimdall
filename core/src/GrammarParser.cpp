@@ -2292,6 +2292,53 @@ namespace heimdall
 			return tail;
 		}
 
+		[[nodiscard]] bool HasKnownTypePrefix(std::size_t begin, std::size_t end) const
+		{
+			for (auto token = begin; token < end; ++token)
+			{
+				const auto& part = m_tree.Tokens()[m_sig[token]];
+				if (part.kind == TokenKind::Identifier &&
+					(part.tok != Tok::None || ClassOf(Text(token)) == kNameType))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		[[nodiscard]] bool LooksLikeDirectInitializer(std::size_t open) const
+		{
+			if (open == 0 ||!IsIdentifierToken(open - 1) ||
+				m_tree.Tokens()[m_sig[open - 1]].tok != Tok::None)
+			{
+				return false;
+			}
+
+			const auto close = m_match[open];
+			for (auto first = open + 1; first < close;)
+			{
+				const auto& token = m_tree.Tokens()[m_sig[first]];
+				if (token.kind == TokenKind::Number || token.kind == TokenKind::StringLiteral ||
+					token.kind == TokenKind::CharacterLiteral || token.kind == TokenKind::RawStringLiteral ||
+					Is(first, "nullptr") || Is(first, "true") || Is(first, "false") ||
+					(token.kind == TokenKind::Identifier&& ClassOf(Text(first)) == kNameValue))
+				{
+					return true;
+				}
+
+				const auto comma = FindComma(first, close);
+				if (comma >= close)
+				{
+					break;
+				}
+
+				first = comma + 1;
+			}
+
+			return false;
+		}
+
 		std::size_t AddTypeAndDeclarator(
 			std::size_t begin,
 			std::size_t end,
@@ -2377,7 +2424,8 @@ namespace heimdall
 				if (init_pos < declarator_end && Is(init_pos, "("))
 				{
 					const auto maybe_name = FindDeclaredName(begin, init_pos);
-					if (maybe_name != Invalid)
+					if (maybe_name != Invalid &&
+						(!HasKnownTypePrefix(begin, init_pos) ||!LooksLikeDirectInitializer(init_pos)))
 					{
 						init_pos = declarator_end;
 					}
@@ -2632,8 +2680,35 @@ namespace heimdall
 					// Every declarator reuses the shared TypeSpecifier node above:
 					// `int a, b;` declares `b`, it does not name a type `b`.
 					const auto code_begin = part == body_start ? spec_end : part;
-					const auto init       = TopLevelAssignment(code_begin, comma);
-					const auto code_end   = init < comma ? init : comma;
+					auto init             = TopLevelAssignment(code_begin, comma);
+					if (init >= comma && HasKnownTypePrefix(body_start, spec_end))
+					{
+						for (auto token = code_begin; token < comma; ++token)
+						{
+							if (Is(token, "<"))
+							{
+								const auto close = FindTemplateClose(token, comma);
+								if (close != Invalid)
+								{
+									token = close;
+									continue;
+								}
+							}
+
+							if (m_match[token] != Invalid && m_match[token] > token)
+							{
+								if (Is(token, "(") && LooksLikeDirectInitializer(token))
+								{
+									init = token;
+									break;
+								}
+
+								token = m_match[token];
+							}
+						}
+					}
+
+					const auto code_end = init < comma ? init : comma;
 					if (code_begin < code_end)
 					{
 						consumed = ParseSingleDeclarator(code_begin, code_end, declarator);
@@ -2664,6 +2739,22 @@ namespace heimdall
 						{
 							consumed = m_match[init] + 1;
 						}
+					}
+					else if (init < comma && Is(init, "(") && m_match[init] != Invalid)
+					{
+						const auto close = m_match[init];
+						for (auto argument = init + 1; argument < close;)
+						{
+							const auto next = FindComma(argument, close);
+							if (argument < next)
+							{
+								ParseExpression(argument, next, declarator);
+							}
+
+							argument = next + 1;
+						}
+
+						consumed = close + 1;
 					}
 				}
 				else

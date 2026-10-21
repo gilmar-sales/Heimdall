@@ -98,6 +98,7 @@ interface IndexStatus {
     done: number;
     total: number;
     elapsedMs: number;
+    activity?: string;
 }
 
 function formatElapsed(milliseconds: number): string {
@@ -110,8 +111,9 @@ function showIndexStatus(status: IndexStatus): void {
     }
     const elapsed = formatElapsed(status.elapsedMs);
     if (status.state === 'indexing') {
-        indexStatus.text = `$(sync~spin) Heimdall: indexing ${status.done}/${status.total} (${elapsed})`;
-        indexStatus.tooltip = 'Heimdall is indexing the workspace for Go to Symbol in Workspace.';
+        const activity = status.activity ? ` — ${status.activity}` : '';
+        indexStatus.text = `$(sync~spin) Heimdall: indexing ${status.done}/${status.total} (${elapsed})${activity}`;
+        indexStatus.tooltip = `Heimdall is indexing the workspace for Go to Symbol in Workspace.${activity}`;
     } else {
         indexStatus.text = `$(check) Heimdall: ${status.total} files indexed in ${elapsed}`;
         indexStatus.tooltip = `Go to Symbol in Workspace is ready: ${status.total} files indexed in ${elapsed}.`;

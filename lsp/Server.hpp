@@ -337,7 +337,10 @@ namespace heimdall::lsp
 
 		// Re-reads `file` from disk and replaces its disk entry (or drops it when the file
 		// is gone, unreadable or too large). An open buffer keeps shadowing the entry.
-		void IndexDiskSymbols(const std::filesystem::path& file, std::stop_token stop);
+		void IndexDiskSymbols(
+			const std::filesystem::path& file,
+			std::stop_token stop,
+			const std::function<void(std::string_view) > & reportStage = {});
 
 		[[nodiscard]] std::shared_ptr<const heimdall::index::FileShard> IndexShard(
 			const heimdall::ParseTree& tree,
@@ -615,12 +618,13 @@ namespace heimdall::lsp
 		std::atomic<bool> mIndexScanFinished {false};
 		std::atomic<std::size_t> mIndexPendingJobs {0};
 		std::string mIndexIssue;
-		std::atomic<bool> mWorkspaceScan       = true;
-		std::atomic<bool> mWorkspaceSymbols    = true;
-		std::atomic<bool> mInlayHints          = true;
-		std::atomic<bool> mHierarchicalSymbols = false;
-		std::atomic<bool> mWorkDoneProgress    = false;
-		std::atomic<bool> mIndexStatus         = false;
+		std::atomic<bool> mWorkspaceScan         = true;
+		std::atomic<bool> mWorkspaceSymbols      = true;
+		std::atomic<bool> mInlayHints            = true;
+		std::atomic<bool> mHierarchicalSymbols   = false;
+		std::atomic<bool> mWorkDoneProgress      = false;
+		std::atomic<bool> mIndexStatus           = false;
+		std::atomic<bool> mSemanticTokensRefresh = false;
 		WorkspaceSymbolIndex mSymbolIndex;
 		std::mutex mSymbolMutex;
 		std::jthread mSymbolWorker;

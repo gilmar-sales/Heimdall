@@ -17,7 +17,7 @@ namespace heimdall
 		constexpr std::array<std::string_view, static_cast<std::size_t>(HighlightKind::Count) >
 		kKindNames = {"keyword", "number", "string", "comment", "operator", "macro",
 			"namespace", "type", "class", "struct", "enum", "enumMember",
-			"function", "method", "property", "variable", "parameter", "doxygen"};
+			"function", "method", "property", "variable", "parameter", "doxygen", "typeParameter", "concept"};
 
 		constexpr std::size_t kTypeKeywordCount = 15;
 		constexpr std::size_t kTokensPerSpan    = 2;
@@ -158,7 +158,7 @@ namespace heimdall
 				std::size_t offset,
 				std::size_t length,
 				HighlightKind kind,
-				std::uint8_t modifiers = 0)
+				std::uint32_t modifiers = 0)
 			{
 				if (length != 0)
 				{

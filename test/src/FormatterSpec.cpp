@@ -2001,7 +2001,12 @@ TEST(FormatterSpec, TokListMacroStaysHumanReadable)
     while (pos < source.size())
     {
         const std::size_t end = source.find('\n', pos);
-        const std::string line = source.substr(pos, end - pos);
+        std::string line = source.substr(pos, end - pos);
+        if (line.ends_with('\r'))
+        {
+            line.pop_back();
+        }
+
         EXPECT_TRUE(line.starts_with("    X(")) << line;
         EXPECT_LT(line.size(), limit) << line;
         ++continuations;

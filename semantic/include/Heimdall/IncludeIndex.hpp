@@ -9,6 +9,7 @@
 
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/Completion.hpp>
+#include <Heimdall/SemanticHighlight.hpp>
 #include <Heimdall/SourceOverlay.hpp>
 
 namespace heimdall
@@ -153,6 +154,12 @@ namespace heimdall
 			return m_scopes;
 		}
 
+		/// Semantic categories from the same header contents and compile configuration as Scopes().
+		[[nodiscard]] const SemanticHighlightIndex& Highlights() const noexcept
+		{
+			return mHighlights;
+		}
+
 		// Type names of the headers, for ParserOptions::type_names; never null.
 		const std::shared_ptr<const TypeNameOracle>& TypeNames() const noexcept
 		{
@@ -179,6 +186,7 @@ namespace heimdall
 
 	private:
 		ScopeIndex m_scopes;
+		SemanticHighlightIndex mHighlights;
 		std::shared_ptr<const TypeNameOracle> m_type_names;
 		std::vector<std::filesystem::path> m_files;
 		std::vector<std::shared_ptr<const std::string>> m_sources;
