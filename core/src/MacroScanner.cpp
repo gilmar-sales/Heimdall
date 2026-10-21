@@ -799,7 +799,7 @@ namespace heimdall
 			std::string expandedText;
 			if (rest.empty() ||(rest.front() != '"' && rest.front() != '<'))
 			{
-				HEIMDALL_TRACE_SCOPE(Macro, "ExpandIncludeOperand");
+				HEIMDALL_TRACE_SCOPE(MacroDetail, "ExpandIncludeOperand");
 				const ExpansionResult expanded = MacroExpander(table).Expand(rest);
 				for (const ExpandedToken& token : expanded.tokens)
 				{
@@ -844,7 +844,7 @@ namespace heimdall
 		const MacroScanCallbacks& callbacks,
 		std::vector<PreprocessorDiagnostic>* diagnostics)
 	{
-		HEIMDALL_TRACE_SCOPE(Macro, "EvaluateCondition");
+		HEIMDALL_TRACE_SCOPE(MacroDetail, "EvaluateCondition");
 		const ExpansionResult expanded = MacroExpander(table).Expand(expression, true);
 		Condition condition(expanded.tokens, table, callbacks);
 		const bool result = condition.Evaluate();

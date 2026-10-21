@@ -24,7 +24,9 @@ int main(int argc, char**argv)
 	: nullptr;
 	if (tracePath && !traceSession)
 	{
-		std::cerr << "heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON\n";
+		std::cerr <<(heimdall::profiling::Available()
+			? "heimdall: failed to start profiling; check trace settings and temporary storage\n"
+			: "heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON\n");
 	}
 
 	heimdall::trace::NameThread("cli-main");

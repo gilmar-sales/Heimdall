@@ -1,8 +1,14 @@
 #pragma once
 
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+
+#include <Heimdall/Trace.hpp>
 
 namespace heimdall::profiling
 {
@@ -11,6 +17,13 @@ namespace heimdall::profiling
 
 	/** Whether this build carries the Perfetto backend (HEIMDALL_PROFILING=ON). */
 	[[nodiscard]] bool Available() noexcept;
+
+	/** Parses comma-separated category names/presets and ordered exclusions prefixed by '-'. */
+	[[nodiscard]] std::expected<std::uint64_t, std::string> ParseCategories(
+		std::string_view selection);
+
+	/** Tests a category against a parsed capture mask. */
+	[[nodiscard]] bool CategoryEnabled(std::uint64_t mask, trace::Category category) noexcept;
 
 	/**
 	 * Returns heimdall.pftrace in the supplied workspace root. With no root, searches
@@ -31,6 +44,11 @@ namespace heimdall::profiling
 	public:
 		/** Begins recording; nullptr when the backend is missing, already running or failed. */
 		[[nodiscard]] static std::unique_ptr<Session> Start(std::filesystem::path output);
+
+		/** Begins recording with explicit categories instead of HEIMDALL_TRACE_CATEGORIES. */
+		[[nodiscard]] static std::unique_ptr<Session> Start(
+			std::filesystem::path output,
+			std::string_view categorySelection);
 
 		/** Sets the destination after the editor supplies its workspace root, before Stop. */
 		void SetProjectRoot(const std::filesystem::path& projectRoot);

@@ -111,6 +111,20 @@ target_precompile_headers(Tests_run PRIVATE
 
 gtest_discover_tests(Tests_run)
 
+if (HEIMDALL_PROFILING)
+  add_test(
+    NAME ProfilingSmallBufferStreaming
+    COMMAND "$<TARGET_FILE:Tests_run>"
+      --gtest_filter=ProfilingSpec.SustainedRecordingStreamsToDiskBeforeStop
+  )
+  set_tests_properties(ProfilingSmallBufferStreaming PROPERTIES
+    ENVIRONMENT "HEIMDALL_TRACE_BUFFER_MB=8"
+    TIMEOUT 60
+    RUN_SERIAL TRUE
+    LABELS "profiling"
+  )
+endif ()
+
 option(HEIMDALL_TEST_REFLECTION "Probe optional C++26 reflection support" ON)
 set(HEIMDALL_REFLECTION_PROBE_AVAILABLE 0)
 if (HEIMDALL_TEST_REFLECTION)

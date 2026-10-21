@@ -273,20 +273,24 @@ namespace heimdall
 
 			std::vector<std::shared_ptr<const Effect>> Find(const std::string& key)
 			{
-				const std::lock_guard<std::mutex> lock(mMutex);
+				HEIMDALL_TRACE_SCOPE(Cache, "EffectCache::Find");
+				HEIMDALL_TRACE_LOCK(mMutex, "EffectCache::Find");
 				const auto found = mEffects.find(key);
 				if (found == mEffects.end())
 				{
+					HEIMDALL_TRACE_INSTANT(Cache, "EffectCache::Miss");
 					return {};
 				}
 
 				mOrder.splice(mOrder.begin(), mOrder, found->second.position);
+				HEIMDALL_TRACE_INSTANT(Cache, "EffectCache::Hit");
 				return found->second.variants;
 			}
 
 			void Store(const std::string& key, std::shared_ptr<const Effect> effect)
 			{
-				const std::lock_guard<std::mutex> lock(mMutex);
+				HEIMDALL_TRACE_SCOPE(Cache, "EffectCache::Store");
+				HEIMDALL_TRACE_LOCK(mMutex, "EffectCache::Store");
 				std::size_t bytes = sizeof(Effect) + key.size();
 				for (const auto& file : effect->files)
 				{
@@ -407,26 +411,39 @@ namespace heimdall
 			{
 				const auto key = path.generic_string();
 				{
-					const std::lock_guard lock(mMutex);
+					HEIMDALL_TRACE_LOCK(mMutex, "HeaderContentCache::Find");
 					if (const auto found = mContents.find(key); found != mContents.end() &&
 						found->second.stamp == stamp)
 					{
 						mOrder.splice(mOrder.begin(), mOrder, found->second.position);
+						HEIMDALL_TRACE_INSTANT(Cache, "HeaderContentCache::Hit");
 						return found->second.content->size() <= maxBytes ? found->second.content : nullptr;
 					}
 				}
-				std::error_code error;
-				const auto size = std::filesystem::file_size(path, error);
-				if (error || size > maxBytes)
+				HEIMDALL_TRACE_INSTANT(Cache, "HeaderContentCache::Miss");
+				auto content = [&]()->std::shared_ptr<std::string>
 				{
-					return nullptr;
-				}
+					HEIMDALL_TRACE_SCOPE_DETAIL(Io, "HeaderContentCache::ReadFile", key);
+					std::error_code error;
+					const auto size = std::filesystem::file_size(path, error);
+					if (error || size > maxBytes)
+					{
+						return nullptr;
+					}
 
-				std::ifstream input(path, std::ios::binary);
-				auto content = std::make_shared<std::string>(static_cast<std::size_t>(size), '\0');
-				input.read(content->data(), static_cast<std::streamsize>(size));
-				++metrics.metadataQueries;
-				if (!input || Stamp(path, nullptr) != stamp)
+					std::ifstream input(path, std::ios::binary);
+					auto result = std::make_shared<std::string>(static_cast<std::size_t>(size), '\0');
+					input.read(result->data(), static_cast<std::streamsize>(size));
+					++metrics.metadataQueries;
+					if (!input || Stamp(path, nullptr) != stamp)
+					{
+						return nullptr;
+					}
+
+					return result;
+				}
+				();
+				if (!content)
 				{
 					return nullptr;
 				}
@@ -440,7 +457,7 @@ namespace heimdall
 					return content;
 				}
 
-				const std::lock_guard lock(mMutex);
+				HEIMDALL_TRACE_LOCK(mMutex, "HeaderContentCache::Store");
 				if (const auto old = mContents.find(key); old != mContents.end())
 				{
 					mBytes -= old->second.content->size();
@@ -550,6 +567,7 @@ namespace heimdall
 					{
 						return;
 					}
+
 					MacroPtr definition;
 					if (found)
 					{
@@ -557,6 +575,7 @@ namespace heimdall
 						definition = table->Lookup(name);
 						table->SetObserver(this);
 					}
+
 					trace.AddRead(name, Signature(found), std::move(definition));
 				}
 			}
@@ -772,7 +791,7 @@ namespace heimdall
 			const IncludeRequest& request,
 			const std::filesystem::path& includerDir)
 		{
-			HEIMDALL_TRACE_SCOPE(Include, "ResolveInclude");
+			HEIMDALL_TRACE_SCOPE(IncludeDetail, "ResolveInclude");
 			auto result = ResolveUntracked(request, includerDir);
 			if (!mTracer.stack.empty())
 			{
@@ -933,25 +952,28 @@ namespace heimdall
 			const std::string cacheKey = mConfigKey + key;
 			if (mOptions.reuseEffects)
 			{
-				HEIMDALL_TRACE_SCOPE(Include, "ReplayEffects");
+				HEIMDALL_TRACE_SCOPE(CacheDetail, "ReplayEffects");
 				for (const auto& effect : EffectCache::Instance().Find(cacheKey))
 				{
 					if (Valid(*effect))
 					{
 						++mEnv.mMetrics.effectsReplayed;
+						HEIMDALL_TRACE_INSTANT(Cache, "EffectCache::Accepted");
 						Apply(*effect);
 						return true;
 					}
 
 					++mEnv.mMetrics.effectsRejected;
+					HEIMDALL_TRACE_INSTANT(Cache, "EffectCache::Rejected");
 				}
 			}
 
 			const auto content = [&]
 			{
-				HEIMDALL_TRACE_SCOPE_DETAIL(Include, "ReadHeader", key);
+				HEIMDALL_TRACE_SCOPE_DETAIL(Io, "ReadHeader", key);
 				return Read(*path);
-			}();
+			}
+			();
 			if (!content)
 			{
 				mComplete = false;
@@ -972,9 +994,10 @@ namespace heimdall
 			++mEnv.mMetrics.effectsScanned;
 			const MacroScanResult scanned = [&]
 			{
-				HEIMDALL_TRACE_SCOPE_DETAIL(Macro, "ScanHeader", key);
+				HEIMDALL_TRACE_SCOPE_DETAIL(Header, "ScanHeader", key);
 				return MacroScanner::Scan(*content, key, mTable, CallbacksFor(path->parent_path()), mStop);
-			}();
+			}
+			();
 			--mDepth;
 			mTracer.stack.pop_back();
 			mGuards[key] = scanned.guard;
@@ -1020,6 +1043,7 @@ namespace heimdall
 			}
 
 			++mEnv.mMetrics.metadataQueries;
+			HEIMDALL_TRACE_SCOPE_DETAIL(Io, "HeaderStamp", path);
 			const auto stamp = Stamp(path, mOptions.overlay);
 			mStamps.emplace(path, stamp);
 			return stamp;
@@ -1027,7 +1051,7 @@ namespace heimdall
 
 		bool Valid(const Effect& effect) const
 		{
-			HEIMDALL_TRACE_SCOPE(Include, "ValidateEffect");
+			HEIMDALL_TRACE_SCOPE(CacheDetail, "ValidateEffect");
 			if (mStop.stop_requested() || effect.depth > mOptions.maxIncludeDepth - mDepth ||
 				mTracer.everDefined.size() + effect.definedNames.size() > mOptions.maxMacros)
 			{
@@ -1075,7 +1099,7 @@ namespace heimdall
 		// records them itself; its reads and files are added here.
 		void Apply(const Effect& effect)
 		{
-			HEIMDALL_TRACE_SCOPE(Include, "ApplyEffect");
+			HEIMDALL_TRACE_SCOPE(CacheDetail, "ApplyEffect");
 			mTracer.everDefined.insert(effect.definedNames.begin(), effect.definedNames.end());
 			if (!mTracer.stack.empty())
 			{
@@ -1211,7 +1235,7 @@ namespace heimdall
 
 		static std::mutex mutex;
 		static std::unordered_map<std::string, MacroTable> cache;
-		const std::lock_guard lock(mutex);
+		HEIMDALL_TRACE_LOCK(mutex, "BuiltinTableCache");
 		if (const auto found = cache.find(output); found != cache.end())
 		{
 			return found->second;

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <latch>
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
@@ -51,8 +52,6 @@ namespace heimdall::lsp
 
 	namespace
 	{
-		constexpr std::size_t kDocumentWorkers = 3;
-		constexpr std::size_t kParseWorkers    = 2;
 
 		std::uint64_t PositionNumber(simdjson::dom::object position, const char* key);
 
@@ -732,13 +731,10 @@ namespace heimdall::lsp
 	thread_local const LanguageServer::RequestContext* LanguageServer::t_context = nullptr;
 
 	LanguageServer::LanguageServer()
-	: mPool(PoolSize()), mParsePool(kParseWorkers), mDocumentPool(kDocumentWorkers) {}
+	: mPool(PoolSize()) {}
 
 	LanguageServer::~LanguageServer()
 	{
-		// Producers must finish before the pools they submit continuations to.
-		mDocumentPool.WaitIdle();
-		mDocumentPool.Shutdown();
 		mIndexWorker.request_stop();
 		mScanWorker.request_stop();
 		mSymbolWorker.request_stop();
@@ -770,7 +766,6 @@ namespace heimdall::lsp
 		}
 
 		DrainRequests();
-		mParsePool.Shutdown();
 		mPool.Shutdown();
 	}
 
@@ -783,7 +778,9 @@ namespace heimdall::lsp
 		{
 			std::osyncstream(std::cerr)
 			<<(traceSession ? "heimdall: recording Perfetto trace to " + tracePath->string()
-				: std::string("heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON"))
+				: std::string(heimdall::profiling::Available()
+				? "heimdall: failed to start profiling; check trace settings and temporary storage"
+				: "heimdall: HEIMDALL_TRACE ignored, build with -DHEIMDALL_PROFILING=ON"))
 			<< '\n';
 		}
 
@@ -821,8 +818,6 @@ namespace heimdall::lsp
 				source.request_stop();
 			}
 
-			mDocumentPool.WaitIdle();
-			mDocumentPool.Shutdown();
 			mIndexWorker.request_stop();
 			mDiagWorker.request_stop();
 			{
@@ -854,7 +849,6 @@ namespace heimdall::lsp
 			}
 
 			DrainRequests();
-			mParsePool.Shutdown();
 			mPool.Shutdown();
 			if (traceSession)
 			{
@@ -957,7 +951,7 @@ namespace heimdall::lsp
 				else if (method == "shutdown")
 				{
 					// Answer every request received so far before acknowledging.
-					mDocumentPool.WaitIdle();
+					mPool.WaitIdle();
 					FlushDiagnostics();
 					DrainRequests();
 					Respond(id_json, "null");
@@ -1171,12 +1165,8 @@ namespace heimdall::lsp
 
 	void LanguageServer::DrainRequests()
 	{
-		// Handlers can produce parse jobs, which produce handler continuations.
-		// A single pool-idle observation cannot cover both directions.
 		for (;;)
 		{
-			mPool.WaitIdle();
-			mParsePool.WaitIdle();
 			mPool.WaitIdle();
 			const std::lock_guard<std::mutex> lock(m_inflight_mu);
 			if (m_inflight.empty())
@@ -1197,7 +1187,7 @@ namespace heimdall::lsp
 			return;
 		}
 
-		mDocumentPool.SubmitSerial(std::string(uri),
+		mPool.SubmitSerial(std::string(uri),
 			[this, body = std::string(body)]
 			{
 				simdjson::dom::parser parser;
@@ -1335,16 +1325,17 @@ namespace heimdall::lsp
 		if (method == "textDocument/rename" || method == "textDocument/prepareRename" ||
 			method == "textDocument/codeAction")
 		{
-			mDocumentPool.SubmitBarrier(std::move(pin));
+			mPool.SubmitBarrier(std::move(pin));
 		}
 		else
 		{
-			mDocumentPool.SubmitSerial(job->context.document_uri, std::move(pin));
+			mPool.SubmitSerial(job->context.document_uri, std::move(pin));
 		}
 	}
 
 	void LanguageServer::ExecuteRequest(const std::shared_ptr<RequestJob>& job)
 	{
+		HEIMDALL_TRACE_SCOPE_DETAIL(Lsp, "ExecuteRequest", job->context.document_uri);
 		struct ContextScope
 		{
 			~ContextScope()
@@ -2463,6 +2454,7 @@ namespace heimdall::lsp
 		const std::filesystem::path& file,
 		std::stop_token stop)
 	{
+		HEIMDALL_TRACE_SCOPE_DETAIL(Lsp, "WorkspaceDiagnosticsFile", file.generic_string());
 		auto contents = ReadWorkspaceFile(file);
 		if (!contents)
 		{
@@ -4987,10 +4979,11 @@ namespace heimdall::lsp
 
 			// The parse belongs to the version, not to whichever request won
 			// the race. Cancelling one consumer cannot invalidate other users.
-			mParsePool.SubmitCancellable(
+			mPool.SubmitCancellable(
 				[this, slot, uri, text, options = std::move(options), lexed, lifetime,
 				base = std::move(base), base_edit, baseDirectivesUnchanged]
 				{
+					HEIMDALL_TRACE_SCOPE_DETAIL(Parse, "ParseDocument", uri);
 					std::shared_ptr<const heimdall::ParseTree> tree;
 					std::exception_ptr failure;
 					try
@@ -8054,8 +8047,12 @@ namespace heimdall::lsp
 			stage("Resolving macros and includes");
 			const auto options = ParserOptionsForText(uri, text, 0, CommandFor(uri), false, stop);
 			stage("Parsing");
-			const auto tree = heimdall::ParseTree::ParseSnapshot(
-				text, options, stop);
+			const auto tree = [&]
+			{
+				HEIMDALL_TRACE_SCOPE_DETAIL(Parse, "ParseIndexFile", file.generic_string());
+				return heimdall::ParseTree::ParseSnapshot(text, options, stop);
+			}
+			();
 			if (tree.Cancelled())
 			{
 				return;
@@ -8216,7 +8213,7 @@ namespace heimdall::lsp
 
 		const auto drain = [&](std::size_t slot)
 		{
-			HEIMDALL_TRACE_THREAD(slot == 0 ? "index-main" : "index-helper");
+			HEIMDALL_TRACE_SCOPE(Index, "SymbolIndexBatch");
 			// Relaxed is enough: the counter only hands out distinct file indexes, and each
 			// file's result is published through WorkspaceSymbolIndex's own lock.
 			for (std::size_t i = next.fetch_add(1, std::memory_order_relaxed);
@@ -8253,16 +8250,36 @@ namespace heimdall::lsp
 			}
 		};
 		{
-			std::vector<std::jthread> helpers;
+			std::latch remaining(static_cast<std::ptrdiff_t>(threads - 1));
 			for (std::size_t i = 1; i < threads; ++i)
 			{
-				helpers.emplace_back([&, i]
+				mPool.Submit([&, i]
 					{
-						drain(i);
-					});
+						try
+						{
+							drain(i);
+						}
+						catch (...)
+						{
+							remaining.count_down();
+							throw;
+						}
+
+						remaining.count_down();
+						}, ThreadPool::Priority::Background);
 			}
 
-			drain(0);
+			try
+			{
+				drain(0);
+			}
+			catch (...)
+			{
+				remaining.wait();
+				throw;
+			}
+
+			remaining.wait();
 		}
 		if (!stop.stop_requested())
 		{

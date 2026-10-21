@@ -652,8 +652,6 @@ namespace heimdall::lsp
 		std::jthread mIndexWorker;
 		std::jthread mDiagWorker;
 		ThreadPool mPool;
-		ThreadPool mParsePool;
-		ThreadPool mDocumentPool;
 	};
 
 } // namespace heimdall::lsp

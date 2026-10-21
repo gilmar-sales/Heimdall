@@ -1037,7 +1037,7 @@ namespace heimdall
 		std::size_t offset,
 		const CompileCommand* command)
 	{
-		HEIMDALL_TRACE_SCOPE(Include, "IncludeIndex::ResolveIncludeAt");
+		HEIMDALL_TRACE_SCOPE(IncludeDetail, "IncludeIndex::ResolveIncludeAt");
 		offset                  = std::min(offset, text.size());
 		const std::size_t begin = offset == 0 ? 0 : text.rfind('\n', offset - 1) + 1;
 		std::size_t end         = text.find('\n', offset);

@@ -313,7 +313,7 @@ namespace heimdall::detail
 		std::shared_ptr<ProbeSlot> slot;
 		bool producer = false;
 		{
-			const std::lock_guard lock(cacheMutex);
+			HEIMDALL_TRACE_LOCK(cacheMutex, "CompilerProbeCache::Find");
 			auto[entry, inserted] = cache.try_emplace(key);
 			if (inserted)
 			{
@@ -341,7 +341,7 @@ namespace heimdall::detail
 				slot->finished = true;
 			}
 			slot->ready.notify_all();
-			const std::lock_guard lock(cacheMutex);
+			HEIMDALL_TRACE_LOCK(cacheMutex, "CompilerProbeCache::Store");
 			constexpr std::size_t kMaxProbes = 128;
 			if (!slot->result.completed)
 			{

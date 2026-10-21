@@ -19,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include <Heimdall/Trace.hpp>
+
 namespace heimdall::lsp
 {
 
@@ -66,6 +68,7 @@ namespace heimdall::lsp
 		using Task = std::move_only_function<void() >;
 
 		explicit ThreadPool(std::size_t threads)
+		: mBackgroundLimit(threads > 1 ? threads - 1 : 1)
 		{
 			m_threads.reserve(threads);
 			for (std::size_t i = 0; i < std::max<std::size_t>(1, threads); ++i)
@@ -237,6 +240,9 @@ namespace heimdall::lsp
 			return[this, task = std::move(task), queued = Clock::now()] mutable
 			{
 				const auto start = Clock::now();
+				HEIMDALL_TRACE_SCOPE(Scheduler, "ThreadPool::Task");
+				HEIMDALL_TRACE_COUNTER(Scheduler, "task queue delay ns",
+					std::chrono::duration_cast<std::chrono::nanoseconds>(start - queued).count());
 				{
 					const std::lock_guard lock(m_mu);
 					if (mMetrics.queued != 0)
@@ -389,25 +395,30 @@ namespace heimdall::lsp
 			while (true)
 			{
 				Task task;
+				bool background = false;
 				{
 					std::unique_lock<std::mutex> lock(m_mu);
 					m_cv.wait(
 						lock,[&]
 						{
-							return m_stopping ||!m_interactive.empty() ||!m_background.empty();
+							return m_stopping ||!m_interactive.empty() ||
+							(!m_background.empty() && mBackgroundActive < mBackgroundLimit);
 						});
 					if (m_stopping)
 					{
 						return;
 					}
 
-					auto& queue = m_interactive.empty() ? m_background : m_interactive;
+					background  = m_interactive.empty();
+					auto& queue = background ? m_background : m_interactive;
 					task        = std::move(queue.front());
 					queue.pop_front();
 					++m_active;
+					mBackgroundActive += background;
 				}
 				try
 				{
+					HEIMDALL_TRACE_THREAD("lsp-worker");
 					task();
 				}
 				catch (...)
@@ -418,11 +429,13 @@ namespace heimdall::lsp
 				{
 					const std::lock_guard<std::mutex> lock(m_mu);
 					--m_active;
+					mBackgroundActive -= background;
 					if (m_interactive.empty() && m_background.empty() && m_active == 0)
 					{
 						m_idle_cv.notify_all();
 					}
 				}
+				m_cv.notify_all();
 			}
 		}
 
@@ -439,7 +452,9 @@ namespace heimdall::lsp
 		std::uint64_t mSerialCompleted = 0;
 		bool mBarrierActive            = false;
 		std::size_t m_active           = 0;
-		bool m_stopping                = false;
+		const std::size_t mBackgroundLimit;
+		std::size_t mBackgroundActive = 0;
+		bool m_stopping               = false;
 		std::vector<std::thread> m_threads;
 	};
 
