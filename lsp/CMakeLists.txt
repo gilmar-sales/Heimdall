@@ -1,6 +1,9 @@
 # heimdall-lsp: JSON-RPC stdio server. simdjson stays PRIVATE to this exe.
 add_executable(heimdall-lsp
   main.cpp
+  BackgroundBatch.cpp
+  BackgroundBatch.hpp
+  IndexProgress.hpp
   Document.cpp
   JsonRpc.cpp
   MacroProtocol.cpp

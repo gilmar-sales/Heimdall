@@ -4,6 +4,8 @@
 #include <mutex>
 #include <simdjson.h>
 
+#include <Heimdall/Trace.hpp>
+
 namespace heimdall::lsp
 {
 
@@ -49,12 +51,19 @@ namespace heimdall::lsp
 
 	void Send(std::string_view body)
 	{
+		HEIMDALL_TRACE_SCOPE(Lsp, "JsonRpc::Send");
 		static std::mutex send_mutex;
-		const std::lock_guard<std::mutex> lock(send_mutex);
+		HEIMDALL_TRACE_LOCK(send_mutex, "JsonRpc::Send");
 
-		std::cout << "Content-Length: " << body.size() << "\r\n\r\n";
-		std::cout.write(body.data(), static_cast<std::streamsize>(body.size()));
-		std::cout.flush();
+		{
+			HEIMDALL_TRACE_SCOPE(Io, "JsonRpc::Write");
+			std::cout << "Content-Length: " << body.size() << "\r\n\r\n";
+			std::cout.write(body.data(), static_cast<std::streamsize>(body.size()));
+		}
+		{
+			HEIMDALL_TRACE_SCOPE(Io, "JsonRpc::Flush");
+			std::cout.flush();
+		}
 	}
 
 	bool ReadMessage(std::string& body)

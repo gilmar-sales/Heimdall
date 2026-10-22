@@ -91,17 +91,24 @@ namespace heimdall::lsp
 
 		void Submit(Task task, Priority priority = Priority::Interactive)
 		{
+			static_cast<void>(TrySubmit(std::move(task), priority));
+		}
+
+		/** Returns false if shutdown prevents accepting a task. */
+		[[nodiscard]] bool TrySubmit(Task task, Priority priority = Priority::Interactive)
+		{
 			{
 				const std::lock_guard<std::mutex> lock(m_mu);
 				if (m_stopping)
 				{
-					return;
+					return false;
 				}
 
 				(priority == Priority::Interactive ? m_interactive : m_background)
 				.push_back(TimedTask(std::move(task)));
 			}
 			m_cv.notify_one();
+			return true;
 		}
 
 		/** Serializes tasks with the same key while independent keys run concurrently. */

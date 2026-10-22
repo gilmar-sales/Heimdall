@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <latch>
 #include <set>
 #include <shared_mutex>
 #include <stop_token>
@@ -40,7 +39,9 @@
 #include <Heimdall/Trace.hpp>
 #include <Heimdall/TypeHierarchy.hpp>
 
+#include "BackgroundBatch.hpp"
 #include "Document.hpp"
+#include "IndexProgress.hpp"
 #include "JsonRpc.hpp"
 #include "MacroProtocol.hpp"
 #include "SemanticTokens.hpp"
@@ -8012,11 +8013,13 @@ namespace heimdall::lsp
 		const auto stage = [&](const char* name)
 		{
 			stageTrace.reset();
-			stageTrace.emplace(trace::Category::Index, name);
 			if (reportStage)
 			{
+				HEIMDALL_TRACE_SCOPE(Index, "UpdateIndexActivity");
 				reportStage(name);
 			}
+
+			stageTrace.emplace(trace::Category::Index, name);
 		};
 		const std::string key = FileKey(file);
 		try
@@ -8115,9 +8118,7 @@ namespace heimdall::lsp
 			{
 				return !IsDependencySource(root, file);
 			});
-		const auto projectFiles = static_cast<std::size_t>(projectEnd - files.begin());
-		// Reading files dominates, so a few helpers overlap the I/O; the pool that serves
-		// requests is left alone, and shutdown never waits for this scan.
+		const auto projectFiles                 = static_cast<std::size_t>(projectEnd - files.begin());
 		constexpr std::size_t kMaxIndexThreads  = 4;
 		constexpr unsigned kCoresPerIndexThread = 4;
 		std::size_t threads = std::clamp<std::size_t>(
@@ -8133,11 +8134,9 @@ namespace heimdall::lsp
 			}
 		}
 
-		std::atomic<std::size_t> next {0};
 		std::atomic<std::size_t> done {0};
 		std::atomic<std::size_t> projectDone {0};
-		std::mutex report_mutex;
-		std::vector<std::string> activities(threads);
+		IndexProgress progress(threads);
 		const bool show_progress = mWorkspaceSymbols.load(std::memory_order_relaxed) && mWorkDoneProgress.load(std::memory_order_relaxed) &&
 			!files.empty();
 		const bool show_status = mWorkspaceSymbols.load(std::memory_order_relaxed) && mIndexStatus.load(std::memory_order_relaxed);
@@ -8154,52 +8153,78 @@ namespace heimdall::lsp
 				"0/" + std::to_string(files.size()) + " files"));
 		}
 
-		// File milestones supplement the periodic reports for long-running files.
 		constexpr std::size_t kPercent = 100;
-		const std::size_t report_every = std::max<std::size_t>(1, files.size() / kPercent);
+		bool projectReported           = false;
+		const auto reportProject = [&]
+		{
+			if (!projectReported && projectFiles != 0 &&
+				projectDone.load(std::memory_order_relaxed) == projectFiles && !stop.stop_requested())
+			{
+				projectReported     = true;
+				std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":3,\"message\":";
+				QuoteJson("Heimdall: project files processed: " + std::to_string(projectFiles) +
+					" files in " + FormatDuration(elapsed_ms()), message);
+				Send(message + "}}");
+			}
+		};
+		std::uint64_t lastRevision                            = 0;
+		std::uint64_t lastReportMs                            = 0;
+		constexpr std::uint64_t REPORT_HEARTBEAT_MILLISECONDS = 1000;
 		const auto report = [&]
 		{
-			const std::lock_guard<std::mutex> lock(report_mutex);
-			std::string activity;
-			for (const auto& current : activities)
-			{
-				if (!current.empty())
+			HEIMDALL_TRACE_SCOPE(Lsp, "PublishIndexProgress");
+			progress.Report([&](const IndexProgress::Snapshot& snapshot)
 				{
-					if (!activity.empty())
+					const auto now = elapsed_ms();
+					if (snapshot.revision == lastRevision && now - lastReportMs < REPORT_HEARTBEAT_MILLISECONDS)
 					{
-						activity += " | ";
+						return;
 					}
 
-					activity += current;
-				}
-			}
+					lastRevision = snapshot.revision;
+					lastReportMs = now;
+					std::string activity;
+					for (const auto& current : snapshot.activities)
+					{
+						if (!current.empty())
+						{
+							if (!activity.empty())
+							{
+								activity += " | ";
+							}
 
-			const auto finished = done.load(std::memory_order_relaxed);
-			if (show_status)
-			{
-				Send(IndexStatusNotification("indexing", finished, files.size(), elapsed_ms(), activity));
-			}
+							activity += current;
+						}
+					}
 
-			if (show_progress)
-			{
-				Send(WorkDoneProgressReport(token,
-					std::to_string(finished) + "/" + std::to_string(files.size()) +
-					" files (" + FormatDuration(elapsed_ms()) + ") — " + activity,
-					static_cast<unsigned>(finished * kPercent / files.size())));
-			}
+					const auto finished = done.load(std::memory_order_relaxed);
+					if (show_status)
+					{
+						Send(IndexStatusNotification("indexing", finished, files.size(), now, activity));
+					}
+
+					if (show_progress)
+					{
+						Send(WorkDoneProgressReport(token,
+						std::to_string(finished) + "/" + std::to_string(files.size()) +
+						" files (" + FormatDuration(now) + ") — " + activity,
+						static_cast<unsigned>(finished * kPercent / files.size())));
+					}
+				});
+			reportProject();
 		};
 		std::jthread reporter;
 		if (show_status || show_progress)
 		{
 			reporter = std::jthread([&](std::stop_token reportingStop)
 				{
-					constexpr std::chrono::milliseconds kReportInterval {1000};
+					constexpr std::chrono::milliseconds REPORT_INTERVAL {250};
 					std::mutex timerMutex;
 					std::condition_variable_any timer;
 					std::unique_lock lock(timerMutex);
 					while (!reportingStop.stop_requested() && !stop.stop_requested())
 					{
-						timer.wait_for(lock, reportingStop, kReportInterval,[]
+						timer.wait_for(lock, reportingStop, REPORT_INTERVAL,[]
 						{
 							return false;
 						});
@@ -8211,83 +8236,27 @@ namespace heimdall::lsp
 				});
 		}
 
-		const auto drain = [&](std::size_t slot)
+		const auto indexFile = [&](std::size_t i, std::size_t slot)
 		{
-			HEIMDALL_TRACE_SCOPE(Index, "SymbolIndexBatch");
-			// Relaxed is enough: the counter only hands out distinct file indexes, and each
-			// file's result is published through WorkspaceSymbolIndex's own lock.
-			for (std::size_t i = next.fetch_add(1, std::memory_order_relaxed);
-				i < files.size() && !stop.stop_requested();
-				i = next.fetch_add(1, std::memory_order_relaxed))
+			HEIMDALL_TRACE_SCOPE_DETAIL(Index, "SymbolIndexFile", files[i].generic_string());
+			const auto relative = files[i].lexically_relative(root).generic_string();
+			IndexDiskSymbols(files[i], stop,[&](std::string_view stage)
+				{
+					progress.Update(slot, std::string(stage) + ": " + relative);
+				});
+			progress.Update(slot, {});
+			const std::size_t finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
+			HEIMDALL_TRACE_COUNTER(Index, "indexed files", static_cast<std::int64_t>(finished));
+			if (i < projectFiles && projectDone.fetch_add(1, std::memory_order_relaxed) + 1 == projectFiles &&
+				!stop.stop_requested() && mWorkspaceSymbols.load(std::memory_order_relaxed))
 			{
-				const auto relative = files[i].lexically_relative(root).generic_string();
-				IndexDiskSymbols(files[i], stop,[&](std::string_view stage)
-					{
-						const std::lock_guard<std::mutex> lock(report_mutex);
-						activities[slot] = std::string(stage) + ": " + relative;
-					});
-				{
-					const std::lock_guard<std::mutex> lock(report_mutex);
-					activities[slot].clear();
-				}
-				const std::size_t finished = done.fetch_add(1, std::memory_order_relaxed) + 1;
-				HEIMDALL_TRACE_COUNTER(Index, "indexed files", static_cast<std::int64_t>(finished));
-				if (i < projectFiles && projectDone.fetch_add(1, std::memory_order_relaxed) + 1 == projectFiles &&
-					!stop.stop_requested() && mWorkspaceSymbols.load(std::memory_order_relaxed))
-				{
-					HEIMDALL_TRACE_INSTANT(Index, "project files processed");
-					std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":3,\"message\":";
-					QuoteJson("Heimdall: project files processed: " + std::to_string(projectFiles) +
-						" files in " + FormatDuration(elapsed_ms()), message);
-					Send(message + "}}");
-				}
-
-				if ((show_status || show_progress) && finished % report_every == 0 &&
-					finished < files.size())
-				{
-					report();
-				}
+				HEIMDALL_TRACE_INSTANT(Index, "project files processed");
 			}
 		};
-		{
-			std::latch remaining(static_cast<std::ptrdiff_t>(threads - 1));
-			for (std::size_t i = 1; i < threads; ++i)
-			{
-				mPool.Submit([&, i]
-					{
-						try
-						{
-							drain(i);
-						}
-						catch (...)
-						{
-							remaining.count_down();
-							throw;
-						}
-
-						remaining.count_down();
-						}, ThreadPool::Priority::Background);
-			}
-
-			try
-			{
-				drain(0);
-			}
-			catch (...)
-			{
-				remaining.wait();
-				throw;
-			}
-
-			remaining.wait();
-		}
+		RunBackgroundBatch(mPool, files.size(), threads, stop, indexFile);
 		if (!stop.stop_requested())
 		{
-			{
-				const std::lock_guard lock(report_mutex);
-				activities[0] = "Checking index completeness";
-			}
-			report();
+			progress.Update(0, "Checking index completeness");
 			mIndexScanFinished.store(true, std::memory_order_release);
 			HEIMDALL_TRACE_INSTANT(Index, "index scan finished");
 			RefreshIndexCompleteness(stop);
@@ -8296,7 +8265,6 @@ namespace heimdall::lsp
 		if (reporter.joinable())
 		{
 			reporter.request_stop();
-			reporter.join();
 		}
 
 		if (!stop.stop_requested())
@@ -8313,6 +8281,13 @@ namespace heimdall::lsp
 				mProfilingSession.reset();
 			}
 		}
+
+		if (reporter.joinable())
+		{
+			reporter.join();
+		}
+
+		reportProject();
 
 		if (show_status)
 		{

@@ -77,6 +77,8 @@ add_executable(Tests_run
   src/WorkspaceFilesSpec.cpp
   src/DocumentSpec.cpp
   src/ThreadPoolSpec.cpp
+  src/BackgroundBatchSpec.cpp
+  src/IndexProgressSpec.cpp
   src/IncludeIndexSpec.cpp
   src/HeaderFixtureSpec.cpp
   src/IncludeAnalyzerSpec.cpp
@@ -86,6 +88,7 @@ add_executable(Tests_run
   src/FileDiscoverySpec.cpp
   src/CliOptionsSpec.cpp
   ../../lsp/Document.cpp
+  ../../lsp/BackgroundBatch.cpp
   ../../lsp/JsonRpc.cpp
   ../../lsp/MacroProtocol.cpp
   ../../lsp/SemanticTokens.cpp

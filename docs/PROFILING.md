@@ -87,6 +87,19 @@ No caso dos headers, compare os intervalos `lock.wait` com `lock.hold` de
 `CompilerProbeCache::Find/Store`. São pontos instrumentados específicos, não todos os
 locks do processo. Um `ScanHeader` longo, isoladamente, não comprova contenção.
 
+Para investigar espera na publicação de progresso ou transporte:
+
+- `lock.wait` / `lock.hold`: `IndexProgress::Update`, `IndexProgress::Snapshot` e
+  `JsonRpc::Send` distinguem aquisição e posse dos respectivos mutexes.
+- `lsp`: `JsonRpc::Send` e `PublishIndexProgress` abrangem o envio completo.
+- `io`: `JsonRpc::Write` e `JsonRpc::Flush` medem escrita e flush no stdout.
+- `index`: `UpdateIndexActivity` mede a atualização do progresso **fora** do intervalo
+  da etapa seguinte. Assim, esperar para atualizar a atividade não aparece como parsing.
+
+Use `contention,header` para esses eventos com as fases gerais. Um `JsonRpc::Flush`
+longo aponta para o transporte; um `lock.wait/JsonRpc::Send` longo aponta para espera
+por outro remetente. Isso não mede CPU: são intervalos de tempo decorrido.
+
 Para identificar parsing repetido, os escopos `WorkspaceDiagnosticsFile`,
 `ParseIndexFile` e `ParseDocument` carregam o caminho/URI do arquivo e distinguem
 diagnósticos, indexação e parsing requisitado pelo editor. Seus descendentes mostram
@@ -102,10 +115,26 @@ de indexação. Com dois ou mais workers, tarefas background podem ocupar no má
 N-1 workers, deixando capacidade para requisições interativas. Isso não preempta uma
 tarefa já em execução nem elimina toda espera por locks ou parsing.
 
+A indexação agenda uma tarefa `SymbolIndexFile` por arquivo, com uma janela limitada
+por `HEIMDALL_INDEX_THREADS` (máximo de quatro). Um arquivo lento não impede os outros
+slots de avançar; a pool reavalia as prioridades entre arquivos, sem enfileirar todo o
+workspace de uma vez. `IndexDispatchWait` e `IndexCompletionWait`, em `scheduler`,
+mostram as esperas do coordenador por slots e pela conclusão das tarefas.
+
+Workers apenas atualizam o último estado de progresso em memória. O reporter copia
+esse estado sob o lock e libera o mutex antes de montar/enviar as notificações. Envia
+no máximo uma atualização a cada 250 ms, com heartbeat de um segundo se nada mudou;
+marcos de início/fim não seguem esse limite. Nenhuma resposta a requisições é descartada.
+O trace é salvo após a indexação e antes de aguardar o reporter encerrar; uma publicação
+ainda bloqueada aparece como intervalo cortado pela captura. O envio continua síncrono:
+stdout bloqueado ainda pode atrasar respostas e o encerramento,
+mas não mantém adquirido o mutex usado pelos indexadores para atualizar o progresso.
+
 O transporte de I/O e os coordenadores de indexação, varredura e diagnósticos continuam
 separados: seus loops/esperas não são colocados dentro da pool. O coordenador da
-indexação também processa arquivos; portanto, uma única pool não significa que todo
-o trabalho do processo seja executado exclusivamente por seus workers.
+indexação descobre os arquivos, despacha as tarefas e verifica a completude. A varredura
+de diagnósticos mantém seu fluxo próprio; portanto, uma única pool não significa que
+todo o trabalho do processo seja executado exclusivamente por seus workers.
 
 ## Integridade da captura
 
